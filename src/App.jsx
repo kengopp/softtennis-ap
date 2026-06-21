@@ -379,8 +379,8 @@ function NavBar({ active }) {
 }
 
 // ★試合終了後のスコア修正：ポイントをタップした際に開く編集モーダル
-function PointEditModal({ point, players, teamALabel, teamBLabel, onClose, onSave, onDelete }) {
-  const [team,   setTeam]   = useState(point.scoring_team);
+function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, onClose, onSave, onDelete }) {
+  const [team,   setTeam]   = useState(point.scoring_team || "A");
   const [play,   setPlay]   = useState(point.play_type);
   const [side,   setSide]   = useState(point.side_type);
   const [result, setResult] = useState(point.result_type);
@@ -394,7 +394,7 @@ function PointEditModal({ point, players, teamALabel, teamBLabel, onClose, onSav
   return (
     <Modal onClose={onClose}>
       <div style={{ maxHeight:"72vh", overflowY:"auto" }}>
-        <h3 style={{ fontSize:16,fontWeight:800,marginBottom:14,textAlign:"center" }}>ポイントを修正</h3>
+        <h3 style={{ fontSize:16,fontWeight:800,marginBottom:14,textAlign:"center" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
 
         <div style={{ marginBottom:12 }}>
           <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>得点チーム</div>
@@ -440,8 +440,10 @@ function PointEditModal({ point, players, teamALabel, teamBLabel, onClose, onSav
           </div>
         </div>
 
-        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8 }} onClick={handleSave}>保存する</button>
-        <button style={{ ...S.btn("#fff"),color:C.red,border:"1px solid "+C.red, marginBottom:8 }} onClick={onDelete}>🗑 このポイントを削除</button>
+        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8 }} onClick={handleSave}>{mode==="add"?"追加する":"保存する"}</button>
+        {mode==="edit" && (
+          <button style={{ ...S.btn("#fff"),color:C.red,border:"1px solid "+C.red, marginBottom:8 }} onClick={onDelete}>🗑 このポイントを削除</button>
+        )}
         <button style={{ ...S.btn("#f0f0f0"),color:C.text }} onClick={onClose}>キャンセル</button>
       </div>
     </Modal>
@@ -844,6 +846,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
   const [selPlayerId, setSelPlayerId] = useState(null); // 選手（チップ選択状態の判定用・一意ID）
   const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
   const [editingPoint, setEditingPoint] = useState(null); // 修正中のポイント { gameId, point }
+  const [addingPoint, setAddingPoint] = useState(null); // 追加位置 { gameId, atIndex }
 
   // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
   const saveQueueRef = useRef(Promise.resolve());
@@ -956,6 +959,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
     const g = match.games.find(gm=>gm.id===gameId);
     if(!g) return;
     applyGamePointsChange(gameId, g.points.map(p=>p.id===pointId?{...p,...updates}:p));
+  }
+
+  // ★試合終了後、過去の任意のゲームの好きな位置にポイントを挿入する
+  function insertPointInGame(gameId, atIndex, values){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g) return;
+    const newPoint = { id:uid(), game_id:gameId, match_id:match.id, ...values };
+    const newPoints = [...g.points.slice(0,atIndex), newPoint, ...g.points.slice(atIndex)];
+    applyGamePointsChange(gameId, newPoints);
   }
 
   const allPlayers = match.players.map(p=>({ id:p.id, name:p.player_name, team:p.team }));
@@ -1126,7 +1138,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
           {match.status==="finished"&&correctMode&&(
             <div>
               <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7a5800" }}>
-                ✏️ 修正したいポイントをタップしてください。内容の変更・削除ができます。
+                ✏️ 修正したいポイントをタップすると内容の変更・削除ができます。「＋」では好きな位置にポイントを追加できます。
               </div>
               {match.games.map(g=>(
                 <div key={g.id} style={S.card}>
@@ -1135,17 +1147,25 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
                     <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
                   </div>
                   <div style={{ padding:"8px 10px" }}>
-                    {g.points.length===0&&<div style={{ fontSize:12,color:C.textSec,padding:"6px 4px" }}>記録なし</div>}
-                    {g.points.map(pt=>(
-                      <div key={pt.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:C.gray,borderRadius:8,marginBottom:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}`,cursor:"pointer" }} onClick={()=>setEditingPoint({gameId:g.id,point:pt})}>
-                        <span style={{ fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:20,background:pt.scoring_team==="A"?C.accentL:C.redL,color:pt.scoring_team==="A"?C.accent:C.red,whiteSpace:"nowrap" }}>
-                          {pt.scoring_team==="A"?"A 得点":"B 得点"}
-                        </span>
-                        <span style={{ fontSize:11,flex:1,color:C.text }}>
-                          {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
-                        </span>
-                        <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
-                        <span style={{ fontSize:14,color:C.textSec,flexShrink:0 }}>›</span>
+                    <div style={{ textAlign:"center" }}>
+                      <button style={{ background:"none",border:`1px dashed ${C.border}`,borderRadius:8,color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 10px",width:"100%" }} onClick={()=>setAddingPoint({gameId:g.id,atIndex:0})}>＋ 先頭に追加</button>
+                    </div>
+                    {g.points.length===0&&<div style={{ fontSize:12,color:C.textSec,padding:"10px 4px",textAlign:"center" }}>記録なし</div>}
+                    {g.points.map((pt,idx)=>(
+                      <div key={pt.id}>
+                        <div style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:C.gray,borderRadius:8,marginTop:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}`,cursor:"pointer" }} onClick={()=>setEditingPoint({gameId:g.id,point:pt})}>
+                          <span style={{ fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:20,background:pt.scoring_team==="A"?C.accentL:C.redL,color:pt.scoring_team==="A"?C.accent:C.red,whiteSpace:"nowrap" }}>
+                            {pt.scoring_team==="A"?"A 得点":"B 得点"}
+                          </span>
+                          <span style={{ fontSize:11,flex:1,color:C.text }}>
+                            {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
+                          </span>
+                          <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
+                          <span style={{ fontSize:14,color:C.textSec,flexShrink:0 }}>›</span>
+                        </div>
+                        <div style={{ textAlign:"center",marginTop:4 }}>
+                          <button style={{ background:"none",border:"none",color:C.accent,fontSize:10,fontWeight:700,cursor:"pointer",padding:"3px 8px" }} onClick={()=>setAddingPoint({gameId:g.id,atIndex:idx+1})}>＋ ここに追加</button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1157,6 +1177,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
 
           {editingPoint && (
             <PointEditModal
+              mode="edit"
               point={editingPoint.point}
               players={allPlayers}
               teamALabel={teamALabel}
@@ -1164,6 +1185,18 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
               onClose={()=>setEditingPoint(null)}
               onSave={(updates)=>{ updatePointInGame(editingPoint.gameId, editingPoint.point.id, updates); setEditingPoint(null); }}
               onDelete={()=>{ if(window.confirm("このポイントを削除しますか？削除後はスコアが自動的に再計算されます。")){ deletePointFromGame(editingPoint.gameId, editingPoint.point.id); setEditingPoint(null); } }}
+            />
+          )}
+
+          {addingPoint && (
+            <PointEditModal
+              mode="add"
+              point={{ scoring_team:"A", play_type:null, side_type:null, result_type:null, player_name:null }}
+              players={allPlayers}
+              teamALabel={teamALabel}
+              teamBLabel={teamBLabel}
+              onClose={()=>setAddingPoint(null)}
+              onSave={(values)=>{ insertPointInGame(addingPoint.gameId, addingPoint.atIndex, values); setAddingPoint(null); }}
             />
           )}
 
