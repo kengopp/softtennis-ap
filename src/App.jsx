@@ -1660,6 +1660,16 @@ const PREFECTURES = [
   "福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県",
 ];
 
+// 区分（プロフィール・新規登録共通）
+const CATEGORY_OPTIONS = [
+  { key: "adult",       label: "社会人"   },
+  { key: "university",  label: "大学"     },
+  { key: "high_school", label: "高校"     },
+  { key: "junior_high", label: "中学校"   },
+  { key: "elementary",  label: "小学校"   },
+  { key: "other",       label: "その他"   },
+];
+
 // ============================================================
 // プロフィール編集画面
 // ============================================================
@@ -1668,7 +1678,7 @@ function ProfileScreen({ onBack }) {
   const [name, setName] = useState("");
   const [schoolName, setSchoolName] = useState("");
   const [prefecture, setPrefecture] = useState("東京都");
-  const [category, setCategory] = useState("junior_high");
+  const [category, setCategory] = useState(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
@@ -1683,7 +1693,7 @@ function ProfileScreen({ onBack }) {
         setName(p.name ?? "");
         setSchoolName(p.school_name ?? "");
         setPrefecture(p.prefecture ?? "東京都");
-        setCategory(p.category ?? "junior_high");
+        setCategory(p.category ?? null);
       }
       setReady(true);
     });
@@ -1694,6 +1704,7 @@ function ProfileScreen({ onBack }) {
     setErrorMsg("");
     if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
     if (!schoolName.trim()) { setErrorMsg("学校名を入力してください"); return; }
+    if (!category) { setErrorMsg("区分を選択してください"); return; }
     setSaving(true);
     try {
       await saveMyProfile({ name: name.trim(), school_name: schoolName.trim(), prefecture, category });
@@ -1726,18 +1737,19 @@ function ProfileScreen({ onBack }) {
           <FormRow label="お名前">
             <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} />
           </FormRow>
-          <FormRow label="学校名">
-            <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
-          </FormRow>
           <FormRow label="都道府県">
             <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>setPrefecture(e.target.value)}>
               {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </FormRow>
+          <FormRow label="学校名またはチーム名">
+            <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
+          </FormRow>
           <FormRow label="区分">
-            <div style={{ display:"flex",gap:8 }}>
-              <button style={S.togBtn(category==="junior_high")} onClick={()=>setCategory("junior_high")}>中学校</button>
-              <button style={S.togBtn(category==="high_school")} onClick={()=>setCategory("high_school")}>高校</button>
+            <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+              {CATEGORY_OPTIONS.map(c => (
+                <button key={c.key} style={S.togBtn(category===c.key)} onClick={()=>setCategory(c.key)}>{c.label}</button>
+              ))}
             </div>
           </FormRow>
         </FormSec>
@@ -1865,7 +1877,7 @@ function AuthScreen({ onAuthed }) {
   const [name,        setName]        = useState("");
   const [schoolName,  setSchoolName]  = useState("");
   const [prefecture,  setPrefecture]  = useState("東京都");
-  const [category,    setCategory]    = useState("junior_high");
+  const [category,    setCategory]    = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
@@ -1895,6 +1907,7 @@ function AuthScreen({ onAuthed }) {
     if (password.length < 6) { setErrorMsg("パスワードは6文字以上で入力してください"); return; }
     if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
     if (!schoolName.trim()) { setErrorMsg("学校名を入力してください"); return; }
+    if (!category) { setErrorMsg("区分を選択してください"); return; }
     setLoading(true);
     try {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
@@ -1949,20 +1962,21 @@ function AuthScreen({ onAuthed }) {
               <input style={S.inp} placeholder="例：田中 蓮" value={name} onChange={e=>setName(e.target.value)}/>
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>学校名</label>
-              <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
-            </div>
-            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>都道府県</label>
               <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>setPrefecture(e.target.value)}>
                 {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <label style={S.lbl}>学校名またはチーム名</label>
+              <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
+            </div>
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>区分</label>
-              <div style={{ display:"flex", gap:8 }}>
-                <button style={S.togBtn(category==="junior_high")} onClick={()=>setCategory("junior_high")}>中学校</button>
-                <button style={S.togBtn(category==="high_school")} onClick={()=>setCategory("high_school")}>高校</button>
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                {CATEGORY_OPTIONS.map(c => (
+                  <button key={c.key} style={S.togBtn(category===c.key)} onClick={()=>setCategory(c.key)}>{c.label}</button>
+                ))}
               </div>
             </div>
           </>
