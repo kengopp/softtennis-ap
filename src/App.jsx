@@ -863,6 +863,18 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
   const [schools, setSchools] = useState([]);
   useEffect(() => { getKnownSchools().then(setSchools); }, []);
 
+  // ★新規作成時（編集・コピーではない場合）は、自チームの学校名をプロフィールの学校で初期化する
+  useEffect(() => {
+    if (base) return; // 編集・コピー時は既存のチーム名をそのまま使う
+    (async () => {
+      const profile = await getMyProfile();
+      if (!profile?.school_id) return;
+      const allSchools = await getSchools();
+      const mine = allSchools.find(s => s.id === profile.school_id);
+      if (mine) setAClub(prev => prev || mine.name);
+    })();
+  }, []);
+
   async function handleSave() {
     setSaving(true);
     try {
