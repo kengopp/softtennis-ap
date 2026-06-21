@@ -277,6 +277,23 @@ async function deletePlayerFromRoster(id) {
 }
 
 // ============================================================
+// 学校名サジェスト（誤入力防止のための候補一覧）
+// 登録済みユーザーの学校名 ＋ これまで試合で入力されたチーム名 を候補にする
+// ============================================================
+async function getKnownSchoolNames() {
+  const [{ data: rpcData, error: rpcErr }, { data: cpData, error: cpErr }] = await Promise.all([
+    supabase.rpc("list_school_names"),
+    supabase.from("match_players").select("club_name"),
+  ]);
+  if (rpcErr) console.error(rpcErr);
+  if (cpErr) console.error(cpErr);
+  const set = new Set();
+  (rpcData ?? []).forEach(v => { const s = typeof v === "string" ? v : Object.values(v||{})[0]; if (s) set.add(s); });
+  (cpData ?? []).forEach(r => { if (r.club_name) set.add(r.club_name); });
+  return Array.from(set).sort((a,b)=>a.localeCompare(b,"ja"));
+}
+
+// ============================================================
 // ゲームロジック
 // ============================================================
 const calcWinGames = (fmt) => Math.ceil(fmt / 2);
@@ -640,6 +657,42 @@ function FormRow({ label, children }) {
   );
 }
 
+// ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
+function SchoolField({ value, onChange, schools, placeholder }) {
+  const [customMode, setCustomMode] = useState(!!value && !schools.includes(value));
+
+  useEffect(() => {
+    // 候補一覧が後から読み込まれた場合、まだ何も入力していなければ一覧モードに切り替える
+    if (!value && schools.length>0 && customMode) setCustomMode(false);
+  }, [schools]);
+
+  if (customMode) {
+    return (
+      <div>
+        <input style={S.inp} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} />
+        {schools.length>0 && (
+          <button style={{ background:"none",border:"none",color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",marginTop:4,padding:0 }} onClick={()=>setCustomMode(false)}>← 一覧から選ぶ</button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <select
+      style={{ ...S.inp, background:"transparent" }}
+      value={schools.includes(value) ? value : ""}
+      onChange={e=>{
+        if (e.target.value === "__custom__") { setCustomMode(true); }
+        else onChange(e.target.value);
+      }}
+    >
+      <option value="">選択してください</option>
+      {schools.map(s => <option key={s} value={s}>{s}</option>)}
+      <option value="__custom__">＋ 新しい学校名を入力</option>
+    </select>
+  );
+}
+
 // ============================================================
 // 試合セットアップ
 // ============================================================
@@ -706,6 +759,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+
+  // ★学校名の候補一覧（誤入力防止）
+  const [schools, setSchools] = useState([]);
+  useEffect(() => { getKnownSchoolNames().then(setSchools); }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -831,7 +888,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
 
         <FormSec title="自チーム (A)">
           <FormRow label="チーム名 / 学校名">
-            <input style={S.inp} placeholder="例：○○中学校" value={aClub} onChange={e => setAClub(e.target.value)}/>
+            <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" />
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={aP1} onChange={e => setAP1(e.target.value)}/>
@@ -864,7 +921,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
 
         <FormSec title="相手チーム (B)">
           <FormRow label="チーム名 / 学校名">
-            <input style={S.inp} placeholder="例：相手チーム名" value={bClub} onChange={e => setBClub(e.target.value)}/>
+            <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" />
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={bP1} onChange={e => setBP1(e.target.value)}/>
@@ -1614,6 +1671,9 @@ function ProfileScreen({ onBack }) {
   const [category, setCategory] = useState("junior_high");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [schools, setSchools] = useState([]);
+
+  useEffect(() => { getKnownSchoolNames().then(setSchools); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1667,7 +1727,7 @@ function ProfileScreen({ onBack }) {
             <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} />
           </FormRow>
           <FormRow label="学校名">
-            <input style={S.inp} value={schoolName} onChange={e=>setSchoolName(e.target.value)} />
+            <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
           </FormRow>
           <FormRow label="都道府県">
             <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>setPrefecture(e.target.value)}>
@@ -1808,7 +1868,9 @@ function AuthScreen({ onAuthed }) {
   const [category,    setCategory]    = useState("junior_high");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [schools, setSchools] = useState([]);
 
+  useEffect(() => { getKnownSchoolNames().then(setSchools); }, []);
 
 
   async function handleLogin() {
@@ -1888,7 +1950,7 @@ function AuthScreen({ onAuthed }) {
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>学校名</label>
-              <input style={S.inp} placeholder="例：○○中学校" value={schoolName} onChange={e=>setSchoolName(e.target.value)}/>
+              <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>都道府県</label>
