@@ -695,19 +695,21 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
             </div>
           );
         })}
-        {!loading && matches.length>0 && (
+        {!loading && totalPages>1 && (
           <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginTop:8,marginBottom:8 }}>
-            <button
-              style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12,width:84,opacity:page<=1?0.4:1 }}
-              disabled={page<=1}
-              onClick={()=>setPage(p=>Math.max(1,p-1))}
-            >← 前へ</button>
+            {page>1 ? (
+              <button
+                style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12,width:84 }}
+                onClick={()=>setPage(p=>Math.max(1,p-1))}
+              >← 前へ</button>
+            ) : <div style={{ width:84 }} />}
             <span style={{ fontSize:12,color:C.textSec }}>{page} / {totalPages}</span>
-            <button
-              style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12,width:84,opacity:page>=totalPages?0.4:1 }}
-              disabled={page>=totalPages}
-              onClick={()=>setPage(p=>Math.min(totalPages,p+1))}
-            >次へ →</button>
+            {page<totalPages ? (
+              <button
+                style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12,width:84 }}
+                onClick={()=>setPage(p=>Math.min(totalPages,p+1))}
+              >次へ →</button>
+            ) : <div style={{ width:84 }} />}
           </div>
         )}
       </div>
