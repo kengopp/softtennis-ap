@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { supabase } from "./supabase-client";
 
 // ============================================================
@@ -768,7 +768,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
   const [selPlayer, setSelPlayer] = useState(null);   // 選手（表示名・記録用）
   const [selPlayerId, setSelPlayerId] = useState(null); // 選手（チップ選択状態の判定用・一意ID）
 
-  const persist = useCallback((m)=>{ setMatch({...m}); saveMatch(m).catch(e=>alert("保存に失敗しました: "+(e.message||e))); },[]);
+  // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
+  const saveQueueRef = useRef(Promise.resolve());
+  const persist = useCallback((m)=>{
+    setMatch({...m});
+    saveQueueRef.current = saveQueueRef.current
+      .then(()=>saveMatch(m))
+      .catch(e=>alert("保存に失敗しました: "+(e.message||e)));
+  },[]);
   const winGames = calcWinGames(match.game_format);
   const currentGame = match.games.length>0&&!match.games[match.games.length-1].winner_team ? match.games[match.games.length-1] : null;
   const currentGameIsFinal = currentGame ? currentGame.is_final : isFinalGame(match.game_format,match.match_score_a,match.match_score_b);
