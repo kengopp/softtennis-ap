@@ -580,11 +580,13 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate }) {
   const [filter, setFilter] = useState("all");
   const [mineOnly, setMineOnly] = useState(false);
+  const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null); // 削除確認対象のmatch_id
   const [isAdmin, setIsAdmin] = useState(false);
   const [myId, setMyId] = useState(null);
+  const [linkedPlayerName, setLinkedPlayerName] = useState(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 6;
 
@@ -594,14 +596,26 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
-  useEffect(() => { getMyProfile().then(p => { setIsAdmin(!!p?.is_admin); setMyId(p?.id ?? null); }); }, []);
+  useEffect(() => {
+    (async () => {
+      const p = await getMyProfile();
+      setIsAdmin(!!p?.is_admin);
+      setMyId(p?.id ?? null);
+      if (p?.linked_player_id) {
+        const roster = await getPlayerRoster();
+        const found = roster.find(r => r.id === p.linked_player_id);
+        setLinkedPlayerName(found?.player_name ?? null);
+      }
+    })();
+  }, []);
 
   const matches = allMatches
     .filter(m=>filter==="all"||m.match_type===filter)
-    .filter(m=>!mineOnly || m.created_by===myId);
+    .filter(m=>!mineOnly || m.created_by===myId)
+    .filter(m=>!childOnly || m.players.some(p=>p.player_name===linkedPlayerName));
 
   // ★絞り込み条件が変わったら1ページ目に戻す
-  useEffect(() => { setPage(1); }, [filter, mineOnly]);
+  useEffect(() => { setPage(1); }, [filter, mineOnly, childOnly]);
 
   const totalPages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
   const pageMatches = matches.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
@@ -644,11 +658,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           <button key={v} style={{ ...S.togBtn(filter===v,C.navy),whiteSpace:"nowrap",fontSize:12 }} onClick={()=>setFilter(v)}>{l}</button>
         ))}
       </div>
-      <div style={{ padding:"8px 14px 0" }}>
+      <div style={{ display:"flex",gap:8,padding:"8px 14px 0",flexWrap:"wrap" }}>
         <button
           style={{ ...S.togBtn(mineOnly,C.navy),fontSize:12,padding:"6px 12px" }}
           onClick={()=>setMineOnly(v=>!v)}
         >👤 自分が登録した試合のみ</button>
+        {linkedPlayerName && (
+          <button
+            style={{ ...S.togBtn(childOnly,C.navy),fontSize:12,padding:"6px 12px" }}
+            onClick={()=>setChildOnly(v=>!v)}
+          >🎾 {linkedPlayerName}さんの試合のみ</button>
+        )}
       </div>
       <div style={{ padding:"12px 14px" }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
