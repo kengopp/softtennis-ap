@@ -761,6 +761,16 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats }) {
   const winRate = finished.length>0 ? Math.round(wins/finished.length*100) : 0;
   const recent = allMatches.slice(0,3);
 
+  // ★紐づけ選手（お子さん/自分）の戦績を、この画面で直接計算する
+  const linkedMatches = linkedPlayerName ? allMatches.filter(m => m.players.some(p=>p.player_name===linkedPlayerName)) : [];
+  const linkedFinished = linkedMatches.filter(m=>m.status==="finished");
+  function linkedIsWin(m) {
+    const onA = m.players.some(p => p.team==="A" && p.player_name===linkedPlayerName);
+    return onA ? m.match_score_a>m.match_score_b : m.match_score_b>m.match_score_a;
+  }
+  const linkedWins = linkedFinished.filter(linkedIsWin).length;
+  const linkedWinRate = linkedFinished.length>0 ? Math.round(linkedWins/linkedFinished.length*100) : 0;
+
   return (
     <div style={S.page}>
       <div style={S.hdr}>
@@ -794,11 +804,33 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats }) {
             <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:14 }} onClick={onNew}>＋ 新規試合を記録する</button>
 
             {linkedPlayerName && (
-              <button
-                style={{ ...S.btn(C.navy), marginBottom:18, display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}
-                onClick={onGoPlayerStats}
-              >🎾 {linkedPlayerName}さんの戦績を見る</button>
+              <div style={{ ...S.card, padding:16, marginBottom:14, border:`1px solid ${C.navy}22` }}>
+                <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:10 }}>🎾 {linkedPlayerName}さんの戦績</div>
+                {linkedFinished.length===0 ? (
+                  <div style={{ fontSize:12,color:C.textSec }}>まだ試合記録がありません</div>
+                ) : (
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
+                    <div>
+                      <div style={{ fontSize:18,fontWeight:800,color:C.navy }}>{linkedFinished.length}</div>
+                      <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:18,fontWeight:800,color:C.accent }}>{linkedWinRate}%</div>
+                      <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:18,fontWeight:800,color:C.navy }}>{linkedWins}勝{linkedFinished.length-linkedWins}敗</div>
+                      <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
+
+            <button
+              style={{ ...S.btn(C.navy), marginBottom:18, display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}
+              onClick={onGoPlayerStats}
+            >👥 他の選手の戦績を見る</button>
 
             <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>最近の試合</div>
             {allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
@@ -951,16 +983,19 @@ function StatsScreen({ onNavigate }) {
 // ============================================================
 function PlayerStatsScreen({ onBack, onOpen }) {
   const [loading, setLoading] = useState(true);
-  const [playerName, setPlayerName] = useState(null);
+  const [roster, setRoster] = useState([]);
+  const [linkedPlayerName, setLinkedPlayerName] = useState(null);
+  const [playerName, setPlayerName] = useState(null); // 現在表示中の選手（未選択ならnull＝選択画面）
   const [matches, setMatches] = useState([]);
 
   useEffect(() => {
     (async () => {
       const profile = await getMyProfile();
+      const rosterList = await getPlayerRoster();
+      setRoster(rosterList);
       if (profile?.linked_player_id) {
-        const roster = await getPlayerRoster();
-        const found = roster.find(p => p.id === profile.linked_player_id);
-        setPlayerName(found?.player_name ?? null);
+        const found = rosterList.find(p => p.id === profile.linked_player_id);
+        setLinkedPlayerName(found?.player_name ?? null);
       }
       const list = await getMatches();
       setMatches(list);
@@ -982,17 +1017,32 @@ function PlayerStatsScreen({ onBack, onOpen }) {
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{ display:"flex",alignItems:"center",gap:12 }}>
-          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
-          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{playerName ? `${playerName}さんの戦績` : "選手の戦績"}</span>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={()=>{ if (playerName) setPlayerName(null); else onBack(); }}>←</button>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{playerName ? `${playerName}さんの戦績` : "選手を選ぶ"}</span>
         </div>
       </div>
       <div style={{ padding:14, paddingBottom:40 }}>
         {loading ? (
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
         ) : !playerName ? (
-          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>
-            プロフィール画面で「お子さん／ご自身の選手登録」を設定すると、ここに戦績が表示されます。
-          </div>
+          // ★選手選択画面
+          roster.length===0 ? (
+            <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>選手マスターに選手が登録されていません。</div>
+          ) : (
+            <>
+              <div style={{ fontSize:12,color:C.textSec,marginBottom:10 }}>戦績を見たい選手を選んでください</div>
+              {roster.map(p=>(
+                <div
+                  key={p.id}
+                  style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+                  onClick={()=>setPlayerName(p.player_name)}
+                >
+                  <span style={{ fontSize:14,fontWeight:700 }}>{p.player_name}{p.player_name===linkedPlayerName ? "（自分／お子さん）" : ""}</span>
+                  <span style={{ fontSize:14,color:C.textSec }}>→</span>
+                </div>
+              ))}
+            </>
+          )
         ) : finished.length===0 ? (
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>{playerName}さんの試合記録がまだありません</div>
         ) : (
