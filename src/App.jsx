@@ -95,7 +95,23 @@ async function getMatches() {
     .select("*")
     .order("created_at", { ascending: false });
   if (error) { console.error(error); return []; }
-  return data.map(rowToMatchSummary);
+  if (data.length === 0) return [];
+
+  const matchIds = data.map(m => m.id);
+  const { data: playersData, error: playersErr } = await supabase
+    .from("match_players")
+    .select("*")
+    .in("match_id", matchIds)
+    .order("team")
+    .order("order_num");
+  if (playersErr) console.error(playersErr);
+
+  const playersByMatch = {};
+  (playersData ?? []).forEach(p => {
+    (playersByMatch[p.match_id] ??= []).push(p);
+  });
+
+  return data.map(m => rowToMatchSummary(m, playersByMatch[m.id] ?? []));
 }
 
 // 試合1件を、関連テーブルすべて含めて取得
@@ -114,7 +130,7 @@ async function getMatch(id) {
   return rowToMatchFull(m, players ?? [], games ?? [], points ?? [], faults ?? []);
 }
 
-function rowToMatchSummary(m) {
+function rowToMatchSummary(m, players=[]) {
   return {
     id: m.id, created_by: m.created_by,
     match_date: m.match_date, venue: m.venue ?? "",
@@ -122,7 +138,12 @@ function rowToMatchSummary(m) {
     match_type: m.match_type, game_format: m.game_format,
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
-    memo: m.memo ?? "", players: [], games: [],
+    memo: m.memo ?? "",
+    players: players.map(p => ({
+      id: p.id, team: p.team, player_name: p.player_name,
+      club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
+    })),
+    games: [],
   };
 }
 
@@ -557,10 +578,12 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }) {
   const [filter, setFilter] = useState("all");
+  const [mineOnly, setMineOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null); // 削除確認対象のmatch_id
   const [isAdmin, setIsAdmin] = useState(false);
+  const [myId, setMyId] = useState(null);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -568,9 +591,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
-  useEffect(() => { getMyProfile().then(p => setIsAdmin(!!p?.is_admin)); }, []);
+  useEffect(() => { getMyProfile().then(p => { setIsAdmin(!!p?.is_admin); setMyId(p?.id ?? null); }); }, []);
 
-  const matches = allMatches.filter(m=>filter==="all"||m.match_type===filter);
+  const matches = allMatches
+    .filter(m=>filter==="all"||m.match_type===filter)
+    .filter(m=>!mineOnly || m.created_by===myId);
 
   async function handleDelete(id) {
     await deleteMatch(id);
@@ -609,6 +634,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
         {[["all","すべて"],["tournament","公式大会"],["practice","練習試合"],["internal","部内戦"]].map(([v,l])=>(
           <button key={v} style={{ ...S.togBtn(filter===v,C.navy),whiteSpace:"nowrap",fontSize:12 }} onClick={()=>setFilter(v)}>{l}</button>
         ))}
+      </div>
+      <div style={{ padding:"8px 14px 0" }}>
+        <button
+          style={{ ...S.togBtn(mineOnly,C.navy),fontSize:12,padding:"6px 12px" }}
+          onClick={()=>setMineOnly(v=>!v)}
+        >👤 自分が登録した試合のみ</button>
       </div>
       <div style={{ padding:"12px 14px" }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
