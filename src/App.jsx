@@ -1531,11 +1531,13 @@ function AuthScreen({ onAuthed }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const canSubmitLogin  = email.trim() && password.length >= 6;
-  const canSubmitSignup = canSubmitLogin && name.trim() && schoolName.trim();
+
 
   async function handleLogin() {
-    setErrorMsg(""); setLoading(true);
+    setErrorMsg("");
+    if (!email.trim()) { setErrorMsg("メールアドレスを入力してください"); return; }
+    if (password.length < 6) { setErrorMsg("パスワードは6文字以上で入力してください"); return; }
+    setLoading(true);
     try {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (error) throw error;
@@ -1548,7 +1550,12 @@ function AuthScreen({ onAuthed }) {
   }
 
   async function handleSignup() {
-    setErrorMsg(""); setLoading(true);
+    setErrorMsg("");
+    if (!email.trim()) { setErrorMsg("メールアドレスを入力してください"); return; }
+    if (password.length < 6) { setErrorMsg("パスワードは6文字以上で入力してください"); return; }
+    if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
+    if (!schoolName.trim()) { setErrorMsg("学校名を入力してください"); return; }
+    setLoading(true);
     try {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) throw error;
@@ -1630,7 +1637,7 @@ function AuthScreen({ onAuthed }) {
 
       <button
         style={{ ...S.btn(mode==="login" ? `linear-gradient(135deg,${C.accent},#00a066)` : C.navy), marginTop:16, opacity:loading?0.6:1 }}
-        disabled={loading || (mode==="login" ? !canSubmitLogin : !canSubmitSignup)}
+        disabled={loading}
         onClick={mode==="login" ? handleLogin : handleSignup}
       >
         {loading ? "処理中..." : (mode==="login" ? "ログイン" : "新規登録する")}
