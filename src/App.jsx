@@ -24,19 +24,28 @@ const PLAY_TYPES = [
   { key: "drop",     label: "ドロップ"  },
 ];
 
-// 結果
+// 結果（新規記録時の選択肢：ウィナー / エラーの2択）
 const RESULT_TYPES = [
   { key: "winner", label: "ウィナー", is_winner: true  },
-  { key: "ace",    label: "エース",   is_winner: true  },
   { key: "error",  label: "エラー",   is_winner: false },
+];
+// ラベル・勝敗判定（過去データに残る "ace" も正しく表示できるよう選択肢とは別管理）
+const RESULT_LABELS    = { winner: "ウィナー", ace: "エース", error: "エラー" };
+const RESULT_IS_WINNER = { winner: true,        ace: true,    error: false   };
+
+// フォア / バック
+const SIDE_TYPES = [
+  { key: "forehand", label: "フォア" },
+  { key: "backhand",  label: "バック" },
 ];
 
 // shot_typeキー（DB保存用：プレイ内容_結果 の組み合わせで生成）
 const buildShotKey = (play, result) => play && result ? `${play}_${result}` : play ?? result ?? null;
 
-const getPlayLabel  = (key) => PLAY_TYPES.find(p => p.key === key)?.label   ?? key ?? "—";
-const getResultLabel = (key) => RESULT_TYPES.find(r => r.key === key)?.label ?? key ?? "";
-const isWinnerResult = (result) => RESULT_TYPES.find(r => r.key === result)?.is_winner ?? null;
+const getPlayLabel   = (key) => PLAY_TYPES.find(p => p.key === key)?.label ?? key ?? "—";
+const getResultLabel = (key) => RESULT_LABELS[key] ?? key ?? "";
+const getSideLabel   = (key) => SIDE_TYPES.find(s => s.key === key)?.label ?? key ?? "";
+const isWinnerResult = (result) => RESULT_IS_WINNER[result] ?? null;
 
 const C = {
   navy:    "#0f2044",
@@ -141,7 +150,7 @@ function rowToMatchFull(m, players, games, points, faults) {
       points: points.filter(pt => pt.game_id === g.id).map(pt => ({
         id: pt.id, game_id: pt.game_id, match_id: m.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name,
-        play_type: pt.play_type ?? null, result_type: pt.result_type ?? null,
+        play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, result_type: pt.result_type ?? null,
         is_winner: pt.is_winner, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
       })),
     })),
@@ -191,7 +200,7 @@ async function saveMatch(match) {
         id: pt.id, game_id: g.id, match_id: match.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name || null,
         shot_type: toShotType(pt.play_type, pt.result_type),
-        play_type: pt.play_type || null, result_type: pt.result_type || null,
+        play_type: pt.play_type || null, side_type: pt.side_type || null, result_type: pt.result_type || null,
         is_winner: pt.is_winner, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
       }));
       const { error: ptErr } = await supabase.from("points").insert(pointRows);
@@ -301,26 +310,21 @@ function buildLineText(match) {
   t += (!aWin && match.status==="finished" ? "\u{1F3C6} " : "") + bC + " " + bP + "\n\n";
   t += "\u30B9\u30B3\u30A2 " + match.match_score_a + " - " + match.match_score_b + "\n";
   match.games.forEach(function(g) { t += "G" + g.game_number + (g.is_final ? "(F)" : "") + ": " + g.score_a + "-" + g.score_b + "\n"; });
-  var stats = calcPlayerStats(match);
-  if (stats.length > 0) {
-    t += "\n\u9078\u624B\u5225\n";
-    stats.filter(function(s){return s.team==="A";}).forEach(function(s) { t += s.player_name + ": " + s.winners + "\u5F97\u70B9 / " + s.errors + "\u30DF\u30B9\n"; });
-  }
   return t;
 }
 
 // CSV出力
 function buildCsv(match) {
-  const headers = ["試合日","大会名","何回戦","ゲーム番号","ファイナルゲーム","ポイント番号","得点チーム","チーム区分","選手名","所属","プレイ内容","結果","チームA得点","チームB得点"];
+  const headers = ["試合日","大会名","何回戦","ゲーム番号","ファイナルゲーム","ポイント番号","得点チーム","チーム区分","選手名","所属","プレイ内容","フォア/バック","結果","チームA得点","チームB得点"];
   const rows = [];
   for (const g of match.games) {
     for (const f of (g.faults ?? [])) {
       const pl = match.players.find(p=>p.player_name===f.player_name);
-      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO","","",f.server_team==="A"?"自チーム":"相手チーム",f.player_name??"",pl?.club_name??""," 1stフォルト","fault",f.score_a_at,f.score_b_at]);
+      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO","","",f.server_team==="A"?"自チーム":"相手チーム",f.player_name??"",pl?.club_name??""," 1stフォルト","","fault",f.score_a_at,f.score_b_at]);
     }
     for (const pt of g.points) {
       const pl = match.players.find(p=>p.player_name===pt.player_name);
-      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO",pt.point_number,pt.scoring_team,pt.scoring_team==="A"?"自チーム":"相手チーム",pt.player_name??"",pl?.club_name??"",pt.play_type?getPlayLabel(pt.play_type):"",pt.result_type?getResultLabel(pt.result_type):"",pt.score_a_after,pt.score_b_after]);
+      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO",pt.point_number,pt.scoring_team,pt.scoring_team==="A"?"自チーム":"相手チーム",pt.player_name??"",pl?.club_name??"",pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):"",pt.score_a_after,pt.score_b_after]);
     }
   }
   const esc = v => { const s = String(v == null ? "" : v); if (s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0) { return '"' + s.split('"').join('""'  ) + '"'; } return s; };
@@ -762,11 +766,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
   const [tab,    setTab]    = useState("record");
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
-  // 3段階選択状態
+  // 4段階選択状態
   const [selPlay,   setSelPlay]   = useState(null);   // プレイ内容
+  const [selSide,   setSelSide]   = useState(null);   // フォア / バック
   const [selResult, setSelResult] = useState(null);   // 結果
   const [selPlayer, setSelPlayer] = useState(null);   // 選手（表示名・記録用）
   const [selPlayerId, setSelPlayerId] = useState(null); // 選手（チップ選択状態の判定用・一意ID）
+  const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
 
   // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
   const saveQueueRef = useRef(Promise.resolve());
@@ -787,7 +793,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
   const aClub = match.players.find(p=>p.team==="A")?.club_name??"";
   const bClub = match.players.find(p=>p.team==="B")?.club_name??"";
 
-  function resetSel(){ setSelPlay(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
+  function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
 
   function startNewGame(base=match){
     const num=base.games.length+1;
@@ -809,6 +815,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
       scoring_team:team,
       player_name:selPlayer??null,
       play_type:selPlay??null,
+      side_type:selSide??null,
       result_type:selResult??null,
       is_winner:isWin,
       score_a_after:newA, score_b_after:newB,
@@ -847,6 +854,27 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
     const updG={...cg,points:newPts,score_a:last?.score_a_after??0,score_b:last?.score_b_after??0,winner_team:null};
     persist({...match,games:match.games.map(g=>g.id===cg.id?updG:g)});
     setFault(0);
+  }
+
+  // ★試合終了後、過去の任意のゲームの特定ポイントを削除して修正する
+  function deletePointFromGame(gameId, pointId){
+    if(!window.confirm("このポイントを削除しますか？削除後はスコアが自動的に再計算されます。")) return;
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g) return;
+    const remaining = g.points.filter(p=>p.id!==pointId);
+    let a=0, b=0;
+    const recalced = remaining.map((p,i)=>{
+      if(p.scoring_team==="A") a++; else b++;
+      return {...p, point_number:i+1, score_a_after:a, score_b_after:b};
+    });
+    const finalA = recalced.length ? recalced[recalced.length-1].score_a_after : 0;
+    const finalB = recalced.length ? recalced[recalced.length-1].score_b_after : 0;
+    const newWinner = g.is_final ? checkFinalWinner(finalA,finalB) : checkNormalWinner(finalA,finalB);
+    const updG = {...g, points:recalced, score_a:finalA, score_b:finalB, winner_team:newWinner};
+    const newGames = match.games.map(gm=>gm.id===gameId?updG:gm);
+    const newScoreA = newGames.filter(gm=>gm.winner_team==="A").length;
+    const newScoreB = newGames.filter(gm=>gm.winner_team==="B").length;
+    persist({...match, games:newGames, match_score_a:newScoreA, match_score_b:newScoreB});
   }
 
   const allPlayers = match.players.map(p=>({ id:p.id, name:p.player_name, team:p.team }));
@@ -962,7 +990,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
               <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>startNewGame()}>第{match.games.length+1}ゲーム開始</button>
             </div>
           )}
-          {match.status==="finished"&&(
+          {match.status==="finished"&&!correctMode&&(
             <div>
               {/* 結果サマリー */}
               <div style={{ textAlign:"center",padding:"24px 0 16px" }}>
@@ -1008,8 +1036,41 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
                 <button style={{ ...S.btn(C.navyMid),fontSize:13 }} onClick={()=>setTab("score")}>📋 スコアを見る</button>
               </div>
               <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
+              <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
               <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={onBack}>← 試合一覧に戻る</button>
+            </div>
+          )}
+
+          {match.status==="finished"&&correctMode&&(
+            <div>
+              <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7a5800" }}>
+                ✏️ 削除したいポイントの「✕」をタップしてください。スコアは自動的に再計算されます。
+              </div>
+              {match.games.map(g=>(
+                <div key={g.id} style={S.card}>
+                  <div style={{ padding:"8px 12px",background:C.navyMid,color:C.white,display:"flex",justifyContent:"space-between" }}>
+                    <span style={{ fontWeight:700,fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
+                    <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
+                  </div>
+                  <div style={{ padding:"8px 10px" }}>
+                    {g.points.length===0&&<div style={{ fontSize:12,color:C.textSec,padding:"6px 4px" }}>記録なし</div>}
+                    {g.points.map(pt=>(
+                      <div key={pt.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:C.gray,borderRadius:8,marginBottom:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}` }}>
+                        <span style={{ fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:20,background:pt.scoring_team==="A"?C.accentL:C.redL,color:pt.scoring_team==="A"?C.accent:C.red,whiteSpace:"nowrap" }}>
+                          {pt.scoring_team==="A"?"A 得点":"B 得点"}
+                        </span>
+                        <span style={{ fontSize:11,flex:1,color:C.text }}>
+                          {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
+                        </span>
+                        <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
+                        <button style={{ width:22,height:22,borderRadius:"50%",background:C.red,color:C.white,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0 }} onClick={()=>deletePointFromGame(g.id,pt.id)}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:4 }} onClick={()=>setCorrectMode(false)}>修正を完了</button>
             </div>
           )}
 
@@ -1036,24 +1097,34 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
                 </div>
               </div>
 
-              {/* ★段階2: 結果 */}
+              {/* ★段階2: フォア / バック */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果（任意）</div>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック（任意）</div>
                 <div>
-                  {RESULT_TYPES.map(r=>(
-                    <span key={r.key} style={{ ...S.chip(selResult===r.key), ...(selResult===r.key ? {} : { color: r.is_winner===false?C.red:r.key==="ace"?C.orange:C.accent, borderColor: r.is_winner===false?C.red:r.key==="ace"?C.orange:C.accent }) }} onClick={()=>setSelResult(selResult===r.key?null:r.key)}>{r.label}</span>
+                  {SIDE_TYPES.map(s=>(
+                    <span key={s.key} style={S.chip(selSide===s.key)} onClick={()=>setSelSide(selSide===s.key?null:s.key)}>{s.label}</span>
                   ))}
                 </div>
               </div>
 
-              {/* ★段階3: 選手 */}
+              {/* ★段階3: 結果 */}
+              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果（任意）</div>
+                <div>
+                  {RESULT_TYPES.map(r=>(
+                    <span key={r.key} style={S.chip(selResult===r.key)} onClick={()=>setSelResult(selResult===r.key?null:r.key)}>{r.label}</span>
+                  ))}
+                </div>
+              </div>
+
+              {/* ★段階4: 選手 */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:10 }}>
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手（任意）</div>
                 <div>
                   {allPlayers.map(p=>(
                     <span
                       key={p.id}
-                      style={{ ...S.chip(selPlayerId===p.id), ...(selPlayerId===p.id?{}:{color:p.team==="A"?C.teamA:C.teamB,borderColor:p.team==="A"?C.teamA:C.teamB}) }}
+                      style={S.chip(selPlayerId===p.id)}
                       onClick={()=>{ setSelPlayerId(selPlayerId===p.id?null:p.id); setSelPlayer(selPlayerId===p.id?null:p.name); }}
                     >{p.name}</span>
                   ))}
@@ -1084,7 +1155,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
                         {pt.scoring_team==="A"?"A 得点":"B 得点"}
                       </span>
                       <span style={{ fontSize:11,flex:1,color:C.text }}>
-                        {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
+                        {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
                       </span>
                       <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
                     </div>
@@ -1108,7 +1179,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
                   {g.points.map(pt=>(
-                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?C.teamA:C.teamB,display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
+                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?C.teamA:C.teamB,display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
                       <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
                     </div>
                   ))}
