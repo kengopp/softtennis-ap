@@ -688,27 +688,49 @@ function FormSec({ title, children }) {
     </div>
   );
 }
-function FormRow({ label, children }) {
+function FormRow({ label, labelRight, children }) {
   return (
     <div style={{ padding:"10px 14px",borderBottom:`1px solid ${C.border}` }}>
-      <label style={{ display:"block",fontSize:11,color:C.textSec,marginBottom:4 }}>{label}</label>
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
+        <label style={{ fontSize:11,color:C.textSec }}>{label}</label>
+        {labelRight}
+      </div>
       {children}
     </div>
   );
 }
 
+// schools（{name,prefecture}[] または {prefecture}を持つ配列）から、絞り込み候補の都道府県一覧を作る
+function knownPrefsFrom(schools) {
+  return Array.from(new Set(schools.map(s=>s.prefecture).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja"));
+}
+
+// ★学校名選択欄のラベル横に置く、小さな都道府県絞り込みプルダウン
+function PrefMiniFilter({ value, onChange, options }) {
+  if (options.length === 0) return null;
+  return (
+    <select
+      value={value}
+      onChange={e=>onChange(e.target.value)}
+      style={{ fontSize:10,padding:"3px 6px",borderRadius:6,border:`1px solid ${C.border}`,background:C.white,color:C.textSec,maxWidth:130 }}
+    >
+      <option value="">都道府県で絞込み</option>
+      {options.map(p => <option key={p} value={p}>{p}</option>)}
+    </select>
+  );
+}
+
 // ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
 // schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
-function SchoolField({ value, onChange, schools, placeholder }) {
+// prefFilter: 親から渡される都道府県絞り込み値（任意）
+function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
   const [customMode, setCustomMode] = useState(!!value && !schools.some(s => s.name === value));
-  const [prefFilter, setPrefFilter] = useState("");
 
   useEffect(() => {
     // 候補一覧が後から読み込まれた場合、まだ何も入力していなければ一覧モードに切り替える
     if (!value && schools.length>0 && customMode) setCustomMode(false);
   }, [schools]);
 
-  const knownPrefs = Array.from(new Set(schools.map(s=>s.prefecture).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja"));
   const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
 
   if (customMode) {
@@ -723,37 +745,24 @@ function SchoolField({ value, onChange, schools, placeholder }) {
   }
 
   return (
-    <div>
-      {knownPrefs.length>0 && (
-        <select
-          style={{ ...S.inp, background:"transparent", marginBottom:6, fontSize:12 }}
-          value={prefFilter}
-          onChange={e=>setPrefFilter(e.target.value)}
-        >
-          <option value="">都道府県で絞り込み（指定なし）</option>
-          {knownPrefs.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-      )}
-      <select
-        style={{ ...S.inp, background:"transparent" }}
-        value={visibleSchools.some(s=>s.name===value) ? value : ""}
-        onChange={e=>{
-          if (e.target.value === "__custom__") { setCustomMode(true); }
-          else onChange(e.target.value);
-        }}
-      >
-        <option value="">選択してください</option>
-        {visibleSchools.map(s => <option key={s.name} value={s.name}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
-        <option value="__custom__">＋ 新しい学校名を入力</option>
-      </select>
-    </div>
+    <select
+      style={{ ...S.inp, background:"transparent" }}
+      value={visibleSchools.some(s=>s.name===value) ? value : ""}
+      onChange={e=>{
+        if (e.target.value === "__custom__") { setCustomMode(true); }
+        else onChange(e.target.value);
+      }}
+    >
+      <option value="">選択してください</option>
+      {visibleSchools.map(s => <option key={s.name} value={s.name}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
+      <option value="__custom__">＋ 新しい学校名を入力</option>
+    </select>
   );
 }
 
 // ★プロフィール・新規登録用：学校マスターから選ぶだけ（自由入力不可、管理者のみがマスターを編集できる）
-function SchoolIdSelect({ value, onChange, schools }) {
-  const [prefFilter, setPrefFilter] = useState("");
-
+// prefFilter: 親から渡される都道府県絞り込み値（任意）
+function SchoolIdSelect({ value, onChange, schools, prefFilter }) {
   if (schools.length === 0) {
     return (
       <div style={{ fontSize:12,color:C.textSec,padding:"10px 0" }}>
@@ -762,33 +771,20 @@ function SchoolIdSelect({ value, onChange, schools }) {
     );
   }
 
-  const knownPrefs = Array.from(new Set(schools.map(s=>s.prefecture).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja"));
   const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
 
   return (
-    <div>
-      {knownPrefs.length>0 && (
-        <select
-          style={{ ...S.inp, background:"transparent", marginBottom:6, fontSize:12 }}
-          value={prefFilter}
-          onChange={e=>setPrefFilter(e.target.value)}
-        >
-          <option value="">都道府県で絞り込み（指定なし）</option>
-          {knownPrefs.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-      )}
-      <select
-        style={{ ...S.inp, background:"transparent" }}
-        value={value || ""}
-        onChange={e=>onChange(e.target.value || null)}
-      >
-        <option value="">選択してください</option>
-        {visibleSchools.map(s => {
-          const tags = [categoryLabel(s.category), s.prefecture].filter(Boolean).join("・");
-          return <option key={s.id} value={s.id}>{s.name}{tags ? `（${tags}）` : ""}</option>;
-        })}
-      </select>
-    </div>
+    <select
+      style={{ ...S.inp, background:"transparent" }}
+      value={value || ""}
+      onChange={e=>onChange(e.target.value || null)}
+    >
+      <option value="">選択してください</option>
+      {visibleSchools.map(s => {
+        const tags = [categoryLabel(s.category), s.prefecture].filter(Boolean).join("・");
+        return <option key={s.id} value={s.id}>{s.name}{tags ? `（${tags}）` : ""}</option>;
+      })}
+    </select>
   );
 }
 
@@ -862,6 +858,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
   // ★学校名の候補一覧（誤入力防止）
   const [schools, setSchools] = useState([]);
   useEffect(() => { getKnownSchools().then(setSchools); }, []);
+
+  // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
+  const [aClubPref, setAClubPref] = useState("");
+  const [bClubPref, setBClubPref] = useState("");
 
   // ★新規作成時（編集・コピーではない場合）は、自チームの学校名をプロフィールの学校で初期化する
   useEffect(() => {
@@ -998,8 +998,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
         </FormSec>
 
         <FormSec title="自チーム (A)">
-          <FormRow label="チーム名 / 学校名">
-            <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" />
+          <FormRow label="チーム名 / 学校名" labelRight={<PrefMiniFilter value={aClubPref} onChange={setAClubPref} options={knownPrefsFrom(schools)} />}>
+            <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={aP1} onChange={e => setAP1(e.target.value)}/>
@@ -1031,8 +1031,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
         </FormSec>
 
         <FormSec title="相手チーム (B)">
-          <FormRow label="チーム名 / 学校名">
-            <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" />
+          <FormRow label="チーム名 / 学校名" labelRight={<PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
+            <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={bP1} onChange={e => setBP1(e.target.value)}/>
@@ -1804,6 +1804,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
+  const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
 
   useEffect(() => { getSchools().then(setSchools); }, []);
 
@@ -1872,8 +1873,8 @@ function ProfileScreen({ onBack, forced, onSaved }) {
               {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </FormRow>
-          <FormRow label="学校名またはチーム名">
-            <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} />
+          <FormRow label="学校名またはチーム名" labelRight={<PrefMiniFilter value={schoolPrefFilter} onChange={setSchoolPrefFilter} options={knownPrefsFrom(schools)} />}>
+            <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} />
           </FormRow>
           <FormRow label="男子・女子・共通">
             <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
@@ -2190,6 +2191,7 @@ function AuthScreen({ onAuthed }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
+  const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
 
   useEffect(() => { getSchools().then(setSchools); }, []);
 
@@ -2279,8 +2281,11 @@ function AuthScreen({ onAuthed }) {
               </select>
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>学校名またはチーム名</label>
-              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} />
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
+                <label style={{ fontSize:11,color:C.textSec }}>学校名またはチーム名</label>
+                <PrefMiniFilter value={schoolPrefFilter} onChange={setSchoolPrefFilter} options={knownPrefsFrom(schools)} />
+              </div>
+              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} />
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>男子・女子・共通</label>
