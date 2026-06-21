@@ -239,10 +239,36 @@ async function saveMyProfile(profile) {
   if (!user) throw new Error("ログインしていません");
   const { error } = await supabase.from("users").update({
     name: profile.name,
-    school_name: profile.school_name,
+    school_id: profile.school_id,
     prefecture: profile.prefecture,
     category: profile.category,
   }).eq("id", user.id);
+  if (error) throw error;
+}
+
+// ============================================================
+// 学校マスター（閲覧は誰でも可、追加・編集・削除は管理者のみ）
+// ============================================================
+async function getSchools() {
+  const { data, error } = await supabase.from("schools").select("*").order("name");
+  if (error) { console.error(error); return []; }
+  return data;
+}
+
+async function addSchool(name, prefecture) {
+  const row = { id: uid(), name: name.trim(), prefecture: prefecture || null };
+  const { error } = await supabase.from("schools").insert(row);
+  if (error) throw error;
+  return row;
+}
+
+async function updateSchoolMaster(id, updates) {
+  const { error } = await supabase.from("schools").update(updates).eq("id", id);
+  if (error) throw error;
+}
+
+async function deleteSchoolMaster(id) {
+  const { error } = await supabase.from("schools").delete().eq("id", id);
   if (error) throw error;
 }
 
@@ -261,7 +287,7 @@ async function savePlayer(player) {
   const profile = await getMyProfile();
   const row = {
     id: player.id || uid(),
-    school_name: profile?.school_name || "",
+    school_id: profile?.school_id || null,
     player_name: player.player_name,
     position: player.position || null,
     created_by: user.id,
@@ -278,17 +304,18 @@ async function deletePlayerFromRoster(id) {
 
 // ============================================================
 // 学校名サジェスト（誤入力防止のための候補一覧）
-// 登録済みユーザーの学校名 ＋ これまで試合で入力されたチーム名 を候補にする
+// 学校マスター ＋ これまで試合で入力されたチーム名 を候補にする
+// （試合のチーム名欄は相手チームなど自由入力も許可するための候補リスト）
 // ============================================================
 async function getKnownSchoolNames() {
-  const [{ data: rpcData, error: rpcErr }, { data: cpData, error: cpErr }] = await Promise.all([
-    supabase.rpc("list_school_names"),
+  const [{ data: schoolsData, error: schoolsErr }, { data: cpData, error: cpErr }] = await Promise.all([
+    supabase.from("schools").select("name"),
     supabase.from("match_players").select("club_name"),
   ]);
-  if (rpcErr) console.error(rpcErr);
+  if (schoolsErr) console.error(schoolsErr);
   if (cpErr) console.error(cpErr);
   const set = new Set();
-  (rpcData ?? []).forEach(v => { const s = typeof v === "string" ? v : Object.values(v||{})[0]; if (s) set.add(s); });
+  (schoolsData ?? []).forEach(r => { if (r.name) set.add(r.name); });
   (cpData ?? []).forEach(r => { if (r.club_name) set.add(r.club_name); });
   return Array.from(set).sort((a,b)=>a.localeCompare(b,"ja"));
 }
@@ -523,11 +550,12 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }) {
   const [filter, setFilter] = useState("all");
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null); // 削除確認対象のmatch_id
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -535,6 +563,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster }) {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { getMyProfile().then(p => setIsAdmin(!!p?.is_admin)); }, []);
 
   const matches = allMatches.filter(m=>filter==="all"||m.match_type===filter);
 
@@ -558,6 +587,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster }) {
               style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
               onClick={onRoster} title="選手マスター"
             >👥</button>
+            {isAdmin && (
+              <button
+                style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
+                onClick={onSchoolAdmin} title="学校マスター管理"
+              >🛠</button>
+            )}
             <button
               style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:11, padding:"6px 10px", cursor:"pointer" }}
               onClick={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); } }}
@@ -689,6 +724,27 @@ function SchoolField({ value, onChange, schools, placeholder }) {
       <option value="">選択してください</option>
       {schools.map(s => <option key={s} value={s}>{s}</option>)}
       <option value="__custom__">＋ 新しい学校名を入力</option>
+    </select>
+  );
+}
+
+// ★プロフィール・新規登録用：学校マスターから選ぶだけ（自由入力不可、管理者のみがマスターを編集できる）
+function SchoolIdSelect({ value, onChange, schools }) {
+  if (schools.length === 0) {
+    return (
+      <div style={{ fontSize:12,color:C.textSec,padding:"10px 0" }}>
+        学校がまだ登録されていません。管理者に学校の追加を依頼してください。
+      </div>
+    );
+  }
+  return (
+    <select
+      style={{ ...S.inp, background:"transparent" }}
+      value={value || ""}
+      onChange={e=>onChange(e.target.value || null)}
+    >
+      <option value="">選択してください</option>
+      {schools.map(s => <option key={s.id} value={s.id}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
     </select>
   );
 }
@@ -1676,14 +1732,14 @@ const CATEGORY_OPTIONS = [
 function ProfileScreen({ onBack }) {
   const [ready, setReady] = useState(false);
   const [name, setName] = useState("");
-  const [schoolName, setSchoolName] = useState("");
+  const [schoolId, setSchoolId] = useState(null);
   const [prefecture, setPrefecture] = useState("東京都");
   const [category, setCategory] = useState(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
 
-  useEffect(() => { getKnownSchoolNames().then(setSchools); }, []);
+  useEffect(() => { getSchools().then(setSchools); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1691,7 +1747,7 @@ function ProfileScreen({ onBack }) {
       if (cancelled) return;
       if (p) {
         setName(p.name ?? "");
-        setSchoolName(p.school_name ?? "");
+        setSchoolId(p.school_id ?? null);
         setPrefecture(p.prefecture ?? "東京都");
         setCategory(p.category ?? null);
       }
@@ -1703,11 +1759,11 @@ function ProfileScreen({ onBack }) {
   async function handleSave() {
     setErrorMsg("");
     if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
-    if (!schoolName.trim()) { setErrorMsg("学校名を入力してください"); return; }
+    if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
     setSaving(true);
     try {
-      await saveMyProfile({ name: name.trim(), school_name: schoolName.trim(), prefecture, category });
+      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, category });
       onBack();
     } catch (e) {
       setErrorMsg(e.message || "保存に失敗しました");
@@ -1743,7 +1799,7 @@ function ProfileScreen({ onBack }) {
             </select>
           </FormRow>
           <FormRow label="学校名またはチーム名">
-            <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
+            <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} />
           </FormRow>
           <FormRow label="区分">
             <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
@@ -1868,6 +1924,119 @@ function PlayerRosterScreen({ onBack }) {
 }
 
 // ============================================================
+// 学校マスター管理画面（管理者専用）
+// ============================================================
+function AdminSchoolsScreen({ onBack }) {
+  const [schools, setSchools] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState("");
+  const [newPrefecture, setNewPrefecture] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editPrefecture, setEditPrefecture] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    getSchools().then(list => { setSchools(list); setLoading(false); });
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  async function handleAdd() {
+    setErrorMsg("");
+    if (!newName.trim()) return;
+    try {
+      await addSchool(newName.trim(), newPrefecture.trim());
+      setNewName(""); setNewPrefecture("");
+      reload();
+    } catch (e) {
+      setErrorMsg(e.message?.includes("duplicate") ? "同じ名前の学校がすでに登録されています" : (e.message || "追加に失敗しました"));
+    }
+  }
+
+  async function handleUpdate(id) {
+    setErrorMsg("");
+    if (!editName.trim()) return;
+    try {
+      await updateSchoolMaster(id, { name: editName.trim(), prefecture: editPrefecture.trim() || null });
+      setEditingId(null);
+      reload();
+    } catch (e) {
+      setErrorMsg(e.message?.includes("duplicate") ? "同じ名前の学校がすでに登録されています" : (e.message || "更新に失敗しました"));
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm("この学校をマスターから削除しますか？\n（すでにこの学校を選んでいる人がいる場合、その人のプロフィールから学校が外れます）")) return;
+    await deleteSchoolMaster(id);
+    reload();
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>学校マスター管理</span>
+        </div>
+      </div>
+      <div style={{ padding:14 }}>
+        <div style={{ background:"#e3f2fd",border:"1px solid #90caf9",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#1565c0",marginBottom:14 }}>
+          ℹ️ ここで登録した学校だけが、新規登録・プロフィールの学校名選択肢に表示されます。
+        </div>
+
+        <FormSec title="学校を追加">
+          <FormRow label="学校名">
+            <input style={S.inp} placeholder="例：東福岡高校" value={newName} onChange={e=>setNewName(e.target.value)} />
+          </FormRow>
+          <FormRow label="都道府県（任意）">
+            <select style={{ ...S.inp, background:"transparent" }} value={newPrefecture} onChange={e=>setNewPrefecture(e.target.value)}>
+              <option value="">指定なし</option>
+              {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </FormRow>
+        </FormSec>
+
+        {errorMsg && <div style={{ color:C.red,fontSize:12,marginBottom:10 }}>{errorMsg}</div>}
+
+        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:16 }} onClick={handleAdd}>＋ 追加する</button>
+
+        {loading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
+        {!loading && schools.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>登録されている学校がありません</div>}
+
+        {schools.map(s => (
+          <div key={s.id} style={S.card}>
+            {editingId===s.id ? (
+              <div style={{ padding:12 }}>
+                <input style={{ ...S.inp, marginBottom:8 }} value={editName} onChange={e=>setEditName(e.target.value)} />
+                <select style={{ ...S.inp, background:"transparent", marginBottom:10 }} value={editPrefecture} onChange={e=>setEditPrefecture(e.target.value)}>
+                  <option value="">指定なし</option>
+                  {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
+                  <button style={{ ...S.btn(C.accent),fontSize:12 }} onClick={()=>handleUpdate(s.id)}>保存</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display:"flex",alignItems:"center",padding:"12px 14px",gap:10 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14,fontWeight:700,color:C.text }}>{s.name}</div>
+                  {s.prefecture && <div style={{ fontSize:11,color:C.textSec }}>{s.prefecture}</div>}
+                </div>
+                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer" }} onClick={()=>{ setEditingId(s.id); setEditName(s.name); setEditPrefecture(s.prefecture||""); }}>✏️</button>
+                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.red }} onClick={()=>handleDelete(s.id)}>🗑</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // ログイン／新規登録画面
 // ============================================================
 function AuthScreen({ onAuthed }) {
@@ -1875,14 +2044,14 @@ function AuthScreen({ onAuthed }) {
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [name,        setName]        = useState("");
-  const [schoolName,  setSchoolName]  = useState("");
+  const [schoolId,    setSchoolId]    = useState(null);
   const [prefecture,  setPrefecture]  = useState("東京都");
   const [category,    setCategory]    = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
 
-  useEffect(() => { getKnownSchoolNames().then(setSchools); }, []);
+  useEffect(() => { getSchools().then(setSchools); }, []);
 
 
   async function handleLogin() {
@@ -1906,7 +2075,7 @@ function AuthScreen({ onAuthed }) {
     if (!email.trim()) { setErrorMsg("メールアドレスを入力してください"); return; }
     if (password.length < 6) { setErrorMsg("パスワードは6文字以上で入力してください"); return; }
     if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
-    if (!schoolName.trim()) { setErrorMsg("学校名を入力してください"); return; }
+    if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
     setLoading(true);
     try {
@@ -1916,7 +2085,7 @@ function AuthScreen({ onAuthed }) {
         const { error: profileErr } = await supabase.from("users").insert({
           id: data.user.id,
           name: name.trim(),
-          school_name: schoolName.trim(),
+          school_id: schoolId,
           prefecture,
           category,
         });
@@ -1969,7 +2138,7 @@ function AuthScreen({ onAuthed }) {
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>学校名またはチーム名</label>
-              <SchoolField value={schoolName} onChange={setSchoolName} schools={schools} placeholder="例：○○中学校" />
+              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} />
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>区分</label>
@@ -2045,6 +2214,9 @@ export default function App() {
   if (screen==="roster") {
     return <PlayerRosterScreen onBack={()=>setScreen("list")} />;
   }
+  if (screen==="schoolAdmin") {
+    return <AdminSchoolsScreen onBack={()=>setScreen("list")} />;
+  }
 
   if (screen==="setup") {
     return (
@@ -2096,6 +2268,7 @@ export default function App() {
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setScreen("setup"); }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
+      onSchoolAdmin={()=>setScreen("schoolAdmin")}
     />
   );
 }
