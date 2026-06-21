@@ -378,6 +378,76 @@ function NavBar({ active }) {
   );
 }
 
+// ★試合終了後のスコア修正：ポイントをタップした際に開く編集モーダル
+function PointEditModal({ point, players, teamALabel, teamBLabel, onClose, onSave, onDelete }) {
+  const [team,   setTeam]   = useState(point.scoring_team);
+  const [play,   setPlay]   = useState(point.play_type);
+  const [side,   setSide]   = useState(point.side_type);
+  const [result, setResult] = useState(point.result_type);
+  const [playerName, setPlayerName] = useState(point.player_name);
+
+  function handleSave(){
+    const isWin = result ? isWinnerResult(result) : null;
+    onSave({ scoring_team:team, play_type:play, side_type:side, result_type:result, player_name:playerName, is_winner:isWin });
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ maxHeight:"72vh", overflowY:"auto" }}>
+        <h3 style={{ fontSize:16,fontWeight:800,marginBottom:14,textAlign:"center" }}>ポイントを修正</h3>
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>得点チーム</div>
+          <div style={{ display:"flex",gap:8 }}>
+            <button style={{ ...S.togBtn(team==="A"),flex:1 }} onClick={()=>setTeam("A")}>{teamALabel||"自チーム"}</button>
+            <button style={{ ...S.togBtn(team==="B"),flex:1 }} onClick={()=>setTeam("B")}>{teamBLabel||"相手"}</button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容</div>
+          <div>
+            {PLAY_TYPES.map(p=>(
+              <span key={p.key} style={S.chip(play===p.key)} onClick={()=>setPlay(play===p.key?null:p.key)}>{p.label}</span>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック</div>
+          <div>
+            {SIDE_TYPES.map(s=>(
+              <span key={s.key} style={S.chip(side===s.key)} onClick={()=>setSide(side===s.key?null:s.key)}>{s.label}</span>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果</div>
+          <div>
+            {RESULT_TYPES.map(r=>(
+              <span key={r.key} style={S.chip(result===r.key)} onClick={()=>setResult(result===r.key?null:r.key)}>{r.label}</span>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手</div>
+          <div>
+            {players.map(p=>(
+              <span key={p.id} style={S.chip(playerName===p.name)} onClick={()=>setPlayerName(playerName===p.name?null:p.name)}>{p.name}</span>
+            ))}
+          </div>
+        </div>
+
+        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8 }} onClick={handleSave}>保存する</button>
+        <button style={{ ...S.btn("#fff"),color:C.red,border:"1px solid "+C.red, marginBottom:8 }} onClick={onDelete}>🗑 このポイントを削除</button>
+        <button style={{ ...S.btn("#f0f0f0"),color:C.text }} onClick={onClose}>キャンセル</button>
+      </div>
+    </Modal>
+  );
+}
+
 // ============================================================
 // 試合一覧
 // ============================================================
@@ -773,6 +843,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
   const [selPlayer, setSelPlayer] = useState(null);   // 選手（表示名・記録用）
   const [selPlayerId, setSelPlayerId] = useState(null); // 選手（チップ選択状態の判定用・一意ID）
   const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
+  const [editingPoint, setEditingPoint] = useState(null); // 修正中のポイント { gameId, point }
 
   // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
   const saveQueueRef = useRef(Promise.resolve());
@@ -856,14 +927,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
     setFault(0);
   }
 
-  // ★試合終了後、過去の任意のゲームの特定ポイントを削除して修正する
-  function deletePointFromGame(gameId, pointId){
-    if(!window.confirm("このポイントを削除しますか？削除後はスコアが自動的に再計算されます。")) return;
+  // ★試合終了後、過去の任意のゲームのポイント構成が変わった際にスコア・勝敗を再計算して保存する共通処理
+  function applyGamePointsChange(gameId, newPoints){
     const g = match.games.find(gm=>gm.id===gameId);
     if(!g) return;
-    const remaining = g.points.filter(p=>p.id!==pointId);
     let a=0, b=0;
-    const recalced = remaining.map((p,i)=>{
+    const recalced = newPoints.map((p,i)=>{
       if(p.scoring_team==="A") a++; else b++;
       return {...p, point_number:i+1, score_a_after:a, score_b_after:b};
     });
@@ -875,6 +944,18 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
     const newScoreA = newGames.filter(gm=>gm.winner_team==="A").length;
     const newScoreB = newGames.filter(gm=>gm.winner_team==="B").length;
     persist({...match, games:newGames, match_score_a:newScoreA, match_score_b:newScoreB});
+  }
+
+  function deletePointFromGame(gameId, pointId){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g) return;
+    applyGamePointsChange(gameId, g.points.filter(p=>p.id!==pointId));
+  }
+
+  function updatePointInGame(gameId, pointId, updates){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g) return;
+    applyGamePointsChange(gameId, g.points.map(p=>p.id===pointId?{...p,...updates}:p));
   }
 
   const allPlayers = match.players.map(p=>({ id:p.id, name:p.player_name, team:p.team }));
@@ -1045,7 +1126,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
           {match.status==="finished"&&correctMode&&(
             <div>
               <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7a5800" }}>
-                ✏️ 削除したいポイントの「✕」をタップしてください。スコアは自動的に再計算されます。
+                ✏️ 修正したいポイントをタップしてください。内容の変更・削除ができます。
               </div>
               {match.games.map(g=>(
                 <div key={g.id} style={S.card}>
@@ -1056,7 +1137,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
                   <div style={{ padding:"8px 10px" }}>
                     {g.points.length===0&&<div style={{ fontSize:12,color:C.textSec,padding:"6px 4px" }}>記録なし</div>}
                     {g.points.map(pt=>(
-                      <div key={pt.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:C.gray,borderRadius:8,marginBottom:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}` }}>
+                      <div key={pt.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:C.gray,borderRadius:8,marginBottom:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}`,cursor:"pointer" }} onClick={()=>setEditingPoint({gameId:g.id,point:pt})}>
                         <span style={{ fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:20,background:pt.scoring_team==="A"?C.accentL:C.redL,color:pt.scoring_team==="A"?C.accent:C.red,whiteSpace:"nowrap" }}>
                           {pt.scoring_team==="A"?"A 得点":"B 得点"}
                         </span>
@@ -1064,7 +1145,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
                           {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
                         </span>
                         <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
-                        <button style={{ width:22,height:22,borderRadius:"50%",background:C.red,color:C.white,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0 }} onClick={()=>deletePointFromGame(g.id,pt.id)}>✕</button>
+                        <span style={{ fontSize:14,color:C.textSec,flexShrink:0 }}>›</span>
                       </div>
                     ))}
                   </div>
@@ -1072,6 +1153,18 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
               ))}
               <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:4 }} onClick={()=>setCorrectMode(false)}>修正を完了</button>
             </div>
+          )}
+
+          {editingPoint && (
+            <PointEditModal
+              point={editingPoint.point}
+              players={allPlayers}
+              teamALabel={teamALabel}
+              teamBLabel={teamBLabel}
+              onClose={()=>setEditingPoint(null)}
+              onSave={(updates)=>{ updatePointInGame(editingPoint.gameId, editingPoint.point.id, updates); setEditingPoint(null); }}
+              onDelete={()=>{ if(window.confirm("このポイントを削除しますか？削除後はスコアが自動的に再計算されます。")){ deletePointFromGame(editingPoint.gameId, editingPoint.point.id); setEditingPoint(null); } }}
+            />
           )}
 
           {currentGame&&match.status!=="finished"&&(
