@@ -163,7 +163,7 @@ async function saveMatch(match) {
   if (!user) throw new Error("ログインしていません");
 
   const matchRow = {
-    id: match.id, created_by: user.id,
+    id: match.id, created_by: (match.created_by && match.created_by !== "me") ? match.created_by : user.id,
     match_date: match.match_date, venue: match.venue || null,
     tournament_name: match.tournament_name || null, round: match.round || null,
     match_type: match.match_type, game_format: match.game_format,
@@ -220,6 +220,59 @@ async function saveMatch(match) {
 
 async function deleteMatch(id) {
   const { error } = await supabase.from("matches").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ============================================================
+// プロフィール
+// ============================================================
+async function getMyProfile() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase.from("users").select("*").eq("id", user.id).single();
+  if (error) { console.error(error); return null; }
+  return data;
+}
+
+async function saveMyProfile(profile) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const { error } = await supabase.from("users").update({
+    name: profile.name,
+    school_name: profile.school_name,
+    prefecture: profile.prefecture,
+    category: profile.category,
+  }).eq("id", user.id);
+  if (error) throw error;
+}
+
+// ============================================================
+// 選手マスター（同じ学校のメンバーで共有）
+// ============================================================
+async function getPlayerRoster() {
+  const { data, error } = await supabase.from("players").select("*").order("player_name");
+  if (error) { console.error(error); return []; }
+  return data;
+}
+
+async function savePlayer(player) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const profile = await getMyProfile();
+  const row = {
+    id: player.id || uid(),
+    school_name: profile?.school_name || "",
+    player_name: player.player_name,
+    position: player.position || null,
+    created_by: user.id,
+  };
+  const { error } = await supabase.from("players").upsert(row);
+  if (error) throw error;
+  return row;
+}
+
+async function deletePlayerFromRoster(id) {
+  const { error } = await supabase.from("players").delete().eq("id", id);
   if (error) throw error;
 }
 
@@ -453,7 +506,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster }) {
   const [filter, setFilter] = useState("all");
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -479,10 +532,20 @@ function MatchList({ onNew, onOpen, onCopy }) {
       <div style={S.hdr}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
-          <button
-            style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:11, padding:"6px 10px", cursor:"pointer" }}
-            onClick={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); } }}
-          >ログアウト</button>
+          <div style={{ display:"flex",gap:6 }}>
+            <button
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
+              onClick={onProfile} title="プロフィール"
+            >👤</button>
+            <button
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
+              onClick={onRoster} title="選手マスター"
+            >👥</button>
+            <button
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:11, padding:"6px 10px", cursor:"pointer" }}
+              onClick={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); } }}
+            >ログアウト</button>
+          </div>
         </div>
       </div>
       <div style={{ display:"flex",gap:6,padding:"12px 14px 0",overflowX:"auto" }}>
@@ -640,6 +703,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
 
   const [saving, setSaving] = useState(false);
 
+  // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
+  const [roster, setRoster] = useState([]);
+  useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -768,11 +835,30 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={aP1} onChange={e => setAP1(e.target.value)}/>
+            {roster.length>0 && (
+              <div style={{ marginTop:6 }}>
+                {roster.map(p=>(
+                  <span key={p.id} style={S.chip(aP1===p.player_name)} onClick={()=>setAP1(p.player_name)}>{p.player_name}</span>
+                ))}
+              </div>
+            )}
           </FormRow>
           {isDoubles && (
             <FormRow label="選手2（ペア）">
               <input style={S.inp} placeholder="選手名" value={aP2} onChange={e => setAP2(e.target.value)}/>
+              {roster.length>0 && (
+                <div style={{ marginTop:6 }}>
+                  {roster.map(p=>(
+                    <span key={p.id} style={S.chip(aP2===p.player_name)} onClick={()=>setAP2(p.player_name)}>{p.player_name}</span>
+                  ))}
+                </div>
+              )}
             </FormRow>
+          )}
+          {roster.length===0 && (
+            <div style={{ padding:"0 14px 12px",fontSize:11,color:C.textSec }}>
+              ホーム画面の「👥 選手マスター」から選手を登録すると、ここで選んで入力できるようになります。
+            </div>
           )}
         </FormSec>
 
@@ -1518,6 +1604,198 @@ const PREFECTURES = [
 ];
 
 // ============================================================
+// プロフィール編集画面
+// ============================================================
+function ProfileScreen({ onBack }) {
+  const [ready, setReady] = useState(false);
+  const [name, setName] = useState("");
+  const [schoolName, setSchoolName] = useState("");
+  const [prefecture, setPrefecture] = useState("東京都");
+  const [category, setCategory] = useState("junior_high");
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyProfile().then(p => {
+      if (cancelled) return;
+      if (p) {
+        setName(p.name ?? "");
+        setSchoolName(p.school_name ?? "");
+        setPrefecture(p.prefecture ?? "東京都");
+        setCategory(p.category ?? "junior_high");
+      }
+      setReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleSave() {
+    setErrorMsg("");
+    if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
+    if (!schoolName.trim()) { setErrorMsg("学校名を入力してください"); return; }
+    setSaving(true);
+    try {
+      await saveMyProfile({ name: name.trim(), school_name: schoolName.trim(), prefecture, category });
+      onBack();
+    } catch (e) {
+      setErrorMsg(e.message || "保存に失敗しました");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!ready) {
+    return (
+      <div style={S.page}>
+        <div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>プロフィール</span>
+        </div>
+      </div>
+      <div style={{ padding:14 }}>
+        <FormSec title="基本情報">
+          <FormRow label="お名前">
+            <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} />
+          </FormRow>
+          <FormRow label="学校名">
+            <input style={S.inp} value={schoolName} onChange={e=>setSchoolName(e.target.value)} />
+          </FormRow>
+          <FormRow label="都道府県">
+            <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>setPrefecture(e.target.value)}>
+              {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </FormRow>
+          <FormRow label="区分">
+            <div style={{ display:"flex",gap:8 }}>
+              <button style={S.togBtn(category==="junior_high")} onClick={()=>setCategory("junior_high")}>中学校</button>
+              <button style={S.togBtn(category==="high_school")} onClick={()=>setCategory("high_school")}>高校</button>
+            </div>
+          </FormRow>
+        </FormSec>
+
+        <div style={{ background:"#e3f2fd",border:"1px solid #90caf9",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#1565c0",marginBottom:12 }}>
+          ℹ️ 学校名を変更すると、共有される試合・選手マスターの範囲が変わります。
+        </div>
+
+        {errorMsg && (
+          <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginBottom:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+        )}
+
+        <button
+          style={{ ...S.btn(saving ? C.border : `linear-gradient(135deg,${C.accent},#00a066)`), color: saving?C.textSec:C.white }}
+          disabled={saving}
+          onClick={handleSave}
+        >
+          {saving ? "保存中..." : "保存する"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 選手マスター画面（同じ学校のメンバーで共有）
+// ============================================================
+function PlayerRosterScreen({ onBack }) {
+  const [players, setPlayers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState("");
+  const [newPosition, setNewPosition] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editPosition, setEditPosition] = useState("");
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    getPlayerRoster().then(list => { setPlayers(list); setLoading(false); });
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  async function handleAdd() {
+    if (!newName.trim()) return;
+    await savePlayer({ player_name: newName.trim(), position: newPosition.trim() });
+    setNewName(""); setNewPosition("");
+    reload();
+  }
+
+  async function handleUpdate(id) {
+    if (!editName.trim()) return;
+    await savePlayer({ id, player_name: editName.trim(), position: editPosition.trim() });
+    setEditingId(null);
+    reload();
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm("この選手をマスターから削除しますか？")) return;
+    await deletePlayerFromRoster(id);
+    reload();
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>選手マスター</span>
+        </div>
+      </div>
+      <div style={{ padding:14 }}>
+        <div style={{ background:"#e3f2fd",border:"1px solid #90caf9",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#1565c0",marginBottom:14 }}>
+          ℹ️ ここで登録した選手は、同じ学校のメンバー全員が試合作成時に選べます。
+        </div>
+
+        <FormSec title="選手を追加">
+          <FormRow label="選手名">
+            <input style={S.inp} placeholder="例：田中 蓮" value={newName} onChange={e=>setNewName(e.target.value)} />
+          </FormRow>
+          <FormRow label="ポジション（任意）">
+            <input style={S.inp} placeholder="例：前衛" value={newPosition} onChange={e=>setNewPosition(e.target.value)} />
+          </FormRow>
+        </FormSec>
+        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:16 }} onClick={handleAdd}>＋ 追加する</button>
+
+        {loading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
+        {!loading && players.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>登録されている選手がいません</div>}
+
+        {players.map(p => (
+          <div key={p.id} style={S.card}>
+            {editingId===p.id ? (
+              <div style={{ padding:12 }}>
+                <input style={{ ...S.inp, marginBottom:8 }} value={editName} onChange={e=>setEditName(e.target.value)} />
+                <input style={{ ...S.inp, marginBottom:10 }} placeholder="ポジション" value={editPosition} onChange={e=>setEditPosition(e.target.value)} />
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
+                  <button style={{ ...S.btn(C.accent),fontSize:12 }} onClick={()=>handleUpdate(p.id)}>保存</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display:"flex",alignItems:"center",padding:"12px 14px",gap:10 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14,fontWeight:700,color:C.text }}>{p.player_name}</div>
+                  {p.position && <div style={{ fontSize:11,color:C.textSec }}>{p.position}</div>}
+                </div>
+                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer" }} onClick={()=>{ setEditingId(p.id); setEditName(p.player_name); setEditPosition(p.position||""); }}>✏️</button>
+                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // ログイン／新規登録画面
 // ============================================================
 function AuthScreen({ onAuthed }) {
@@ -1685,6 +1963,13 @@ export default function App() {
     return <AuthScreen onAuthed={()=>{}} />;
   }
 
+  if (screen==="profile") {
+    return <ProfileScreen onBack={()=>setScreen("list")} />;
+  }
+  if (screen==="roster") {
+    return <PlayerRosterScreen onBack={()=>setScreen("list")} />;
+  }
+
   if (screen==="setup") {
     return (
       <MatchSetup
@@ -1733,6 +2018,8 @@ export default function App() {
       onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }}
       onOpen={id=>{setMatchId(id);setScreen("record");}}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setScreen("setup"); }}
+      onProfile={()=>setScreen("profile")}
+      onRoster={()=>setScreen("roster")}
     />
   );
 }
