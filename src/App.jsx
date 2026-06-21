@@ -242,6 +242,7 @@ async function saveMyProfile(profile) {
     school_id: profile.school_id,
     prefecture: profile.prefecture,
     category: profile.category,
+    gender_category: profile.gender_category,
   }).eq("id", user.id);
   if (error) throw error;
 }
@@ -255,8 +256,8 @@ async function getSchools() {
   return data;
 }
 
-async function addSchool(name, prefecture) {
-  const row = { id: uid(), name: name.trim(), prefecture: prefecture || null };
+async function addSchool(name, prefecture, category) {
+  const row = { id: uid(), name: name.trim(), prefecture: prefecture || null, category: category || null };
   const { error } = await supabase.from("schools").insert(row);
   if (error) throw error;
   return row;
@@ -288,6 +289,7 @@ async function savePlayer(player) {
   const row = {
     id: player.id || uid(),
     school_id: profile?.school_id || null,
+    gender_category: profile?.gender_category || null,
     player_name: player.player_name,
     position: player.position || null,
     created_by: user.id,
@@ -744,7 +746,10 @@ function SchoolIdSelect({ value, onChange, schools }) {
       onChange={e=>onChange(e.target.value || null)}
     >
       <option value="">選択してください</option>
-      {schools.map(s => <option key={s.id} value={s.id}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
+      {schools.map(s => {
+        const tags = [categoryLabel(s.category), s.prefecture].filter(Boolean).join("・");
+        return <option key={s.id} value={s.id}>{s.name}{tags ? `（${tags}）` : ""}</option>;
+      })}
     </select>
   );
 }
@@ -1725,6 +1730,16 @@ const CATEGORY_OPTIONS = [
   { key: "elementary",  label: "小学校"   },
   { key: "other",       label: "その他"   },
 ];
+function categoryLabel(key) {
+  return CATEGORY_OPTIONS.find(c => c.key === key)?.label || "";
+}
+
+// 男子・女子・共通（プロフィール・新規登録共通）
+const GENDER_OPTIONS = [
+  { key: "boys",  label: "男子" },
+  { key: "girls", label: "女子" },
+  { key: "mixed", label: "共通" },
+];
 
 // ============================================================
 // プロフィール編集画面
@@ -1734,6 +1749,7 @@ function ProfileScreen({ onBack }) {
   const [name, setName] = useState("");
   const [schoolId, setSchoolId] = useState(null);
   const [prefecture, setPrefecture] = useState("東京都");
+  const [genderCategory, setGenderCategory] = useState(null);
   const [category, setCategory] = useState(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -1749,6 +1765,7 @@ function ProfileScreen({ onBack }) {
         setName(p.name ?? "");
         setSchoolId(p.school_id ?? null);
         setPrefecture(p.prefecture ?? "東京都");
+        setGenderCategory(p.gender_category ?? null);
         setCategory(p.category ?? null);
       }
       setReady(true);
@@ -1760,10 +1777,11 @@ function ProfileScreen({ onBack }) {
     setErrorMsg("");
     if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
+    if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
     setSaving(true);
     try {
-      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, category });
+      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, gender_category: genderCategory, category });
       onBack();
     } catch (e) {
       setErrorMsg(e.message || "保存に失敗しました");
@@ -1800,6 +1818,13 @@ function ProfileScreen({ onBack }) {
           </FormRow>
           <FormRow label="学校名またはチーム名">
             <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} />
+          </FormRow>
+          <FormRow label="男子・女子・共通">
+            <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+              {GENDER_OPTIONS.map(g => (
+                <button key={g.key} style={S.togBtn(genderCategory===g.key)} onClick={()=>setGenderCategory(g.key)}>{g.label}</button>
+              ))}
+            </div>
           </FormRow>
           <FormRow label="区分">
             <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
@@ -1931,9 +1956,11 @@ function AdminSchoolsScreen({ onBack }) {
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
   const [newPrefecture, setNewPrefecture] = useState("");
+  const [newCategory, setNewCategory] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editPrefecture, setEditPrefecture] = useState("");
+  const [editCategory, setEditCategory] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
   const reload = useCallback(() => {
@@ -1946,24 +1973,26 @@ function AdminSchoolsScreen({ onBack }) {
   async function handleAdd() {
     setErrorMsg("");
     if (!newName.trim()) return;
+    if (!newCategory) { setErrorMsg("区分（高校・中学校など）を選択してください"); return; }
     try {
-      await addSchool(newName.trim(), newPrefecture.trim());
-      setNewName(""); setNewPrefecture("");
+      await addSchool(newName.trim(), newPrefecture.trim(), newCategory);
+      setNewName(""); setNewPrefecture(""); setNewCategory(null);
       reload();
     } catch (e) {
-      setErrorMsg(e.message?.includes("duplicate") ? "同じ名前の学校がすでに登録されています" : (e.message || "追加に失敗しました"));
+      setErrorMsg(e.message?.includes("duplicate") ? "同じ名前・同じ区分の学校がすでに登録されています" : (e.message || "追加に失敗しました"));
     }
   }
 
   async function handleUpdate(id) {
     setErrorMsg("");
     if (!editName.trim()) return;
+    if (!editCategory) { setErrorMsg("区分（高校・中学校など）を選択してください"); return; }
     try {
-      await updateSchoolMaster(id, { name: editName.trim(), prefecture: editPrefecture.trim() || null });
+      await updateSchoolMaster(id, { name: editName.trim(), prefecture: editPrefecture.trim() || null, category: editCategory });
       setEditingId(null);
       reload();
     } catch (e) {
-      setErrorMsg(e.message?.includes("duplicate") ? "同じ名前の学校がすでに登録されています" : (e.message || "更新に失敗しました"));
+      setErrorMsg(e.message?.includes("duplicate") ? "同じ名前・同じ区分の学校がすでに登録されています" : (e.message || "更新に失敗しました"));
     }
   }
 
@@ -1983,12 +2012,19 @@ function AdminSchoolsScreen({ onBack }) {
       </div>
       <div style={{ padding:14 }}>
         <div style={{ background:"#e3f2fd",border:"1px solid #90caf9",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#1565c0",marginBottom:14 }}>
-          ℹ️ ここで登録した学校だけが、新規登録・プロフィールの学校名選択肢に表示されます。
+          ℹ️ ここで登録した学校だけが、新規登録・プロフィールの学校名選択肢に表示されます。同じ学校名でも区分（高校・中学校など）が違えば別の学校として登録できます。
         </div>
 
         <FormSec title="学校を追加">
           <FormRow label="学校名">
-            <input style={S.inp} placeholder="例：東福岡高校" value={newName} onChange={e=>setNewName(e.target.value)} />
+            <input style={S.inp} placeholder="例：東福岡" value={newName} onChange={e=>setNewName(e.target.value)} />
+          </FormRow>
+          <FormRow label="区分">
+            <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+              {CATEGORY_OPTIONS.map(c => (
+                <button key={c.key} style={S.togBtn(newCategory===c.key)} onClick={()=>setNewCategory(c.key)}>{c.label}</button>
+              ))}
+            </div>
           </FormRow>
           <FormRow label="都道府県（任意）">
             <select style={{ ...S.inp, background:"transparent" }} value={newPrefecture} onChange={e=>setNewPrefecture(e.target.value)}>
@@ -2010,6 +2046,11 @@ function AdminSchoolsScreen({ onBack }) {
             {editingId===s.id ? (
               <div style={{ padding:12 }}>
                 <input style={{ ...S.inp, marginBottom:8 }} value={editName} onChange={e=>setEditName(e.target.value)} />
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
+                  {CATEGORY_OPTIONS.map(c => (
+                    <button key={c.key} style={S.togBtn(editCategory===c.key)} onClick={()=>setEditCategory(c.key)}>{c.label}</button>
+                  ))}
+                </div>
                 <select style={{ ...S.inp, background:"transparent", marginBottom:10 }} value={editPrefecture} onChange={e=>setEditPrefecture(e.target.value)}>
                   <option value="">指定なし</option>
                   {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
@@ -2023,9 +2064,11 @@ function AdminSchoolsScreen({ onBack }) {
               <div style={{ display:"flex",alignItems:"center",padding:"12px 14px",gap:10 }}>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:14,fontWeight:700,color:C.text }}>{s.name}</div>
-                  {s.prefecture && <div style={{ fontSize:11,color:C.textSec }}>{s.prefecture}</div>}
+                  <div style={{ fontSize:11,color:C.textSec }}>
+                    {[categoryLabel(s.category) || "区分未設定", s.prefecture].filter(Boolean).join("・")}
+                  </div>
                 </div>
-                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer" }} onClick={()=>{ setEditingId(s.id); setEditName(s.name); setEditPrefecture(s.prefecture||""); }}>✏️</button>
+                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer" }} onClick={()=>{ setEditingId(s.id); setEditName(s.name); setEditPrefecture(s.prefecture||""); setEditCategory(s.category||null); }}>✏️</button>
                 <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.red }} onClick={()=>handleDelete(s.id)}>🗑</button>
               </div>
             )}
@@ -2046,6 +2089,7 @@ function AuthScreen({ onAuthed }) {
   const [name,        setName]        = useState("");
   const [schoolId,    setSchoolId]    = useState(null);
   const [prefecture,  setPrefecture]  = useState("東京都");
+  const [genderCategory, setGenderCategory] = useState(null);
   const [category,    setCategory]    = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -2076,6 +2120,7 @@ function AuthScreen({ onAuthed }) {
     if (password.length < 6) { setErrorMsg("パスワードは6文字以上で入力してください"); return; }
     if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
+    if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
     setLoading(true);
     try {
@@ -2087,6 +2132,7 @@ function AuthScreen({ onAuthed }) {
           name: name.trim(),
           school_id: schoolId,
           prefecture,
+          gender_category: genderCategory,
           category,
         });
         if (profileErr) throw profileErr;
@@ -2139,6 +2185,14 @@ function AuthScreen({ onAuthed }) {
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>学校名またはチーム名</label>
               <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} />
+            </div>
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <label style={S.lbl}>男子・女子・共通</label>
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                {GENDER_OPTIONS.map(g => (
+                  <button key={g.key} style={S.togBtn(genderCategory===g.key)} onClick={()=>setGenderCategory(g.key)}>{g.label}</button>
+                ))}
+              </div>
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>区分</label>
