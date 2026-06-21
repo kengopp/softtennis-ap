@@ -308,18 +308,21 @@ async function deletePlayerFromRoster(id) {
 // 学校名サジェスト（誤入力防止のための候補一覧）
 // 学校マスター ＋ これまで試合で入力されたチーム名 を候補にする
 // （試合のチーム名欄は相手チームなど自由入力も許可するための候補リスト）
+// 都道府県で絞り込めるよう、学校マスター由来のものは prefecture を保持する
 // ============================================================
-async function getKnownSchoolNames() {
+async function getKnownSchools() {
   const [{ data: schoolsData, error: schoolsErr }, { data: cpData, error: cpErr }] = await Promise.all([
-    supabase.from("schools").select("name"),
+    supabase.from("schools").select("name, prefecture"),
     supabase.from("match_players").select("club_name"),
   ]);
   if (schoolsErr) console.error(schoolsErr);
   if (cpErr) console.error(cpErr);
-  const set = new Set();
-  (schoolsData ?? []).forEach(r => { if (r.name) set.add(r.name); });
-  (cpData ?? []).forEach(r => { if (r.club_name) set.add(r.club_name); });
-  return Array.from(set).sort((a,b)=>a.localeCompare(b,"ja"));
+  const map = new Map(); // name -> prefecture（学校マスター由来を優先）
+  (cpData ?? []).forEach(r => { if (r.club_name && !map.has(r.club_name)) map.set(r.club_name, null); });
+  (schoolsData ?? []).forEach(r => { if (r.name) map.set(r.name, r.prefecture || null); });
+  return Array.from(map.entries())
+    .map(([name, prefecture]) => ({ name, prefecture }))
+    .sort((a,b)=>a.name.localeCompare(b.name,"ja"));
 }
 
 // ============================================================
@@ -695,13 +698,18 @@ function FormRow({ label, children }) {
 }
 
 // ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
+// schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
 function SchoolField({ value, onChange, schools, placeholder }) {
-  const [customMode, setCustomMode] = useState(!!value && !schools.includes(value));
+  const [customMode, setCustomMode] = useState(!!value && !schools.some(s => s.name === value));
+  const [prefFilter, setPrefFilter] = useState("");
 
   useEffect(() => {
     // 候補一覧が後から読み込まれた場合、まだ何も入力していなければ一覧モードに切り替える
     if (!value && schools.length>0 && customMode) setCustomMode(false);
   }, [schools]);
+
+  const knownPrefs = Array.from(new Set(schools.map(s=>s.prefecture).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja"));
+  const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
 
   if (customMode) {
     return (
@@ -715,23 +723,37 @@ function SchoolField({ value, onChange, schools, placeholder }) {
   }
 
   return (
-    <select
-      style={{ ...S.inp, background:"transparent" }}
-      value={schools.includes(value) ? value : ""}
-      onChange={e=>{
-        if (e.target.value === "__custom__") { setCustomMode(true); }
-        else onChange(e.target.value);
-      }}
-    >
-      <option value="">選択してください</option>
-      {schools.map(s => <option key={s} value={s}>{s}</option>)}
-      <option value="__custom__">＋ 新しい学校名を入力</option>
-    </select>
+    <div>
+      {knownPrefs.length>0 && (
+        <select
+          style={{ ...S.inp, background:"transparent", marginBottom:6, fontSize:12 }}
+          value={prefFilter}
+          onChange={e=>setPrefFilter(e.target.value)}
+        >
+          <option value="">都道府県で絞り込み（指定なし）</option>
+          {knownPrefs.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      )}
+      <select
+        style={{ ...S.inp, background:"transparent" }}
+        value={visibleSchools.some(s=>s.name===value) ? value : ""}
+        onChange={e=>{
+          if (e.target.value === "__custom__") { setCustomMode(true); }
+          else onChange(e.target.value);
+        }}
+      >
+        <option value="">選択してください</option>
+        {visibleSchools.map(s => <option key={s.name} value={s.name}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
+        <option value="__custom__">＋ 新しい学校名を入力</option>
+      </select>
+    </div>
   );
 }
 
 // ★プロフィール・新規登録用：学校マスターから選ぶだけ（自由入力不可、管理者のみがマスターを編集できる）
 function SchoolIdSelect({ value, onChange, schools }) {
+  const [prefFilter, setPrefFilter] = useState("");
+
   if (schools.length === 0) {
     return (
       <div style={{ fontSize:12,color:C.textSec,padding:"10px 0" }}>
@@ -739,18 +761,34 @@ function SchoolIdSelect({ value, onChange, schools }) {
       </div>
     );
   }
+
+  const knownPrefs = Array.from(new Set(schools.map(s=>s.prefecture).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja"));
+  const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
+
   return (
-    <select
-      style={{ ...S.inp, background:"transparent" }}
-      value={value || ""}
-      onChange={e=>onChange(e.target.value || null)}
-    >
-      <option value="">選択してください</option>
-      {schools.map(s => {
-        const tags = [categoryLabel(s.category), s.prefecture].filter(Boolean).join("・");
-        return <option key={s.id} value={s.id}>{s.name}{tags ? `（${tags}）` : ""}</option>;
-      })}
-    </select>
+    <div>
+      {knownPrefs.length>0 && (
+        <select
+          style={{ ...S.inp, background:"transparent", marginBottom:6, fontSize:12 }}
+          value={prefFilter}
+          onChange={e=>setPrefFilter(e.target.value)}
+        >
+          <option value="">都道府県で絞り込み（指定なし）</option>
+          {knownPrefs.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      )}
+      <select
+        style={{ ...S.inp, background:"transparent" }}
+        value={value || ""}
+        onChange={e=>onChange(e.target.value || null)}
+      >
+        <option value="">選択してください</option>
+        {visibleSchools.map(s => {
+          const tags = [categoryLabel(s.category), s.prefecture].filter(Boolean).join("・");
+          return <option key={s.id} value={s.id}>{s.name}{tags ? `（${tags}）` : ""}</option>;
+        })}
+      </select>
+    </div>
   );
 }
 
@@ -823,7 +861,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
 
   // ★学校名の候補一覧（誤入力防止）
   const [schools, setSchools] = useState([]);
-  useEffect(() => { getKnownSchoolNames().then(setSchools); }, []);
+  useEffect(() => { getKnownSchools().then(setSchools); }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -1744,7 +1782,7 @@ const GENDER_OPTIONS = [
 // ============================================================
 // プロフィール編集画面
 // ============================================================
-function ProfileScreen({ onBack }) {
+function ProfileScreen({ onBack, forced, onSaved }) {
   const [ready, setReady] = useState(false);
   const [name, setName] = useState("");
   const [schoolId, setSchoolId] = useState(null);
@@ -1782,6 +1820,7 @@ function ProfileScreen({ onBack }) {
     setSaving(true);
     try {
       await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, gender_category: genderCategory, category });
+      onSaved?.();
       onBack();
     } catch (e) {
       setErrorMsg(e.message || "保存に失敗しました");
@@ -1802,11 +1841,16 @@ function ProfileScreen({ onBack }) {
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{ display:"flex",alignItems:"center",gap:12 }}>
-          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+          {!forced && <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>}
           <span style={{ fontSize:18,fontWeight:800,color:C.white }}>プロフィール</span>
         </div>
       </div>
       <div style={{ padding:14 }}>
+        {forced && (
+          <div style={{ background:"#fff3e0",border:"1px solid #ffb74d",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#e65100",marginBottom:14 }}>
+            ⚠️ 学校名・男子女子区分の設定が完了していないため、試合の閲覧・作成ができません。設定して保存してください。
+          </div>
+        )}
         <FormSec title="基本情報">
           <FormRow label="お名前">
             <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} />
@@ -1866,6 +1910,7 @@ function PlayerRosterScreen({ onBack }) {
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editPosition, setEditPosition] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -1875,23 +1920,38 @@ function PlayerRosterScreen({ onBack }) {
   useEffect(() => { reload(); }, [reload]);
 
   async function handleAdd() {
+    setErrorMsg("");
     if (!newName.trim()) return;
-    await savePlayer({ player_name: newName.trim(), position: newPosition.trim() });
-    setNewName(""); setNewPosition("");
-    reload();
+    try {
+      await savePlayer({ player_name: newName.trim(), position: newPosition.trim() });
+      setNewName(""); setNewPosition("");
+      reload();
+    } catch (e) {
+      setErrorMsg("追加に失敗しました。プロフィールの学校名・男女区分の設定をご確認ください。");
+    }
   }
 
   async function handleUpdate(id) {
+    setErrorMsg("");
     if (!editName.trim()) return;
-    await savePlayer({ id, player_name: editName.trim(), position: editPosition.trim() });
-    setEditingId(null);
-    reload();
+    try {
+      await savePlayer({ id, player_name: editName.trim(), position: editPosition.trim() });
+      setEditingId(null);
+      reload();
+    } catch (e) {
+      setErrorMsg("更新に失敗しました。プロフィールの学校名・男女区分の設定をご確認ください。");
+    }
   }
 
   async function handleDelete(id) {
     if (!window.confirm("この選手をマスターから削除しますか？")) return;
-    await deletePlayerFromRoster(id);
-    reload();
+    setErrorMsg("");
+    try {
+      await deletePlayerFromRoster(id);
+      reload();
+    } catch (e) {
+      setErrorMsg("削除に失敗しました");
+    }
   }
 
   return (
@@ -1915,6 +1975,7 @@ function PlayerRosterScreen({ onBack }) {
             <input style={S.inp} placeholder="例：前衛" value={newPosition} onChange={e=>setNewPosition(e.target.value)} />
           </FormRow>
         </FormSec>
+        {errorMsg && <div style={{ color:C.red,fontSize:12,marginBottom:10 }}>{errorMsg}</div>}
         <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:16 }} onClick={handleAdd}>＋ 追加する</button>
 
         {loading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
@@ -1962,6 +2023,7 @@ function AdminSchoolsScreen({ onBack }) {
   const [editPrefecture, setEditPrefecture] = useState("");
   const [editCategory, setEditCategory] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [listPrefFilter, setListPrefFilter] = useState("");
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -1997,9 +2059,18 @@ function AdminSchoolsScreen({ onBack }) {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm("この学校をマスターから削除しますか？\n（すでにこの学校を選んでいる人がいる場合、その人のプロフィールから学校が外れます）")) return;
-    await deleteSchoolMaster(id);
-    reload();
+    if (!window.confirm("この学校をマスターから削除しますか？")) return;
+    setErrorMsg("");
+    try {
+      await deleteSchoolMaster(id);
+      reload();
+    } catch (e) {
+      setErrorMsg(
+        (e.message?.includes("foreign key") || e.code === "23503")
+          ? "この学校を選択しているメンバーがいるため削除できません。先にメンバーに別の学校を選び直してもらうか、学校名を編集してください。"
+          : (e.message || "削除に失敗しました")
+      );
+    }
   }
 
   return (
@@ -2041,7 +2112,20 @@ function AdminSchoolsScreen({ onBack }) {
         {loading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
         {!loading && schools.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>登録されている学校がありません</div>}
 
-        {schools.map(s => (
+        {!loading && schools.length>0 && (
+          <select
+            style={{ ...S.inp, background:"transparent", marginBottom:10 }}
+            value={listPrefFilter}
+            onChange={e=>setListPrefFilter(e.target.value)}
+          >
+            <option value="">都道府県で絞り込み（すべて表示）</option>
+            {Array.from(new Set(schools.map(s=>s.prefecture).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja")).map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        )}
+
+        {schools.filter(s => !listPrefFilter || s.prefecture === listPrefFilter).map(s => (
           <div key={s.id} style={S.card}>
             {editingId===s.id ? (
               <div style={{ padding:12 }}>
@@ -2245,6 +2329,21 @@ export default function App() {
   const [editTargetId, setEditTargetId] = useState(null); // 編集対象の試合ID
   const [tick,         setTick]         = useState(0);
 
+  // プロフィール（学校・男女区分が未設定だと試合・選手マスターを共有できないため、設定完了をチェック）
+  const [profile, setProfile] = useState(null);
+  const [profileChecked, setProfileChecked] = useState(false);
+  useEffect(() => {
+    if (!user) { setProfileChecked(false); return; }
+    let cancelled = false;
+    setProfileChecked(false);
+    getMyProfile().then(p => {
+      if (cancelled) return;
+      setProfile(p);
+      setProfileChecked(true);
+    });
+    return () => { cancelled = true; };
+  }, [user]);
+
   // ログイン状態確認中は簡易ローディング表示
   if (!authChecked) {
     return (
@@ -2262,8 +2361,33 @@ export default function App() {
     return <AuthScreen onAuthed={()=>{}} />;
   }
 
+  // プロフィール確認中は簡易ローディング表示
+  if (!profileChecked) {
+    return (
+      <div style={{ ...S.page, display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ textAlign:"center", color:C.textSec }}>
+          <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
+          読み込み中...
+        </div>
+      </div>
+    );
+  }
+
+  // 学校・男女区分が未設定の場合は、設定が終わるまでプロフィール画面に固定する
+  // （未設定のままだと試合・選手マスターの共有判定ができないため）
+  const profileIncomplete = !profile || !profile.school_id || !profile.gender_category;
+  if (profileIncomplete) {
+    return (
+      <ProfileScreen
+        forced
+        onBack={()=>setScreen("list")}
+        onSaved={()=>{ getMyProfile().then(setProfile); }}
+      />
+    );
+  }
+
   if (screen==="profile") {
-    return <ProfileScreen onBack={()=>setScreen("list")} />;
+    return <ProfileScreen onBack={()=>setScreen("list")} onSaved={()=>{ getMyProfile().then(setProfile); }} />;
   }
   if (screen==="roster") {
     return <PlayerRosterScreen onBack={()=>setScreen("list")} />;
