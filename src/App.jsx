@@ -264,6 +264,7 @@ async function saveMyProfile(profile) {
     prefecture: profile.prefecture,
     category: profile.category,
     gender_category: profile.gender_category,
+    linked_player_id: profile.linked_player_id ?? null,
   }).eq("id", user.id);
   if (error) throw error;
 }
@@ -736,13 +737,24 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 // ============================================================
 // ホーム画面（ダッシュボード）
 // ============================================================
-function HomeScreen({ onNew, onOpen, onNavigate }) {
+function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats }) {
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
+  const [linkedPlayerName, setLinkedPlayerName] = useState(null);
 
   useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
-  useEffect(() => { getMyProfile().then(setProfile); }, []);
+  useEffect(() => {
+    (async () => {
+      const p = await getMyProfile();
+      setProfile(p);
+      if (p?.linked_player_id) {
+        const roster = await getPlayerRoster();
+        const found = roster.find(r => r.id === p.linked_player_id);
+        setLinkedPlayerName(found?.player_name ?? null);
+      }
+    })();
+  }, []);
 
   const finished = allMatches.filter(m=>m.status==="finished");
   const wins = finished.filter(m=>m.match_score_a>m.match_score_b).length;
@@ -779,7 +791,14 @@ function HomeScreen({ onNew, onOpen, onNavigate }) {
               </div>
             </div>
 
-            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:18 }} onClick={onNew}>＋ 新規試合を記録する</button>
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:14 }} onClick={onNew}>＋ 新規試合を記録する</button>
+
+            {linkedPlayerName && (
+              <button
+                style={{ ...S.btn(C.navy), marginBottom:18, display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}
+                onClick={onGoPlayerStats}
+              >🎾 {linkedPlayerName}さんの戦績を見る</button>
+            )}
 
             <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>最近の試合</div>
             {allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
@@ -923,6 +942,105 @@ function StatsScreen({ onNavigate }) {
         )}
       </div>
       <NavBar active={2} onNavigate={onNavigate}/>
+    </div>
+  );
+}
+
+// ============================================================
+// 特定選手の戦績画面（保護者の「お子さんの戦績」/選手本人の「自分の戦績」）
+// ============================================================
+function PlayerStatsScreen({ onBack, onOpen }) {
+  const [loading, setLoading] = useState(true);
+  const [playerName, setPlayerName] = useState(null);
+  const [matches, setMatches] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      const profile = await getMyProfile();
+      if (profile?.linked_player_id) {
+        const roster = await getPlayerRoster();
+        const found = roster.find(p => p.id === profile.linked_player_id);
+        setPlayerName(found?.player_name ?? null);
+      }
+      const list = await getMatches();
+      setMatches(list);
+      setLoading(false);
+    })();
+  }, []);
+
+  const myMatches = playerName ? matches.filter(m => m.players.some(p => p.player_name === playerName)) : [];
+  const finished = myMatches.filter(m => m.status === "finished");
+
+  function isWin(m) {
+    const onA = m.players.some(p => p.team==="A" && p.player_name===playerName);
+    return onA ? m.match_score_a > m.match_score_b : m.match_score_b > m.match_score_a;
+  }
+  const wins = finished.filter(isWin).length;
+  const winRate = finished.length>0 ? Math.round(wins/finished.length*100) : 0;
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{playerName ? `${playerName}さんの戦績` : "選手の戦績"}</span>
+        </div>
+      </div>
+      <div style={{ padding:14, paddingBottom:40 }}>
+        {loading ? (
+          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
+        ) : !playerName ? (
+          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>
+            プロフィール画面で「お子さん／ご自身の選手登録」を設定すると、ここに戦績が表示されます。
+          </div>
+        ) : finished.length===0 ? (
+          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>{playerName}さんの試合記録がまだありません</div>
+        ) : (
+          <>
+            <div style={{ ...S.card, padding:16, marginBottom:16 }}>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
+                <div>
+                  <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{finished.length}</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:22,fontWeight:800,color:C.accent }}>{winRate}%</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{wins}勝{finished.length-wins}敗</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>試合一覧</div>
+            {myMatches.map(m=>{
+              const win = m.status==="finished" ? isWin(m) : null;
+              const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
+              const bC = m.players.find(p=>p.team==="B")?.club_name??"";
+              const bP = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+              return (
+                <div key={m.id} style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
+                  <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
+                    <span style={{ fontSize:12,fontWeight:700 }}>{m.tournament_name||"試合"}</span>
+                    <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
+                  </div>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:m.memo?6:0 }}>
+                    <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
+                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(win?C.teamA:C.teamB):C.textSec }}>
+                      {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
+                    </span>
+                  </div>
+                  {m.memo && (
+                    <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:4 }}>📝 {m.memo}</div>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -2068,12 +2186,15 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [prefecture, setPrefecture] = useState("東京都");
   const [genderCategory, setGenderCategory] = useState(null);
   const [category, setCategory] = useState(null);
+  const [linkedPlayerId, setLinkedPlayerId] = useState(null);
+  const [roster, setRoster] = useState([]);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
 
   useEffect(() => { getSchools().then(setSchools); }, []);
+  useEffect(() => { getPlayerRoster().then(setRoster); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2085,6 +2206,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         setPrefecture(p.prefecture ?? "東京都");
         setGenderCategory(p.gender_category ?? null);
         setCategory(p.category ?? null);
+        setLinkedPlayerId(p.linked_player_id ?? null);
       }
       setReady(true);
     });
@@ -2099,7 +2221,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
     if (!category) { setErrorMsg("区分を選択してください"); return; }
     setSaving(true);
     try {
-      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, gender_category: genderCategory, category });
+      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId });
       onSaved?.();
       onBack();
     } catch (e) {
@@ -2156,6 +2278,21 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                 <button key={c.key} style={S.togBtn(category===c.key)} onClick={()=>setCategory(c.key)}>{c.label}</button>
               ))}
             </div>
+          </FormRow>
+          <FormRow label="お子さん／ご自身の選手登録（任意）">
+            {roster.length===0 ? (
+              <div style={{ fontSize:12,color:C.textSec,padding:"6px 0" }}>選手マスターに登録がまだありません。先に「選手マスター」から登録してください。</div>
+            ) : (
+              <select
+                style={{ ...S.inp, background:"transparent" }}
+                value={linkedPlayerId || ""}
+                onChange={e=>setLinkedPlayerId(e.target.value || null)}
+              >
+                <option value="">設定しない</option>
+                {roster.map(p => <option key={p.id} value={p.id}>{p.player_name}</option>)}
+              </select>
+            )}
+            <div style={{ fontSize:11,color:C.textSec,marginTop:4 }}>設定すると、ホーム画面でその選手の戦績だけをまとめて確認できます。保護者の方は「お子さん」、選手ご本人は「自分」を選んでください。</div>
           </FormRow>
         </FormSec>
 
@@ -2679,6 +2816,14 @@ export default function App() {
   if (screen==="schoolAdmin") {
     return <AdminSchoolsScreen onBack={()=>setScreen("list")} />;
   }
+  if (screen==="playerStats") {
+    return (
+      <PlayerStatsScreen
+        onBack={()=>setScreen("home")}
+        onOpen={id=>{ setMatchId(id); setScreen("record"); }}
+      />
+    );
+  }
 
   // ★下部ナビゲーション（ホーム/記録/統計/履歴）の共通遷移ハンドラ
   function goNav(i) {
@@ -2694,6 +2839,7 @@ export default function App() {
         onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }}
         onOpen={id=>{ setMatchId(id); setScreen("record"); }}
         onNavigate={goNav}
+        onGoPlayerStats={()=>setScreen("playerStats")}
       />
     );
   }
