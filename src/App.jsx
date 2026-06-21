@@ -584,6 +584,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
   const [confirmDelete, setConfirmDelete] = useState(null); // 削除確認対象のmatch_id
   const [isAdmin, setIsAdmin] = useState(false);
   const [myId, setMyId] = useState(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 6;
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -596,6 +598,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
   const matches = allMatches
     .filter(m=>filter==="all"||m.match_type===filter)
     .filter(m=>!mineOnly || m.created_by===myId);
+
+  // ★絞り込み条件が変わったら1ページ目に戻す
+  useEffect(() => { setPage(1); }, [filter, mineOnly]);
+
+  const totalPages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
+  const pageMatches = matches.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
 
   async function handleDelete(id) {
     await deleteMatch(id);
@@ -644,7 +652,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
       <div style={{ padding:"12px 14px" }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
         {!loading && matches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>試合記録がありません</div>}
-        {!loading && matches.map(m=>{
+        {!loading && pageMatches.map(m=>{
           const aWin=m.match_score_a>m.match_score_b;
           const aP=m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
           const bP=m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
@@ -687,6 +695,21 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
             </div>
           );
         })}
+        {!loading && matches.length>0 && (
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginTop:8,marginBottom:8 }}>
+            <button
+              style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12,width:84,opacity:page<=1?0.4:1 }}
+              disabled={page<=1}
+              onClick={()=>setPage(p=>Math.max(1,p-1))}
+            >← 前へ</button>
+            <span style={{ fontSize:12,color:C.textSec }}>{page} / {totalPages}</span>
+            <button
+              style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12,width:84,opacity:page>=totalPages?0.4:1 }}
+              disabled={page>=totalPages}
+              onClick={()=>setPage(p=>Math.min(totalPages,p+1))}
+            >次へ →</button>
+          </div>
+        )}
       </div>
       <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={onNew}>＋</button>
       <NavBar active={3}/>
