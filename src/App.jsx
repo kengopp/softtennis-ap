@@ -1927,7 +1927,7 @@ function PlayerRosterScreen({ onBack }) {
       setNewName(""); setNewPosition("");
       reload();
     } catch (e) {
-      setErrorMsg("追加に失敗しました。プロフィールの学校名・男女区分の設定をご確認ください。");
+      setErrorMsg("追加に失敗しました: " + (e.message || JSON.stringify(e)));
     }
   }
 
@@ -1939,7 +1939,7 @@ function PlayerRosterScreen({ onBack }) {
       setEditingId(null);
       reload();
     } catch (e) {
-      setErrorMsg("更新に失敗しました。プロフィールの学校名・男女区分の設定をご確認ください。");
+      setErrorMsg("更新に失敗しました: " + (e.message || JSON.stringify(e)));
     }
   }
 
