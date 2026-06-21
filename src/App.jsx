@@ -489,11 +489,11 @@ function Modal({ children, onClose }) {
   );
 }
 
-function NavBar({ active }) {
+function NavBar({ active, onNavigate }) {
   return (
     <div style={{ position:"fixed",bottom:0,left:0,right:0,background:C.white,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:10 }}>
       {[["🏠","ホーム"],["🎾","記録"],["📊","統計"],["📋","履歴"]].map(([icon,label],i)=>(
-        <div key={i} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0 4px",fontSize:9,fontWeight:600,color:active===i?C.accent:C.textSec }}>
+        <div key={i} onClick={()=>onNavigate&&onNavigate(i)} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0 4px",fontSize:9,fontWeight:600,color:active===i?C.accent:C.textSec,cursor:"pointer" }}>
           <span style={{ fontSize:20 }}>{icon}</span>{label}
         </div>
       ))}
@@ -576,7 +576,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate }) {
   const [filter, setFilter] = useState("all");
   const [mineOnly, setMineOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
@@ -714,7 +714,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
         )}
       </div>
       <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={onNew}>＋</button>
-      <NavBar active={3}/>
+      <NavBar active={3} onNavigate={onNavigate}/>
 
       {confirmDelete && (
         <Modal onClose={()=>setConfirmDelete(null)}>
@@ -729,6 +729,200 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin }
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// ホーム画面（ダッシュボード）
+// ============================================================
+function HomeScreen({ onNew, onOpen, onNavigate }) {
+  const [allMatches, setAllMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
+  useEffect(() => { getMyProfile().then(setProfile); }, []);
+
+  const finished = allMatches.filter(m=>m.status==="finished");
+  const wins = finished.filter(m=>m.match_score_a>m.match_score_b).length;
+  const winRate = finished.length>0 ? Math.round(wins/finished.length*100) : 0;
+  const recent = allMatches.slice(0,3);
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>
+          {profile?.name ? `${profile.name}さん、こんにちは` : "ホーム"}
+        </span>
+      </div>
+      <div style={{ padding:14, paddingBottom:90 }}>
+        {loading ? (
+          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
+        ) : (
+          <>
+            {/* サマリーカード */}
+            <div style={{ ...S.card, padding:16, marginBottom:14 }}>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
+                <div>
+                  <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{finished.length}</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>総試合数</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:22,fontWeight:800,color:C.accent }}>{winRate}%</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{wins}勝{finished.length-wins}敗</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                </div>
+              </div>
+            </div>
+
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:18 }} onClick={onNew}>＋ 新規試合を記録する</button>
+
+            <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>最近の試合</div>
+            {allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
+            {recent.map(m=>{
+              const aWin = m.match_score_a>m.match_score_b;
+              const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
+              const bP = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+              const bC = m.players.find(p=>p.team==="B")?.club_name??"";
+              return (
+                <div key={m.id} style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
+                  <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
+                    <span style={{ fontSize:12,fontWeight:700 }}>{m.tournament_name||"試合"}</span>
+                    <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
+                  </div>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
+                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(aWin?C.teamA:C.teamB):C.textSec }}>
+                      {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {allMatches.length>0 && (
+              <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:13 }} onClick={()=>onNavigate(3)}>すべての試合を見る →</button>
+            )}
+          </>
+        )}
+      </div>
+      <NavBar active={0} onNavigate={onNavigate}/>
+    </div>
+  );
+}
+
+// ============================================================
+// 統計画面（複数試合をまたいだ分析）
+// ============================================================
+function StatsScreen({ onNavigate }) {
+  const [allMatches, setAllMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [mineOnly, setMineOnly] = useState(false);
+  const [myId, setMyId] = useState(null);
+
+  useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
+  useEffect(() => { getMyProfile().then(p=>setMyId(p?.id ?? null)); }, []);
+
+  const matches  = allMatches.filter(m=>!mineOnly || m.created_by===myId);
+  const finished = matches.filter(m=>m.status==="finished");
+  const totalWins = finished.filter(m=>m.match_score_a>m.match_score_b).length;
+  const totalRate = finished.length>0 ? Math.round(totalWins/finished.length*100) : 0;
+
+  // 月別集計
+  const byMonth = {};
+  finished.forEach(m=>{
+    const month = (m.match_date||"").slice(0,7);
+    if (!month) return;
+    (byMonth[month] ??= { wins:0, total:0 });
+    byMonth[month].total++;
+    if (m.match_score_a>m.match_score_b) byMonth[month].wins++;
+  });
+  const months = Object.keys(byMonth).sort();
+
+  // 対戦相手別集計（相手チームの学校名/チーム名で集計）
+  const byOpponent = {};
+  finished.forEach(m=>{
+    const name = m.players.find(p=>p.team==="B")?.club_name || "（相手不明）";
+    (byOpponent[name] ??= { wins:0, total:0 });
+    byOpponent[name].total++;
+    if (m.match_score_a>m.match_score_b) byOpponent[name].wins++;
+  });
+  const opponents = Object.entries(byOpponent).sort((a,b)=>b[1].total-a[1].total);
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>統計</span>
+      </div>
+      <div style={{ padding:14, paddingBottom:90 }}>
+        <button
+          style={{ ...S.togBtn(mineOnly,C.navy),fontSize:12,padding:"6px 12px",marginBottom:14 }}
+          onClick={()=>setMineOnly(v=>!v)}
+        >👤 自分が登録した試合のみ</button>
+
+        {loading ? (
+          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
+        ) : finished.length===0 ? (
+          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>集計できる試合がまだありません</div>
+        ) : (
+          <>
+            {/* 総合成績 */}
+            <div style={{ ...S.card, padding:16, marginBottom:16 }}>
+              <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>総合成績</div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
+                <div>
+                  <div style={{ fontSize:20,fontWeight:800 }}>{finished.length}</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{totalRate}%</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:20,fontWeight:800 }}>{totalWins}勝{finished.length-totalWins}敗</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 月別勝率推移 */}
+            <div style={{ ...S.card, padding:16, marginBottom:16 }}>
+              <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>月別の勝率推移</div>
+              {months.map(month=>{
+                const { wins, total } = byMonth[month];
+                const rate = Math.round(wins/total*100);
+                const [y,mo] = month.split("-");
+                return (
+                  <div key={month} style={{ marginBottom:10 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:C.textSec,marginBottom:3 }}>
+                      <span>{y}年{Number(mo)}月（{total}試合）</span>
+                      <span style={{ fontWeight:700,color:C.text }}>{wins}勝{total-wins}敗・{rate}%</span>
+                    </div>
+                    <div style={{ height:8,background:"#e8edf3",borderRadius:4,overflow:"hidden" }}>
+                      <div style={{ width:`${rate}%`,height:"100%",background:C.accent,borderRadius:4 }}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 対戦相手別成績 */}
+            <div style={{ ...S.card, padding:16 }}>
+              <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>対戦相手別の通算成績</div>
+              {opponents.map(([name,{wins,total}])=>(
+                <div key={name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ fontSize:13 }}>{name}</span>
+                  <span style={{ fontSize:12,color:C.textSec }}>{wins}勝{total-wins}敗（{total}試合）</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <NavBar active={2} onNavigate={onNavigate}/>
     </div>
   );
 }
@@ -1157,6 +1351,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
   const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
   const [editingPoint, setEditingPoint] = useState(null); // 修正中のポイント { gameId, point }
   const [addingPoint, setAddingPoint] = useState(null); // 追加位置 { gameId, atIndex }
+  const [memoDraft, setMemoDraft] = useState(initialMatch.memo || ""); // 試合メモ（下書き）
+  const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
 
   // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
   const saveQueueRef = useRef(Promise.resolve());
@@ -1432,6 +1628,21 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
                   <span style={{ width:74,textAlign:"center",fontSize:16 }}>{match.match_score_a>match.match_score_b?"🏆":""}</span>
                   <span style={{ width:74,textAlign:"center",fontSize:16 }}>{match.match_score_b>match.match_score_a?"🏆":""}</span>
                 </div>
+              </div>
+              {/* 試合メモ */}
+              <div style={{ ...S.card, padding:14, marginBottom:8 }}>
+                <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
+                <textarea
+                  style={{ width:"100%",minHeight:70,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:13,fontFamily:"inherit",resize:"vertical" }}
+                  placeholder="気づいたこと、課題、次への作戦などを自由にメモできます"
+                  value={memoDraft}
+                  onChange={e=>{ setMemoDraft(e.target.value); setMemoSaved(false); }}
+                />
+                <button
+                  style={{ ...S.btn(memoSaved?"#f0f0f0":C.navy), color:memoSaved?C.textSec:C.white, fontSize:12, marginTop:8, padding:"9px" }}
+                  disabled={memoSaved}
+                  onClick={()=>{ persist({...match, memo: memoDraft}); setMemoSaved(true); }}
+                >{memoSaved ? "保存済み" : "💾 メモを保存"}</button>
               </div>
               {/* ボタン群 */}
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8 }}>
@@ -2469,6 +2680,27 @@ export default function App() {
     return <AdminSchoolsScreen onBack={()=>setScreen("list")} />;
   }
 
+  // ★下部ナビゲーション（ホーム/記録/統計/履歴）の共通遷移ハンドラ
+  function goNav(i) {
+    if (i===0) setScreen("home");
+    else if (i===1) { setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }
+    else if (i===2) setScreen("stats");
+    else setScreen("list");
+  }
+
+  if (screen==="home") {
+    return (
+      <HomeScreen
+        onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }}
+        onOpen={id=>{ setMatchId(id); setScreen("record"); }}
+        onNavigate={goNav}
+      />
+    );
+  }
+  if (screen==="stats") {
+    return <StatsScreen onNavigate={goNav} />;
+  }
+
   if (screen==="setup") {
     return (
       <MatchSetup
@@ -2520,6 +2752,7 @@ export default function App() {
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
+      onNavigate={goNav}
     />
   );
 }
