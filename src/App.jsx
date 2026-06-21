@@ -629,29 +629,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   return (
     <div style={S.page}>
       <div style={S.hdr}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
-          <div style={{ display:"flex",gap:6 }}>
-            <button
-              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
-              onClick={onProfile} title="プロフィール"
-            >👤</button>
-            <button
-              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
-              onClick={onRoster} title="選手マスター"
-            >👥</button>
-            {isAdmin && (
-              <button
-                style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
-                onClick={onSchoolAdmin} title="学校マスター管理"
-              >🛠</button>
-            )}
-            <button
-              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:11, padding:"6px 10px", cursor:"pointer" }}
-              onClick={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); } }}
-            >ログアウト</button>
-          </div>
-        </div>
+        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
       </div>
       <div style={{ display:"flex",gap:6,padding:"12px 14px 0",overflowX:"auto" }}>
         {[["all","すべて"],["tournament","公式大会"],["practice","練習試合"],["internal","部内戦"]].map(([v,l])=>(
@@ -757,7 +735,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 // ============================================================
 // ホーム画面（ダッシュボード）
 // ============================================================
-function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats }) {
+function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats, onProfile, onRoster, onSchoolAdmin }) {
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -794,9 +772,31 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats }) {
   return (
     <div style={S.page}>
       <div style={S.hdr}>
-        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>
-          {profile?.name ? `${profile.name}さん、こんにちは` : "ホーム"}
-        </span>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <span style={{ fontSize:20,fontWeight:800,color:C.white }}>
+            {profile?.name ? `${profile.name}さん、こんにちは` : "ホーム"}
+          </span>
+          <div style={{ display:"flex",gap:6 }}>
+            <button
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
+              onClick={onProfile} title="プロフィール"
+            >👤</button>
+            <button
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
+              onClick={onRoster} title="選手マスター"
+            >👥</button>
+            {profile?.is_admin && (
+              <button
+                style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
+                onClick={onSchoolAdmin} title="学校マスター管理"
+              >🛠</button>
+            )}
+            <button
+              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:11, padding:"6px 10px", cursor:"pointer" }}
+              onClick={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); } }}
+            >ログアウト</button>
+          </div>
+        </div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
         {loading ? (
@@ -2878,13 +2878,13 @@ export default function App() {
   }
 
   if (screen==="profile") {
-    return <ProfileScreen onBack={()=>setScreen("list")} onSaved={()=>{ getMyProfile().then(setProfile); }} />;
+    return <ProfileScreen onBack={()=>setScreen("home")} onSaved={()=>{ getMyProfile().then(setProfile); }} />;
   }
   if (screen==="roster") {
-    return <PlayerRosterScreen onBack={()=>setScreen("list")} />;
+    return <PlayerRosterScreen onBack={()=>setScreen("home")} />;
   }
   if (screen==="schoolAdmin") {
-    return <AdminSchoolsScreen onBack={()=>setScreen("list")} />;
+    return <AdminSchoolsScreen onBack={()=>setScreen("home")} />;
   }
   if (screen==="playerStats") {
     return (
@@ -2910,6 +2910,9 @@ export default function App() {
         onOpen={id=>{ setMatchId(id); setScreen("record"); }}
         onNavigate={goNav}
         onGoPlayerStats={()=>setScreen("playerStats")}
+        onProfile={()=>setScreen("profile")}
+        onRoster={()=>setScreen("roster")}
+        onSchoolAdmin={()=>setScreen("schoolAdmin")}
       />
     );
   }
