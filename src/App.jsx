@@ -387,6 +387,7 @@ async function savePlayer(player) {
     gender_category: profile?.gender_category || null,
     player_name: player.player_name,
     position: player.position || null,
+    dominant_hand: player.dominant_hand || null,
     is_own_team: player.is_own_team !== false,
     team_name: player.team_name || null,
     created_by: user.id,
@@ -2687,13 +2688,23 @@ function PlayerRosterScreen({ onBack }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("own"); // own | other
+  const [schools, setSchools] = useState([]);
+  const [mySchoolName, setMySchoolName] = useState("");
+  const [filterSchool, setFilterSchool] = useState("");
+
+  // 追加フォーム
   const [newName, setNewName] = useState("");
   const [newPosition, setNewPosition] = useState("");
   const [newTeamName, setNewTeamName] = useState("");
+  const [newDominantHand, setNewDominantHand] = useState("");
+
+  // 編集フォーム
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editPosition, setEditPosition] = useState("");
   const [editTeamName, setEditTeamName] = useState("");
+  const [editDominantHand, setEditDominantHand] = useState("");
+
   const [errorMsg, setErrorMsg] = useState("");
 
   const reload = useCallback(() => {
@@ -2701,16 +2712,64 @@ function PlayerRosterScreen({ onBack }) {
     getPlayerRoster().then(list => { setPlayers(list); setLoading(false); });
   }, []);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    reload();
+    getSchools().then(list => {
+      setSchools(list);
+      getMyProfile().then(p => {
+        if (p?.school_id) {
+          const s = list.find(s => s.id === p.school_id);
+          if (s) setMySchoolName(s.name);
+        }
+      });
+    });
+  }, [reload]);
 
-  const visiblePlayers = players.filter(p => tab==="own" ? p.is_own_team!==false : p.is_own_team===false);
+  const ownPlayers = players.filter(p => p.is_own_team !== false);
+  const otherPlayers = players.filter(p => p.is_own_team === false);
+  const otherSchoolNames = [...new Set(otherPlayers.map(p => p.team_name).filter(Boolean))].sort();
+  const visibleOtherPlayers = filterSchool ? otherPlayers.filter(p => p.team_name === filterSchool) : otherPlayers;
+
+  const POSITIONS = ["前衛", "後衛", "その他"];
+
+  function PositionButtons({ value, onChange }) {
+    return (
+      <div style={{ display:"flex", gap:6 }}>
+        {POSITIONS.map(pos => (
+          <button key={pos} style={{ flex:1, padding:"8px 4px", fontSize:12, borderRadius:8, border:"none", cursor:"pointer",
+            background: value===pos ? C.navy : C.gray, color: value===pos ? C.white : C.text, fontWeight: value===pos ? 700 : 400 }}
+            onClick={() => onChange(value===pos ? "" : pos)}>{pos}</button>
+        ))}
+      </div>
+    );
+  }
+
+  function HandButtons({ value, onChange }) {
+    return (
+      <div style={{ display:"flex", gap:6 }}>
+        {[["right","右利き"],["left","左利き"]].map(([k,l]) => (
+          <button key={k} style={{ flex:1, padding:"8px 4px", fontSize:12, borderRadius:8, border:"none", cursor:"pointer",
+            background: value===k ? C.accent : C.gray, color: value===k ? C.white : C.text, fontWeight: value===k ? 700 : 400 }}
+            onClick={() => onChange(value===k ? "" : k)}>{l}</button>
+        ))}
+      </div>
+    );
+  }
+
+  const handLabel = (k) => k==="right" ? "右利き" : k==="left" ? "左利き" : "";
 
   async function handleAdd() {
     setErrorMsg("");
     if (!newName.trim()) return;
     try {
-      await savePlayer({ player_name: newName.trim(), position: newPosition.trim(), is_own_team: tab==="own", team_name: newTeamName.trim() });
-      setNewName(""); setNewPosition(""); setNewTeamName("");
+      await savePlayer({
+        player_name: newName.trim(),
+        position: newPosition || null,
+        dominant_hand: newDominantHand || null,
+        is_own_team: tab==="own",
+        team_name: tab==="own" ? mySchoolName : newTeamName,
+      });
+      setNewName(""); setNewPosition(""); setNewTeamName(""); setNewDominantHand("");
       reload();
     } catch (e) {
       setErrorMsg("追加に失敗しました: " + (e.message || JSON.stringify(e)));
@@ -2721,7 +2780,14 @@ function PlayerRosterScreen({ onBack }) {
     setErrorMsg("");
     if (!editName.trim()) return;
     try {
-      await savePlayer({ id, player_name: editName.trim(), position: editPosition.trim(), is_own_team: tab==="own", team_name: editTeamName.trim() });
+      await savePlayer({
+        id,
+        player_name: editName.trim(),
+        position: editPosition || null,
+        dominant_hand: editDominantHand || null,
+        is_own_team: tab==="own",
+        team_name: tab==="own" ? mySchoolName : editTeamName,
+      });
       setEditingId(null);
       reload();
     } catch (e) {
@@ -2743,60 +2809,154 @@ function PlayerRosterScreen({ onBack }) {
   return (
     <div style={S.page}>
       <div style={S.hdr}>
-        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
-          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
-          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>選手マスター</span>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
+          <span style={{ fontSize:18, fontWeight:800, color:C.white }}>選手マスター</span>
         </div>
       </div>
-      <div style={{ display:"flex",gap:6,padding:"12px 14px 0" }}>
+
+      <div style={{ display:"flex", gap:6, padding:"12px 14px 0" }}>
         {[["own","自チーム"],["other","他チーム"]].map(([v,l])=>(
-          <button key={v} style={{ ...S.togBtn(tab===v,C.navy),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>{ setTab(v); setEditingId(null); }}>{l}</button>
+          <button key={v} style={{ ...S.togBtn(tab===v,C.navy), flex:1, fontSize:13, padding:"9px 4px" }}
+            onClick={()=>{ setTab(v); setEditingId(null); setFilterSchool(""); }}>{l}</button>
         ))}
       </div>
+
       <div style={{ padding:14 }}>
-        <div style={{ background:"#e3f2fd",border:"1px solid #90caf9",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#1565c0",marginBottom:14 }}>
+        <div style={{ background:"#e3f2fd", border:"1px solid #90caf9", borderRadius:10, padding:"10px 14px", fontSize:12, color:"#1565c0", marginBottom:14 }}>
           {tab==="own"
             ? "ℹ️ ここで登録した選手は、同じ学校のメンバー全員が試合作成時に「自チーム」として選べます。"
             : "ℹ️ 対戦相手の選手を登録しておくと、試合作成時に「相手チーム」として選べ、対戦相手別の分析もしやすくなります。"}
         </div>
 
+        {/* 追加フォーム */}
         <FormSec title={tab==="own" ? "自チームの選手を追加" : "他チームの選手を追加"}>
           <FormRow label="選手名">
             <input style={S.inp} placeholder="例：田中 蓮" value={newName} onChange={e=>setNewName(e.target.value)} />
           </FormRow>
-          <FormRow label="学校名またはチーム名（任意）">
-            <input style={S.inp} placeholder={tab==="own" ? "例：東福岡" : "例：筑紫台"} value={newTeamName} onChange={e=>setNewTeamName(e.target.value)} />
-          </FormRow>
+
+          {tab==="own" ? (
+            <FormRow label="学校名・チーム名">
+              <div style={{ ...S.inp, background:C.gray, color:C.textSec, display:"flex", alignItems:"center" }}>
+                {mySchoolName || "（プロフィールから自動入力）"}
+              </div>
+            </FormRow>
+          ) : (
+            <FormRow label="学校名・チーム名">
+              <select style={{ ...S.inp, appearance:"none" }} value={newTeamName} onChange={e=>setNewTeamName(e.target.value)}>
+                <option value="">選択してください</option>
+                {schools.map(s=>(
+                  <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
+              </select>
+            </FormRow>
+          )}
+
           <FormRow label="ポジション（任意）">
-            <input style={S.inp} placeholder="例：前衛" value={newPosition} onChange={e=>setNewPosition(e.target.value)} />
+            <PositionButtons value={newPosition} onChange={setNewPosition} />
+          </FormRow>
+          <FormRow label="利き手（任意）">
+            <HandButtons value={newDominantHand} onChange={setNewDominantHand} />
           </FormRow>
         </FormSec>
-        {errorMsg && <div style={{ color:C.red,fontSize:12,marginBottom:10 }}>{errorMsg}</div>}
+
+        {errorMsg && <div style={{ color:C.red, fontSize:12, marginBottom:10 }}>{errorMsg}</div>}
         <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:16 }} onClick={handleAdd}>＋ 追加する</button>
 
-        {loading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
-        {!loading && visiblePlayers.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>登録されている選手がいません</div>}
+        {/* 他チーム：学校別絞り込み */}
+        {tab==="other" && otherSchoolNames.length > 0 && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>学校で絞り込み</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              <button style={{ ...S.togBtn(filterSchool==="", C.navy), fontSize:11, padding:"6px 10px" }}
+                onClick={()=>setFilterSchool("")}>すべて</button>
+              {otherSchoolNames.map(name=>(
+                <button key={name} style={{ ...S.togBtn(filterSchool===name, C.navy), fontSize:11, padding:"6px 10px" }}
+                  onClick={()=>setFilterSchool(name)}>{name}</button>
+              ))}
+            </div>
+          </div>
+        )}
 
-        {visiblePlayers.map(p => (
+        {loading && <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>読み込み中...</div>}
+        {!loading && tab==="own" && ownPlayers.length===0 &&
+          <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>登録されている選手がいません</div>}
+        {!loading && tab==="other" && visibleOtherPlayers.length===0 &&
+          <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>登録されている選手がいません</div>}
+
+        {/* 自チーム一覧 */}
+        {tab==="own" && ownPlayers.map(p => (
           <div key={p.id} style={S.card}>
             {editingId===p.id ? (
               <div style={{ padding:12 }}>
                 <input style={{ ...S.inp, marginBottom:8 }} placeholder="選手名" value={editName} onChange={e=>setEditName(e.target.value)} />
-                <input style={{ ...S.inp, marginBottom:8 }} placeholder="学校名またはチーム名" value={editTeamName} onChange={e=>setEditTeamName(e.target.value)} />
-                <input style={{ ...S.inp, marginBottom:10 }} placeholder="ポジション" value={editPosition} onChange={e=>setEditPosition(e.target.value)} />
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                  <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
-                  <button style={{ ...S.btn(C.accent),fontSize:12 }} onClick={()=>handleUpdate(p.id)}>保存</button>
+                <div style={{ ...S.inp, background:C.gray, color:C.textSec, marginBottom:8, display:"flex", alignItems:"center" }}>
+                  {mySchoolName || "（プロフィールから自動入力）"}
+                </div>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>ポジション</div>
+                <div style={{ marginBottom:8 }}><PositionButtons value={editPosition} onChange={setEditPosition} /></div>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>利き手</div>
+                <div style={{ marginBottom:10 }}><HandButtons value={editDominantHand} onChange={setEditDominantHand} /></div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
+                  <button style={{ ...S.btn(C.accent), fontSize:12 }} onClick={()=>handleUpdate(p.id)}>保存</button>
                 </div>
               </div>
             ) : (
-              <div style={{ display:"flex",alignItems:"center",padding:"12px 14px",gap:10 }}>
+              <div style={{ display:"flex", alignItems:"center", padding:"12px 14px", gap:10 }}>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:14,fontWeight:700,color:C.text }}>{p.player_name}</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>{[p.team_name, p.position].filter(Boolean).join(" ・ ")}</div>
+                  <div style={{ fontSize:14, fontWeight:700, color:C.text }}>{p.player_name}</div>
+                  <div style={{ fontSize:11, color:C.textSec }}>
+                    {[p.team_name, p.position, handLabel(p.dominant_hand)].filter(Boolean).join(" ・ ")}
+                  </div>
                 </div>
-                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer" }} onClick={()=>{ setEditingId(p.id); setEditName(p.player_name); setEditPosition(p.position||""); setEditTeamName(p.team_name||""); }}>✏️</button>
-                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
+                <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer" }} onClick={()=>{
+                  setEditingId(p.id); setEditName(p.player_name);
+                  setEditPosition(p.position||""); setEditTeamName(p.team_name||"");
+                  setEditDominantHand(p.dominant_hand||"");
+                }}>✏️</button>
+                <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer", color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* 他チーム一覧 */}
+        {tab==="other" && visibleOtherPlayers.map(p => (
+          <div key={p.id} style={S.card}>
+            {editingId===p.id ? (
+              <div style={{ padding:12 }}>
+                <input style={{ ...S.inp, marginBottom:8 }} placeholder="選手名" value={editName} onChange={e=>setEditName(e.target.value)} />
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>学校名・チーム名</div>
+                <select style={{ ...S.inp, appearance:"none", marginBottom:8 }} value={editTeamName} onChange={e=>setEditTeamName(e.target.value)}>
+                  <option value="">選択してください</option>
+                  {schools.map(s=>(
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>ポジション</div>
+                <div style={{ marginBottom:8 }}><PositionButtons value={editPosition} onChange={setEditPosition} /></div>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>利き手</div>
+                <div style={{ marginBottom:10 }}><HandButtons value={editDominantHand} onChange={setEditDominantHand} /></div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
+                  <button style={{ ...S.btn(C.accent), fontSize:12 }} onClick={()=>handleUpdate(p.id)}>保存</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display:"flex", alignItems:"center", padding:"12px 14px", gap:10 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, fontWeight:700, color:C.text }}>{p.player_name}</div>
+                  <div style={{ fontSize:11, color:C.textSec }}>
+                    {[p.team_name, p.position, handLabel(p.dominant_hand)].filter(Boolean).join(" ・ ")}
+                  </div>
+                </div>
+                <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer" }} onClick={()=>{
+                  setEditingId(p.id); setEditName(p.player_name);
+                  setEditPosition(p.position||""); setEditTeamName(p.team_name||"");
+                  setEditDominantHand(p.dominant_hand||"");
+                }}>✏️</button>
+                <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer", color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
               </div>
             )}
           </div>
