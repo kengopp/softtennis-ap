@@ -1682,7 +1682,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
   const base    = editing || source;
 
   // 編集モードでは形式設定をロック（試合開始後は変更不可）
-  const locked = !!editing;
+  // ただし予定（scheduled）の試合は形式変更を許可する
+  const locked = !!editing && editing.status !== "scheduled";
 
   const aBase = base ? base.players.find(p=>p.team==="A") : null;
   const aBase2 = base ? base.players.find(p=>p.team==="A" && p.order_num===2) : null;
@@ -1706,7 +1707,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
   const [bP1,    setBP1]    = useState(bBase?.player_name ?? "");
   const [bP2,    setBP2]    = useState(bBase2?.player_name ?? "");
 
-  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && firstServer;
+  const isScheduledEdit = editing?.status === "scheduled";
+  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && (firstServer || isScheduledEdit);
 
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
@@ -1794,7 +1796,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
           ...editing,
           match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType, court_number:courtNumber||null,
           players: updatedPlayers,
-          // 形式設定（game_format, is_doubles, first_server）はロックのため変更しない
+          // 予定の場合は形式設定も更新可能
+          ...(editing.status === "scheduled" ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer } : {}),
         };
         await saveMatch(updated);
         onSave(editing.id);
@@ -1902,11 +1905,11 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
           </FormRow>
           <FormRow label="最初のサーブ">
             {locked ? (
-              <div style={{ fontSize:14,fontWeight:700,color:C.textSec,padding:"4px 0" }}>{firstServer==="A"?"自チーム":"相手"} 🔒</div>
+              <div style={{ fontSize:14,fontWeight:700,color:C.textSec,padding:"4px 0" }}>{firstServer==="A"?"自チーム":firstServer==="B"?"相手":"未選択"} 🔒</div>
             ) : (
               <div style={{ display:"flex",gap:8 }}>
-                <button style={S.togBtn(firstServer==="A")} onClick={() => setFirstServer("A")}>自チーム</button>
-                <button style={S.togBtn(firstServer==="B")} onClick={() => setFirstServer("B")}>相手</button>
+                <button style={S.togBtn(firstServer==="A")} onClick={() => setFirstServer(firstServer==="A" ? null : "A")}>自チーム</button>
+                <button style={S.togBtn(firstServer==="B")} onClick={() => setFirstServer(firstServer==="B" ? null : "B")}>相手</button>
               </div>
             )}
           </FormRow>
