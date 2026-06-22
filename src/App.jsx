@@ -336,6 +336,12 @@ async function deleteMatch(id) {
   if (error) throw error;
 }
 
+// 予定 → 進行中に切り替え
+async function startScheduledMatch(id) {
+  const { error } = await supabase.from("matches").update({ status:"active" }).eq("id", id);
+  if (error) throw error;
+}
+
 // ============================================================
 // プロフィール
 // ============================================================
@@ -710,7 +716,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled }) {
   const [filter, setFilter] = useState("all");
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
@@ -742,7 +748,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }, []);
 
   const matches = allMatches
-    .filter(m=>filter==="active" ? m.status==="active" : (filter==="all"||m.match_type===filter))
+    .filter(m=> filter==="active" ? m.status==="active" : filter==="scheduled" ? m.status==="scheduled" : (filter==="all"||m.match_type===filter))
+    .filter(m=> filter==="scheduled" ? true : m.status!=="scheduled") // 予定以外のタブでは予定を除外
     .filter(m=>!childOnly || m.players.some(p=>p.player_name===linkedPlayerName));
 
   // ★絞り込み条件が変わったら1ページ目に戻す
@@ -759,7 +766,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   return (
     <div style={S.page}>
-      <div style={S.hdr}>
+      <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
         <button
           style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }}
@@ -768,6 +775,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       </div>
       <div style={{ display:"flex",gap:6,padding:"12px 14px 0",overflowX:"auto" }}>
         <button style={{ ...S.togBtn(filter==="active", "#e53935"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="active" ? 800 : 600, border: filter==="active" ? "none" : "1.5px solid #e53935", color: filter==="active" ? C.white : "#e53935" }} onClick={()=>setFilter("active")}>🔴 進行中</button>
+        <button style={{ ...S.togBtn(filter==="scheduled", "#7b1fa2"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="scheduled" ? 800 : 600, border: filter==="scheduled" ? "none" : "1.5px solid #7b1fa2", color: filter==="scheduled" ? C.white : "#7b1fa2" }} onClick={()=>setFilter("scheduled")}>📅 予定</button>
         {[["all","すべて"],["tournament","公式大会"],["practice","練習試合"],["internal","部内戦"]].map(([v,l])=>(
           <button key={v} style={{ ...S.togBtn(filter===v,C.navy),whiteSpace:"nowrap",fontSize:12 }} onClick={()=>setFilter(v)}>{l}</button>
         ))}
@@ -831,9 +839,19 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   {[`${m.game_format}Gマッチ`,MATCH_TYPES.find(t=>t.key===m.match_type)?.label].filter(Boolean).map(l=>(
                     <span key={l} style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:C.navyMid+"22",color:C.navyMid,fontWeight:600 }}>{l}</span>
                   ))}
-                  {m.status!=="finished"&&<span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#fff3cd",color:"#7a5800",fontWeight:600 }}>進行中</span>}
+                  {m.status==="active"&&<span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#fff3cd",color:"#7a5800",fontWeight:600 }}>進行中</span>}
+                  {m.status==="scheduled"&&<span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#f3e5f5",color:"#7b1fa2",fontWeight:600 }}>📅 予定</span>}
                 </div>
               </div>
+              {/* 予定の場合：試合を開始するボタン */}
+              {m.status==="scheduled" && (
+                <div style={{ padding:"10px 14px", borderTop:"1px solid "+C.border, background:"#f3e5f5" }}>
+                  <button
+                    style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13 }}
+                    onClick={(e)=>{ e.stopPropagation(); onStartScheduled(m.id); }}
+                  >🎾 この試合を開始する</button>
+                </div>
+              )}
               {/* コピー・削除ボタン行 */}
               <div style={{ display:"flex",borderTop:"1px solid "+C.border }}>
                 <button
@@ -1687,6 +1705,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
   const canSave = aP1.trim() && bP1.trim();
 
   const [saving, setSaving] = useState(false);
+  const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
 
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
@@ -1722,6 +1741,39 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
       if (mine) setAClub(prev => prev || mine.name);
     })();
   }, []);
+
+  // 自チーム選手の入力チェック
+  const canSchedule = aP1.trim() && (!isDoubles || aP2.trim());
+
+  async function handleSchedule() {
+    // 2回目以降は確認ポップアップ
+    if (scheduledId) {
+      if (!window.confirm("予定情報を更新しますか？")) return;
+    }
+    setSaving(true);
+    try {
+      const mid = scheduledId || uid();
+      const players = [
+        { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
+        ...(isDoubles && aP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:null, order_num:2 }] : []),
+        ...(bP1.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP1.trim(), club_name:bClub.trim(), position:null, order_num:1 }] : []),
+        ...(isDoubles && bP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP2.trim(), club_name:bClub.trim(), position:null, order_num:2 }] : []),
+      ];
+      const match = {
+        id:mid, created_by:"me",
+        match_date:matchDate, venue, tournament_name:tournamentName, round,
+        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer,
+        status:"scheduled", match_score_a:0, match_score_b:0, memo:"", players, games:[],
+      };
+      await saveMatch(match);
+      setScheduledId(mid);
+      alert("📅 試合予定を登録しました！");
+    } catch(e) {
+      alert("登録に失敗しました: " + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -1919,6 +1971,15 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
           )}
         </FormSec>
 
+        {!editing && (
+          <button
+            style={{ ...S.btn(canSchedule ? "linear-gradient(135deg,#7b1fa2,#9c27b0)" : C.border, canSchedule ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
+            disabled={!canSchedule || saving}
+            onClick={handleSchedule}
+          >
+            {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
+          </button>
+        )}
         <button
           style={{ ...S.btn((canSave&&!saving) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (canSave&&!saving) ? C.white : C.textSec), marginTop:4 }}
           disabled={!canSave || saving}
@@ -3619,9 +3680,10 @@ export default function App() {
   return (
     <MatchList
       key={tick}
-      onNew={f=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
+      onNew={f=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
       onOpen={id=>{setMatchId(id); setPrevScreen("list"); setScreen("record");}}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
+      onStartScheduled={async id=>{ await startScheduledMatch(id); setMatchId(id); setPrevScreen("list"); setScreen("record"); }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
