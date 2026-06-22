@@ -171,35 +171,20 @@ async function getMatches() {
   if (data.length === 0) return [];
 
   const matchIds = data.map(m => m.id);
-  const [
-    { data: playersData, error: playersErr },
-    { data: gamesData,   error: gamesErr },
-    { data: pointsData,  error: pointsErr },
-  ] = await Promise.all([
-    supabase.from("match_players").select("*").in("match_id", matchIds).order("team").order("order_num"),
-    supabase.from("games").select("*").in("match_id", matchIds).order("game_number"),
-    supabase.from("points").select("match_id,game_id,scoring_team,score_a_after,score_b_after,point_number").in("match_id", matchIds),
-  ]);
+  const { data: playersData, error: playersErr } = await supabase
+    .from("match_players")
+    .select("*")
+    .in("match_id", matchIds)
+    .order("team")
+    .order("order_num");
   if (playersErr) console.error(playersErr);
-  if (gamesErr)   console.error(gamesErr);
-  if (pointsErr)  console.error(pointsErr);
 
   const playersByMatch = {};
-  (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
-
-  const gamesByMatch = {};
-  (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
-
-  const pointsByGame = {};
-  (pointsData ?? []).forEach(pt => { (pointsByGame[pt.game_id] ??= []).push(pt); });
-
-  return data.map(m => {
-    const games = (gamesByMatch[m.id] ?? []).map(g => ({
-      ...g,
-      points: (pointsByGame[g.id] ?? []).sort((a,b) => a.point_number - b.point_number),
-    }));
-    return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
+  (playersData ?? []).forEach(p => {
+    (playersByMatch[p.match_id] ??= []).push(p);
   });
+
+  return data.map(m => rowToMatchSummary(m, playersByMatch[m.id] ?? []));
 }
 
 // 試合1件を、関連テーブルすべて含めて取得
@@ -218,7 +203,7 @@ async function getMatch(id) {
   return rowToMatchFull(m, players ?? [], games ?? [], points ?? [], faults ?? []);
 }
 
-function rowToMatchSummary(m, players=[], games=[]) {
+function rowToMatchSummary(m, players=[]) {
   return {
     id: m.id, created_by: m.created_by,
     match_date: m.match_date, venue: m.venue ?? "",
@@ -227,17 +212,11 @@ function rowToMatchSummary(m, players=[], games=[]) {
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
-    court_number: m.court_number ?? "",
-    is_younger: m.is_younger !== false,
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
     })),
-    games: games.map(g => ({
-      id: g.id, game_number: g.game_number, is_final: g.is_final,
-      score_a: g.score_a, score_b: g.score_b, winner_team: g.winner_team,
-      points: g.points ?? [],
-    })),
+    games: [],
   };
 }
 
@@ -250,7 +229,6 @@ function rowToMatchFull(m, players, games, points, faults) {
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
-    court_number: m.court_number ?? "",
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
@@ -286,8 +264,6 @@ async function saveMatch(match) {
     is_doubles: match.is_doubles, first_server: match.first_server, status: match.status,
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
-    court_number: match.court_number || null,
-    is_younger: match.is_younger !== false,
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
@@ -338,14 +314,6 @@ async function saveMatch(match) {
 
 async function deleteMatch(id) {
   const { error } = await supabase.from("matches").delete().eq("id", id);
-  if (error) throw error;
-}
-
-// 予定 → 進行中に切り替え
-async function startScheduledMatch(id, firstServer) {
-  const updates = { status:"active" };
-  if (firstServer) updates.first_server = firstServer;
-  const { error } = await supabase.from("matches").update(updates).eq("id", id);
   if (error) throw error;
 }
 
@@ -463,15 +431,6 @@ async function deletePlayerFromRoster(id) {
 // （試合のチーム名欄は相手チームなど自由入力も許可するための候補リスト）
 // 都道府県で絞り込めるよう、学校マスター由来のものは prefecture を保持する
 // ============================================================
-// 過去の試合に入力された会場名の候補一覧を取得
-async function getKnownVenues() {
-  try {
-    const { data, error } = await supabase.from("matches").select("venue");
-    if (error) { console.error("venue fetch error:", error); return []; }
-    return [...new Set((data ?? []).map(r => r.venue).filter(Boolean))].sort();
-  } catch(e) { console.error("getKnownVenues exception:", e); return []; }
-}
-
 async function getKnownSchools() {
   const [{ data: schoolsData, error: schoolsErr }, { data: cpData, error: cpErr }] = await Promise.all([
     supabase.from("schools").select("name, prefecture"),
@@ -723,15 +682,12 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast }) {
-  const [filter, setFilter] = useState(initialFilter || "all");
-  const [toast, setToast] = useState(initialToast || null);
-  useEffect(() => { if (initialToast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [initialToast]);
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate }) {
+  const [filter, setFilter] = useState("all");
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null); // 削除確認対象のmatch_id
-  const [serveSelectMatch, setServeSelectMatch] = useState(null); // サーブ選択モーダル対象の試合
   const [isAdmin, setIsAdmin] = useState(false);
   const [myId, setMyId] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
@@ -758,8 +714,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }, []);
 
   const matches = allMatches
-    .filter(m=> filter==="active" ? m.status==="active" : filter==="scheduled" ? m.status==="scheduled" : (filter==="all"||m.match_type===filter))
-    .filter(m=> filter==="scheduled" ? true : m.status!=="scheduled") // 予定以外のタブでは予定を除外
+    .filter(m=>filter==="all"||m.match_type===filter)
     .filter(m=>!childOnly || m.players.some(p=>p.player_name===linkedPlayerName));
 
   // ★絞り込み条件が変わったら1ページ目に戻す
@@ -776,21 +731,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   return (
     <div style={S.page}>
-      <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      <div style={S.hdr}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
-        <button
-          style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }}
-          onClick={reload}
-        >🔄 更新</button>
       </div>
-      {toast && (
-        <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>
-          {toast}
-        </div>
-      )}
       <div style={{ display:"flex",gap:6,padding:"12px 14px 0",overflowX:"auto" }}>
-        <button style={{ ...S.togBtn(filter==="active", "#e53935"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="active" ? 800 : 600, border: filter==="active" ? "none" : "1.5px solid #e53935", color: filter==="active" ? C.white : "#e53935" }} onClick={()=>setFilter("active")}>🔴 進行中</button>
-        <button style={{ ...S.togBtn(filter==="scheduled", "#7b1fa2"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="scheduled" ? 800 : 600, border: filter==="scheduled" ? "none" : "1.5px solid #7b1fa2", color: filter==="scheduled" ? C.white : "#7b1fa2" }} onClick={()=>setFilter("scheduled")}>📅 予定</button>
         {[["all","すべて"],["tournament","公式大会"],["practice","練習試合"],["internal","部内戦"]].map(([v,l])=>(
           <button key={v} style={{ ...S.togBtn(filter===v,C.navy),whiteSpace:"nowrap",fontSize:12 }} onClick={()=>setFilter(v)}>{l}</button>
         ))}
@@ -820,7 +764,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   <span style={{ fontSize:13,fontWeight:700 }}>{m.tournament_name||"試合"}{m.round?` · ${m.round}`:""}</span>
                   <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
                 </div>
-                {(m.venue||m.court_number)&&<div style={{ fontSize:11,color:C.textSec,marginBottom:6 }}>📍 {[m.venue,m.court_number].filter(Boolean).join(" · ")}</div>}
+                {m.venue&&<div style={{ fontSize:11,color:C.textSec,marginBottom:6 }}>📍 {m.venue}</div>}
                 {[["A",aC,aP,m.match_score_a,aWin,C.teamA],["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB]].map(([t,club,names,sc,win,col])=>(
                   <div key={t} style={{ display:"flex",alignItems:"center",padding:"2px 0" }}>
                     <span style={{ width:18,fontSize:13 }}>{win?"🏆":""}</span>
@@ -828,45 +772,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     <span style={{ fontSize:22,fontWeight:800,color:win?col:C.textSec }}>{sc??"-"}</span>
                   </div>
                 ))}
-                {/* 進行中：現在のゲームスコア表示 */}
-                {m.status==="active" && m.games && m.games.length > 0 && (() => {
-                  const activeGame = m.games.find(g => !g.winner_team);
-                  const finishedGames = m.games.filter(g => g.winner_team);
-                  return (
-                    <div style={{ marginTop:6, padding:"6px 10px", background:"rgba(0,0,0,0.04)", borderRadius:8 }}>
-                      <div style={{ fontSize:10, color:C.textSec, marginBottom:3, fontWeight:600 }}>現在のスコア</div>
-                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                        {finishedGames.map(g => (
-                          <span key={g.id} style={{ fontSize:11, padding:"2px 7px", borderRadius:12, background: g.winner_team==="A" ? C.teamA+"22" : C.teamB+"22", color: g.winner_team==="A" ? C.teamA : C.teamB, fontWeight:700 }}>
-                            G{g.game_number}: {g.score_a}-{g.score_b}
-                          </span>
-                        ))}
-                        {activeGame && (
-                          <span style={{ fontSize:11, padding:"2px 7px", borderRadius:12, background:"#fff3cd", color:"#7a5800", fontWeight:700 }}>
-                            G{activeGame.game_number}: {activeGame.score_a}-{activeGame.score_b} 🔴
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
                 <div style={{ marginTop:8,display:"flex",justifyContent:"flex-end",gap:6 }}>
                   {[`${m.game_format}Gマッチ`,MATCH_TYPES.find(t=>t.key===m.match_type)?.label].filter(Boolean).map(l=>(
                     <span key={l} style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:C.navyMid+"22",color:C.navyMid,fontWeight:600 }}>{l}</span>
                   ))}
-                  {m.status==="active"&&<span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#fff3cd",color:"#7a5800",fontWeight:600 }}>進行中</span>}
-                  {m.status==="scheduled"&&<span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#f3e5f5",color:"#7b1fa2",fontWeight:600 }}>📅 予定</span>}
+                  {m.status!=="finished"&&<span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#fff3cd",color:"#7a5800",fontWeight:600 }}>進行中</span>}
                 </div>
               </div>
-              {/* 予定の場合：試合を開始するボタン */}
-              {m.status==="scheduled" && (
-                <div style={{ padding:"10px 14px", borderTop:"1px solid "+C.border, background:"#f3e5f5" }}>
-                  <button
-                    style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13 }}
-                    onClick={(e)=>{ e.stopPropagation(); if (!m.first_server) { setServeSelectMatch(m); } else { onStartScheduled(m.id, m.first_server); } }}
-                  >🎾 この試合を開始する</button>
-                </div>
-              )}
               {/* コピー・削除ボタン行 */}
               <div style={{ display:"flex",borderTop:"1px solid "+C.border }}>
                 <button
@@ -899,33 +811,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </div>
         )}
       </div>
-      <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew(filter)}>＋</button>
+      <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={onNew}>＋</button>
       <NavBar active="list" onNavigate={onNavigate}/>
-
-      {serveSelectMatch && (
-        <Modal onClose={()=>setServeSelectMatch(null)}>
-          <div style={{ textAlign:"center" }}>
-            <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
-            <h3 style={{ fontSize:16, fontWeight:800, margin:"8px 0 4px" }}>最初のサーブを選択</h3>
-            <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>試合を開始するにはサーブ側を選んでください</p>
-            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-              {[["A", serveSelectMatch.players?.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "自チーム"],
-                ["B", serveSelectMatch.players?.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
-              ].map(([team, label]) => (
-                <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
-                  onClick={async ()=>{
-                    const m = serveSelectMatch;
-                    setServeSelectMatch(null);
-                    await onStartScheduled(m.id, team);
-                  }}
-                >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
-              ))}
-            </div>
-            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectMatch(null)}>キャンセル</button>
-          </div>
-        </Modal>
-      )}
 
       {confirmDelete && (
         <Modal onClose={()=>setConfirmDelete(null)}>
@@ -1136,7 +1023,6 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
   const [roster, setRoster] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("team"); // team | players | opponents
-  const [teamSubTab, setTeamSubTab] = useState("overall"); // overall | pairs
   const [period, setPeriod] = useState("all"); // all | month1
   const [sort, setSort] = useState("desc"); // desc | asc
 
@@ -1146,18 +1032,6 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
   const periodMatches = period==="month1" ? withinLastDays(allMatches, 30) : allMatches;
   const finished = periodMatches.filter(m=>m.status==="finished");
   const teamRecord = recordOf(finished, m=>m.match_score_a>m.match_score_b);
-
-  // ペア別成績（自チームAのペア名を「選手1／選手2」形式で集計）
-  const byPair = {};
-  finished.forEach(m => {
-    const aPlayers = m.players.filter(p => p.team === "A").sort((a,b) => a.order_num - b.order_num);
-    const pairKey = aPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
-    (byPair[pairKey] ??= []).push(m);
-  });
-  const pairRows = Object.entries(byPair).map(([name, list]) => ({
-    name, ...recordOf(list, m => m.match_score_a > m.match_score_b),
-  }));
-  pairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   // 選手別成績（選手マスターの自チーム選手のみ）
   const playerRows = roster.filter(p=>p.is_own_team!==false).map(p=>{
@@ -1196,49 +1070,24 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
         ) : tab==="team" ? (
           <>
             <PeriodSortBar period={period} setPeriod={setPeriod} sort={sort} setSort={setSort} />
-            {/* 自チームサブタブ：総合／ペア別 */}
-            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-              {[["overall","総合成績"],["pairs","ペア別"]].map(([v,l])=>(
-                <button key={v} style={{ ...S.togBtn(teamSubTab===v, C.accent), flex:1, fontSize:12, padding:"7px 4px" }} onClick={()=>setTeamSubTab(v)}>{l}</button>
-              ))}
-            </div>
-            {teamSubTab==="overall" ? (
-              <>
-                <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>総合成績</div>
-                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
-                    <div>
-                      <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.total}</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.wins}勝{teamRecord.losses}敗</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
-                    </div>
-                  </div>
+            <div style={{ ...S.card, padding:16, marginBottom:16 }}>
+              <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>総合成績</div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
+                <div>
+                  <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.total}</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
                 </div>
-                <MonthlyTrendCard finishedMatches={allMatches.filter(m=>m.status==="finished")} winFn={m=>m.match_score_a>m.match_score_b} />
-              </>
-            ) : (
-              <>
-                {pairRows.length===0 ? (
-                  <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この期間の試合記録がありません</div>
-                ) : pairRows.map(r=>(
-                  <div key={r.name} style={{ ...S.card, padding:"12px 14px", marginBottom:8 }}>
-                    <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>{r.name}</div>
-                    <div style={{ display:"flex", gap:12, alignItems:"center" }}>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.total}試合</span>
-                      <span style={{ fontSize:14,fontWeight:700,color:C.accent }}>{r.rate}%</span>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗</span>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
+                <div>
+                  <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                </div>
+                <div>
+                  <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.wins}勝{teamRecord.losses}敗</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                </div>
+              </div>
+            </div>
+            <MonthlyTrendCard finishedMatches={allMatches.filter(m=>m.status==="finished")} winFn={m=>m.match_score_a>m.match_score_b} />
           </>
         ) : tab==="players" ? (
           <>
@@ -1587,32 +1436,6 @@ function PrefMiniFilter({ value, onChange, options }) {
   );
 }
 
-// 会場名入力＋候補サジェストコンポーネント
-function VenueField({ value, onChange, venues }) {
-  const safeValue = value ?? "";
-  const safeVenues = venues ?? [];
-  const filtered = safeValue.trim() ? safeVenues.filter(v => v.includes(safeValue.trim())) : [];
-  const [open, setOpen] = useState(false);
-  return (
-    <div style={{ position:"relative" }}>
-      <input style={S.inp} placeholder="例：○○市民コート" value={safeValue}
-        onChange={e => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 200)}
-      />
-      {open && filtered.length > 0 && (
-        <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:200, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", maxHeight:200, overflowY:"auto" }}>
-          {filtered.map(v => (
-            <div key={v} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
-              onMouseDown={e => { e.preventDefault(); onChange(v); setOpen(false); }}
-            >{v}</div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
 // schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
 // prefFilter: 親から渡される都道府県絞り込み値（任意）
@@ -1686,7 +1509,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -1712,15 +1535,14 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled }) {
+function MatchSetupForm({ onSave, onCancel, editing, source }) {
   const base    = editing || source;
 
-  // 試合開始済み（active/finished）の場合のみ形式設定をロック
-  // 予定（scheduled）は編集可能
-  const locked = !!editing && (editing.status === "active" || editing.status === "finished");
+  // 編集モードでは形式設定をロック（試合開始後は変更不可）
+  const locked = !!editing;
 
   const aBase = base ? base.players.find(p=>p.team==="A") : null;
   const aBase2 = base ? base.players.find(p=>p.team==="A" && p.order_num===2) : null;
@@ -1732,12 +1554,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [venue,          setVenue]          = useState(base?.venue ?? "");
   const [tournamentName, setTournamentName] = useState(base?.tournament_name ?? "");
   const [round,          setRound]          = useState(base?.round ?? "");
-  const [matchType,      setMatchType]      = useState(base?.match_type ?? initialMatchType ?? "tournament");
-  const [courtNumber,    setCourtNumber]    = useState(base?.court_number ?? "");
-  const [isYounger,      setIsYounger]      = useState(base?.is_younger !== false ? true : false);
+  const [matchType,      setMatchType]      = useState(base?.match_type ?? "tournament");
   const [gameFormat,     setGameFormat]     = useState(base?.game_format ?? 7);
   const [isDoubles,      setIsDoubles]      = useState(base?.is_doubles ?? true);
-  const [firstServer,    setFirstServer]    = useState(base?.first_server ?? null);
+  const [firstServer,    setFirstServer]    = useState(base?.first_server ?? "A");
   const [aClub,  setAClub]  = useState(aBase?.club_name ?? "");
   const [aP1,    setAP1]    = useState(aBase?.player_name ?? "");
   const [aP2,    setAP2]    = useState(aBase2?.player_name ?? "");
@@ -1745,31 +1565,19 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [bP1,    setBP1]    = useState(bBase?.player_name ?? "");
   const [bP2,    setBP2]    = useState(bBase2?.player_name ?? "");
 
-  const isScheduledEdit = editing?.status === "scheduled";
-  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim());
+  const canSave = aP1.trim() && bP1.trim();
 
   const [saving, setSaving] = useState(false);
-  const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
-  const [serveSelectForSave, setServeSelectForSave] = useState(null);
 
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
   const ownRoster = roster.filter(p => p.is_own_team !== false);
-  const oppRosterBase = roster.filter(p => p.is_own_team === false);
-  // 同校対決：相手チームが自チームと同じ学校名の場合、自チームの選手もチップに表示
-  const isSameSchool = aClub && bClub && aClub.trim() === bClub.trim();
-  const oppRoster = isSameSchool
-    ? [...ownRoster, ...oppRosterBase.filter(p => p.team_name === bClub)]
-    : oppRosterBase;
+  const oppRoster = roster.filter(p => p.is_own_team === false);
 
   // ★学校名の候補一覧（誤入力防止）
   const [schools, setSchools] = useState([]);
   useEffect(() => { getKnownSchools().then(setSchools); }, []);
-
-  // ★会場名の候補一覧
-  const [venues, setVenues] = useState([]);
-  useEffect(() => { getKnownVenues().then(setVenues); }, []);
 
   // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
   const [aClubPref, setAClubPref] = useState("");
@@ -1787,50 +1595,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     })();
   }, []);
 
-  // 自チーム選手の入力チェック
-  const canSchedule = aP1.trim() && (!isDoubles || aP2.trim()) && isYounger !== null;
-
-  async function handleSchedule() {
-    // 2回目以降は確認ポップアップ
-    if (scheduledId) {
-      if (!window.confirm("予定情報を更新しますか？")) return;
-    }
-    setSaving(true);
-    try {
-      const mid = scheduledId || uid();
-      const players = [
-        { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
-        ...(isDoubles && aP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:null, order_num:2 }] : []),
-        ...(bP1.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP1.trim(), club_name:bClub.trim(), position:null, order_num:1 }] : []),
-        ...(isDoubles && bP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP2.trim(), club_name:bClub.trim(), position:null, order_num:2 }] : []),
-      ];
-      const match = {
-        id:mid, created_by:"me",
-        match_date:matchDate, venue, tournament_name:tournamentName, round,
-        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer,
-        status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
-      };
-      await saveMatch(match);
-      setScheduledId(mid);
-      onScheduled && onScheduled();
-    } catch(e) {
-      alert("登録に失敗しました: " + (e.message || e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-
-  // サーブ選択ポップアップ → handleSave本体を呼ぶ
-  function handleSaveWithServeSelect() {
-    if (editing) { handleSave(null); return; } // 編集時はサーブ選択不要
-    // 自チームと相手のラベルを作成
-    const aLabel = [aP1.trim(), isDoubles ? aP2.trim() : ""].filter(Boolean).join("/") || "自チーム";
-    const bLabel = [bP1.trim(), isDoubles ? bP2.trim() : ""].filter(Boolean).join("/") || "相手チーム";
-    setServeSelectForSave({ aLabel, bLabel });
-  }
-
-  async function handleSave(selectedServer) {
+  async function handleSave() {
     setSaving(true);
     try {
       if (editing) {
@@ -1843,10 +1608,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         ];
         const updated = {
           ...editing,
-          match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType, court_number:courtNumber||null,
+          match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType,
           players: updatedPlayers,
-          // 予定の場合は形式設定も更新可能
-          ...(editing.status === "scheduled" ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
+          // 形式設定（game_format, is_doubles, first_server）はロックのため変更しない
         };
         await saveMatch(updated);
         onSave(editing.id);
@@ -1864,8 +1628,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const match = {
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
-        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:selectedServer || firstServer || "A",
-        status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer,
+        status:"active", match_score_a:0, match_score_b:0, memo:"", players, games:[],
       };
       await saveMatch(match);
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
@@ -1908,8 +1672,14 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <FormRow label="試合日">
             <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
           </FormRow>
+          <FormRow label="場所 / 会場名">
+            <input style={S.inp} placeholder="例：○○市民コート" value={venue} onChange={e => setVenue(e.target.value)}/>
+          </FormRow>
           <FormRow label="大会名">
             <input style={S.inp} placeholder="例：○○中学校選手権" value={tournamentName} onChange={e => setTournamentName(e.target.value)}/>
+          </FormRow>
+          <FormRow label="何回戦">
+            <input style={S.inp} placeholder="例：準々決勝" value={round} onChange={e => setRound(e.target.value)}/>
           </FormRow>
           <FormRow label="試合の種別">
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -1930,15 +1700,6 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
                 <div style={{ fontSize:10, opacity:0.8 }}>スコア右側</div>
               </button>
             </div>
-          </FormRow>
-          <FormRow label="場所 / 会場名">
-            <VenueField value={venue} onChange={setVenue} venues={venues} />
-          </FormRow>
-          <FormRow label="コート番号（任意）">
-            <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
-          </FormRow>
-          <FormRow label="何回戦">
-            <input style={S.inp} placeholder="例：準々決勝" value={round} onChange={e => setRound(e.target.value)}/>
           </FormRow>
         </FormSec>
 
@@ -1965,7 +1726,16 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               </div>
             )}
           </FormRow>
-
+          <FormRow label="最初のサーブ">
+            {locked ? (
+              <div style={{ fontSize:14,fontWeight:700,color:C.textSec,padding:"4px 0" }}>{firstServer==="A"?"自チーム":"相手"} 🔒</div>
+            ) : (
+              <div style={{ display:"flex",gap:8 }}>
+                <button style={S.togBtn(firstServer==="A")} onClick={() => setFirstServer("A")}>自チーム</button>
+                <button style={S.togBtn(firstServer==="B")} onClick={() => setFirstServer("B")}>相手</button>
+              </div>
+            )}
+          </FormRow>
         </FormSec>
 
         <FormSec title="自チーム (A)">
@@ -2034,43 +1804,14 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           )}
         </FormSec>
 
-        {!editing && (
-          <button
-            style={{ ...S.btn(canSchedule ? "linear-gradient(135deg,#7b1fa2,#9c27b0)" : C.border, canSchedule ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
-            disabled={!canSchedule || saving}
-            onClick={handleSchedule}
-          >
-            {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
-          </button>
-        )}
         <button
           style={{ ...S.btn((canSave&&!saving) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (canSave&&!saving) ? C.white : C.textSec), marginTop:4 }}
           disabled={!canSave || saving}
-          onClick={editing ? ()=>handleSave(null) : handleSaveWithServeSelect}
+          onClick={handleSave}
         >
           {saving ? "保存中..." : (editing ? "保存する 💾" : "試合を開始する 🎾")}
         </button>
       </div>
-
-      {/* サーブ選択モーダル */}
-      {serveSelectForSave && (
-        <Modal onClose={()=>setServeSelectForSave(null)}>
-          <div style={{ textAlign:"center" }}>
-            <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
-            <h3 style={{ fontSize:16, fontWeight:800, margin:"8px 0 4px" }}>最初のサーブを選択</h3>
-            <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
-            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-              {[["A", serveSelectForSave.aLabel], ["B", serveSelectForSave.bLabel]].map(([team, label]) => (
-                <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
-                  onClick={()=>{ setServeSelectForSave(null); handleSave(team); }}
-                >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
-              ))}
-            </div>
-            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectForSave(null)}>キャンセル</button>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -2078,31 +1819,13 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 // ============================================================
 // スコア記録
 // ============================================================
-function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
+function ScoreRecord({ matchId, onBack, onEdit }) {
   const [initialMatch, setInitialMatch] = useState(null);
-  const [loadKey, setLoadKey] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const [viewOnly, setViewOnly] = useState(false); // 観戦モード
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    const m = await getMatch(matchId);
-    setInitialMatch(m);
-    setRefreshing(false);
-  };
+  const [loadKey, setLoadKey] = useState(0); // 再読み込みトリガー（編集画面から戻った時など）
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const [m, { data: { user } }] = await Promise.all([
-        getMatch(matchId),
-        supabase.auth.getUser(),
-      ]);
-      if (cancelled) return;
-      setInitialMatch(m);
-      // 作成者でなければ観戦モード
-      if (m && user && m.created_by !== user.id) setViewOnly(true);
-    })();
+    getMatch(matchId).then(m => { if (!cancelled) setInitialMatch(m); });
     return () => { cancelled = true; };
   }, [matchId, loadKey]);
 
@@ -2120,20 +1843,15 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
       onBack={onBack}
       onEdit={onEdit}
       onReload={()=>setLoadKey(k=>k+1)}
-      onRefresh={handleRefresh}
-      refreshing={refreshing}
-      onNavigate={onNavigate}
-      viewOnly={viewOnly}
     />
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
   const [match,  setMatch]  = useState(initialMatch);
-  const [tab,    setTab]    = useState(viewOnly ? "score" : "record");
+  const [tab,    setTab]    = useState("record");
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
-  const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
   // 4段階選択状態
   const [selPlay,   setSelPlay]   = useState(null);   // プレイ内容
   const [selSide,   setSelSide]   = useState(null);   // フォア / バック
@@ -2162,9 +1880,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const serverLabel = curServer==="A" ? match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") : match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
   const teamALabel = match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
   const teamBLabel = match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
-  // 若番=自チーム左、遅番=自チーム右
   const isYounger = match.is_younger !== false;
-  // left=左側表示チーム、right=右側表示チーム
   const leftTeam  = isYounger ? "A" : "B";
   const rightTeam = isYounger ? "B" : "A";
   const leftLabel  = isYounger ? teamALabel : teamBLabel;
@@ -2180,16 +1896,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
   function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
 
-  function startNewGame(base=match, overrideServer=null){
-    const server = overrideServer || base.first_server;
-    if (!server) {
-      setServeSelectModal(true);
-      return;
-    }
-    base = { ...base, first_server: server };
+  function startNewGame(base=match){
     const num=base.games.length+1;
     const isFin=isFinalGame(base.game_format,base.match_score_a,base.match_score_b);
-    const srv=gameServer(base.first_server||server,num);
+    const srv=gameServer(base.first_server,num);
     const g={id:uid(),match_id:base.id,game_number:num,server_team:srv,is_final:isFin,score_a:0,score_b:0,winner_team:null,points:[],faults:[]};
     persist({...base,games:[...base.games,g]});
   }
@@ -2297,19 +2007,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
           <div style={{ textAlign:"center" }}>
             {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700 }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
-            <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""}{match.court_number?` · ${match.court_number}`:""} · {match.game_format}Gマッチ</div>
+            <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""} · {match.game_format}Gマッチ</div>
           </div>
-          <div style={{ display:"flex", gap:6 }}>
-            {match.status==="active" && (
-              <button
-                style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
-                onClick={onRefresh}
-                disabled={refreshing}
-                title="最新データに更新"
-              >{refreshing ? "..." : "🔄"}</button>
-            )}
-            <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(match.id)} title="試合情報を編集">✏️</button>
-          </div>
+          <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(match.id)} title="試合情報を編集">✏️</button>
         </div>
 
         {/* スコアボード: 行ごとgridで左右高さを統一 */}
@@ -2346,13 +2046,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
           </div>
           {/* 左右=ゲーム内ポイント（大きく）、中央=ゲームカウント（小さく） */}
           <div style={{ display:"grid",gridTemplateColumns:"1fr 88px 1fr",gap:8,alignItems:"center" }}>
-            {/* 左 */}
+            {/* 左：自チームの現在ゲームポイント */}
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:56,fontWeight:900,color:C.white,lineHeight:1 }}>
                 {currentGame ? leftScore(currentGame) : "—"}
               </div>
             </div>
-            {/* 中央：ゲームカウント */}
+            {/* 中央：ゲームカウント（小さく） */}
             <div style={{ textAlign:"center" }}>
               <div style={{ background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"6px 4px" }}>
                 <div style={{ fontSize:9,color:"rgba(255,255,255,0.6)",marginBottom:3 }}>
@@ -2366,7 +2066,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 {fault===1 && <div style={{ fontSize:9,color:C.serve,marginTop:2,fontWeight:700 }}>1st F</div>}
               </div>
             </div>
-            {/* 右 */}
+            {/* 右：相手チームの現在ゲームポイント */}
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:56,fontWeight:900,color:C.white,lineHeight:1 }}>
                 {currentGame ? rightScore(currentGame) : "—"}
@@ -2387,23 +2087,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       </div>
 
       {/* タブ */}
-      {viewOnly && (
-        <div style={{ background:"#e3f2fd", borderBottom:"1px solid #90caf9", padding:"8px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <span style={{ fontSize:12, color:"#1565c0", fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
-          <button
-            style={{ background:"#1565c0", border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
-            onClick={onRefresh} disabled={refreshing}
-          >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
-        </div>
-      )}
       <div style={{ display:"flex",background:C.white,borderBottom:`1px solid ${C.border}` }}>
-        {(viewOnly ? [["score","スコア"],["stats","スタッツ"]] : [["record","記録"],["score","スコア"],["stats","スタッツ"]]).map(([v,l])=>(
+        {[["record","記録"],["score","スコア"],["stats","スタッツ"]].map(([v,l])=>(
           <button key={v} style={{ flex:1,padding:11,border:"none",cursor:"pointer",background:"transparent",fontWeight:tab===v?700:400,fontSize:14,color:tab===v?C.accent:C.textSec,borderBottom:tab===v?`3px solid ${C.accent}`:"3px solid transparent" }} onClick={()=>setTab(v)}>{l}</button>
         ))}
       </div>
 
       {/* 記録タブ */}
-      {tab==="record"&&!viewOnly&&(
+      {tab==="record"&&(
         <div style={{ padding:"10px 12px 20px" }}>
           {match.games.length===0&&match.status!=="finished"&&(
             <div style={{ textAlign:"center",padding:"40px 0" }}>
@@ -2611,12 +2302,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               {/* ★得点ボタン（◯✕→「得点」表記に変更） */}
               <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どちらが得点しましたか？</div>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
-                {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
                 <button style={{ height:70,background:isYounger?"#2ecc71":C.red,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(229,57,53,0.35)" }} onClick={()=>addPoint(leftTeam)}>
                   <span style={{ fontSize:22 }}>得点</span>
                   <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||(isYounger?"自分たち":"相手")}</span>
                 </button>
-                {/* 右ボタン：若番=相手(赤)、遅番=自チーム(緑) */}
                 <button style={{ height:70,background:isYounger?C.red:"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(229,57,53,0.35)":"0 3px 10px rgba(46,204,113,0.35)" }} onClick={()=>addPoint(rightTeam)}>
                   <span style={{ fontSize:22 }}>得点</span>
                   <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自分たち")}</span>
@@ -2705,36 +2394,6 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         </Modal>
       )}
 
-      {/* サーブ未設定時の選択モーダル */}
-      {serveSelectModal && (
-        <Modal onClose={()=>setServeSelectModal(false)}>
-          <div style={{ textAlign:"center" }}>
-            <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
-            <h3 style={{ fontSize:16, fontWeight:800, margin:"8px 0 4px" }}>最初のサーブを選択</h3>
-            <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
-            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-              {[["A", match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "自チーム"],
-                ["B", match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
-              ].map(([team, label]) => (
-                <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
-                  onClick={async ()=>{
-                    setServeSelectModal(false);
-                    // DBのfirst_serverを更新してからゲーム開始
-                    const updated = {...match, first_server: team};
-                    await saveMatch(updated);
-                    setMatch(updated);
-                    startNewGame(updated, team);
-                  }}
-                >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
-              ))}
-            </div>
-            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectModal(false)}>キャンセル</button>
-          </div>
-        </Modal>
-      )}
-
-      <NavBar active="record" onNavigate={onNavigate}/>
     </div>
   );
 }
@@ -2742,6 +2401,29 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 // ============================================================
 // スタッツタブ（★相手チームスタッツのバグ修正）
 // ============================================================
+function Bar({ a, b, label }) {
+  const max = Math.max(a, b, 1);
+  const pctA = Math.round((a / max) * 100);
+  const pctB = Math.round((b / max) * 100);
+  return (
+    <div style={{ marginBottom:12 }}>
+      <div style={{ display:"flex", alignItems:"center", marginBottom:4 }}>
+        <span style={{ fontSize:13, fontWeight:700, color:C.teamA, width:28, textAlign:"left" }}>{a}</span>
+        <span style={{ flex:1, fontSize:11, color:C.textSec, textAlign:"center" }}>{label}</span>
+        <span style={{ fontSize:13, fontWeight:700, color:C.teamB, width:28, textAlign:"right" }}>{b}</span>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 2px 1fr", alignItems:"center", height:8, gap:2 }}>
+        <div style={{ display:"flex", justifyContent:"flex-end", height:8, background:"#e8edf3", borderRadius:"4px 0 0 4px", overflow:"hidden" }}>
+          <div style={{ width:`${pctA}%`, background:C.teamA, height:"100%", borderRadius:"4px 0 0 4px", transition:"width 0.3s" }}/>
+        </div>
+        <div style={{ width:2, height:14, background:C.border }}/>
+        <div style={{ display:"flex", justifyContent:"flex-start", height:8, background:"#e8edf3", borderRadius:"0 4px 4px 0", overflow:"hidden" }}>
+          <div style={{ width:`${pctB}%`, background:C.teamB, height:"100%", borderRadius:"0 4px 4px 0", transition:"width 0.3s" }}/>
+        </div>
+      </div>
+    </div>
+  );
+}
 function StatsTab({ match, onDownloadCsv, onShareLine }) {
   const [teamFilter, setTeamFilter] = useState("A");
   const stats    = calcPlayerStats(match);
@@ -2754,35 +2436,6 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
   const totalB = allPts.filter(p=>p.scoring_team==="B").length;
   const winA   = allPts.filter(p=>p.scoring_team==="A"&&p.is_winner===true).length;
   const winB   = allPts.filter(p=>p.scoring_team==="B"&&p.is_winner===true).length;
-
-  function Bar({ a, b, label }) {
-    const max = Math.max(a, b, 1);
-    const pctA = Math.round((a / max) * 100);
-    const pctB = Math.round((b / max) * 100);
-    return (
-      <div style={{ marginBottom:12 }}>
-        {/* 数値ラベル行 */}
-        <div style={{ display:"flex", alignItems:"center", marginBottom:4 }}>
-          <span style={{ fontSize:13, fontWeight:700, color:C.teamA, width:28, textAlign:"left" }}>{a}</span>
-          <span style={{ flex:1, fontSize:11, color:C.textSec, textAlign:"center" }}>{label}</span>
-          <span style={{ fontSize:13, fontWeight:700, color:C.teamB, width:28, textAlign:"right" }}>{b}</span>
-        </div>
-        {/* バー行：左=自チームA（右寄せ）、中央区切り、右=相手B（左寄せ） */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 2px 1fr", alignItems:"center", height:8, gap:2 }}>
-          {/* A側：右寄せ */}
-          <div style={{ display:"flex", justifyContent:"flex-end", height:8, background:"#e8edf3", borderRadius:"4px 0 0 4px", overflow:"hidden" }}>
-            <div style={{ width:`${pctA}%`, background:C.teamA, height:"100%", borderRadius:"4px 0 0 4px", transition:"width 0.3s" }}/>
-          </div>
-          {/* 中央区切り線 */}
-          <div style={{ width:2, height:14, background:C.border }}/>
-          {/* B側：左寄せ */}
-          <div style={{ display:"flex", justifyContent:"flex-start", height:8, background:"#e8edf3", borderRadius:"0 4px 4px 0", overflow:"hidden" }}>
-            <div style={{ width:`${pctB}%`, background:C.teamB, height:"100%", borderRadius:"0 4px 4px 0", transition:"width 0.3s" }}/>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ padding:14 }}>
@@ -3080,6 +2733,29 @@ function ProfileScreen({ onBack, forced, onSaved }) {
 // ============================================================
 // 選手マスター画面（同じ学校のメンバーで共有）
 // ============================================================
+const ROSTER_POSITIONS = ["前衛", "後衛", "その他"];
+function PositionButtons({ value, onChange }) {
+  return (
+    <div style={{ display:"flex", gap:6 }}>
+      {ROSTER_POSITIONS.map(pos => (
+        <button key={pos} style={{ flex:1, padding:"8px 4px", fontSize:12, borderRadius:8, border:"none", cursor:"pointer",
+          background: value===pos ? C.navy : C.gray, color: value===pos ? C.white : C.text, fontWeight: value===pos ? 700 : 400 }}
+          onClick={() => onChange(value===pos ? "" : pos)}>{pos}</button>
+      ))}
+    </div>
+  );
+}
+function HandButtons({ value, onChange }) {
+  return (
+    <div style={{ display:"flex", gap:6 }}>
+      {[["right","右利き"],["left","左利き"]].map(([k,l]) => (
+        <button key={k} style={{ flex:1, padding:"8px 4px", fontSize:12, borderRadius:8, border:"none", cursor:"pointer",
+          background: value===k ? C.accent : C.gray, color: value===k ? C.white : C.text, fontWeight: value===k ? 700 : 400 }}
+          onClick={() => onChange(value===k ? "" : k)}>{l}</button>
+      ))}
+    </div>
+  );
+}
 function PlayerRosterScreen({ onBack }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3121,29 +2797,6 @@ function PlayerRosterScreen({ onBack }) {
   const otherSchoolNames = [...new Set(otherPlayers.map(p => p.team_name).filter(Boolean))].sort();
   const visibleOtherPlayers = filterSchool ? otherPlayers.filter(p => p.team_name === filterSchool) : otherPlayers;
 
-  const POSITIONS = ["前衛", "後衛", "その他"];
-  function PositionButtons({ value, onChange }) {
-    return (
-      <div style={{ display:"flex", gap:6 }}>
-        {POSITIONS.map(pos => (
-          <button key={pos} style={{ flex:1, padding:"8px 4px", fontSize:12, borderRadius:8, border:"none", cursor:"pointer",
-            background: value===pos ? C.navy : C.gray, color: value===pos ? C.white : C.text, fontWeight: value===pos ? 700 : 400 }}
-            onClick={() => onChange(value===pos ? "" : pos)}>{pos}</button>
-        ))}
-      </div>
-    );
-  }
-  function HandButtons({ value, onChange }) {
-    return (
-      <div style={{ display:"flex", gap:6 }}>
-        {[["right","右利き"],["left","左利き"]].map(([k,l]) => (
-          <button key={k} style={{ flex:1, padding:"8px 4px", fontSize:12, borderRadius:8, border:"none", cursor:"pointer",
-            background: value===k ? C.accent : C.gray, color: value===k ? C.white : C.text, fontWeight: value===k ? 700 : 400 }}
-            onClick={() => onChange(value===k ? "" : k)}>{l}</button>
-        ))}
-      </div>
-    );
-  }
   const handLabel = (k) => k==="right" ? "右利き" : k==="left" ? "左利き" : "";
 
   async function handleAdd() {
@@ -3626,11 +3279,7 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  const [screen,       setScreen]       = useState("home");
-  const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
-  const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
-  const [listFilter,   setListFilter]   = useState("all"); // 試合一覧フィルター
-  const [toast, setToast] = useState(null); // トースト通知
+  const [screen,       setScreen]       = useState("list");
   const [matchId,      setMatchId]      = useState(null);
   const [copySourceId, setCopySourceId] = useState(null); // コピー元の試合ID
   const [editTargetId, setEditTargetId] = useState(null); // 編集対象の試合ID
@@ -3638,17 +3287,6 @@ export default function App() {
   const [statsPlayerName,   setStatsPlayerName]   = useState(null); // 直接開く選手名（統計画面から遷移時）
   const [statsOpponentName, setStatsOpponentName] = useState(null); // 直接開く対戦相手校名
   const [playerStatsFrom,   setPlayerStatsFrom]   = useState("home"); // 選手戦績画面の戻り先（home/stats）
-
-  // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
-  useEffect(() => {
-    const handler = (e) => {
-      e.preventDefault();
-      e.returnValue = "アプリを終了しますか？";
-      return e.returnValue;
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, []);
 
   // プロフィール（学校・男女区分が未設定だと試合・選手マスターを共有できないため、設定完了をチェック）
   const [profile, setProfile] = useState(null);
@@ -3720,7 +3358,7 @@ export default function App() {
     return (
       <PlayerStatsScreen
         onBack={()=>{ setStatsPlayerName(null); setScreen(playerStatsFrom); }}
-        onOpen={id=>{ setMatchId(id); setPrevScreen("home"); setScreen("record"); }}
+        onOpen={id=>{ setMatchId(id); setScreen("record"); }}
         initialPlayerName={statsPlayerName}
       />
     );
@@ -3746,7 +3384,7 @@ export default function App() {
   if (screen==="home") {
     return (
       <HomeScreen
-        onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPrevScreen("home"); setScreen("setup"); }}
+        onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }}
         onOpen={id=>{ setMatchId(id); setScreen("record"); }}
         onNavigate={goNav}
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
@@ -3778,26 +3416,28 @@ export default function App() {
       <MatchSetup
         sourceMatchId={copySourceId}
         editMatchId={editTargetId}
-        initialMatchType={initMatchType}
-        onScheduled={()=>{ setInitMatchType(null); setListFilter("scheduled"); setScreen("list"); setTimeout(()=>setListFilter("all"), 100); }}
         onSave={id=>{
           setCopySourceId(null);
-          setInitMatchType(null);
-          setEditTargetId(null);
-          setMatchId(id);
-          setPrevScreen("record");
-          setScreen("record");
+          if (editTargetId) {
+            // 編集完了後は記録画面に戻る
+            setEditTargetId(null);
+            setMatchId(id);
+            setScreen("record");
+          } else {
+            setMatchId(id);
+            setScreen("record");
+          }
         }}
         onCancel={()=>{
           setCopySourceId(null);
-          setInitMatchType(null);
           if (editTargetId) {
+            // 編集キャンセル時は記録画面に戻る
             const back = editTargetId;
             setEditTargetId(null);
             setMatchId(back);
             setScreen("record");
           } else {
-            setScreen(prevScreen || "list");
+            setScreen("list");
           }
         }}
       />
@@ -3808,25 +3448,21 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{ setTick(t=>t+1); setMatchId(null); setScreen(prevScreen==="home" ? "home" : "list"); }}
+        onBack={()=>{setScreen("list");setTick(t=>t+1);setMatchId(null);}}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
     );
   }
   return (
     <MatchList
       key={tick}
-      onNew={f=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
-      onOpen={id=>{setMatchId(id); setPrevScreen("list"); setScreen("record");}}
-      onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
-      onStartScheduled={async (id, firstServer)=>{ await startScheduledMatch(id, firstServer); setMatchId(id); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); }}
+      onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }}
+      onOpen={id=>{setMatchId(id);setScreen("record");}}
+      onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setScreen("setup"); }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
       onNavigate={goNav}
-      initialFilter={listFilter}
-      initialToast={listFilter==="scheduled" ? "📅 試合予定を登録しました！" : null}
     />
   );
 }
