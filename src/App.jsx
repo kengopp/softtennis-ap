@@ -721,8 +721,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled }) {
-  const [filter, setFilter] = useState("all");
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter }) {
+  const [filter, setFilter] = useState(initialFilter || "all");
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1677,7 +1677,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -1703,10 +1703,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled }) {
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -1736,7 +1736,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
   const [bP2,    setBP2]    = useState(bBase2?.player_name ?? "");
 
   const isScheduledEdit = editing?.status === "scheduled";
-  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && (firstServer || isScheduledEdit);
+  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim());
 
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
@@ -1802,6 +1802,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
       await saveMatch(match);
       setScheduledId(mid);
       alert("📅 試合予定を登録しました！");
+      onScheduled && onScheduled();
     } catch(e) {
       alert("登録に失敗しました: " + (e.message || e));
     } finally {
@@ -1809,7 +1810,18 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
     }
   }
 
-  async function handleSave() {
+  // サーブ選択ポップアップ → handleSave本体を呼ぶ
+  function handleSaveWithServeSelect() {
+    if (editing) { handleSave(null); return; } // 編集時はサーブ選択不要
+    // 自チームと相手のラベルを作成
+    const aLabel = [aP1.trim(), isDoubles ? aP2.trim() : ""].filter(Boolean).join("/") || "自チーム";
+    const bLabel = [bP1.trim(), isDoubles ? bP2.trim() : ""].filter(Boolean).join("/") || "相手チーム";
+    setServeSelectForSave({ aLabel, bLabel });
+  }
+
+  const [serveSelectForSave, setServeSelectForSave] = useState(null);
+
+  async function handleSave(selectedServer) {
     setSaving(true);
     try {
       if (editing) {
@@ -1843,7 +1855,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
       const match = {
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
-        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer,
+        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:selectedServer || firstServer || "A",
         status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, players, games:[],
       };
       await saveMatch(match);
@@ -1931,16 +1943,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
               </div>
             )}
           </FormRow>
-          <FormRow label="最初のサーブ">
-            {locked ? (
-              <div style={{ fontSize:14,fontWeight:700,color:C.textSec,padding:"4px 0" }}>{firstServer==="A"?"自チーム":firstServer==="B"?"相手":"未選択"} 🔒</div>
-            ) : (
-              <div style={{ display:"flex",gap:8 }}>
-                <button style={S.togBtn(firstServer==="A")} onClick={() => setFirstServer(firstServer==="A" ? null : "A")}>自チーム</button>
-                <button style={S.togBtn(firstServer==="B")} onClick={() => setFirstServer(firstServer==="B" ? null : "B")}>相手</button>
-              </div>
-            )}
-          </FormRow>
+
         </FormSec>
 
         <FormSec title="自チーム (A)">
@@ -2021,11 +2024,31 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
         <button
           style={{ ...S.btn((canSave&&!saving) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (canSave&&!saving) ? C.white : C.textSec), marginTop:4 }}
           disabled={!canSave || saving}
-          onClick={handleSave}
+          onClick={editing ? ()=>handleSave(null) : handleSaveWithServeSelect}
         >
           {saving ? "保存中..." : (editing ? "保存する 💾" : "試合を開始する 🎾")}
         </button>
       </div>
+
+      {/* サーブ選択モーダル */}
+      {serveSelectForSave && (
+        <Modal onClose={()=>setServeSelectForSave(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
+            <h3 style={{ fontSize:16, fontWeight:800, margin:"8px 0 4px" }}>最初のサーブを選択</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
+            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+              {[["A", serveSelectForSave.aLabel], ["B", serveSelectForSave.bLabel]].map(([team, label]) => (
+                <button key={team}
+                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
+                  onClick={()=>{ setServeSelectForSave(null); handleSave(team); }}
+                >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
+              ))}
+            </div>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectForSave(null)}>キャンセル</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -3537,6 +3560,7 @@ export default function App() {
   const [screen,       setScreen]       = useState("home");
   const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
   const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
+  const [listFilter,   setListFilter]   = useState("all"); // 試合一覧フィルター
   const [matchId,      setMatchId]      = useState(null);
   const [copySourceId, setCopySourceId] = useState(null); // コピー元の試合ID
   const [editTargetId, setEditTargetId] = useState(null); // 編集対象の試合ID
@@ -3685,6 +3709,7 @@ export default function App() {
         sourceMatchId={copySourceId}
         editMatchId={editTargetId}
         initialMatchType={initMatchType}
+        onScheduled={()=>{ setInitMatchType(null); setScreen("list"); setListFilter("scheduled"); }}
         onSave={id=>{
           setCopySourceId(null);
           setInitMatchType(null);
@@ -3730,6 +3755,7 @@ export default function App() {
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
       onNavigate={goNav}
+      initialFilter={listFilter}
     />
   );
 }
