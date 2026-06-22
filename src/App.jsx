@@ -723,7 +723,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }, []);
 
   const matches = allMatches
-    .filter(m=>filter==="all"||m.match_type===filter)
+    .filter(m=>filter==="active" ? m.status==="active" : (filter==="all"||m.match_type===filter))
     .filter(m=>!childOnly || m.players.some(p=>p.player_name===linkedPlayerName));
 
   // ★絞り込み条件が変わったら1ページ目に戻す
@@ -744,6 +744,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
       </div>
       <div style={{ display:"flex",gap:6,padding:"12px 14px 0",overflowX:"auto" }}>
+        <button style={{ ...S.togBtn(filter==="active", "#e53935"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="active" ? 800 : 600, border: filter==="active" ? "none" : "1.5px solid #e53935", color: filter==="active" ? C.white : "#e53935" }} onClick={()=>setFilter("active")}>🔴 進行中</button>
         {[["all","すべて"],["tournament","公式大会"],["practice","練習試合"],["internal","部内戦"]].map(([v,l])=>(
           <button key={v} style={{ ...S.togBtn(filter===v,C.navy),whiteSpace:"nowrap",fontSize:12 }} onClick={()=>setFilter(v)}>{l}</button>
         ))}
@@ -1646,7 +1647,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
   const [roster, setRoster] = useState([]);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
   const ownRoster = roster.filter(p => p.is_own_team !== false);
-  const oppRoster = roster.filter(p => p.is_own_team === false);
+  const oppRosterBase = roster.filter(p => p.is_own_team === false);
+  // 同校対決：相手チームが自チームと同じ学校名の場合、自チームの選手もチップに表示
+  const isSameSchool = aClub && bClub && aClub.trim() === bClub.trim();
+  const oppRoster = isSameSchool
+    ? [...ownRoster, ...oppRosterBase.filter(p => p.team_name === bClub)]
+    : oppRosterBase;
 
   // ★学校名の候補一覧（誤入力防止）
   const [schools, setSchools] = useState([]);
@@ -1886,6 +1892,14 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
 function ScoreRecord({ matchId, onBack, onEdit }) {
   const [initialMatch, setInitialMatch] = useState(null);
   const [loadKey, setLoadKey] = useState(0); // 再読み込みトリガー（編集画面から戻った時など）
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    const m = await getMatch(matchId);
+    setInitialMatch(m);
+    setRefreshing(false);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1907,11 +1921,13 @@ function ScoreRecord({ matchId, onBack, onEdit }) {
       onBack={onBack}
       onEdit={onEdit}
       onReload={()=>setLoadKey(k=>k+1)}
+      onRefresh={handleRefresh}
+      refreshing={refreshing}
     />
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing }) {
   const [match,  setMatch]  = useState(initialMatch);
   const [tab,    setTab]    = useState("record");
   const [fault,  setFault]  = useState(0);
@@ -2062,7 +2078,17 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload }) {
             {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700 }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
             <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""} · {match.game_format}Gマッチ</div>
           </div>
-          <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(match.id)} title="試合情報を編集">✏️</button>
+          <div style={{ display:"flex", gap:6 }}>
+            {match.status==="active" && (
+              <button
+                style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
+                onClick={onRefresh}
+                disabled={refreshing}
+                title="最新データに更新"
+              >{refreshing ? "..." : "🔄"}</button>
+            )}
+            <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(match.id)} title="試合情報を編集">✏️</button>
+          </div>
         </div>
 
         {/* スコアボード: 行ごとgridで左右高さを統一 */}
