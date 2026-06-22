@@ -2117,6 +2117,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const [tab,    setTab]    = useState(viewOnly ? "score" : "record");
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
+  const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
   // 4段階選択状態
   const [selPlay,   setSelPlay]   = useState(null);   // プレイ内容
   const [selSide,   setSelSide]   = useState(null);   // フォア / バック
@@ -2150,14 +2151,16 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
   function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
 
-  function startNewGame(base=match){
-    if (!base.first_server) {
-      alert("最初のサーブが設定されていません。✏️ボタンから試合情報を編集してサーブを選択してください。");
+  function startNewGame(base=match, overrideServer=null){
+    const server = overrideServer || base.first_server;
+    if (!server) {
+      setServeSelectModal(true);
       return;
     }
+    base = { ...base, first_server: server };
     const num=base.games.length+1;
     const isFin=isFinalGame(base.game_format,base.match_score_a,base.match_score_b);
-    const srv=gameServer(base.first_server,num);
+    const srv=gameServer(base.first_server||server,num);
     const g={id:uid(),match_id:base.id,game_number:num,server_team:srv,is_final:isFin,score_a:0,score_b:0,winner_team:null,points:[],faults:[]};
     persist({...base,games:[...base.games,g]});
   }
@@ -2667,6 +2670,35 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
             <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
             <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:C.teamA }}>{modal.sA}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:C.teamB }}>{modal.sB}</span></div>
             <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>{setModal(null);startNewGame();}}>次のゲームへ</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* サーブ未設定時の選択モーダル */}
+      {serveSelectModal && (
+        <Modal onClose={()=>setServeSelectModal(false)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
+            <h3 style={{ fontSize:16, fontWeight:800, margin:"8px 0 4px" }}>最初のサーブを選択</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
+            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+              {[["A", match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "自チーム"],
+                ["B", match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
+              ].map(([team, label]) => (
+                <button key={team}
+                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
+                  onClick={async ()=>{
+                    setServeSelectModal(false);
+                    // DBのfirst_serverを更新してからゲーム開始
+                    const updated = {...match, first_server: team};
+                    await saveMatch(updated);
+                    setMatch(updated);
+                    startNewGame(updated, team);
+                  }}
+                >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
+              ))}
+            </div>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectModal(false)}>キャンセル</button>
           </div>
         </Modal>
       )}
