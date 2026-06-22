@@ -1819,6 +1819,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     }
   }
 
+  const [serveSelectForSave, setServeSelectForSave] = useState(null);
+
   // サーブ選択ポップアップ → handleSave本体を呼ぶ
   function handleSaveWithServeSelect() {
     if (editing) { handleSave(null); return; } // 編集時はサーブ選択不要
@@ -1827,8 +1829,6 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     const bLabel = [bP1.trim(), isDoubles ? bP2.trim() : ""].filter(Boolean).join("/") || "相手チーム";
     setServeSelectForSave({ aLabel, bLabel });
   }
-
-  const [serveSelectForSave, setServeSelectForSave] = useState(null);
 
   async function handleSave(selectedServer) {
     setSaving(true);
