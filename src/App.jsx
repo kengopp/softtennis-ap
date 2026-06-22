@@ -431,6 +431,13 @@ async function deletePlayerFromRoster(id) {
 // （試合のチーム名欄は相手チームなど自由入力も許可するための候補リスト）
 // 都道府県で絞り込めるよう、学校マスター由来のものは prefecture を保持する
 // ============================================================
+// 過去の試合に入力された会場名の候補一覧を取得
+async function getKnownVenues() {
+  const { data, error } = await supabase.from("matches").select("venue");
+  if (error) { console.error(error); return []; }
+  return [...new Set((data ?? []).map(r => r.venue).filter(Boolean))].sort();
+}
+
 async function getKnownSchools() {
   const [{ data: schoolsData, error: schoolsErr }, { data: cpData, error: cpErr }] = await Promise.all([
     supabase.from("schools").select("name, prefecture"),
@@ -1439,6 +1446,37 @@ function PrefMiniFilter({ value, onChange, options }) {
 // ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
 // schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
 // prefFilter: 親から渡される都道府県絞り込み値（任意）
+// 会場名入力＋候補サジェストコンポーネント
+function VenueField({ value, onChange, venues }) {
+  const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const filtered = value.trim()
+    ? venues.filter(v => v.includes(value.trim()))
+    : [];
+
+  return (
+    <div style={{ position:"relative" }}>
+      <input
+        style={S.inp}
+        placeholder="例：○○市民コート"
+        value={value}
+        onChange={e => { onChange(e.target.value); setShowSuggestions(true); }}
+        onFocus={() => setShowSuggestions(true)}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+      />
+      {showSuggestions && filtered.length > 0 && (
+        <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:100, boxShadow:"0 4px 12px rgba(0,0,0,0.12)", maxHeight:180, overflowY:"auto" }}>
+          {filtered.map(v => (
+            <div key={v}
+              style={{ padding:"10px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer" }}
+              onMouseDown={() => { onChange(v); setShowSuggestions(false); }}
+            >{v}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
   const [customMode, setCustomMode] = useState(!!value && !schools.some(s => s.name === value));
 
@@ -1579,6 +1617,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
   const [schools, setSchools] = useState([]);
   useEffect(() => { getKnownSchools().then(setSchools); }, []);
 
+  // ★会場名の候補一覧
+  const [venues, setVenues] = useState([]);
+  useEffect(() => { getKnownVenues().then(setVenues); }, []);
+
   // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
   const [aClubPref, setAClubPref] = useState("");
   const [bClubPref, setBClubPref] = useState("");
@@ -1673,7 +1715,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
             <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
           </FormRow>
           <FormRow label="場所 / 会場名">
-            <input style={S.inp} placeholder="例：○○市民コート" value={venue} onChange={e => setVenue(e.target.value)}/>
+            <VenueField value={venue} onChange={setVenue} venues={venues} />
           </FormRow>
           <FormRow label="大会名">
             <input style={S.inp} placeholder="例：○○中学校選手権" value={tournamentName} onChange={e => setTournamentName(e.target.value)}/>
