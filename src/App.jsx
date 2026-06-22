@@ -340,8 +340,10 @@ async function deleteMatch(id) {
 }
 
 // 予定 → 進行中に切り替え
-async function startScheduledMatch(id) {
-  const { error } = await supabase.from("matches").update({ status:"active" }).eq("id", id);
+async function startScheduledMatch(id, firstServer) {
+  const updates = { status:"active" };
+  if (firstServer) updates.first_server = firstServer;
+  const { error } = await supabase.from("matches").update(updates).eq("id", id);
   if (error) throw error;
 }
 
@@ -725,6 +727,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null); // 削除確認対象のmatch_id
+  const [serveSelectMatch, setServeSelectMatch] = useState(null); // サーブ選択モーダル対象の試合
   const [isAdmin, setIsAdmin] = useState(false);
   const [myId, setMyId] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
@@ -851,7 +854,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 <div style={{ padding:"10px 14px", borderTop:"1px solid "+C.border, background:"#f3e5f5" }}>
                   <button
                     style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13 }}
-                    onClick={(e)=>{ e.stopPropagation(); onStartScheduled(m.id); }}
+                    onClick={(e)=>{ e.stopPropagation(); if (!m.first_server) { setServeSelectMatch(m); } else { onStartScheduled(m.id, m.first_server); } }}
                   >🎾 この試合を開始する</button>
                 </div>
               )}
@@ -889,6 +892,31 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       </div>
       <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew(filter)}>＋</button>
       <NavBar active="list" onNavigate={onNavigate}/>
+
+      {serveSelectMatch && (
+        <Modal onClose={()=>setServeSelectMatch(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
+            <h3 style={{ fontSize:16, fontWeight:800, margin:"8px 0 4px" }}>最初のサーブを選択</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>試合を開始するにはサーブ側を選んでください</p>
+            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+              {[["A", serveSelectMatch.players?.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "自チーム"],
+                ["B", serveSelectMatch.players?.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
+              ].map(([team, label]) => (
+                <button key={team}
+                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
+                  onClick={async ()=>{
+                    const m = serveSelectMatch;
+                    setServeSelectMatch(null);
+                    await onStartScheduled(m.id, team);
+                  }}
+                >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
+              ))}
+            </div>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectMatch(null)}>キャンセル</button>
+          </div>
+        </Modal>
+      )}
 
       {confirmDelete && (
         <Modal onClose={()=>setConfirmDelete(null)}>
@@ -1681,9 +1709,9 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
 function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType }) {
   const base    = editing || source;
 
-  // 編集モードでは形式設定をロック（試合開始後は変更不可）
-  // ただし予定（scheduled）の試合は形式変更を許可する
-  const locked = !!editing && editing.status !== "scheduled";
+  // 試合開始済み（active/finished）の場合のみ形式設定をロック
+  // 予定（scheduled）は編集可能
+  const locked = !!editing && (editing.status === "active" || editing.status === "finished");
 
   const aBase = base ? base.players.find(p=>p.team==="A") : null;
   const aBase2 = base ? base.players.find(p=>p.team==="A" && p.order_num===2) : null;
@@ -2094,6 +2122,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
 
   function startNewGame(base=match){
+    if (!base.first_server) {
+      alert("最初のサーブが設定されていません。✏️ボタンから試合情報を編集してサーブを選択してください。");
+      return;
+    }
     const num=base.games.length+1;
     const isFin=isFinalGame(base.game_format,base.match_score_a,base.match_score_b);
     const srv=gameServer(base.first_server,num);
@@ -3693,7 +3725,7 @@ export default function App() {
       onNew={f=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
       onOpen={id=>{setMatchId(id); setPrevScreen("list"); setScreen("record");}}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
-      onStartScheduled={async id=>{ await startScheduledMatch(id); setMatchId(id); setPrevScreen("list"); setScreen("record"); }}
+      onStartScheduled={async (id, firstServer)=>{ await startScheduledMatch(id, firstServer); setMatchId(id); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
