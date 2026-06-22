@@ -742,6 +742,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     <div style={S.page}>
       <div style={S.hdr}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
+        <button
+          style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }}
+          onClick={reload}
+        >🔄 更新</button>
       </div>
       <div style={{ display:"flex",gap:6,padding:"12px 14px 0",overflowX:"auto" }}>
         <button style={{ ...S.togBtn(filter==="active", "#e53935"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="active" ? 800 : 600, border: filter==="active" ? "none" : "1.5px solid #e53935", color: filter==="active" ? C.white : "#e53935" }} onClick={()=>setFilter("active")}>🔴 進行中</button>
@@ -1889,7 +1893,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
 // ============================================================
 // スコア記録
 // ============================================================
-function ScoreRecord({ matchId, onBack, onEdit }) {
+function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
   const [initialMatch, setInitialMatch] = useState(null);
   const [loadKey, setLoadKey] = useState(0); // 再読み込みトリガー（編集画面から戻った時など）
   const [refreshing, setRefreshing] = useState(false);
@@ -1923,11 +1927,12 @@ function ScoreRecord({ matchId, onBack, onEdit }) {
       onReload={()=>setLoadKey(k=>k+1)}
       onRefresh={handleRefresh}
       refreshing={refreshing}
+      onNavigate={onNavigate}
     />
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate }) {
   const [match,  setMatch]  = useState(initialMatch);
   const [tab,    setTab]    = useState("record");
   const [fault,  setFault]  = useState(0);
@@ -2473,6 +2478,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         </Modal>
       )}
 
+      <NavBar active="record" onNavigate={onNavigate}/>
     </div>
   );
 }
@@ -3545,6 +3551,7 @@ export default function App() {
         matchId={matchId}
         onBack={()=>{ setTick(t=>t+1); setMatchId(null); setScreen(prevScreen==="home" ? "home" : "list"); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
+        onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
     );
   }
