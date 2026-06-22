@@ -400,21 +400,6 @@ async function autoRegisterPlayerToRoster(playerName, teamName, isOwnTeam) {
   }
 }
 
-// 試合保存時に選手を選手マスターへ自動登録
-async function autoRegisterPlayerToRoster(playerName, teamName, isOwnTeam) {
-  if (!playerName?.trim()) return;
-  try {
-    const roster = await getPlayerRoster();
-    const baseName = playerName.trim();
-    const existingNames = new Set(roster.map(p => p.player_name));
-    if (existingNames.has(baseName)) return;
-    let finalName = baseName;
-    let n = 2;
-    while (existingNames.has(finalName)) { finalName = `${baseName}${n}`; n++; }
-    await savePlayer({ player_name: finalName, is_own_team: isOwnTeam, team_name: teamName || null });
-  } catch (e) { console.error("選手マスター自動登録エラー:", e); }
-}
-
 async function savePlayer(player) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
