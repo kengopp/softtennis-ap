@@ -171,20 +171,35 @@ async function getMatches() {
   if (data.length === 0) return [];
 
   const matchIds = data.map(m => m.id);
-  const { data: playersData, error: playersErr } = await supabase
-    .from("match_players")
-    .select("*")
-    .in("match_id", matchIds)
-    .order("team")
-    .order("order_num");
+  const [
+    { data: playersData, error: playersErr },
+    { data: gamesData,   error: gamesErr },
+    { data: pointsData,  error: pointsErr },
+  ] = await Promise.all([
+    supabase.from("match_players").select("*").in("match_id", matchIds).order("team").order("order_num"),
+    supabase.from("games").select("*").in("match_id", matchIds).order("game_number"),
+    supabase.from("points").select("match_id,game_id,scoring_team,score_a_after,score_b_after,point_number").in("match_id", matchIds),
+  ]);
   if (playersErr) console.error(playersErr);
+  if (gamesErr)   console.error(gamesErr);
+  if (pointsErr)  console.error(pointsErr);
 
   const playersByMatch = {};
-  (playersData ?? []).forEach(p => {
-    (playersByMatch[p.match_id] ??= []).push(p);
-  });
+  (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
 
-  return data.map(m => rowToMatchSummary(m, playersByMatch[m.id] ?? []));
+  const gamesByMatch = {};
+  (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
+
+  const pointsByGame = {};
+  (pointsData ?? []).forEach(pt => { (pointsByGame[pt.game_id] ??= []).push(pt); });
+
+  return data.map(m => {
+    const games = (gamesByMatch[m.id] ?? []).map(g => ({
+      ...g,
+      points: (pointsByGame[g.id] ?? []).sort((a,b) => a.point_number - b.point_number),
+    }));
+    return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
+  });
 }
 
 // 試合1件を、関連テーブルすべて含めて取得
@@ -203,7 +218,7 @@ async function getMatch(id) {
   return rowToMatchFull(m, players ?? [], games ?? [], points ?? [], faults ?? []);
 }
 
-function rowToMatchSummary(m, players=[]) {
+function rowToMatchSummary(m, players=[], games=[]) {
   return {
     id: m.id, created_by: m.created_by,
     match_date: m.match_date, venue: m.venue ?? "",
@@ -216,7 +231,11 @@ function rowToMatchSummary(m, players=[]) {
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
     })),
-    games: [],
+    games: games.map(g => ({
+      id: g.id, game_number: g.game_number, is_final: g.is_final,
+      score_a: g.score_a, score_b: g.score_b, winner_team: g.winner_team,
+      points: g.points ?? [],
+    })),
   };
 }
 
@@ -786,6 +805,28 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     <span style={{ fontSize:22,fontWeight:800,color:win?col:C.textSec }}>{sc??"-"}</span>
                   </div>
                 ))}
+                {/* 進行中：現在のゲームスコア表示 */}
+                {m.status==="active" && m.games && m.games.length > 0 && (() => {
+                  const activeGame = m.games.find(g => !g.winner_team);
+                  const finishedGames = m.games.filter(g => g.winner_team);
+                  return (
+                    <div style={{ marginTop:6, padding:"6px 10px", background:"rgba(0,0,0,0.04)", borderRadius:8 }}>
+                      <div style={{ fontSize:10, color:C.textSec, marginBottom:3, fontWeight:600 }}>現在のスコア</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        {finishedGames.map(g => (
+                          <span key={g.id} style={{ fontSize:11, padding:"2px 7px", borderRadius:12, background: g.winner_team==="A" ? C.teamA+"22" : C.teamB+"22", color: g.winner_team==="A" ? C.teamA : C.teamB, fontWeight:700 }}>
+                            G{g.game_number}: {g.score_a}-{g.score_b}
+                          </span>
+                        ))}
+                        {activeGame && (
+                          <span style={{ fontSize:11, padding:"2px 7px", borderRadius:12, background:"#fff3cd", color:"#7a5800", fontWeight:700 }}>
+                            G{activeGame.game_number}: {activeGame.score_a}-{activeGame.score_b} 🔴
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div style={{ marginTop:8,display:"flex",justifyContent:"flex-end",gap:6 }}>
                   {[`${m.game_format}Gマッチ`,MATCH_TYPES.find(t=>t.key===m.match_type)?.label].filter(Boolean).map(l=>(
                     <span key={l} style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:C.navyMid+"22",color:C.navyMid,fontWeight:600 }}>{l}</span>
@@ -1895,8 +1936,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
 // ============================================================
 function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
   const [initialMatch, setInitialMatch] = useState(null);
-  const [loadKey, setLoadKey] = useState(0); // 再読み込みトリガー（編集画面から戻った時など）
+  const [loadKey, setLoadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [viewOnly, setViewOnly] = useState(false); // 観戦モード
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -1907,7 +1949,16 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
 
   useEffect(() => {
     let cancelled = false;
-    getMatch(matchId).then(m => { if (!cancelled) setInitialMatch(m); });
+    (async () => {
+      const [m, { data: { user } }] = await Promise.all([
+        getMatch(matchId),
+        supabase.auth.getUser(),
+      ]);
+      if (cancelled) return;
+      setInitialMatch(m);
+      // 作成者でなければ観戦モード
+      if (m && user && m.created_by !== user.id) setViewOnly(true);
+    })();
     return () => { cancelled = true; };
   }, [matchId, loadKey]);
 
@@ -1928,13 +1979,14 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
       onRefresh={handleRefresh}
       refreshing={refreshing}
       onNavigate={onNavigate}
+      viewOnly={viewOnly}
     />
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly }) {
   const [match,  setMatch]  = useState(initialMatch);
-  const [tab,    setTab]    = useState("record");
+  const [tab,    setTab]    = useState(viewOnly ? "score" : "record");
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
   // 4段階選択状態
@@ -2171,14 +2223,23 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       </div>
 
       {/* タブ */}
+      {viewOnly && (
+        <div style={{ background:"#e3f2fd", borderBottom:"1px solid #90caf9", padding:"8px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <span style={{ fontSize:12, color:"#1565c0", fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
+          <button
+            style={{ background:"#1565c0", border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
+            onClick={onRefresh} disabled={refreshing}
+          >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
+        </div>
+      )}
       <div style={{ display:"flex",background:C.white,borderBottom:`1px solid ${C.border}` }}>
-        {[["record","記録"],["score","スコア"],["stats","スタッツ"]].map(([v,l])=>(
+        {(viewOnly ? [["score","スコア"],["stats","スタッツ"]] : [["record","記録"],["score","スコア"],["stats","スタッツ"]]).map(([v,l])=>(
           <button key={v} style={{ flex:1,padding:11,border:"none",cursor:"pointer",background:"transparent",fontWeight:tab===v?700:400,fontSize:14,color:tab===v?C.accent:C.textSec,borderBottom:tab===v?`3px solid ${C.accent}`:"3px solid transparent" }} onClick={()=>setTab(v)}>{l}</button>
         ))}
       </div>
 
       {/* 記録タブ */}
-      {tab==="record"&&(
+      {tab==="record"&&!viewOnly&&(
         <div style={{ padding:"10px 12px 20px" }}>
           {match.games.length===0&&match.status!=="finished"&&(
             <div style={{ textAlign:"center",padding:"40px 0" }}>
