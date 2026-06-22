@@ -1750,6 +1750,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
+  const [serveSelectForSave, setServeSelectForSave] = useState(null);
 
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
@@ -1819,7 +1820,6 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     }
   }
 
-  const [serveSelectForSave, setServeSelectForSave] = useState(null);
 
   // サーブ選択ポップアップ → handleSave本体を呼ぶ
   function handleSaveWithServeSelect() {
