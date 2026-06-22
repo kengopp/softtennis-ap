@@ -1032,6 +1032,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
   const [roster, setRoster] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("team"); // team | players | opponents
+  const [teamSubTab, setTeamSubTab] = useState("overall"); // overall | pairs
   const [period, setPeriod] = useState("all"); // all | month1
   const [sort, setSort] = useState("desc"); // desc | asc
 
@@ -1041,6 +1042,18 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
   const periodMatches = period==="month1" ? withinLastDays(allMatches, 30) : allMatches;
   const finished = periodMatches.filter(m=>m.status==="finished");
   const teamRecord = recordOf(finished, m=>m.match_score_a>m.match_score_b);
+
+  // ペア別成績（自チームAのペア名を「選手1／選手2」形式で集計）
+  const byPair = {};
+  finished.forEach(m => {
+    const aPlayers = m.players.filter(p => p.team === "A").sort((a,b) => a.order_num - b.order_num);
+    const pairKey = aPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
+    (byPair[pairKey] ??= []).push(m);
+  });
+  const pairRows = Object.entries(byPair).map(([name, list]) => ({
+    name, ...recordOf(list, m => m.match_score_a > m.match_score_b),
+  }));
+  pairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   // 選手別成績（選手マスターの自チーム選手のみ）
   const playerRows = roster.filter(p=>p.is_own_team!==false).map(p=>{
@@ -1079,24 +1092,49 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
         ) : tab==="team" ? (
           <>
             <PeriodSortBar period={period} setPeriod={setPeriod} sort={sort} setSort={setSort} />
-            <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-              <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>総合成績</div>
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
-                <div>
-                  <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.total}</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
-                </div>
-                <div>
-                  <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
-                </div>
-                <div>
-                  <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.wins}勝{teamRecord.losses}敗</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
-                </div>
-              </div>
+            {/* 自チームサブタブ：総合／ペア別 */}
+            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+              {[["overall","総合成績"],["pairs","ペア別"]].map(([v,l])=>(
+                <button key={v} style={{ ...S.togBtn(teamSubTab===v, C.accent), flex:1, fontSize:12, padding:"7px 4px" }} onClick={()=>setTeamSubTab(v)}>{l}</button>
+              ))}
             </div>
-            <MonthlyTrendCard finishedMatches={allMatches.filter(m=>m.status==="finished")} winFn={m=>m.match_score_a>m.match_score_b} />
+            {teamSubTab==="overall" ? (
+              <>
+                <div style={{ ...S.card, padding:16, marginBottom:16 }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>総合成績</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
+                    <div>
+                      <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.total}</div>
+                      <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
+                      <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.wins}勝{teamRecord.losses}敗</div>
+                      <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                    </div>
+                  </div>
+                </div>
+                <MonthlyTrendCard finishedMatches={allMatches.filter(m=>m.status==="finished")} winFn={m=>m.match_score_a>m.match_score_b} />
+              </>
+            ) : (
+              <>
+                {pairRows.length===0 ? (
+                  <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この期間の試合記録がありません</div>
+                ) : pairRows.map(r=>(
+                  <div key={r.name} style={{ ...S.card, padding:"12px 14px", marginBottom:8 }}>
+                    <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>{r.name}</div>
+                    <div style={{ display:"flex", gap:12, alignItems:"center" }}>
+                      <span style={{ fontSize:12,color:C.textSec }}>{r.total}試合</span>
+                      <span style={{ fontSize:14,fontWeight:700,color:C.accent }}>{r.rate}%</span>
+                      <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </>
         ) : tab==="players" ? (
           <>
@@ -3300,7 +3338,7 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  const [screen,       setScreen]       = useState("list");
+  const [screen,       setScreen]       = useState("home");
   const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
   const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
   const [matchId,      setMatchId]      = useState(null);
@@ -3310,6 +3348,17 @@ export default function App() {
   const [statsPlayerName,   setStatsPlayerName]   = useState(null); // 直接開く選手名（統計画面から遷移時）
   const [statsOpponentName, setStatsOpponentName] = useState(null); // 直接開く対戦相手校名
   const [playerStatsFrom,   setPlayerStatsFrom]   = useState("home"); // 選手戦績画面の戻り先（home/stats）
+
+  // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "アプリを終了しますか？";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
 
   // プロフィール（学校・男女区分が未設定だと試合・選手マスターを共有できないため、設定完了をチェック）
   const [profile, setProfile] = useState(null);
