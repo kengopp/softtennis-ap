@@ -721,8 +721,10 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast }) {
   const [filter, setFilter] = useState(initialFilter || "all");
+  const [toast, setToast] = useState(initialToast || null);
+  useEffect(() => { if (initialToast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [initialToast]);
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -779,6 +781,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           onClick={reload}
         >🔄 更新</button>
       </div>
+      {toast && (
+        <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>
+          {toast}
+        </div>
+      )}
       <div style={{ display:"flex",gap:6,padding:"12px 14px 0",overflowX:"auto" }}>
         <button style={{ ...S.togBtn(filter==="active", "#e53935"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="active" ? 800 : 600, border: filter==="active" ? "none" : "1.5px solid #e53935", color: filter==="active" ? C.white : "#e53935" }} onClick={()=>setFilter("active")}>🔴 進行中</button>
         <button style={{ ...S.togBtn(filter==="scheduled", "#7b1fa2"), whiteSpace:"nowrap", fontSize:12, fontWeight: filter==="scheduled" ? 800 : 600, border: filter==="scheduled" ? "none" : "1.5px solid #7b1fa2", color: filter==="scheduled" ? C.white : "#7b1fa2" }} onClick={()=>setFilter("scheduled")}>📅 予定</button>
@@ -1801,7 +1808,6 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       };
       await saveMatch(match);
       setScheduledId(mid);
-      alert("📅 試合予定を登録しました！");
       onScheduled && onScheduled();
     } catch(e) {
       alert("登録に失敗しました: " + (e.message || e));
@@ -3561,6 +3567,7 @@ export default function App() {
   const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
   const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
   const [listFilter,   setListFilter]   = useState("all"); // 試合一覧フィルター
+  const [toast, setToast] = useState(null); // トースト通知
   const [matchId,      setMatchId]      = useState(null);
   const [copySourceId, setCopySourceId] = useState(null); // コピー元の試合ID
   const [editTargetId, setEditTargetId] = useState(null); // 編集対象の試合ID
@@ -3709,7 +3716,7 @@ export default function App() {
         sourceMatchId={copySourceId}
         editMatchId={editTargetId}
         initialMatchType={initMatchType}
-        onScheduled={()=>{ setInitMatchType(null); setScreen("list"); setListFilter("scheduled"); }}
+        onScheduled={()=>{ setInitMatchType(null); setListFilter("scheduled"); setScreen("list"); setTimeout(()=>setListFilter("all"), 100); }}
         onSave={id=>{
           setCopySourceId(null);
           setInitMatchType(null);
@@ -3756,6 +3763,7 @@ export default function App() {
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
       onNavigate={goNav}
       initialFilter={listFilter}
+      initialToast={listFilter==="scheduled" ? "📅 試合予定を登録しました！" : null}
     />
   );
 }
