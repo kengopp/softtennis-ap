@@ -227,6 +227,7 @@ function rowToMatchSummary(m, players=[], games=[]) {
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
+    court_number: m.court_number ?? "",
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
@@ -248,6 +249,7 @@ function rowToMatchFull(m, players, games, points, faults) {
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
+    court_number: m.court_number ?? "",
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
@@ -283,6 +285,7 @@ async function saveMatch(match) {
     is_doubles: match.is_doubles, first_server: match.first_server, status: match.status,
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
+    court_number: match.court_number || null,
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
@@ -805,7 +808,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   <span style={{ fontSize:13,fontWeight:700 }}>{m.tournament_name||"試合"}{m.round?` · ${m.round}`:""}</span>
                   <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
                 </div>
-                {m.venue&&<div style={{ fontSize:11,color:C.textSec,marginBottom:6 }}>📍 {m.venue}</div>}
+                {(m.venue||m.court_number)&&<div style={{ fontSize:11,color:C.textSec,marginBottom:6 }}>📍 {[m.venue,m.court_number].filter(Boolean).join(" · ")}</div>}
                 {[["A",aC,aP,m.match_score_a,aWin,C.teamA],["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB]].map(([t,club,names,sc,win,col])=>(
                   <div key={t} style={{ display:"flex",alignItems:"center",padding:"2px 0" }}>
                     <span style={{ width:18,fontSize:13 }}>{win?"🏆":""}</span>
@@ -1692,9 +1695,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
   const [tournamentName, setTournamentName] = useState(base?.tournament_name ?? "");
   const [round,          setRound]          = useState(base?.round ?? "");
   const [matchType,      setMatchType]      = useState(base?.match_type ?? initialMatchType ?? "tournament");
+  const [courtNumber,    setCourtNumber]    = useState(base?.court_number ?? "");
   const [gameFormat,     setGameFormat]     = useState(base?.game_format ?? 7);
   const [isDoubles,      setIsDoubles]      = useState(base?.is_doubles ?? true);
-  const [firstServer,    setFirstServer]    = useState(base?.first_server ?? "A");
+  const [firstServer,    setFirstServer]    = useState(base?.first_server ?? null);
   const [aClub,  setAClub]  = useState(aBase?.club_name ?? "");
   const [aP1,    setAP1]    = useState(aBase?.player_name ?? "");
   const [aP2,    setAP2]    = useState(aBase2?.player_name ?? "");
@@ -1702,7 +1706,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
   const [bP1,    setBP1]    = useState(bBase?.player_name ?? "");
   const [bP2,    setBP2]    = useState(bBase2?.player_name ?? "");
 
-  const canSave = aP1.trim() && bP1.trim();
+  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && firstServer;
 
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
@@ -1763,7 +1767,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer,
-        status:"scheduled", match_score_a:0, match_score_b:0, memo:"", players, games:[],
+        status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, players, games:[],
       };
       await saveMatch(match);
       setScheduledId(mid);
@@ -1788,7 +1792,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
         ];
         const updated = {
           ...editing,
-          match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType,
+          match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType, court_number:courtNumber||null,
           players: updatedPlayers,
           // 形式設定（game_format, is_doubles, first_server）はロックのため変更しない
         };
@@ -1809,7 +1813,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer,
-        status:"active", match_score_a:0, match_score_b:0, memo:"", players, games:[],
+        status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, players, games:[],
       };
       await saveMatch(match);
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
@@ -1852,14 +1856,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
           <FormRow label="試合日">
             <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
           </FormRow>
-          <FormRow label="場所 / 会場名">
-            <VenueField value={venue} onChange={setVenue} venues={venues} />
-          </FormRow>
           <FormRow label="大会名">
             <input style={S.inp} placeholder="例：○○中学校選手権" value={tournamentName} onChange={e => setTournamentName(e.target.value)}/>
-          </FormRow>
-          <FormRow label="何回戦">
-            <input style={S.inp} placeholder="例：準々決勝" value={round} onChange={e => setRound(e.target.value)}/>
           </FormRow>
           <FormRow label="試合の種別">
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -1867,6 +1865,15 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType })
                 <button key={key} style={S.togBtn(matchType===key)} onClick={() => setMatchType(key)}>{label}</button>
               ))}
             </div>
+          </FormRow>
+          <FormRow label="場所 / 会場名">
+            <VenueField value={venue} onChange={setVenue} venues={venues} />
+          </FormRow>
+          <FormRow label="コート番号（任意）">
+            <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
+          </FormRow>
+          <FormRow label="何回戦">
+            <input style={S.inp} placeholder="例：準々決勝" value={round} onChange={e => setRound(e.target.value)}/>
           </FormRow>
         </FormSec>
 
@@ -2194,7 +2201,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
           <div style={{ textAlign:"center" }}>
             {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700 }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
-            <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""} · {match.game_format}Gマッチ</div>
+            <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""}{match.court_number?` · ${match.court_number}`:""} · {match.game_format}Gマッチ</div>
           </div>
           <div style={{ display:"flex", gap:6 }}>
             {match.status==="active" && (
