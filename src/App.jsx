@@ -400,6 +400,21 @@ async function autoRegisterPlayerToRoster(playerName, teamName, isOwnTeam) {
   }
 }
 
+// 試合保存時に選手を選手マスターへ自動登録
+async function autoRegisterPlayerToRoster(playerName, teamName, isOwnTeam) {
+  if (!playerName?.trim()) return;
+  try {
+    const roster = await getPlayerRoster();
+    const baseName = playerName.trim();
+    const existingNames = new Set(roster.map(p => p.player_name));
+    if (existingNames.has(baseName)) return;
+    let finalName = baseName;
+    let n = 2;
+    while (existingNames.has(finalName)) { finalName = `${baseName}${n}`; n++; }
+    await savePlayer({ player_name: finalName, is_own_team: isOwnTeam, team_name: teamName || null });
+  } catch (e) { console.error("選手マスター自動登録エラー:", e); }
+}
+
 async function savePlayer(player) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
@@ -437,10 +452,7 @@ async function getKnownVenues() {
     const { data, error } = await supabase.from("matches").select("venue");
     if (error) { console.error("venue fetch error:", error); return []; }
     return [...new Set((data ?? []).map(r => r.venue).filter(Boolean))].sort();
-  } catch(e) {
-    console.error("getKnownVenues exception:", e);
-    return [];
-  }
+  } catch(e) { console.error("getKnownVenues exception:", e); return []; }
 }
 
 async function getKnownSchools() {
@@ -823,7 +835,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </div>
         )}
       </div>
-      <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={onNew}>＋</button>
+      <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew(filter)}>＋</button>
       <NavBar active="list" onNavigate={onNavigate}/>
 
       {confirmDelete && (
@@ -1448,24 +1460,15 @@ function PrefMiniFilter({ value, onChange, options }) {
   );
 }
 
-// ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
-// schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
-// prefFilter: 親から渡される都道府県絞り込み値（任意）
 // 会場名入力＋候補サジェストコンポーネント
 function VenueField({ value, onChange, venues }) {
   const safeValue = value ?? "";
   const safeVenues = venues ?? [];
-  const filtered = safeValue.trim()
-    ? safeVenues.filter(v => v.includes(safeValue.trim()))
-    : [];
+  const filtered = safeValue.trim() ? safeVenues.filter(v => v.includes(safeValue.trim())) : [];
   const [open, setOpen] = useState(false);
-
   return (
     <div style={{ position:"relative" }}>
-      <input
-        style={S.inp}
-        placeholder="例：○○市民コート"
-        value={safeValue}
+      <input style={S.inp} placeholder="例：○○市民コート" value={safeValue}
         onChange={e => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 200)}
@@ -1473,9 +1476,7 @@ function VenueField({ value, onChange, venues }) {
       {open && filtered.length > 0 && (
         <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:200, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", maxHeight:200, overflowY:"auto" }}>
           {filtered.map(v => (
-            <div
-              key={v}
-              style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
+            <div key={v} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
               onMouseDown={e => { e.preventDefault(); onChange(v); setOpen(false); }}
             >{v}</div>
           ))}
@@ -1485,6 +1486,9 @@ function VenueField({ value, onChange, venues }) {
   );
 }
 
+// ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
+// schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
+// prefFilter: 親から渡される都道府県絞り込み値（任意）
 function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
   const [customMode, setCustomMode] = useState(!!value && !schools.some(s => s.name === value));
 
@@ -1555,7 +1559,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -1581,10 +1585,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId }) {
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType }) {
   const base    = editing || source;
 
   // 編集モードでは形式設定をロック（試合開始後は変更不可）
@@ -1600,7 +1604,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source }) {
   const [venue,          setVenue]          = useState(base?.venue ?? "");
   const [tournamentName, setTournamentName] = useState(base?.tournament_name ?? "");
   const [round,          setRound]          = useState(base?.round ?? "");
-  const [matchType,      setMatchType]      = useState(base?.match_type ?? "tournament");
+  const [matchType,      setMatchType]      = useState(base?.match_type ?? initialMatchType ?? "tournament");
   const [gameFormat,     setGameFormat]     = useState(base?.game_format ?? 7);
   const [isDoubles,      setIsDoubles]      = useState(base?.is_doubles ?? true);
   const [firstServer,    setFirstServer]    = useState(base?.first_server ?? "A");
@@ -3312,6 +3316,8 @@ export default function App() {
   }, []);
 
   const [screen,       setScreen]       = useState("list");
+  const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
+  const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
   const [matchId,      setMatchId]      = useState(null);
   const [copySourceId, setCopySourceId] = useState(null); // コピー元の試合ID
   const [editTargetId, setEditTargetId] = useState(null); // 編集対象の試合ID
@@ -3390,7 +3396,7 @@ export default function App() {
     return (
       <PlayerStatsScreen
         onBack={()=>{ setStatsPlayerName(null); setScreen(playerStatsFrom); }}
-        onOpen={id=>{ setMatchId(id); setScreen("record"); }}
+        onOpen={id=>{ setMatchId(id); setPrevScreen("home"); setScreen("record"); }}
         initialPlayerName={statsPlayerName}
       />
     );
@@ -3416,7 +3422,7 @@ export default function App() {
   if (screen==="home") {
     return (
       <HomeScreen
-        onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }}
+        onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPrevScreen("home"); setScreen("setup"); }}
         onOpen={id=>{ setMatchId(id); setScreen("record"); }}
         onNavigate={goNav}
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
@@ -3448,28 +3454,25 @@ export default function App() {
       <MatchSetup
         sourceMatchId={copySourceId}
         editMatchId={editTargetId}
+        initialMatchType={initMatchType}
         onSave={id=>{
           setCopySourceId(null);
-          if (editTargetId) {
-            // 編集完了後は記録画面に戻る
-            setEditTargetId(null);
-            setMatchId(id);
-            setScreen("record");
-          } else {
-            setMatchId(id);
-            setScreen("record");
-          }
+          setInitMatchType(null);
+          setEditTargetId(null);
+          setMatchId(id);
+          setPrevScreen("record");
+          setScreen("record");
         }}
         onCancel={()=>{
           setCopySourceId(null);
+          setInitMatchType(null);
           if (editTargetId) {
-            // 編集キャンセル時は記録画面に戻る
             const back = editTargetId;
             setEditTargetId(null);
             setMatchId(back);
             setScreen("record");
           } else {
-            setScreen("list");
+            setScreen(prevScreen || "list");
           }
         }}
       />
@@ -3480,7 +3483,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{setScreen("list");setTick(t=>t+1);setMatchId(null);}}
+        onBack={()=>{ setTick(t=>t+1); setMatchId(null); setScreen(prevScreen==="home" ? "home" : "list"); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
       />
     );
@@ -3488,9 +3491,9 @@ export default function App() {
   return (
     <MatchList
       key={tick}
-      onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setScreen("setup"); }}
-      onOpen={id=>{setMatchId(id);setScreen("record");}}
-      onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setScreen("setup"); }}
+      onNew={f=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
+      onOpen={id=>{setMatchId(id); setPrevScreen("list"); setScreen("record");}}
+      onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
