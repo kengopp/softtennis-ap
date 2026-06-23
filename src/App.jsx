@@ -2196,7 +2196,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const teamALabel = match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
   const teamBLabel = match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
   // 若番=自チーム左、遅番=自チーム右
-  const isYounger = match.is_younger === true;
+  const isYounger = match.is_younger !== false;
   // left=左側表示チーム、right=右側表示チーム
   const leftTeam  = isYounger ? "A" : "B";
   const rightTeam = isYounger ? "B" : "A";
