@@ -2783,30 +2783,30 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               <div style={{ background:C.white,borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",marginBottom:12 }}>
                 <div style={{ background:C.navy,padding:"8px 14px",display:"flex",alignItems:"center" }}>
                   <span style={{ flex:1,fontSize:11,fontWeight:700,color:C.white }}>ゲーム別スコア</span>
-                  <span style={{ width:74,fontSize:10,fontWeight:700,color:isYounger?C.teamA:C.teamB,textAlign:"center" }}>{isYounger?teamALabel:teamBLabel}</span>
-                  <span style={{ width:74,fontSize:10,fontWeight:700,color:isYounger?C.teamB:C.teamA,textAlign:"center" }}>{isYounger?teamBLabel:teamALabel}</span>
+                  <span style={{ width:74,fontSize:10,fontWeight:700,color:C.teamA,textAlign:"center" }}>{leftLabel}</span>
+                  <span style={{ width:74,fontSize:10,fontWeight:700,color:C.teamB,textAlign:"center" }}>{rightLabel}</span>
                 </div>
                 {match.games.map(g=>(
                   <div key={g.id} style={{ display:"flex",alignItems:"center",padding:"10px 14px",borderBottom:"1px solid "+C.border }}>
                     <span style={{ fontSize:12,color:C.textSec,width:46 }}>{g.is_final?"🔥":""}G{g.game_number}</span>
                     <span style={{ flex:1,fontSize:15,fontWeight:700,textAlign:"center" }}>
-                      <span style={{ color:g.winner_team===(isYounger?"A":"B")?C.teamA:C.textSec }}>{isYounger?g.score_a:g.score_b}</span>
+                      <span style={{ color:g.winner_team===leftTeam?C.teamA:C.textSec }}>{leftScore(g)}</span>
                       <span style={{ color:C.textSec,margin:"0 8px" }}>-</span>
-                      <span style={{ color:g.winner_team===(isYounger?"B":"A")?C.teamB:C.textSec }}>{isYounger?g.score_b:g.score_a}</span>
+                      <span style={{ color:g.winner_team===rightTeam?C.teamB:C.textSec }}>{rightScore(g)}</span>
                     </span>
-                    <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===(isYounger?"A":"B")?"🏆":""}</span>
-                    <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===(isYounger?"B":"A")?"🏆":""}</span>
+                    <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===leftTeam?"🏆":""}</span>
+                    <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===rightTeam?"🏆":""}</span>
                   </div>
                 ))}
                 <div style={{ display:"flex",alignItems:"center",padding:"12px 14px",background:C.accentL }}>
                   <span style={{ fontSize:12,fontWeight:700,color:C.navy,width:46 }}>合計</span>
                   <span style={{ flex:1,fontSize:20,fontWeight:900,textAlign:"center" }}>
-                    <span style={{ color:(isYounger?match.match_score_a:match.match_score_b)>(isYounger?match.match_score_b:match.match_score_a)?C.teamA:C.textSec }}>{isYounger?match.match_score_a:match.match_score_b}</span>
+                    <span style={{ color:leftMatchScore>rightMatchScore?C.teamA:C.textSec }}>{leftMatchScore}</span>
                     <span style={{ color:C.textSec,margin:"0 8px" }}>-</span>
-                    <span style={{ color:(isYounger?match.match_score_b:match.match_score_a)>(isYounger?match.match_score_a:match.match_score_b)?C.teamB:C.textSec }}>{isYounger?match.match_score_b:match.match_score_a}</span>
+                    <span style={{ color:rightMatchScore>leftMatchScore?C.teamB:C.textSec }}>{rightMatchScore}</span>
                   </span>
-                  <span style={{ width:74,textAlign:"center",fontSize:16 }}>{(isYounger?match.match_score_a:match.match_score_b)>(isYounger?match.match_score_b:match.match_score_a)?"🏆":""}</span>
-                  <span style={{ width:74,textAlign:"center",fontSize:16 }}>{(isYounger?match.match_score_b:match.match_score_a)>(isYounger?match.match_score_a:match.match_score_b)?"🏆":""}</span>
+                  <span style={{ width:74,textAlign:"center",fontSize:16 }}>{leftMatchScore>rightMatchScore?"🏆":""}</span>
+                  <span style={{ width:74,textAlign:"center",fontSize:16 }}>{rightMatchScore>leftMatchScore?"🏆":""}</span>
                 </div>
               </div>
               {/* 試合メモ */}
