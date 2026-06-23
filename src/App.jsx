@@ -4173,7 +4173,7 @@ function TeamMatchDetailWrapper({ tmId, onBack, onOpen }) {
       tm={tm}
       onBack={onBack}
       onEdit={()=>{}}
-      onOpen={id=>{ onOpen(id); }}
+      onOpen={id=>{ onOpen(id, reload); }}
       onDelete={async ()=>{
         if (!window.confirm("この団体戦を削除しますか？（個人戦データは残ります）")) return;
         await deleteTeamMatch(tmId);
@@ -4531,6 +4531,7 @@ export default function App() {
   const [playerStatsFrom,   setPlayerStatsFrom]   = useState("home"); // 選手戦績画面の戻り先（home/stats）
   const [teamMatchFrom,     setTeamMatchFrom]     = useState("list"); // 団体戦から個人戦を開いたときの戻り先
   const [currentTeamMatchId, setCurrentTeamMatchId] = useState(null); // 現在表示中の団体戦ID
+  const [teamMatchReload, setTeamMatchReload] = useState(null); // 団体戦詳細のリロード関数
 
   // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
   useEffect(() => {
@@ -4675,7 +4676,7 @@ export default function App() {
       <TeamMatchDetailWrapper
         tmId={currentTeamMatchId}
         onBack={()=>{ setCurrentTeamMatchId(null); setScreen("teamMatch"); }}
-        onOpen={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); }}
+        onOpen={(id, reloadFn)=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setTeamMatchReload(()=>reloadFn||null); setScreen("record"); }}
       />
     );
   }
@@ -4730,7 +4731,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{ setTick(t=>t+1); setMatchId(null); setScreen(prevScreen==="home" ? "home" : "list"); }}
+        onBack={()=>{ setTick(t=>t+1); setMatchId(null); if (prevScreen==="teamMatchDetail") { if (teamMatchReload) teamMatchReload(); setScreen("teamMatchDetail"); } else { setScreen(prevScreen==="home" ? "home" : "list"); } }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
