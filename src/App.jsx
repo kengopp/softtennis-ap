@@ -2974,7 +2974,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
                 <button style={{ height:70,background:isYounger?oppColor:ownColor,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)" }} onClick={()=>addPoint(rightTeam)}>
                   <span style={{ fontSize:22 }}>得点</span>
-                  <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||"相手"}</span>
+                  <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
                 </button>
               </div>
               <button style={{ width:"100%",padding:11,background:"#dbeafe",color:"#1565c0",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={undo}>↩ 1つ前に戻す</button>
@@ -3888,7 +3888,7 @@ function TeamMatchSetup({ editing, onSave, onCancel, onOpen }) {
   );
 }
 
-function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave, onReload }) {
+function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave, onReload, ownSchoolName="" }) {
   const { wins, loses, results, isWin } = calcTeamResult(tm);
   const finished = tm.matches.filter(m => m.status === "finished").length;
   const [saving, setSaving] = useState(false);
@@ -3993,7 +3993,12 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave, onReloa
       <div style={{ padding:14, paddingBottom:90 }}>
         {/* 結果サマリー */}
         <div style={{ ...S.card, padding:"16px 14px", marginBottom:14, textAlign:"center" }}>
-          <div style={{ fontSize:13,color:C.textSec,marginBottom:4 }}>vs {tm.opponent_name}</div>
+          <div style={{ fontSize:13,color:C.textSec,marginBottom:4 }}>
+            {ownSchoolName && <span style={{ fontWeight:700,color:C.text }}>{ownSchoolName}</span>}
+            {ownSchoolName && <span> vs </span>}
+            {!ownSchoolName && <span>vs </span>}
+            <span style={{ fontWeight:700,color:C.text }}>{tm.opponent_name}</span>
+          </div>
           <div style={{ fontSize:36,fontWeight:900,color: finished===0 ? C.textSec : isWin ? C.teamA : C.red, marginBottom:8 }}>
             {finished === 0 ? "未実施" : `${wins}勝${loses}敗`}
           </div>
@@ -4155,12 +4160,21 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave, onReloa
 function TeamMatchDetailWrapper({ tmId, onBack, onOpen }) {
   const [tm, setTm] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [ownSchoolName, setOwnSchoolName] = useState("");
 
   const reload = async () => {
     setLoading(true);
-    const list = await getTeamMatches();
+    const [list, profile, schools] = await Promise.all([
+      getTeamMatches(),
+      getMyProfile(),
+      getSchools(),
+    ]);
     const found = list.find(t => t.id === tmId);
     setTm(found || null);
+    if (profile?.school_id) {
+      const mine = schools.find(s => s.id === profile.school_id);
+      setOwnSchoolName(mine?.name || "");
+    }
     setLoading(false);
   };
   useEffect(() => { reload(); }, [tmId]);
@@ -4185,6 +4199,7 @@ function TeamMatchDetailWrapper({ tmId, onBack, onOpen }) {
       onEdit={()=>{}}
       onOpen={id=>{ onOpen(id); }}
       onReload={reload}
+      ownSchoolName={ownSchoolName}
       onDelete={async ()=>{
         if (!window.confirm("この団体戦を削除しますか？（個人戦データは残ります）")) return;
         await deleteTeamMatch(tmId);
