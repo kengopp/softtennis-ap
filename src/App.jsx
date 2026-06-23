@@ -2144,7 +2144,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           )}
         </FormSec>
 
-        <FormSec title="自チーム (A)">
+        {!isTeam && <FormSec title="自チーム (A)">
           <FormRow label="チーム名 / 学校名" labelRight={<PrefMiniFilter value={aClubPref} onChange={setAClubPref} options={knownPrefsFrom(schools)} />}>
             <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
           </FormRow>
@@ -2175,7 +2175,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               マスター画面の「👥 選手マスター」(自チーム)から選手を登録すると、ここで選んで入力できるようになります。
             </div>
           )}
-        </FormSec>
+        </FormSec>}
 
         {!isTeam && (
           <FormSec title="相手チーム (B)">
@@ -2213,55 +2213,69 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         )}
         {isTeam && (
           <>
-            {[["1番手",aP1,setAP1,aP2,setAP2,bP1,setBP1,bP2,setBP2],
-              ["2番手",teamAP1_2,setTeamAP1_2,teamAP2_2,setTeamAP2_2,teamBP1_2,setTeamBP1_2,teamBP2_2,setTeamBP2_2],
-              ["3番手",teamAP1_3,setTeamAP1_3,teamAP2_3,setTeamAP2_3,teamBP1_3,setTeamBP1_3,teamBP2_3,setTeamBP2_3],
-            ].map(([label, ap1, setAp1, ap2, setAp2, bp1, setBp1, bp2, setBp2]) => (
-              <FormSec key={label} title={label}>
-                <div style={{ fontSize:12,fontWeight:700,color:C.textSec,marginBottom:4 }}>自チーム</div>
-                <FormRow label="選手1">
-                  <input style={S.inp} placeholder="選手名" value={ap1} onChange={e=>setAp1(e.target.value)}/>
-                  {ownRoster.length>0 && (
-                    <div style={{ marginTop:6 }}>
-                      {ownRoster.map(p=>(
-                        <span key={p.id} style={S.chip(ap1===p.player_name)} onClick={()=>setAp1(p.player_name)}>{p.player_name}</span>
-                      ))}
-                    </div>
-                  )}
-                </FormRow>
-                <FormRow label="選手2（ペア）">
-                  <input style={S.inp} placeholder="選手名" value={ap2} onChange={e=>setAp2(e.target.value)}/>
-                  {ownRoster.length>0 && (
-                    <div style={{ marginTop:6 }}>
-                      {ownRoster.map(p=>(
-                        <span key={p.id} style={S.chip(ap2===p.player_name)} onClick={()=>setAp2(p.player_name)}>{p.player_name}</span>
-                      ))}
-                    </div>
-                  )}
-                </FormRow>
-                <div style={{ fontSize:12,fontWeight:700,color:C.textSec,margin:"8px 0 4px" }}>相手チーム（{bClub||"相手校"}）</div>
-                <FormRow label="選手1">
-                  <input style={S.inp} placeholder="選手名" value={bp1} onChange={e=>setBp1(e.target.value)}/>
-                  {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && (
-                    <div style={{ marginTop:6 }}>
-                      {oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(
-                        <span key={p.id} style={S.chip(bp1===p.player_name)} onClick={()=>setBp1(p.player_name)}>{p.player_name}</span>
-                      ))}
-                    </div>
-                  )}
-                </FormRow>
-                <FormRow label="選手2（ペア）">
-                  <input style={S.inp} placeholder="選手名" value={bp2} onChange={e=>setBp2(e.target.value)}/>
-                  {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && (
-                    <div style={{ marginTop:6 }}>
-                      {oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(
-                        <span key={p.id} style={S.chip(bp2===p.player_name)} onClick={()=>setBp2(p.player_name)}>{p.player_name}</span>
-                      ))}
-                    </div>
-                  )}
-                </FormRow>
-              </FormSec>
-            ))}
+            {/* 1番手 */}
+            <FormSec title="1番手">
+              <div style={{ fontSize:12,fontWeight:700,color:C.textSec,marginBottom:4 }}>自チーム</div>
+              <FormRow label="選手1">
+                <input style={S.inp} placeholder="選手名" value={aP1} onChange={e=>setAP1(e.target.value)}/>
+                {ownRoster.length>0 && <div style={{ marginTop:6 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(aP1===p.player_name)} onClick={()=>setAP1(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <FormRow label="選手2（ペア）">
+                <input style={S.inp} placeholder="選手名" value={aP2} onChange={e=>setAP2(e.target.value)}/>
+                {ownRoster.length>0 && <div style={{ marginTop:6 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(aP2===p.player_name)} onClick={()=>setAP2(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <div style={{ fontSize:12,fontWeight:700,color:C.textSec,margin:"8px 0 4px" }}>相手チーム（{bClub||"相手校"}）</div>
+              <FormRow label="選手1">
+                <input style={S.inp} placeholder="選手名" value={bP1} onChange={e=>setBP1(e.target.value)}/>
+                {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && <div style={{ marginTop:6 }}>{oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(<span key={p.id} style={S.chip(bP1===p.player_name)} onClick={()=>setBP1(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <FormRow label="選手2（ペア）">
+                <input style={S.inp} placeholder="選手名" value={bP2} onChange={e=>setBP2(e.target.value)}/>
+                {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && <div style={{ marginTop:6 }}>{oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(<span key={p.id} style={S.chip(bP2===p.player_name)} onClick={()=>setBP2(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+            </FormSec>
+            {/* 2番手 */}
+            <FormSec title="2番手">
+              <div style={{ fontSize:12,fontWeight:700,color:C.textSec,marginBottom:4 }}>自チーム</div>
+              <FormRow label="選手1">
+                <input style={S.inp} placeholder="選手名" value={teamAP1_2} onChange={e=>setTeamAP1_2(e.target.value)}/>
+                {ownRoster.length>0 && <div style={{ marginTop:6 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(teamAP1_2===p.player_name)} onClick={()=>setTeamAP1_2(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <FormRow label="選手2（ペア）">
+                <input style={S.inp} placeholder="選手名" value={teamAP2_2} onChange={e=>setTeamAP2_2(e.target.value)}/>
+                {ownRoster.length>0 && <div style={{ marginTop:6 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(teamAP2_2===p.player_name)} onClick={()=>setTeamAP2_2(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <div style={{ fontSize:12,fontWeight:700,color:C.textSec,margin:"8px 0 4px" }}>相手チーム（{bClub||"相手校"}）</div>
+              <FormRow label="選手1">
+                <input style={S.inp} placeholder="選手名" value={teamBP1_2} onChange={e=>setTeamBP1_2(e.target.value)}/>
+                {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && <div style={{ marginTop:6 }}>{oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(<span key={p.id} style={S.chip(teamBP1_2===p.player_name)} onClick={()=>setTeamBP1_2(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <FormRow label="選手2（ペア）">
+                <input style={S.inp} placeholder="選手名" value={teamBP2_2} onChange={e=>setTeamBP2_2(e.target.value)}/>
+                {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && <div style={{ marginTop:6 }}>{oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(<span key={p.id} style={S.chip(teamBP2_2===p.player_name)} onClick={()=>setTeamBP2_2(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+            </FormSec>
+            {/* 3番手 */}
+            <FormSec title="3番手">
+              <div style={{ fontSize:12,fontWeight:700,color:C.textSec,marginBottom:4 }}>自チーム</div>
+              <FormRow label="選手1">
+                <input style={S.inp} placeholder="選手名" value={teamAP1_3} onChange={e=>setTeamAP1_3(e.target.value)}/>
+                {ownRoster.length>0 && <div style={{ marginTop:6 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(teamAP1_3===p.player_name)} onClick={()=>setTeamAP1_3(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <FormRow label="選手2（ペア）">
+                <input style={S.inp} placeholder="選手名" value={teamAP2_3} onChange={e=>setTeamAP2_3(e.target.value)}/>
+                {ownRoster.length>0 && <div style={{ marginTop:6 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(teamAP2_3===p.player_name)} onClick={()=>setTeamAP2_3(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <div style={{ fontSize:12,fontWeight:700,color:C.textSec,margin:"8px 0 4px" }}>相手チーム（{bClub||"相手校"}）</div>
+              <FormRow label="選手1">
+                <input style={S.inp} placeholder="選手名" value={teamBP1_3} onChange={e=>setTeamBP1_3(e.target.value)}/>
+                {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && <div style={{ marginTop:6 }}>{oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(<span key={p.id} style={S.chip(teamBP1_3===p.player_name)} onClick={()=>setTeamBP1_3(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+              <FormRow label="選手2（ペア）">
+                <input style={S.inp} placeholder="選手名" value={teamBP2_3} onChange={e=>setTeamBP2_3(e.target.value)}/>
+                {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && <div style={{ marginTop:6 }}>{oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(<span key={p.id} style={S.chip(teamBP2_3===p.player_name)} onClick={()=>setTeamBP2_3(p.player_name)}>{p.player_name}</span>))}</div>}
+              </FormRow>
+            </FormSec>
           </>
         )}
 
