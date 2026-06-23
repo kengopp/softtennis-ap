@@ -1,5 +1,22 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, Component } from "react";
 import { supabase } from "./supabase-client";
+
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 24, color: "red", fontSize: 13 }}>
+          <b>エラーが発生しました</b><br/>
+          {this.state.error?.message}<br/>
+          {this.state.error?.stack?.slice(0, 300)}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ============================================================
 // 定数
@@ -2118,17 +2135,19 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
     );
   }
   return (
-    <ScoreRecordInner
-      key={initialMatch.id}
-      initialMatch={initialMatch}
-      onBack={onBack}
-      onEdit={onEdit}
-      onReload={()=>setLoadKey(k=>k+1)}
-      onRefresh={handleRefresh}
-      refreshing={refreshing}
-      onNavigate={onNavigate}
-      viewOnly={viewOnly}
-    />
+    <ErrorBoundary>
+      <ScoreRecordInner
+        key={initialMatch.id}
+        initialMatch={initialMatch}
+        onBack={onBack}
+        onEdit={onEdit}
+        onReload={()=>setLoadKey(k=>k+1)}
+        onRefresh={handleRefresh}
+        refreshing={refreshing}
+        onNavigate={onNavigate}
+        viewOnly={viewOnly}
+      />
+    </ErrorBoundary>
   );
 }
 
