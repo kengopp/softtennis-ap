@@ -2094,14 +2094,18 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [m, { data: { user } }] = await Promise.all([
-        getMatch(matchId),
-        supabase.auth.getUser(),
-      ]);
-      if (cancelled) return;
-      setInitialMatch(m);
-      // 作成者でなければ観戦モード
-      if (m && user && m.created_by !== user.id) setViewOnly(true);
+      try {
+        const [m, { data: { user } }] = await Promise.all([
+          getMatch(matchId),
+          supabase.auth.getUser(),
+        ]);
+        if (cancelled) return;
+        setInitialMatch(m);
+        // 作成者でなければ観戦モード
+        if (m && user && m.created_by !== user.id) setViewOnly(true);
+      } catch(e) {
+        if (!cancelled) alert("試合読み込みエラー: " + JSON.stringify({msg: e?.message, code: e?.code, details: e?.details}));
+      }
     })();
     return () => { cancelled = true; };
   }, [matchId, loadKey]);
@@ -3820,7 +3824,7 @@ export default function App() {
       onNew={f=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
       onOpen={id=>{setMatchId(id); setPrevScreen("list"); setScreen("record");}}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
-      onStartScheduled={async (id, firstServer)=>{ await startScheduledMatch(id, firstServer); setMatchId(id); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); }}
+      onStartScheduled={async (id, firstServer)=>{ try { await startScheduledMatch(id, firstServer); setMatchId(id); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + JSON.stringify({msg: e?.message, code: e?.code, details: e?.details, hint: e?.hint})); } }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
