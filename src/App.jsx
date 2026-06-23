@@ -829,6 +829,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           const bP=m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
           const aC=m.players.find(p=>p.team==="A")?.club_name??"";
           const bC=m.players.find(p=>p.team==="B")?.club_name??"";
+          const isYoungerM = m.is_younger === true;
+          const rows = isYoungerM
+            ? [["A",aC,aP,m.match_score_a,aWin,C.teamA],["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB]]
+            : [["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB],["A",aC,aP,m.match_score_a,aWin,C.teamA]];
           return (
             <div key={m.id} style={{ ...S.card,boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4,background:m.status==="finished"?(aWin?C.teamA:C.teamB):C.accent }}/>
@@ -838,10 +842,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
                 </div>
                 {(m.venue||m.court_number)&&<div style={{ fontSize:11,color:C.textSec,marginBottom:6 }}>📍 {[m.venue,m.court_number].filter(Boolean).join(" · ")}</div>}
-                {[["A",aC,aP,m.match_score_a,aWin,C.teamA],["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB]].map(([t,club,names,sc,win,col])=>(
+                {rows.map(([t,club,names,sc,win,col])=>(
                   <div key={t} style={{ display:"flex",alignItems:"center",padding:"2px 0" }}>
                     <span style={{ width:18,fontSize:13 }}>{win?"🏆":""}</span>
-                    <span style={{ flex:1,fontSize:13,fontWeight:win?700:400 }}>{club} {names}</span>
+                    <div style={{ flex:1 }}>
+                      {club && <div style={{ fontSize:11,color:C.textSec,marginBottom:1 }}>{club}</div>}
+                      <div style={{ fontSize:13,fontWeight:win?700:400 }}>{names}</div>
+                    </div>
                     <span style={{ fontSize:22,fontWeight:800,color:win?col:C.textSec }}>{sc??"-"}</span>
                   </div>
                 ))}
