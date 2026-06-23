@@ -1746,7 +1746,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [bP2,    setBP2]    = useState(bBase2?.player_name ?? "");
 
   const isScheduledEdit = editing?.status === "scheduled";
-  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim());
+  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && isYounger !== null;
 
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
@@ -1878,7 +1878,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       await Promise.all(autoRegisterTasks);
       onSave(mid);
     } catch (e) {
-      alert("保存に失敗しました: " + (e.message || e));
+      alert("保存エラー: " + JSON.stringify({msg: e?.message, code: e?.code, details: e?.details, hint: e?.hint}));
     } finally {
       setSaving(false);
     }
