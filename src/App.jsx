@@ -267,6 +267,7 @@ function rowToMatchFull(m, players, games, points, faults) {
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
     court_number: m.court_number ?? "",
+    is_younger: m.is_younger === false ? false : true,
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
@@ -303,7 +304,7 @@ async function saveMatch(match) {
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
     court_number: match.court_number || null,
-    is_younger: match.is_younger === false ? false : true,
+    is_younger: match.is_younger !== false,
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
