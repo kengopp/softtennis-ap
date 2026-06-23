@@ -303,7 +303,7 @@ async function saveMatch(match) {
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
     court_number: match.court_number || null,
-    is_younger: match.is_younger === true,
+    is_younger: match.is_younger === false ? false : true,
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
