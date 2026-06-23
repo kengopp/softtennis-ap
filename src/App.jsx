@@ -4173,7 +4173,7 @@ function TeamMatchDetailWrapper({ tmId, onBack, onOpen }) {
       tm={tm}
       onBack={onBack}
       onEdit={()=>{}}
-      onOpen={id=>{ onOpen(id, reload); }}
+      onOpen={id=>{ onOpen(id); }}
       onDelete={async ()=>{
         if (!window.confirm("この団体戦を削除しますか？（個人戦データは残ります）")) return;
         await deleteTeamMatch(tmId);
@@ -4638,6 +4638,7 @@ export default function App() {
     else if (key==="master") setScreen("master");
     else if (key.startsWith("teamMatchDetail_")) {
       setCurrentTeamMatchId(key.replace("teamMatchDetail_",""));
+      setTeamMatchTick(t=>t+1);
       setScreen("teamMatchDetail");
     }
   }
