@@ -2527,6 +2527,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const rightScore = (g) => isYounger ? g.score_b : g.score_a;
   const leftMatchScore  = isYounger ? match.match_score_a : match.match_score_b;
   const rightMatchScore = isYounger ? match.match_score_b : match.match_score_a;
+  // 自チーム=緑、相手=オレンジ（左右に関わらず固定）
+  const ownColor  = "#2ecc71";  // 緑
+  const oppColor  = "#f97316";  // オレンジ
+  const leftColor  = ownColor;  // 左=常に自チーム
+  const rightColor = oppColor;  // 右=常に相手
 
   function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
 
@@ -2728,7 +2733,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         {/* ゲームバッジ */}
         <div style={{ display:"flex",gap:5,marginTop:8,flexWrap:"wrap",justifyContent:"center" }}>
           {match.games.map(g=>(
-            <div key={g.id} style={{ padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:g.winner_team===leftTeam?"#2ecc71":g.winner_team===rightTeam?"rgba(255,100,100,0.7)":"rgba(255,255,255,0.2)",color:C.white }}>
+            <div key={g.id} style={{ padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:g.winner_team===leftTeam?ownColor:g.winner_team===rightTeam?oppColor:"rgba(255,255,255,0.2)",color:C.white }}>
               {g.is_final?"🔥":""}G{g.game_number}: {leftScore(g)}-{rightScore(g)}
             </div>
           ))}
@@ -2783,16 +2788,16 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               <div style={{ background:C.white,borderRadius:12,border:"1px solid "+C.border,overflow:"hidden",marginBottom:12 }}>
                 <div style={{ background:C.navy,padding:"8px 14px",display:"flex",alignItems:"center" }}>
                   <span style={{ flex:1,fontSize:11,fontWeight:700,color:C.white }}>ゲーム別スコア</span>
-                  <span style={{ width:74,fontSize:10,fontWeight:700,color:C.teamA,textAlign:"center" }}>{leftLabel}</span>
-                  <span style={{ width:74,fontSize:10,fontWeight:700,color:C.teamB,textAlign:"center" }}>{rightLabel}</span>
+                  <span style={{ width:74,fontSize:10,fontWeight:700,color:ownColor,textAlign:"center" }}>{leftLabel}</span>
+                  <span style={{ width:74,fontSize:10,fontWeight:700,color:oppColor,textAlign:"center" }}>{rightLabel}</span>
                 </div>
                 {match.games.map(g=>(
                   <div key={g.id} style={{ display:"flex",alignItems:"center",padding:"10px 14px",borderBottom:"1px solid "+C.border }}>
                     <span style={{ fontSize:12,color:C.textSec,width:46 }}>{g.is_final?"🔥":""}G{g.game_number}</span>
                     <span style={{ flex:1,fontSize:15,fontWeight:700,textAlign:"center" }}>
-                      <span style={{ color:g.winner_team===leftTeam?C.teamA:C.textSec }}>{leftScore(g)}</span>
+                      <span style={{ color:g.winner_team===leftTeam?ownColor:C.textSec }}>{leftScore(g)}</span>
                       <span style={{ color:C.textSec,margin:"0 8px" }}>-</span>
-                      <span style={{ color:g.winner_team===rightTeam?C.teamB:C.textSec }}>{rightScore(g)}</span>
+                      <span style={{ color:g.winner_team===rightTeam?oppColor:C.textSec }}>{rightScore(g)}</span>
                     </span>
                     <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===leftTeam?"🏆":""}</span>
                     <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===rightTeam?"🏆":""}</span>
@@ -2801,9 +2806,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ display:"flex",alignItems:"center",padding:"12px 14px",background:C.accentL }}>
                   <span style={{ fontSize:12,fontWeight:700,color:C.navy,width:46 }}>合計</span>
                   <span style={{ flex:1,fontSize:20,fontWeight:900,textAlign:"center" }}>
-                    <span style={{ color:leftMatchScore>rightMatchScore?C.teamA:C.textSec }}>{leftMatchScore}</span>
+                    <span style={{ color:leftMatchScore>rightMatchScore?ownColor:C.textSec }}>{leftMatchScore}</span>
                     <span style={{ color:C.textSec,margin:"0 8px" }}>-</span>
-                    <span style={{ color:rightMatchScore>leftMatchScore?C.teamB:C.textSec }}>{rightMatchScore}</span>
+                    <span style={{ color:rightMatchScore>leftMatchScore?oppColor:C.textSec }}>{rightMatchScore}</span>
                   </span>
                   <span style={{ width:74,textAlign:"center",fontSize:16 }}>{leftMatchScore>rightMatchScore?"🏆":""}</span>
                   <span style={{ width:74,textAlign:"center",fontSize:16 }}>{rightMatchScore>leftMatchScore?"🏆":""}</span>
@@ -2961,15 +2966,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               {/* ★得点ボタン（◯✕→「得点」表記に変更） */}
               <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どちらが得点しましたか？</div>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
-                {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
-                <button style={{ height:70,background:isYounger?"#2ecc71":C.red,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(229,57,53,0.35)" }} onClick={()=>addPoint(leftTeam)}>
+                {/* 左ボタン：常に自チーム(緑) */}
+                <button style={{ height:70,background:ownColor,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:"0 3px 10px rgba(46,204,113,0.35)" }} onClick={()=>addPoint(leftTeam)}>
                   <span style={{ fontSize:22 }}>得点</span>
-                  <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||(isYounger?"自分たち":"相手")}</span>
+                  <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||"自チーム"}</span>
                 </button>
-                {/* 右ボタン：若番=相手(赤)、遅番=自チーム(緑) */}
-                <button style={{ height:70,background:isYounger?C.red:"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(229,57,53,0.35)":"0 3px 10px rgba(46,204,113,0.35)" }} onClick={()=>addPoint(rightTeam)}>
+                {/* 右ボタン：常に相手(オレンジ) */}
+                <button style={{ height:70,background:oppColor,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:"0 3px 10px rgba(249,115,22,0.35)" }} onClick={()=>addPoint(rightTeam)}>
                   <span style={{ fontSize:22 }}>得点</span>
-                  <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自分たち")}</span>
+                  <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||"相手"}</span>
                 </button>
               </div>
               <button style={{ width:"100%",padding:11,background:"#dbeafe",color:"#1565c0",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={undo}>↩ 1つ前に戻す</button>
