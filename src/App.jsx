@@ -828,13 +828,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           const bP=m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
           const aC=m.players.find(p=>p.team==="A")?.club_name??"";
           const bC=m.players.find(p=>p.team==="B")?.club_name??"";
-          const isYoungerM = m.is_younger === true;
+          const isYoungerM = m.is_younger !== false;
           const rows = isYoungerM
             ? [["A",aC,aP,m.match_score_a,aWin,C.teamA],["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB]]
             : [["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB],["A",aC,aP,m.match_score_a,aWin,C.teamA]];
           return (
             <div key={m.id} style={{ ...S.card,boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-              <div style={{ height:4,background:m.status==="finished"?((isYoungerM?aWin:!aWin)?"#2ecc71":"#f97316"):C.accent }}/>
+              <div style={{ height:4,background:m.status==="finished"?((m.is_younger!==false?aWin:!aWin)?"#2ecc71":"#f97316"):C.accent }}/>
               <div style={{ padding:"12px 14px",cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
                 <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
                   <span style={{ fontSize:13,fontWeight:700 }}>{m.tournament_name||"試合"}{m.round?` · ${m.round}`:""}</span>
