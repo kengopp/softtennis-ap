@@ -326,7 +326,7 @@ async function saveMatch(match) {
       id: g.id, match_id: match.id, game_number: g.game_number, server_team: g.server_team,
       is_final: g.is_final, score_a: g.score_a, score_b: g.score_b, winner_team: g.winner_team || null,
     };
-    const { error: gErr } = await supabase.from("games").insert(gameRow);
+    const { error: gErr } = await supabase.from("games").upsert(gameRow);
     if (gErr) throw gErr;
 
     if (g.points?.length) {
@@ -337,7 +337,7 @@ async function saveMatch(match) {
         play_type: pt.play_type || null, side_type: pt.side_type || null, result_type: pt.result_type || null,
         is_winner: pt.is_winner, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
       }));
-      const { error: ptErr } = await supabase.from("points").insert(pointRows);
+      const { error: ptErr } = await supabase.from("points").upsert(pointRows);
       if (ptErr) throw ptErr;
     }
     if (g.faults?.length) {
