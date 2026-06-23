@@ -840,7 +840,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             : [["B",bC,bP,m.match_score_b,oppWin,C.teamB],["A",aC,aP,m.match_score_a,ownWin,C.teamA]];
           return (
             <div key={m.id} style={{ ...S.card,boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-              <div style={{ height:4,background:m.status==="finished"?(rows[0][4]?"#2ecc71":"#f97316"):C.accent }}/>
+              <div style={{ height:4,background:m.status==="finished"?(ownWin?"#2ecc71":"#f97316"):C.accent }}/>
               <div style={{ padding:"12px 14px",cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
                 <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
                   <span style={{ fontSize:13,fontWeight:700 }}>{m.tournament_name||"試合"}{m.round?` · ${m.round}`:""}</span>
@@ -1139,7 +1139,7 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                     <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
-                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?((m.is_younger===true?aWin:!aWin)?"#2ecc71":"#f97316"):C.textSec }}>
+                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(aWin?"#2ecc71":"#f97316"):C.textSec }}>
                       {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
                     </span>
                   </div>
