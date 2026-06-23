@@ -4532,6 +4532,7 @@ export default function App() {
   const [teamMatchFrom,     setTeamMatchFrom]     = useState("list"); // 団体戦から個人戦を開いたときの戻り先
   const [currentTeamMatchId, setCurrentTeamMatchId] = useState(null); // 現在表示中の団体戦ID
   const [teamMatchReload, setTeamMatchReload] = useState(null); // 団体戦詳細のリロード関数
+  const [teamMatchTick, setTeamMatchTick] = useState(0); // 団体戦詳細の再マウント用
 
   // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
   useEffect(() => {
@@ -4674,9 +4675,10 @@ export default function App() {
   if (screen==="teamMatchDetail" && currentTeamMatchId) {
     return (
       <TeamMatchDetailWrapper
+        key={currentTeamMatchId + teamMatchTick}
         tmId={currentTeamMatchId}
         onBack={()=>{ setCurrentTeamMatchId(null); setScreen("teamMatch"); }}
-        onOpen={(id, reloadFn)=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setTeamMatchReload(()=>reloadFn||null); setScreen("record"); }}
+        onOpen={(id)=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); }}
       />
     );
   }
@@ -4731,7 +4733,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{ setTick(t=>t+1); setMatchId(null); if (prevScreen==="teamMatchDetail") { if (teamMatchReload) teamMatchReload(); setScreen("teamMatchDetail"); } else { setScreen(prevScreen==="home" ? "home" : "list"); } }}
+        onBack={()=>{ setTick(t=>t+1); setMatchId(null); if (prevScreen==="teamMatchDetail") { setTeamMatchTick(t=>t+1); setScreen("teamMatchDetail"); } else { setScreen(prevScreen==="home" ? "home" : "list"); } }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
