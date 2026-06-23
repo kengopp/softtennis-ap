@@ -3102,6 +3102,30 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         >
           {saving ? "保存中..." : "保存する"}
         </button>
+
+        {!forced && (
+          <div style={{ marginTop:32, borderTop:`1px solid ${C.border}`, paddingTop:20 }}>
+            <button
+              style={{ ...S.btn("transparent"), color:C.red, border:`1px solid ${C.red}`, fontSize:13 }}
+              onClick={async ()=>{
+                if (!window.confirm("アカウントを削除しますか？\n\n※試合データは削除されません。\nこの操作は取り消せません。")) return;
+                if (!window.confirm("本当に削除しますか？\nアカウントは完全に削除されます。")) return;
+                try {
+                  const { error } = await supabase.rpc("delete_my_account");
+                  if (error) throw error;
+                  await supabase.auth.signOut();
+                } catch(e) {
+                  alert("削除に失敗しました: " + (e.message || e));
+                }
+              }}
+            >
+              🗑 アカウントを削除する
+            </button>
+            <div style={{ fontSize:11, color:C.textSec, marginTop:8, textAlign:"center" }}>
+              ※試合データは削除されません
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
