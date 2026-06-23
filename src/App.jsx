@@ -817,9 +817,14 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 6;
 
+  const [allTeamMatches, setAllTeamMatches] = useState([]);
   const reload = useCallback(() => {
     setLoading(true);
-    getMatches().then(list => { setAllMatches(list); setLoading(false); });
+    Promise.all([getMatches(), getTeamMatches()]).then(([list, tmList]) => {
+      setAllMatches(list);
+      setAllTeamMatches(tmList);
+      setLoading(false);
+    });
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
@@ -839,7 +844,21 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const matches = allMatches
     .filter(m=> filter==="active" ? m.status==="active" : filter==="scheduled" ? m.status==="scheduled" : (filter==="all"||m.match_type===filter))
     .filter(m=> filter==="scheduled" ? true : m.status!=="scheduled") // 予定以外のタブでは予定を除外
-    .filter(m=>!childOnly || m.players.some(p=>p.player_name===linkedPlayerName));
+    .filter(m=>!childOnly || m.players.some(p=>p.player_name===linkedPlayerName))
+    .filter(m=> {
+      // 団体戦の個別試合（1番手・2番手・3番手）は試合一覧から除外
+      const tmIds = allTeamMatches.flatMap(tm=>[tm.match_id_1,tm.match_id_2,tm.match_id_3].filter(Boolean));
+      return !tmIds.includes(m.id);
+    });
+
+  // 予定タブで表示する団体戦
+  const teamMatchesForList = filter==="scheduled" || filter==="all"
+    ? allTeamMatches.filter(tm => {
+        const allFinished = tm.matches.every(m=>m.status==="finished");
+        if (filter==="scheduled") return !allFinished;
+        return true;
+      })
+    : [];
 
   // ★絞り込み条件が変わったら1ページ目に戻す
   useEffect(() => { setPage(1); }, [filter, childOnly]);
@@ -884,7 +903,46 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       )}
       <div style={{ padding:"12px 14px" }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
-        {!loading && matches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>試合記録がありません</div>}
+        {!loading && matches.length===0 && teamMatchesForList.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>試合記録がありません</div>}
+        {/* 団体戦カード */}
+        {!loading && teamMatchesForList.map(tm=>{
+          const { wins, loses, isWin } = calcTeamResult(tm);
+          const finished = tm.matches.filter(m=>m.status==="finished").length;
+          const total = tm.matches.length;
+          return (
+            <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
+              <div style={{ height:4, background: finished===0 ? "#7b1fa2" : isWin ? C.teamA : C.teamB }} />
+              <div style={{ padding:"12px 14px", cursor:"pointer" }} onClick={()=>{ onNavigate && onNavigate("teamMatchDetail_"+tm.id); }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                  <span style={{ fontSize:13,fontWeight:700 }}>{tm.tournament_name||"団体戦"}</span>
+                  <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(tm.match_date)}</span>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+                  <div>
+                    <div style={{ fontSize:11,color:C.textSec }}>自チーム</div>
+                    <div style={{ fontSize:14,fontWeight:700 }}>vs {tm.opponent_name}</div>
+                  </div>
+                  <span style={{ fontSize:20,fontWeight:900, color: finished===0?"#7b1fa2":isWin?C.teamA:C.red }}>
+                    {finished===0?"予定":`${wins}勝${loses}敗`}
+                  </span>
+                </div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#f3e5f5",color:"#7b1fa2",fontWeight:700 }}>🏆 団体戦</span>
+                  <span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:C.navyMid+"22",color:C.navyMid,fontWeight:600 }}>{tm.finish_early?"2勝終了":"3試合全部"}</span>
+                  {finished===0 && <span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#f3e5f5",color:"#7b1fa2",fontWeight:600 }}>📅 予定</span>}
+                </div>
+              </div>
+              {finished===0 && (
+                <div style={{ padding:"10px 14px", borderTop:"1px solid "+C.border, background:"#f3e5f5" }}>
+                  <button
+                    style={{ width:"100%",padding:"12px 0",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:C.white,border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }}
+                    onClick={e=>{ e.stopPropagation(); onNavigate && onNavigate("teamMatchDetail_"+tm.id); }}
+                  >🎾 この団体戦を開始する</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
         {!loading && pageMatches.map(m=>{
           const aWin=m.match_score_a>m.match_score_b;
           const aP=m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
@@ -1899,7 +1957,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   }, []);
 
   // 自チーム選手の入力チェック
-  const canSchedule = aP1.trim() && (!isDoubles || aP2.trim()) && isYounger !== null;
+  const canSchedule = isTeam
+    ? bClub.trim() && isYounger !== null  // 団体戦：相手校名だけでOK
+    : aP1.trim() && (!isDoubles || aP2.trim()) && isYounger !== null;
 
   async function handleSchedule() {
     // 2回目以降は確認ポップアップ
@@ -1908,6 +1968,43 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     }
     setSaving(true);
     try {
+      if (isTeam) {
+        // 団体戦：team_matchesに登録。選手なしでもOK
+        const tmId = scheduledId || uid();
+        // 3試合分のmatchを作成（選手は空でもOK）
+        const makeEmptyMatch = async (slotRound) => {
+          const mid = uid();
+          const m = {
+            id:mid, created_by:"me",
+            match_date:matchDate, venue, tournament_name:tournamentName, round:slotRound,
+            match_type:matchType, game_format:gameFormat, is_doubles:true, first_server:null,
+            status:"scheduled", match_score_a:0, match_score_b:0, memo:"",
+            court_number:courtNumber||null, is_younger:isYounger, players:[], games:[],
+          };
+          await saveMatch(m);
+          return mid;
+        };
+        // 既存のmatch_idがあればそのまま使い、なければ新規作成
+        const existingList = scheduledId ? await getTeamMatches().then(list=>list.find(t=>t.id===tmId)) : null;
+        const mid1 = existingList?.match_id_1 || await makeEmptyMatch("団体戦1番手");
+        const mid2 = existingList?.match_id_2 || await makeEmptyMatch("団体戦2番手");
+        const mid3 = existingList?.match_id_3 || await makeEmptyMatch("団体戦3番手");
+        await saveTeamMatch({
+          id: tmId,
+          match_date: matchDate,
+          tournament_name: tournamentName || null,
+          venue: venue || null,
+          opponent_name: bClub.trim(),
+          format: "best_of_3",
+          finish_early: finishEarly,
+          match_id_1: mid1,
+          match_id_2: mid2,
+          match_id_3: mid3,
+        });
+        setScheduledId(tmId);
+        onScheduled && onScheduled();
+        return;
+      }
       const mid = scheduledId || uid();
       const players = [
         { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
@@ -4429,6 +4526,10 @@ export default function App() {
     else if (key==="list") setScreen("list");
     else if (key==="stats") setScreen("stats");
     else if (key==="master") setScreen("master");
+    else if (key.startsWith("teamMatchDetail_")) {
+      setCurrentTeamMatchId(key.replace("teamMatchDetail_",""));
+      setScreen("teamMatchDetail");
+    }
   }
 
   if (screen==="home") {
