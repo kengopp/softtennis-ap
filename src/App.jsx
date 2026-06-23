@@ -2966,13 +2966,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               {/* ★得点ボタン（◯✕→「得点」表記に変更） */}
               <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どちらが得点しましたか？</div>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
-                {/* 左ボタン：常に自チーム(緑) */}
-                <button style={{ height:70,background:ownColor,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:"0 3px 10px rgba(46,204,113,0.35)" }} onClick={()=>addPoint(leftTeam)}>
+                {/* 左ボタン：若番=自チーム(緑)、遅番=相手(オレンジ) */}
+                <button style={{ height:70,background:isYounger?ownColor:oppColor,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(249,115,22,0.35)" }} onClick={()=>addPoint(leftTeam)}>
                   <span style={{ fontSize:22 }}>得点</span>
                   <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||"自チーム"}</span>
                 </button>
-                {/* 右ボタン：常に相手(オレンジ) */}
-                <button style={{ height:70,background:oppColor,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:"0 3px 10px rgba(249,115,22,0.35)" }} onClick={()=>addPoint(rightTeam)}>
+                {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
+                <button style={{ height:70,background:isYounger?oppColor:ownColor,color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)" }} onClick={()=>addPoint(rightTeam)}>
                   <span style={{ fontSize:22 }}>得点</span>
                   <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||"相手"}</span>
                 </button>
