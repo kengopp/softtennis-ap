@@ -3885,6 +3885,70 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave }) {
   const { wins, loses, results, isWin } = calcTeamResult(tm);
   const finished = tm.matches.filter(m => m.status === "finished").length;
   const [saving, setSaving] = useState(false);
+  const [editingSlot, setEditingSlot] = useState(null); // 選手編集中の番手(1/2/3)
+  const [slotAP1, setSlotAP1] = useState("");
+  const [slotAP2, setSlotAP2] = useState("");
+  const [slotBP1, setSlotBP1] = useState("");
+  const [slotBP2, setSlotBP2] = useState("");
+  const [roster, setRoster] = useState([]);
+  useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+  const ownRoster = roster.filter(p => p.is_own_team !== false);
+  const oppRoster = roster.filter(p => p.is_own_team === false);
+
+  function openSlotEdit(slot) {
+    const m = tm.matches[slot-1];
+    setSlotAP1(m?.players.find(p=>p.team==="A"&&p.order_num===1)?.player_name || "");
+    setSlotAP2(m?.players.find(p=>p.team==="A"&&p.order_num===2)?.player_name || "");
+    setSlotBP1(m?.players.find(p=>p.team==="B"&&p.order_num===1)?.player_name || "");
+    setSlotBP2(m?.players.find(p=>p.team==="B"&&p.order_num===2)?.player_name || "");
+    setEditingSlot(slot);
+  }
+
+  async function saveSlotPlayers() {
+    setSaving(true);
+    try {
+      const slot = editingSlot;
+      const m = tm.matches[slot-1];
+      const aClubName = m?.players.find(p=>p.team==="A")?.club_name || "";
+      const bClubName = m?.players.find(p=>p.team==="B")?.club_name || tm.opponent_name || "";
+      let mid = m?.id;
+      if (!mid) {
+        // まだ試合がない場合は新規作成
+        mid = uid();
+        const { data:{ user } } = await supabase.auth.getUser();
+        const newMatch = {
+          id:mid, created_by:user.id,
+          match_date:tm.match_date, venue:tm.venue||null,
+          tournament_name:tm.tournament_name||null, round:`団体戦${slot}番手`,
+          match_type:"tournament", game_format:7, is_doubles:true,
+          first_server:null, status:"scheduled",
+          match_score_a:0, match_score_b:0, memo:"", court_number:null,
+          is_younger:true, games:[],
+          players:[],
+        };
+        await saveMatch(newMatch);
+        const { matches:_, ...saveData } = { ...tm, [`match_id_${slot}`]:mid };
+        await onSave(saveData);
+      }
+      // 選手情報を更新
+      const players = [
+        { id:uid(), match_id:mid, team:"A", player_name:slotAP1.trim(), club_name:aClubName, position:null, order_num:1 },
+        ...(slotAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:slotAP2.trim(), club_name:aClubName, position:null, order_num:2 }] : []),
+        { id:uid(), match_id:mid, team:"B", player_name:slotBP1.trim(), club_name:bClubName, position:null, order_num:1 },
+        ...(slotBP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:slotBP2.trim(), club_name:bClubName, position:null, order_num:2 }] : []),
+      ];
+      await supabase.from("match_players").delete().eq("match_id", mid);
+      if (players.length > 0) await supabase.from("match_players").insert(players);
+      setEditingSlot(null);
+      // 再読み込みのためにonSaveを空で呼ぶ
+      const { matches:__, ...sd } = tm;
+      await onSave(sd);
+    } catch(e) {
+      alert("保存に失敗しました: " + (e.message||e));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   // 試合を紐づける
   async function linkMatch(slot, matchId) {
@@ -3999,13 +4063,13 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave }) {
                   </div>
                 )}
                 {m && (
-                  <div style={{ cursor:"pointer" }} onClick={() => onOpen(m.id)}>
+                  <div>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
                       <div>
                         <div style={{ fontSize:11,color:C.textSec }}>{m.players.find(p=>p.team==="A")?.club_name || ""}</div>
                         <div style={{ fontSize:13,fontWeight:700 }}>{m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "—"}</div>
                       </div>
-                      <div style={{ fontSize:22,fontWeight:900,color: m.status==="finished" ? (m.match_score_a>m.match_score_b?C.teamA:C.red) : C.textSec }}>
+                      <div style={{ fontSize:20,fontWeight:900,color: m.status==="finished" ? (m.match_score_a>m.match_score_b?C.teamA:C.red) : C.textSec }}>
                         {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="active" ? "進行中" : "予定"}
                       </div>
                       <div>
@@ -4013,7 +4077,16 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave }) {
                         <div style={{ fontSize:13,fontWeight:700,textAlign:"right" }}>{m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "—"}</div>
                       </div>
                     </div>
-                    <div style={{ fontSize:11,color:C.accent,textAlign:"right" }}>タップして記録を見る →</div>
+                    <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                      <button
+                        style={{ flex:1, padding:"8px 0", background:"#e8f5e9", color:C.accent, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                        onClick={()=>openSlotEdit(slot)}
+                      >👥 選手情報を入力</button>
+                      <button
+                        style={{ flex:1, padding:"8px 0", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                        onClick={()=>onOpen(m.id)}
+                      >🎾 スコア記録</button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -4028,6 +4101,41 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave }) {
           🗑 この団体戦を削除する
         </button>
       </div>
+
+      {/* 選手情報編集モーダル */}
+      {editingSlot && (
+        <Modal onClose={()=>setEditingSlot(null)}>
+          <div style={{ fontSize:15,fontWeight:800,marginBottom:16 }}>{editingSlot}番手の選手情報</div>
+          <div style={{ fontSize:12,fontWeight:700,color:C.textSec,marginBottom:6 }}>自チーム</div>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:3 }}>選手1</div>
+            <input style={S.inp} placeholder="選手名" value={slotAP1} onChange={e=>setSlotAP1(e.target.value)}/>
+            {ownRoster.length>0 && <div style={{ marginTop:4 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(slotAP1===p.player_name)} onClick={()=>setSlotAP1(p.player_name)}>{p.player_name}</span>))}</div>}
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:3 }}>選手2（ペア）</div>
+            <input style={S.inp} placeholder="選手名" value={slotAP2} onChange={e=>setSlotAP2(e.target.value)}/>
+            {ownRoster.length>0 && <div style={{ marginTop:4 }}>{ownRoster.map(p=>(<span key={p.id} style={S.chip(slotAP2===p.player_name)} onClick={()=>setSlotAP2(p.player_name)}>{p.player_name}</span>))}</div>}
+          </div>
+          <div style={{ fontSize:12,fontWeight:700,color:C.textSec,marginBottom:6 }}>相手チーム（{tm.opponent_name}）</div>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:3 }}>選手1</div>
+            <input style={S.inp} placeholder="選手名" value={slotBP1} onChange={e=>setSlotBP1(e.target.value)}/>
+            {oppRoster.filter(p=>p.team_name===tm.opponent_name).length>0 && <div style={{ marginTop:4 }}>{oppRoster.filter(p=>p.team_name===tm.opponent_name).map(p=>(<span key={p.id} style={S.chip(slotBP1===p.player_name)} onClick={()=>setSlotBP1(p.player_name)}>{p.player_name}</span>))}</div>}
+          </div>
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:3 }}>選手2（ペア）</div>
+            <input style={S.inp} placeholder="選手名" value={slotBP2} onChange={e=>setSlotBP2(e.target.value)}/>
+            {oppRoster.filter(p=>p.team_name===tm.opponent_name).length>0 && <div style={{ marginTop:4 }}>{oppRoster.filter(p=>p.team_name===tm.opponent_name).map(p=>(<span key={p.id} style={S.chip(slotBP2===p.player_name)} onClick={()=>setSlotBP2(p.player_name)}>{p.player_name}</span>))}</div>}
+          </div>
+          <button
+            style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8 }}
+            disabled={saving || !slotAP1.trim() || !slotAP2.trim() || !slotBP1.trim() || !slotBP2.trim()}
+            onClick={saveSlotPlayers}
+          >{saving ? "保存中..." : "保存する"}</button>
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text }} onClick={()=>setEditingSlot(null)}>キャンセル</button>
+        </Modal>
+      )}
     </div>
   );
 }
