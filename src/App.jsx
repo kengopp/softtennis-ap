@@ -832,12 +832,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           const aC=m.players.find(p=>p.team==="A")?.club_name??"";
           const bC=m.players.find(p=>p.team==="B")?.club_name??"";
           const isYoungerM = m.is_younger !== false;
-          // 若番=自チームA、遅番=自チームB
-          const ownWin = m.status==="finished" && (isYoungerM ? m.match_score_a > m.match_score_b : m.match_score_b > m.match_score_a);
-          const oppWin = m.status==="finished" && !ownWin;
+          // 自チームは若番・遅番どちらもAとして得点記録される
+          const ownWin = aWin && m.status==="finished";
+          const oppWin = !aWin && m.status==="finished";
           const rows = isYoungerM
             ? [["A",aC,aP,m.match_score_a,ownWin,C.teamA],["B",bC,bP,m.match_score_b,oppWin,C.teamB]]
-            : [["B",bC,bP,m.match_score_b,ownWin,C.teamB],["A",aC,aP,m.match_score_a,oppWin,C.teamA]];
+            : [["B",bC,bP,m.match_score_b,oppWin,C.teamB],["A",aC,aP,m.match_score_a,ownWin,C.teamA]];
           return (
             <div key={m.id} style={{ ...S.card,boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4,background:m.status==="finished"?(rows[0][4]?"#2ecc71":"#f97316"):C.accent }}/>
