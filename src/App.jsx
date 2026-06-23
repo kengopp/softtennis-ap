@@ -319,7 +319,9 @@ async function saveMatch(match) {
     if (pErr) throw pErr;
   }
 
-  // ゲーム・ポイント・フォルトも同様に、入れ直す
+  // ゲーム・ポイント・フォルトも同様に、入れ直す（子テーブルから順に削除）
+  await supabase.from("points").delete().eq("match_id", match.id);
+  await supabase.from("faults").delete().eq("match_id", match.id);
   await supabase.from("games").delete().eq("match_id", match.id);
   for (const g of (match.games ?? [])) {
     const gameRow = {
@@ -346,7 +348,7 @@ async function saveMatch(match) {
         server_team: f.server_team, player_name: f.player_name || null,
         score_a_at: f.score_a_at, score_b_at: f.score_b_at,
       }));
-      const { error: fErr } = await supabase.from("faults").insert(faultRows);
+      const { error: fErr } = await supabase.from("faults").upsert(faultRows);
       if (fErr) throw fErr;
     }
   }
