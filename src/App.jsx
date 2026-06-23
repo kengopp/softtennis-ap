@@ -1133,7 +1133,7 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                     <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
-                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?((isYoungerM?aWin:!aWin)?"#2ecc71":"#f97316"):C.textSec }}>
+                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?((m.is_younger===true?aWin:!aWin)?"#2ecc71":"#f97316"):C.textSec }}>
                       {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
                     </span>
                   </div>
