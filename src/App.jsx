@@ -3862,7 +3862,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{ setTick(t=>t+1); setMatchId(null); setScreen(prevScreen==="home" ? "home" : "list"); }}
+        onBack={()=>{ setMatchId(null); setTick(t=>t+1); setTimeout(()=>setScreen(prevScreen==="home" ? "home" : "list"), 50); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
