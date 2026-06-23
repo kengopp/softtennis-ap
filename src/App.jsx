@@ -932,14 +932,16 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   {finished===0 && <span style={{ fontSize:10,padding:"2px 8px",borderRadius:20,background:"#f3e5f5",color:"#7b1fa2",fontWeight:600 }}>📅 予定</span>}
                 </div>
               </div>
-              {finished===0 && (
-                <div style={{ padding:"10px 14px", borderTop:"1px solid "+C.border, background:"#f3e5f5" }}>
-                  <button
-                    style={{ width:"100%",padding:"12px 0",background:"linear-gradient(135deg,#7b1fa2,#9c27b0)",color:C.white,border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }}
-                    onClick={e=>{ e.stopPropagation(); onNavigate && onNavigate("teamMatchDetail_"+tm.id); }}
-                  >🎾 この団体戦を開始する</button>
-                </div>
-              )}
+              <div style={{ padding:"10px 14px", borderTop:"1px solid "+C.border, background:"#f3e5f5", display:"flex", gap:8 }}>
+                <button
+                  style={{ flex:1, padding:"10px 0", background:"linear-gradient(135deg,#7b1fa2,#9c27b0)", color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }}
+                  onClick={e=>{ e.stopPropagation(); onNavigate && onNavigate("teamMatchDetail_"+tm.id); }}
+                >🎾 詳細・記録</button>
+                <button
+                  style={{ padding:"10px 12px", background:"#fff", color:"#7b1fa2", border:"1px solid #7b1fa2", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }}
+                  onClick={async e=>{ e.stopPropagation(); if (!window.confirm("この団体戦を削除しますか？\n（個人戦データは残ります）")) return; await deleteTeamMatch(tm.id); reload(); }}
+                >🗑</button>
+              </div>
             </div>
           );
         })}
@@ -3881,7 +3883,7 @@ function TeamMatchSetup({ editing, onSave, onCancel, onOpen }) {
   );
 }
 
-function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave }) {
+function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave, onReload }) {
   const { wins, loses, results, isWin } = calcTeamResult(tm);
   const finished = tm.matches.filter(m => m.status === "finished").length;
   const [saving, setSaving] = useState(false);
@@ -3978,7 +3980,10 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave }) {
             <div style={{ fontSize:11,color:"rgba(255,255,255,0.7)" }}>{fmtDate(tm.match_date)}{tm.venue ? " · "+tm.venue : ""}</div>
           </div>
         </div>
-        <button style={{ background:"none",border:"none",color:C.white,fontSize:18,cursor:"pointer" }} onClick={onEdit}>✏️</button>
+        <div style={{ display:"flex", gap:8 }}>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:18,cursor:"pointer" }} onClick={onReload}>🔄</button>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:18,cursor:"pointer" }} onClick={onEdit}>✏️</button>
+        </div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
         {/* 結果サマリー */}
@@ -4174,6 +4179,7 @@ function TeamMatchDetailWrapper({ tmId, onBack, onOpen }) {
       onBack={onBack}
       onEdit={()=>{}}
       onOpen={id=>{ onOpen(id); }}
+      onReload={reload}
       onDelete={async ()=>{
         if (!window.confirm("この団体戦を削除しますか？（個人戦データは残ります）")) return;
         await deleteTeamMatch(tmId);
