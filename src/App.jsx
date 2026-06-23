@@ -245,7 +245,7 @@ function rowToMatchSummary(m, players=[], games=[]) {
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
     court_number: m.court_number ?? "",
-    is_younger: m.is_younger !== false,
+    is_younger: m.is_younger === true,
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
@@ -304,7 +304,7 @@ async function saveMatch(match) {
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
     court_number: match.court_number || null,
-    is_younger: match.is_younger !== false,
+    is_younger: match.is_younger === true,
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
@@ -2186,7 +2186,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const teamALabel = match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
   const teamBLabel = match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
   // 若番=自チーム左、遅番=自チーム右
-  const isYounger = match.is_younger !== false;
+  const isYounger = match.is_younger === true;
   // left=左側表示チーム、right=右側表示チーム
   const leftTeam  = isYounger ? "A" : "B";
   const rightTeam = isYounger ? "B" : "A";
