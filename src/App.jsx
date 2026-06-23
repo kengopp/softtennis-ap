@@ -2192,14 +2192,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const rightTeam = isYounger ? "B" : "A";
   const leftLabel  = isYounger ? teamALabel : teamBLabel;
   const rightLabel = isYounger ? teamBLabel : teamALabel;
+  const aClub = match.players.find(p=>p.team==="A")?.club_name??"";
+  const bClub = match.players.find(p=>p.team==="B")?.club_name??"";
   const leftClub   = isYounger ? aClub : bClub;
   const rightClub  = isYounger ? bClub : aClub;
   const leftScore  = (g) => isYounger ? g.score_a : g.score_b;
   const rightScore = (g) => isYounger ? g.score_b : g.score_a;
   const leftMatchScore  = isYounger ? match.match_score_a : match.match_score_b;
   const rightMatchScore = isYounger ? match.match_score_b : match.match_score_a;
-  const aClub = match.players.find(p=>p.team==="A")?.club_name??"";
-  const bClub = match.players.find(p=>p.team==="B")?.club_name??"";
 
   function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
 
