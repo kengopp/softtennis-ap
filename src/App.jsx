@@ -77,7 +77,7 @@ const C = {
   text:    "#1a2236",
   textSec: "#7a8499",
   white:   "#ffffff",
-  teamA:   "#0ea5e9",
+  teamA:   "#2ecc71",
   teamB:   "#f97316",
   serve:   "#fbbf24",
 };
@@ -834,7 +834,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             : [["B",bC,bP,m.match_score_b,!aWin&&m.status==="finished",C.teamB],["A",aC,aP,m.match_score_a,aWin,C.teamA]];
           return (
             <div key={m.id} style={{ ...S.card,boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-              <div style={{ height:4,background:m.status==="finished"?(aWin?C.teamA:C.teamB):C.accent }}/>
+              <div style={{ height:4,background:m.status==="finished"?((isYoungerM?aWin:!aWin)?"#2ecc71":"#f97316"):C.accent }}/>
               <div style={{ padding:"12px 14px",cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
                 <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
                   <span style={{ fontSize:13,fontWeight:700 }}>{m.tournament_name||"試合"}{m.round?` · ${m.round}`:""}</span>
@@ -893,7 +893,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               {/* コピー・削除ボタン行 */}
               <div style={{ display:"flex",borderTop:"1px solid "+C.border }}>
                 <button
-                  style={{ flex:1,padding:"9px",background:"#f0f6ff",color:"#1565c0",border:"none",fontSize:12,fontWeight:700,cursor:"pointer" }}
+                  style={{ flex:1,padding:"9px",background:"#f5f5f5",color:C.navy,border:"none",fontSize:12,fontWeight:700,cursor:"pointer" }}
                   onClick={(e)=>{ e.stopPropagation(); onCopy(m.id); }}
                 >📋 この試合情報をコピーして新規作成</button>
                 <button
@@ -936,7 +936,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 ["B", serveSelectMatch.players?.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
               ].map(([team, label]) => (
                 <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
+                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?"#2ecc71":"#f97316"}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?"#2ecc71":"#f97316" }}
                   onClick={async ()=>{
                     const m = serveSelectMatch;
                     setServeSelectMatch(null);
@@ -1133,7 +1133,7 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                     <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
-                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(aWin?C.teamA:C.teamB):C.textSec }}>
+                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?((isYoungerM?aWin:!aWin)?"#2ecc71":"#f97316"):C.textSec }}>
                       {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
                     </span>
                   </div>
@@ -1921,7 +1921,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         </div>
       )}
       {locked && (
-        <div style={{ background:"#e3f2fd",borderBottom:"1px solid #90caf9",padding:"10px 14px",fontSize:12,color:"#1565c0" }}>
+        <div style={{ background:"#f5f5f5",borderBottom:"1px solid #e0e0e0",padding:"10px 14px",fontSize:12,color:C.textSec }}>
           ✏️ 試合情報・選手名を編集できます。ゲーム数・種目・サーブ順は試合開始後のため変更できません。
         </div>
       )}
@@ -2085,7 +2085,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             <div style={{ display:"flex", gap:10, marginBottom:12 }}>
               {[["A", serveSelectForSave.aLabel], ["B", serveSelectForSave.bLabel]].map(([team, label]) => (
                 <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
+                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?"#2ecc71":"#f97316"}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?"#2ecc71":"#f97316" }}
                   onClick={()=>{ setServeSelectForSave(null); handleSave(team); }}
                 >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
               ))}
@@ -2416,10 +2416,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
       {/* タブ */}
       {viewOnly && (
-        <div style={{ background:"#e3f2fd", borderBottom:"1px solid #90caf9", padding:"8px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <span style={{ fontSize:12, color:"#1565c0", fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
+        <div style={{ background:"#f5f5f5", borderBottom:"1px solid #e0e0e0", padding:"8px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
           <button
-            style={{ background:"#1565c0", border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
+            style={{ background:C.navy, border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
             onClick={onRefresh} disabled={refreshing}
           >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
         </div>
@@ -2650,7 +2650,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                   <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
                 </button>
               </div>
-              <button style={{ width:"100%",padding:11,background:"#dbeafe",color:"#1565c0",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={undo}>↩ 1つ前に戻す</button>
+              <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={undo}>↩ 1つ前に戻す</button>
 
               {/* 直近記録 */}
               {currentGame.points.length>0&&(
@@ -2679,14 +2679,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         <div style={{ padding:12 }}>
           {match.games.map(g=>(
             <div key={g.id} style={S.card}>
-              <div style={{ padding:"8px 12px",background:g.winner_team==="A"?C.teamA:g.winner_team==="B"?C.teamB:C.accent,color:C.white,display:"flex",justifyContent:"space-between" }}>
+              <div style={{ padding:"8px 12px",background:g.winner_team===leftTeam?"#2ecc71":g.winner_team===rightTeam?"#f97316":C.accent,color:C.white,display:"flex",justifyContent:"space-between" }}>
                 <span style={{ fontWeight:700,fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
                 <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
               </div>
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
                   {g.points.map(pt=>(
-                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?C.teamA:C.teamB,display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
+                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team===leftTeam?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
                       <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
                     </div>
                   ))}
@@ -2698,7 +2698,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                         <tr key={team}>
                           <td style={{ fontSize:10,color:team==="A"?C.teamA:C.teamB,fontWeight:700,paddingRight:8,whiteSpace:"nowrap" }}>{name}</td>
                           {g.points.map((pt,i)=>(
-                            <td key={i} style={{ padding:"2px 4px",textAlign:"center",background:pt.scoring_team===team?(team==="A"?C.teamA+"18":C.teamB+"18"):"transparent",minWidth:28 }}>
+                            <td key={i} style={{ padding:"2px 4px",textAlign:"center",background:pt.scoring_team===team?(pt.scoring_team===leftTeam?"#2ecc7118":"#f9731618"):"transparent",minWidth:28 }}>
                               {pt.scoring_team===team&&(
                                 <div>
                                   <div style={{ fontSize:10,fontWeight:700,color:team==="A"?C.teamA:C.teamB }}>{pt.score_a_after}-{pt.score_b_after}</div>
@@ -2727,7 +2727,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
             <div style={{ fontSize:44 }}>🎾</div>
             <h3 style={{ fontSize:18,fontWeight:800,margin:"8px 0" }}>第{modal.num}ゲーム終了！</h3>
             <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
-            <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:C.teamA }}>{modal.sA}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:C.teamB }}>{modal.sB}</span></div>
+            <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
             <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>{setModal(null);startNewGame();}}>次のゲームへ</button>
           </div>
         </Modal>
@@ -2745,7 +2745,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 ["B", match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
               ].map(([team, label]) => (
                 <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?C.teamA:C.teamB}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?C.teamA:C.teamB }}
+                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?"#2ecc71":"#f97316"}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?"#2ecc71":"#f97316" }}
                   onClick={async ()=>{
                     setServeSelectModal(false);
                     // DBのfirst_serverを更新してからゲーム開始
@@ -2846,7 +2846,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         return (
           <div key={`${p.team}__${p.player_name}`} style={{ ...S.card,marginBottom:10 }}>
             <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"8px 12px",display:"flex",alignItems:"center",gap:8 }}>
-              <div style={{ width:26,height:26,borderRadius:"50%",background:p.team==="A"?C.teamA:C.teamB,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:C.white }}>{p.player_name[0]}</div>
+              <div style={{ width:26,height:26,borderRadius:"50%",background:p.team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:C.white }}>{p.player_name[0]}</div>
               <span style={{ fontSize:13,fontWeight:700,color:C.white,flex:1 }}>{p.player_name}</span>
               <span style={{ fontSize:10,color:"#8099cc" }}>計 {p.total}pt</span>
             </div>
@@ -3085,7 +3085,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           </FormRow>
         </FormSec>
 
-        <div style={{ background:"#e3f2fd",border:"1px solid #90caf9",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#1565c0",marginBottom:12 }}>
+        <div style={{ background:"#f5f5f5",border:"1px solid #e0e0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:C.textSec,marginBottom:12 }}>
           ℹ️ 学校名を変更すると、共有される試合・選手マスターの範囲が変わります。
         </div>
 
@@ -3237,7 +3237,7 @@ function PlayerRosterScreen({ onBack }) {
         ))}
       </div>
       <div style={{ padding:14 }}>
-        <div style={{ background:"#e3f2fd", border:"1px solid #90caf9", borderRadius:10, padding:"10px 14px", fontSize:12, color:"#1565c0", marginBottom:14 }}>
+        <div style={{ background:"#f5f5f5", border:"1px solid #e0e0e0", borderRadius:10, padding:"10px 14px", fontSize:12, color:C.textSec, marginBottom:14 }}>
           {tab==="own" ? "ℹ️ ここで登録した選手は、同じ学校のメンバー全員が試合作成時に「自チーム」として選べます。" : "ℹ️ 対戦相手の選手を登録しておくと、試合作成時に「相手チーム」として選べ、対戦相手別の分析もしやすくなります。"}
         </div>
         <FormSec title={tab==="own" ? "自チームの選手を追加" : "他チームの選手を追加"}>
@@ -3421,7 +3421,7 @@ function AdminSchoolsScreen({ onBack }) {
         </div>
       </div>
       <div style={{ padding:14 }}>
-        <div style={{ background:"#e3f2fd",border:"1px solid #90caf9",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#1565c0",marginBottom:14 }}>
+        <div style={{ background:"#f5f5f5",border:"1px solid #e0e0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:C.textSec,marginBottom:14 }}>
           ℹ️ ここで登録した学校だけが、新規登録・プロフィールの学校名選択肢に表示されます。同じ学校名でも区分（高校・中学校など）が違えば別の学校として登録できます。
         </div>
 
