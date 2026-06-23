@@ -743,7 +743,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast }) {
   const [filter, setFilter] = useState(initialFilter || "all");
   const [toast, setToast] = useState(initialToast || null);
-  useEffect(() => { if (initialToast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [initialToast]);
+  useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
