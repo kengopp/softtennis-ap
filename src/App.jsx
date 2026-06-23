@@ -1841,8 +1841,23 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [bP1,    setBP1]    = useState(bBase?.player_name ?? "");
   const [bP2,    setBP2]    = useState(bBase2?.player_name ?? "");
 
+  // 団体戦
+  const [isTeam,       setIsTeam]       = useState(base?.is_team === true);
+  const [finishEarly,  setFinishEarly]  = useState(base?.finish_early !== false);
+  const [teamAP1_2,    setTeamAP1_2]    = useState("");
+  const [teamAP2_2,    setTeamAP2_2]    = useState("");
+  const [teamBP1_2,    setTeamBP1_2]    = useState("");
+  const [teamBP2_2,    setTeamBP2_2]    = useState("");
+  const [teamAP1_3,    setTeamAP1_3]    = useState("");
+  const [teamAP2_3,    setTeamAP2_3]    = useState("");
+  const [teamBP1_3,    setTeamBP1_3]    = useState("");
+  const [teamBP2_3,    setTeamBP2_3]    = useState("");
+
   const isScheduledEdit = editing?.status === "scheduled";
-  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && isYounger !== null;
+  const canSave1 = aP1.trim() && aP2.trim() && bP1.trim() && bP2.trim() && isYounger !== null;
+  const canSave = isTeam
+    ? canSave1 && teamAP1_2.trim() && teamAP2_2.trim() && teamBP1_2.trim() && teamBP2_2.trim() && teamAP1_3.trim() && teamAP2_3.trim() && teamBP1_3.trim() && teamBP2_3.trim()
+    : aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && isYounger !== null;
 
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
@@ -1950,6 +1965,47 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       }
 
       // 新規作成 or コピー作成
+      if (isTeam) {
+        // 団体戦：3試合分を作成してteam_matchesに登録
+        const makeMatch = async (ap1, ap2, bp1, bp2, slotRound) => {
+          const mid = uid();
+          const players = [
+            { id:uid(), match_id:mid, team:"A", player_name:ap1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
+            { id:uid(), match_id:mid, team:"A", player_name:ap2.trim(), club_name:aClub.trim(), position:null, order_num:2 },
+            { id:uid(), match_id:mid, team:"B", player_name:bp1.trim(), club_name:bClub.trim(), position:null, order_num:1 },
+            { id:uid(), match_id:mid, team:"B", player_name:bp2.trim(), club_name:bClub.trim(), position:null, order_num:2 },
+          ];
+          const m = {
+            id:mid, created_by:"me",
+            match_date:matchDate, venue, tournament_name:tournamentName, round:slotRound,
+            match_type:matchType, game_format:gameFormat, is_doubles:true, first_server:null,
+            status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+          };
+          await saveMatch(m);
+          return mid;
+        };
+        const [mid1, mid2, mid3] = await Promise.all([
+          makeMatch(aP1, aP2, bP1, bP2, "団体戦1番手"),
+          makeMatch(teamAP1_2, teamAP2_2, teamBP1_2, teamBP2_2, "団体戦2番手"),
+          makeMatch(teamAP1_3, teamAP2_3, teamBP1_3, teamBP2_3, "団体戦3番手"),
+        ]);
+        const tmId = uid();
+        await saveTeamMatch({
+          id: tmId,
+          match_date: matchDate,
+          tournament_name: tournamentName || null,
+          venue: venue || null,
+          opponent_name: bClub.trim(),
+          format: "best_of_3",
+          finish_early: finishEarly,
+          match_id_1: mid1,
+          match_id_2: mid2,
+          match_id_3: mid3,
+        });
+        onSave(mid1, tmId);
+        return;
+      }
+
       const mid = uid();
       const players = [
         { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
@@ -2061,7 +2117,31 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               </div>
             )}
           </FormRow>
-
+          {!locked && (
+            <FormRow label="個人戦 / 団体戦">
+              <div style={{ display:"flex",gap:8 }}>
+                <button style={{ ...S.togBtn(!isTeam, C.navy), flex:1 }} onClick={()=>setIsTeam(false)}>個人戦</button>
+                <button style={{ ...S.togBtn(isTeam, C.navy), flex:1 }} onClick={()=>{ setIsTeam(true); setIsDoubles(true); }}>団体戦</button>
+              </div>
+            </FormRow>
+          )}
+          {isTeam && !locked && (
+            <>
+              <FormRow label="試合終了タイミング">
+                <div style={{ display:"flex",gap:8 }}>
+                  <button style={{ ...S.togBtn(finishEarly, C.navy), flex:1 }} onClick={()=>setFinishEarly(true)}>
+                    <div style={{ fontSize:13,fontWeight:700 }}>2勝で終了</div>
+                  </button>
+                  <button style={{ ...S.togBtn(!finishEarly, C.navy), flex:1 }} onClick={()=>setFinishEarly(false)}>
+                    <div style={{ fontSize:13,fontWeight:700 }}>3試合全部</div>
+                  </button>
+                </div>
+              </FormRow>
+              <FormRow label="相手校名">
+                <SchoolField value={bClub} onChange={v=>{ setBClub(v); }} schools={schools} placeholder="例：久留米筑水" prefFilter={bClubPref} />
+              </FormRow>
+            </>
+          )}
         </FormSec>
 
         <FormSec title="自チーム (A)">
@@ -2097,38 +2177,93 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           )}
         </FormSec>
 
-        <FormSec title="相手チーム (B)">
-          <FormRow label="チーム名 / 学校名" labelRight={<PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
-            <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
-          </FormRow>
-          <FormRow label={isDoubles ? "選手1" : "選手名"}>
-            <input style={S.inp} placeholder="選手名" value={bP1} onChange={e => setBP1(e.target.value)}/>
-            {oppRoster.filter(p => !bClub || p.team_name === bClub).length>0 && (
-              <div style={{ marginTop:6 }}>
-                {oppRoster.filter(p => !bClub || p.team_name === bClub).map(p=>(
-                  <span key={p.id} style={S.chip(bP1===p.player_name)} onClick={()=>{ setBP1(p.player_name); if (!bClub && p.team_name) setBClub(p.team_name); }}>{p.player_name}</span>
-                ))}
-              </div>
-            )}
-          </FormRow>
-          {isDoubles && (
-            <FormRow label="選手2（ペア）">
-              <input style={S.inp} placeholder="選手名" value={bP2} onChange={e => setBP2(e.target.value)}/>
+        {!isTeam && (
+          <FormSec title="相手チーム (B)">
+            <FormRow label="チーム名 / 学校名" labelRight={<PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
+              <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
+            </FormRow>
+            <FormRow label={isDoubles ? "選手1" : "選手名"}>
+              <input style={S.inp} placeholder="選手名" value={bP1} onChange={e => setBP1(e.target.value)}/>
               {oppRoster.filter(p => !bClub || p.team_name === bClub).length>0 && (
                 <div style={{ marginTop:6 }}>
                   {oppRoster.filter(p => !bClub || p.team_name === bClub).map(p=>(
-                    <span key={p.id} style={S.chip(bP2===p.player_name)} onClick={()=>{ setBP2(p.player_name); if (!bClub && p.team_name) setBClub(p.team_name); }}>{p.player_name}</span>
+                    <span key={p.id} style={S.chip(bP1===p.player_name)} onClick={()=>{ setBP1(p.player_name); if (!bClub && p.team_name) setBClub(p.team_name); }}>{p.player_name}</span>
                   ))}
                 </div>
               )}
             </FormRow>
-          )}
-          {oppRoster.length===0 && (
-            <div style={{ padding:"0 14px 12px",fontSize:11,color:C.textSec }}>
-              マスター画面の「👥 選手マスター」(他チーム)で対戦相手の選手を登録しておくと、ここで選んで入力できます。
-            </div>
-          )}
-        </FormSec>
+            {isDoubles && (
+              <FormRow label="選手2（ペア）">
+                <input style={S.inp} placeholder="選手名" value={bP2} onChange={e => setBP2(e.target.value)}/>
+                {oppRoster.filter(p => !bClub || p.team_name === bClub).length>0 && (
+                  <div style={{ marginTop:6 }}>
+                    {oppRoster.filter(p => !bClub || p.team_name === bClub).map(p=>(
+                      <span key={p.id} style={S.chip(bP2===p.player_name)} onClick={()=>{ setBP2(p.player_name); if (!bClub && p.team_name) setBClub(p.team_name); }}>{p.player_name}</span>
+                    ))}
+                  </div>
+                )}
+              </FormRow>
+            )}
+            {oppRoster.length===0 && (
+              <div style={{ padding:"0 14px 12px",fontSize:11,color:C.textSec }}>
+                マスター画面の「👥 選手マスター」(他チーム)で対戦相手の選手を登録しておくと、ここで選んで入力できます。
+              </div>
+            )}
+          </FormSec>
+        )}
+        {isTeam && (
+          <>
+            {[["1番手",aP1,setAP1,aP2,setAP2,bP1,setBP1,bP2,setBP2],
+              ["2番手",teamAP1_2,setTeamAP1_2,teamAP2_2,setTeamAP2_2,teamBP1_2,setTeamBP1_2,teamBP2_2,setTeamBP2_2],
+              ["3番手",teamAP1_3,setTeamAP1_3,teamAP2_3,setTeamAP2_3,teamBP1_3,setTeamBP1_3,teamBP2_3,setTeamBP2_3],
+            ].map(([label, ap1, setAp1, ap2, setAp2, bp1, setBp1, bp2, setBp2]) => (
+              <FormSec key={label} title={label}>
+                <div style={{ fontSize:12,fontWeight:700,color:C.textSec,marginBottom:4 }}>自チーム</div>
+                <FormRow label="選手1">
+                  <input style={S.inp} placeholder="選手名" value={ap1} onChange={e=>setAp1(e.target.value)}/>
+                  {ownRoster.length>0 && (
+                    <div style={{ marginTop:6 }}>
+                      {ownRoster.map(p=>(
+                        <span key={p.id} style={S.chip(ap1===p.player_name)} onClick={()=>setAp1(p.player_name)}>{p.player_name}</span>
+                      ))}
+                    </div>
+                  )}
+                </FormRow>
+                <FormRow label="選手2（ペア）">
+                  <input style={S.inp} placeholder="選手名" value={ap2} onChange={e=>setAp2(e.target.value)}/>
+                  {ownRoster.length>0 && (
+                    <div style={{ marginTop:6 }}>
+                      {ownRoster.map(p=>(
+                        <span key={p.id} style={S.chip(ap2===p.player_name)} onClick={()=>setAp2(p.player_name)}>{p.player_name}</span>
+                      ))}
+                    </div>
+                  )}
+                </FormRow>
+                <div style={{ fontSize:12,fontWeight:700,color:C.textSec,margin:"8px 0 4px" }}>相手チーム（{bClub||"相手校"}）</div>
+                <FormRow label="選手1">
+                  <input style={S.inp} placeholder="選手名" value={bp1} onChange={e=>setBp1(e.target.value)}/>
+                  {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && (
+                    <div style={{ marginTop:6 }}>
+                      {oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(
+                        <span key={p.id} style={S.chip(bp1===p.player_name)} onClick={()=>setBp1(p.player_name)}>{p.player_name}</span>
+                      ))}
+                    </div>
+                  )}
+                </FormRow>
+                <FormRow label="選手2（ペア）">
+                  <input style={S.inp} placeholder="選手名" value={bp2} onChange={e=>setBp2(e.target.value)}/>
+                  {oppRoster.filter(p=>!bClub||p.team_name===bClub).length>0 && (
+                    <div style={{ marginTop:6 }}>
+                      {oppRoster.filter(p=>!bClub||p.team_name===bClub).map(p=>(
+                        <span key={p.id} style={S.chip(bp2===p.player_name)} onClick={()=>setBp2(p.player_name)}>{p.player_name}</span>
+                      ))}
+                    </div>
+                  )}
+                </FormRow>
+              </FormSec>
+            ))}
+          </>
+        )}
 
         {!editing && (
           <button
@@ -3786,6 +3921,54 @@ function TeamMatchDetail({ tm, onBack, onEdit, onOpen, onDelete, onSave }) {
   );
 }
 
+
+// 団体戦詳細のラッパー（IDからデータを取得して表示）
+function TeamMatchDetailWrapper({ tmId, onBack, onOpen }) {
+  const [tm, setTm] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const reload = async () => {
+    setLoading(true);
+    const list = await getTeamMatches();
+    const found = list.find(t => t.id === tmId);
+    setTm(found || null);
+    setLoading(false);
+  };
+  useEffect(() => { reload(); }, [tmId]);
+
+  if (loading) return (
+    <div style={S.page}>
+      <div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div>
+    </div>
+  );
+  if (!tm) return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+      </div>
+      <div style={{ padding:24,textAlign:"center",color:C.textSec }}>団体戦データが見つかりません</div>
+    </div>
+  );
+  return (
+    <TeamMatchDetail
+      tm={tm}
+      onBack={onBack}
+      onEdit={()=>{}}
+      onOpen={id=>{ onOpen(id); }}
+      onDelete={async ()=>{
+        if (!window.confirm("この団体戦を削除しますか？（個人戦データは残ります）")) return;
+        await deleteTeamMatch(tmId);
+        onBack();
+      }}
+      onSave={async (updated)=>{
+        const { matches: _, ...saveData } = updated;
+        await saveTeamMatch(saveData);
+        await reload();
+      }}
+    />
+  );
+}
+
 function AdminSchoolsScreen({ onBack }) {
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -4128,6 +4311,7 @@ export default function App() {
   const [statsOpponentName, setStatsOpponentName] = useState(null); // 直接開く対戦相手校名
   const [playerStatsFrom,   setPlayerStatsFrom]   = useState("home"); // 選手戦績画面の戻り先（home/stats）
   const [teamMatchFrom,     setTeamMatchFrom]     = useState("list"); // 団体戦から個人戦を開いたときの戻り先
+  const [currentTeamMatchId, setCurrentTeamMatchId] = useState(null); // 現在表示中の団体戦ID
 
   // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
   useEffect(() => {
@@ -4263,6 +4447,15 @@ export default function App() {
       />
     );
   }
+  if (screen==="teamMatchDetail" && currentTeamMatchId) {
+    return (
+      <TeamMatchDetailWrapper
+        tmId={currentTeamMatchId}
+        onBack={()=>{ setCurrentTeamMatchId(null); setScreen("teamMatch"); }}
+        onOpen={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); }}
+      />
+    );
+  }
   if (screen==="stats") {
     return (
       <StatsScreen
@@ -4280,13 +4473,19 @@ export default function App() {
         editMatchId={editTargetId}
         initialMatchType={initMatchType}
         onScheduled={()=>{ setInitMatchType(null); setListFilter("scheduled"); setScreen("list"); setTimeout(()=>setListFilter("all"), 100); }}
-        onSave={id=>{
+        onSave={(id, tmId)=>{
           setCopySourceId(null);
           setInitMatchType(null);
           setEditTargetId(null);
-          setMatchId(id);
-          setPrevScreen("record");
-          setScreen("record");
+          if (tmId) {
+            // 団体戦の場合：団体戦詳細画面へ
+            setCurrentTeamMatchId(tmId);
+            setScreen("teamMatchDetail");
+          } else {
+            setMatchId(id);
+            setPrevScreen("record");
+            setScreen("record");
+          }
         }}
         onCancel={()=>{
           setCopySourceId(null);
