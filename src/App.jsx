@@ -2679,14 +2679,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         <div style={{ padding:12 }}>
           {match.games.map(g=>(
             <div key={g.id} style={S.card}>
-              <div style={{ padding:"8px 12px",background:g.winner_team===leftTeam?"#2ecc71":g.winner_team===rightTeam?"#f97316":C.accent,color:C.white,display:"flex",justifyContent:"space-between" }}>
+              <div style={{ padding:"8px 12px",background:g.winner_team==="A"?"#2ecc71":g.winner_team==="B"?"#f97316":C.accent,color:C.white,display:"flex",justifyContent:"space-between" }}>
                 <span style={{ fontWeight:700,fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
                 <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
               </div>
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
                   {g.points.map(pt=>(
-                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team===leftTeam?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
+                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
                       <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
                     </div>
                   ))}
@@ -2698,7 +2698,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                         <tr key={team}>
                           <td style={{ fontSize:10,color:team==="A"?C.teamA:C.teamB,fontWeight:700,paddingRight:8,whiteSpace:"nowrap" }}>{name}</td>
                           {g.points.map((pt,i)=>(
-                            <td key={i} style={{ padding:"2px 4px",textAlign:"center",background:pt.scoring_team===team?(pt.scoring_team===leftTeam?"#2ecc7118":"#f9731618"):"transparent",minWidth:28 }}>
+                            <td key={i} style={{ padding:"2px 4px",textAlign:"center",background:pt.scoring_team===team?(pt.scoring_team==="A"?"#2ecc7118":"#f9731618"):"transparent",minWidth:28 }}>
                               {pt.scoring_team===team&&(
                                 <div>
                                   <div style={{ fontSize:10,fontWeight:700,color:team==="A"?C.teamA:C.teamB }}>{pt.score_a_after}-{pt.score_b_after}</div>
