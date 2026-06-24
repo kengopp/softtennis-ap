@@ -904,6 +904,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
+  // 団体戦絞り込み
+  const [tmStatusFilter, setTmStatusFilter] = useState("all"); // all | upcoming | finished
+  const [tmSearch, setTmSearch] = useState("");
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -962,6 +965,19 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const pastMatches = allMatches.filter(m => !isUpcomingMatch(m)).filter(m => !childOnly || m.players.some(p => p.player_name === linkedPlayerName));
   const upcomingTeamMatches = allTeamMatches.filter(isUpcomingTeamMatch);
   const pastTeamMatches = allTeamMatches.filter(tm => !isUpcomingTeamMatch(tm));
+
+  // 団体戦絞り込み適用
+  const filteredTeamMatches = allTeamMatches.filter(tm => {
+    if (tmStatusFilter === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
+    if (tmStatusFilter === "finished" && isUpcomingTeamMatch(tm)) return false;
+    if (tmSearch.trim()) {
+      const q = tmSearch.trim().toLowerCase();
+      const opp = (tm.opponent_name || "").toLowerCase();
+      const tour = (tm.tournament_name || "").toLowerCase();
+      if (!opp.includes(q) && !tour.includes(q)) return false;
+    }
+    return true;
+  });
 
   // 統合リスト（日付降順）
   const makeUnifiedList = (matches, teamMatches) => {
@@ -1061,10 +1077,31 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 団体戦タブ */}
       {timeTab === "team" && (
         <>
-          <div style={{ padding:"12px 14px", paddingBottom:90 }}>
+          {/* 絞り込みUI */}
+          <div style={{ padding:"10px 14px 0" }}>
+            {/* フリーワード検索 */}
+            <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", marginBottom:8 }}>
+              <span style={{ fontSize:14, marginRight:6, color:C.textSec }}>🔍</span>
+              <input
+                value={tmSearch}
+                onChange={e=>setTmSearch(e.target.value)}
+                placeholder="相手校名・大会名で検索"
+                style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+              />
+              {tmSearch && <button onClick={()=>setTmSearch("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }}>✕</button>}
+            </div>
+            {/* ステータス絞り込み */}
+            <div style={{ display:"flex", gap:6, marginBottom:6, flexWrap:"wrap" }}>
+              {[["all","すべて"],["upcoming","予定・進行中"],["finished","完了"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setTmStatusFilter(v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+(tmStatusFilter===v?C.navy:C.border), background:tmStatusFilter===v?C.navy:"transparent", color:tmStatusFilter===v?C.white:C.textSec, fontSize:12, fontWeight:700, cursor:"pointer" }}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding:"8px 14px", paddingBottom:90 }}>
             {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {!loading && allTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>団体戦の記録がありません</div>}
-            {!loading && allTeamMatches.map(tm => {
+            {!loading && allTeamMatches.length>0 && filteredTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う団体戦がありません</div>}
+            {!loading && filteredTeamMatches.map(tm => {
               const myFullLabel = [mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
               const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
               const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
