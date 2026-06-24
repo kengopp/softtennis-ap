@@ -877,6 +877,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [isAdmin, setIsAdmin] = useState(false);
   const [myId, setMyId] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
+  const [mySchoolName, setMySchoolName] = useState("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 6;
 
@@ -899,6 +900,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         const roster = await getPlayerRoster();
         const found = roster.find(r => r.id === p.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
+      }
+      if (p?.school_id) {
+        const schools = await getSchools();
+        const s = schools.find(s => s.id === p.school_id);
+        if (s) setMySchoolName(s.name);
       }
     })();
   }, []);
@@ -1079,7 +1085,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             </div>
           )}
           {!loading && allTeamMatches.map(tm => {
-            const myLabel = tm.my_team_division ? `${tm.opponent_name?.includes(tm.my_team_division) ? "" : ""}${tm.my_team_division}` : "";
+            const myFullLabel = [mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
             const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
             const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
             const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "引き分け") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
@@ -1087,25 +1093,23 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
                 <div style={{ height:4, background:statusColor }}/>
                 <div style={{ padding:"12px 14px", cursor:"pointer" }} onClick={()=>onOpenTeamMatch && onOpenTeamMatch(tm.id)}>
+                  {/* 大会名・日付 */}
                   <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                     <span style={{ fontSize:13, fontWeight:700 }}>{tm.tournament_name || "団体戦"}{tm.round ? ` · ${tm.round}` : ""}</span>
                     <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
                   </div>
-                  {tm.venue && <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>📍 {tm.venue}</div>}
-                  {/* 対戦情報：大きく・黒文字・中央揃え */}
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+                  {tm.venue && <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>📍 {tm.venue}</div>}
+                  {/* 対戦情報：学校名中央・スコア右 */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
                     <div style={{ flex:1, textAlign:"center" }}>
-                      <div style={{ fontSize:16, fontWeight:800, color:C.text }}>
-                        自チーム{myLabel ? `（${myLabel}）` : ""}
-                      </div>
-                      <div style={{ fontSize:13, fontWeight:700, color:C.textSec, margin:"2px 0" }}>vs</div>
-                      <div style={{ fontSize:16, fontWeight:800, color:C.text }}>
-                        {oppLabel || "相手チーム"}
-                      </div>
+                      <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{myFullLabel}</div>
+                      <div style={{ fontSize:11, fontWeight:600, color:C.textSec, margin:"2px 0" }}>vs</div>
+                      <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{oppLabel || "相手チーム"}</div>
                     </div>
                     {tm.status !== "scheduled" && (
-                      <div style={{ textAlign:"center", minWidth:70 }}>
-                        <div style={{ fontSize:28, fontWeight:900, color:statusColor }}>{tm.my_score}-{tm.opponent_score}</div>
+                      <div style={{ textAlign:"center", minWidth:64, background: tm.status==="finished" ? (tm.my_score>tm.opponent_score?"#e8f5e9":"#fdecea") : "#fff8e6", borderRadius:10, padding:"8px 4px" }}>
+                        <div style={{ fontSize:11, color:C.textSec, marginBottom:2 }}>団体</div>
+                        <div style={{ fontSize:22, fontWeight:900, color:statusColor }}>{tm.my_score}-{tm.opponent_score}</div>
                       </div>
                     )}
                   </div>
@@ -1703,11 +1707,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
             <div key={orderNum} style={{ ...S.card, marginBottom:10 }}>
               <div style={{ padding:"10px 14px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <span style={{ fontSize:13,fontWeight:700,color:C.navy }}>{orderNum}番手</span>
-                {isRecording && recorderName && (
+                {isRecording && recorderName && match?.status !== "finished" && (
                   <span style={{ fontSize:11,color:"#dc2626",fontWeight:700,background:"#fdecea",padding:"2px 8px",borderRadius:20 }}>🔴 {recorderName} 記録中</span>
                 )}
-                {isFinished && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
-                {isSuspended && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>⏹ 中断</span>}
+                {(isFinished || match?.status === "finished") && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
+                {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>⏹ 中断</span>}
               </div>
               <div style={{ padding:"10px 14px" }}>
                 {aPlayers || bPlayers ? (
