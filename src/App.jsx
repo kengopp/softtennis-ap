@@ -862,8 +862,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch }) {
-  const [matchMode, setMatchMode] = useState("individual"); // individual | team
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode }) {
+  const [matchMode, setMatchMode] = useState(initialMatchMode || "individual"); // individual | team
   const [filter, setFilter] = useState(initialFilter || "all");
   const [toast, setToast] = useState(initialToast || null);
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
@@ -1064,8 +1064,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </div>
         )}
       </div>
-      {/* 個人戦FABボタン */}
-      <button style={{ position:"fixed",bottom:72,left:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew(filter)}>＋</button>
+      {/* 個人戦FABボタン（右下） */}
+      <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew(filter)}>＋</button>
       </>)}
 
       {/* 団体戦一覧 */}
@@ -1110,15 +1110,19 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 </div>
                 <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                   <button
-                    style={{ flex:1, padding:"9px", background:"#fdecea", color:C.red, border:"none", fontSize:12, fontWeight:700, cursor:"pointer" }}
+                    style={{ flex:1, padding:"9px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:12, fontWeight:700, cursor:"pointer" }}
+                    onClick={(e)=>{ e.stopPropagation(); onCopyTeamMatch && onCopyTeamMatch(tm.id); }}
+                  >📋 この団体戦をコピーして新規作成</button>
+                  <button
+                    style={{ width:64, padding:"9px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
                     onClick={(e)=>{ e.stopPropagation(); setConfirmDeleteTeam(tm.id); }}
                   >🗑 削除</button>
                 </div>
               </div>
             );
           })}
-          {/* 団体戦FABボタン */}
-          <button style={{ position:"fixed",bottom:72,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch && onNewTeamMatch()}>＋</button>
+          {/* 団体戦FABボタン（右下） */}
+          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch && onNewTeamMatch()}>＋</button>
         </div>
       )}
 
@@ -1219,11 +1223,12 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin }) {
   );
 }
 
-function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
+function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
+  const [showNewModal, setShowNewModal] = useState(false);
 
   useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
   useEffect(() => {
@@ -1295,7 +1300,33 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
               </div>
             </div>
 
-            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:14 }} onClick={onNew}>＋ 新規試合を記録する</button>
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:14 }} onClick={()=>setShowNewModal(true)}>＋ 新規試合を記録する</button>
+
+            {showNewModal && (
+              <Modal onClose={()=>setShowNewModal(false)}>
+                <div style={{ textAlign:"center" }}>
+                  <div style={{ fontSize:32, marginBottom:8 }}>🎾</div>
+                  <h3 style={{ fontSize:16, fontWeight:800, marginBottom:16 }}>どちらの試合を記録しますか？</h3>
+                  <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:12 }}>
+                    <button
+                      style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), padding:"14px" }}
+                      onClick={()=>{ setShowNewModal(false); onNew(); }}
+                    >
+                      <div style={{ fontSize:15, fontWeight:700 }}>🎾 個人戦</div>
+                      <div style={{ fontSize:11, opacity:0.85, marginTop:2 }}>ダブルス・シングルスの1試合を記録</div>
+                    </button>
+                    <button
+                      style={{ ...S.btn(`linear-gradient(135deg,${C.navy},${C.navyMid})`), padding:"14px" }}
+                      onClick={()=>{ setShowNewModal(false); onNewTeamMatch && onNewTeamMatch(); }}
+                    >
+                      <div style={{ fontSize:15, fontWeight:700 }}>🏆 団体戦</div>
+                      <div style={{ fontSize:11, opacity:0.85, marginTop:2 }}>3番手制の団体戦を登録</div>
+                    </button>
+                  </div>
+                  <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13 }} onClick={()=>setShowNewModal(false)}>キャンセル</button>
+                </div>
+              </Modal>
+            )}
 
             {linkedPlayerName && (
               <div style={{ ...S.card, padding:16, marginBottom:14, border:`1px solid ${C.navy}22` }}>
@@ -1362,8 +1393,8 @@ function HomeScreen({ onNew, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
 // ============================================================
 // 団体戦 予定登録画面
 // ============================================================
-function TeamMatchSetup({ editId, onSave, onCancel }) {
-  const [ready, setReady] = useState(!editId);
+function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
+  const [ready, setReady] = useState(!editId && !copyId);
   const [saving, setSaving] = useState(false);
   const [matchDate, setMatchDate] = useState(today());
   const [venue, setVenue] = useState("");
@@ -1391,6 +1422,22 @@ function TeamMatchSetup({ editId, onSave, onCancel }) {
         if (!tm) { setReady(true); return; }
         setExistingId(tm.id);
         setMatchDate(tm.match_date || today());
+        setVenue(tm.venue || "");
+        setTournamentName(tm.tournament_name || "");
+        setRound(tm.round || "");
+        setMyTeamDivision(tm.my_team_division || "");
+        setOpponentName(tm.opponent_name || "");
+        setOpponentDivision(tm.opponent_division || "");
+        setFormat(tm.format || "best2");
+        setCourtNumber(tm.court_number || "");
+        setIsYounger(tm.is_younger !== false);
+        setReady(true);
+      });
+    } else if (copyId) {
+      getTeamMatch(copyId).then(tm => {
+        if (!tm) { setReady(true); return; }
+        // コピー：IDは新規、スコアはクリア
+        setMatchDate(today());
         setVenue(tm.venue || "");
         setTournamentName(tm.tournament_name || "");
         setRound(tm.round || "");
@@ -1706,8 +1753,11 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onCancel }) 
       prefillRound={tm?.round || ""}
       prefillVenue={tm?.venue || ""}
       prefillDate={tm?.match_date || ""}
-      prefillOpponent={oppName}
+      prefillOpponent={tm?.opponent_name || ""}
       prefillIsYounger={tm?.is_younger !== false}
+      isTeamMatchGame={true}
+      teamMatchMyDivision={tm?.my_team_division || ""}
+      teamMatchOppDivision={tm?.opponent_division || ""}
       onScheduled={null}
       onSave={onSave}
       onCancel={onCancel}
@@ -2273,7 +2323,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -2299,10 +2349,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision }) {
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -2491,6 +2541,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       )}
       <div style={{ padding:14 }}>
 
+        {/* 団体戦ペア登録モード：試合情報・形式設定を非表示 */}
+        {!isTeamMatchGame && (
+          <>
         <FormSec title="試合情報">
           <FormRow label="試合日">
             <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
@@ -2554,10 +2607,26 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           </FormRow>
 
         </FormSec>
+          </>
+        )}
+
+        {/* 団体戦ペア登録モード：チーム区分・相手校を表示のみ */}
+        {isTeamMatchGame && (
+          <div style={{ ...S.card, padding:"10px 14px", marginBottom:14, background:"#f0f4ff", border:`1px solid ${C.border}` }}>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:4 }}>自チーム区分</div>
+            <div style={{ fontSize:14,fontWeight:700,color:C.navy,marginBottom:8 }}>{teamMatchMyDivision || "（なし）"}</div>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:4 }}>相手チーム</div>
+            <div style={{ fontSize:14,fontWeight:700,color:C.navy }}>{prefillOpponent || "（未設定）"}{teamMatchOppDivision ? `（${teamMatchOppDivision}）` : ""}</div>
+          </div>
+        )}
 
         <FormSec title="自チーム (A)">
-          <FormRow label="チーム名 / 学校名" labelRight={<PrefMiniFilter value={aClubPref} onChange={setAClubPref} options={knownPrefsFrom(schools)} />}>
-            <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
+          <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={aClubPref} onChange={setAClubPref} options={knownPrefsFrom(schools)} />}>
+            {isTeamMatchGame ? (
+              <div style={{ ...S.inp, color:C.text, background:C.gray }}>{aClub || "（自チーム）"}</div>
+            ) : (
+              <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
+            )}
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={aP1} onChange={e => setAP1(e.target.value)}/>
@@ -2589,8 +2658,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         </FormSec>
 
         <FormSec title="相手チーム (B)">
-          <FormRow label="チーム名 / 学校名" labelRight={<PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
-            <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
+          <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
+            {isTeamMatchGame ? (
+              <div style={{ ...S.inp, color:C.text, background:C.gray }}>{bClub || prefillOpponent || "（相手チーム）"}</div>
+            ) : (
+              <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
+            )}
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={bP1} onChange={e => setBP1(e.target.value)}/>
@@ -2621,7 +2694,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           )}
         </FormSec>
 
-        {!editing && (
+        {!editing && !isTeamMatchGame && (
           <button
             style={{ ...S.btn(canSchedule ? "linear-gradient(135deg,#7b1fa2,#9c27b0)" : C.border, canSchedule ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
             disabled={!canSchedule || saving}
@@ -2635,7 +2708,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           disabled={!canSave || saving}
           onClick={editing ? ()=>handleSave(null) : handleSaveWithServeSelect}
         >
-          {saving ? "保存中..." : (editing ? "保存する 💾" : "試合を開始する 🎾")}
+          {saving ? "保存中..." : (editing ? "保存する 💾" : isTeamMatchGame ? "ペアを登録して試合開始 🎾" : "試合を開始する 🎾")}
         </button>
       </div>
 
@@ -4255,9 +4328,11 @@ export default function App() {
   const [statsOpponentName, setStatsOpponentName] = useState(null); // 直接開く対戦相手校名
   const [playerStatsFrom,   setPlayerStatsFrom]   = useState("home"); // 選手戦績画面の戻り先（home/stats）
   // 団体戦関連
-  const [teamMatchId,  setTeamMatchId]  = useState(null); // 表示中の団体戦ID
-  const [teamMatchEditId, setTeamMatchEditId] = useState(null); // 編集中の団体戦ID
-  const [teamMatchOrderNum, setTeamMatchOrderNum] = useState(null); // 番手番号
+  const [teamMatchId,  setTeamMatchId]  = useState(null);
+  const [teamMatchEditId, setTeamMatchEditId] = useState(null);
+  const [teamMatchOrderNum, setTeamMatchOrderNum] = useState(null);
+  const [teamMatchCopyId, setTeamMatchCopyId] = useState(null); // コピー元の団体戦ID
+  const [listMatchMode, setListMatchMode] = useState("individual"); // 履歴画面のタブ状態
 
   // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
   useEffect(() => {
@@ -4360,8 +4435,9 @@ export default function App() {
     return (
       <TeamMatchSetup
         editId={teamMatchEditId}
-        onSave={id=>{ setTeamMatchId(id); setTeamMatchEditId(null); setScreen("teamMatchDetail"); }}
-        onCancel={()=>{ setTeamMatchEditId(null); setScreen("list"); }}
+        copyId={teamMatchCopyId}
+        onSave={id=>{ setTeamMatchId(id); setTeamMatchEditId(null); setTeamMatchCopyId(null); setScreen("teamMatchDetail"); }}
+        onCancel={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setListMatchMode("team"); setScreen("list"); }}
       />
     );
   }
@@ -4369,7 +4445,7 @@ export default function App() {
     return (
       <TeamMatchDetail
         teamMatchId={teamMatchId}
-        onBack={()=>{ setTeamMatchId(null); setScreen("list"); }}
+        onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); setScreen("list"); }}
         onOpenMatch={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); }}
         onNewMatch={async (tm, orderNum, existingGame)=>{
           // 番手の個人戦をsetupに遷移（team_match_idとorder_numを引き渡す）
@@ -4405,7 +4481,7 @@ export default function App() {
           setTick(t=>t+1);
           setScreen("teamMatchRecord");
         }}
-        onCancel={()=>setScreen("teamMatchDetail")}
+        onCancel={()=>{ setListMatchMode("team"); setScreen("teamMatchDetail"); }}
       />
     );
   }
@@ -4440,6 +4516,7 @@ export default function App() {
     return (
       <HomeScreen
         onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPrevScreen("home"); setScreen("setup"); }}
+        onNewTeamMatch={()=>{ setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
         onOpen={id=>{ setMatchId(id); setScreen("record"); }}
         onNavigate={goNav}
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
@@ -4520,8 +4597,10 @@ export default function App() {
       onNavigate={goNav}
       initialFilter={listFilter}
       initialToast={listFilter==="scheduled" ? "📅 試合予定を登録しました！" : null}
-      onOpenTeamMatch={id=>{ setTeamMatchId(id); setScreen("teamMatchDetail"); }}
-      onNewTeamMatch={()=>{ setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
+      onOpenTeamMatch={id=>{ setTeamMatchId(id); setListMatchMode("team"); setScreen("teamMatchDetail"); }}
+      onNewTeamMatch={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setScreen("teamMatchSetup"); }}
+      onCopyTeamMatch={id=>{ setTeamMatchCopyId(id); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
+      initialMatchMode={listMatchMode}
     />
   );
 }
