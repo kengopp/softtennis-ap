@@ -1137,8 +1137,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </div>
         </Modal>
       )}
-          </div>
-        )}
       <NavBar active="list" onNavigate={onNavigate}/>
 
       {serveSelectMatch && (
