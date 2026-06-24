@@ -627,12 +627,22 @@ async function recalcTeamMatchScore(teamMatchId) {
 
   const { data: tm } = await supabase.from("team_matches").select("format").eq("id", teamMatchId).single();
   const winTarget = tm?.format === "best2" ? 2 : 3;
-  const allDone = games.every(g => {
-    if (!g.match_id) return false;
+  const totalGames = tm?.format === "best2" ? 3 : 3;
+
+  // 勝敗決定：どちらかが必要勝利数に達した場合のみfinished
+  const winDecided = myScore >= winTarget || oppScore >= winTarget;
+
+  // 全試合終了：match_idが設定されている全番手が終了済み
+  const registeredGames = games.filter(g => g.match_id);
+  const allRegisteredDone = registeredGames.length > 0 && registeredGames.every(g => {
     const m = matchMap[g.match_id];
     return m?.status === "finished" || g.status === "suspended";
   });
-  const newStatus = (myScore >= winTarget || oppScore >= winTarget || allDone) ? "finished" : "active";
+  // 全番手登録済みかつ全試合終了の場合のみfinished（未登録番手があれば進行中）
+  const allSlotsFilled = games.length >= totalGames;
+  const allDone = allSlotsFilled && allRegisteredDone;
+
+  const newStatus = winDecided || allDone ? "finished" : "active";
 
   await supabase.from("team_matches").update({
     my_score: myScore,
@@ -1110,7 +1120,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             const myFullLabel = [mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
             const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
             const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
-            const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "引き分け") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
+            const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
             const dispMyScore = tm.status === "scheduled" ? 0 : tm.my_score;
             const dispOppScore = tm.status === "scheduled" ? 0 : tm.opponent_score;
             return (
@@ -1665,7 +1675,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   });
 
   const statusLabel = tm.status === "finished"
-    ? (tm.my_score > tm.opponent_score ? `🏆 ${tm.my_score}-${tm.opponent_score} 勝利` : tm.my_score < tm.opponent_score ? `❌ ${tm.my_score}-${tm.opponent_score} 敗北` : `${tm.my_score}-${tm.opponent_score} 引き分け`)
+    ? (tm.my_score > tm.opponent_score ? `🏆 ${tm.my_score}-${tm.opponent_score} 勝利` : tm.my_score < tm.opponent_score ? `❌ ${tm.my_score}-${tm.opponent_score} 敗北` : `${tm.my_score}-${tm.opponent_score} 全試合終了`)
     : tm.status === "active" ? `⏳ ${tm.my_score}-${tm.opponent_score} 進行中` : "📅 予定";
 
   return (
