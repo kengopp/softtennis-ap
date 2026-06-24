@@ -888,7 +888,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // 試合一覧
 // ============================================================
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode }) {
-  const [timeTab, setTimeTab] = useState("upcoming"); // upcoming | past
+  const [timeTab, setTimeTab] = useState(initialMatchMode || "individual"); // individual | team
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [allTeamMatches, setAllTeamMatches] = useState([]);
@@ -908,14 +908,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const reload = useCallback(() => {
     setLoading(true);
     Promise.all([getMatches(), getTeamMatches()]).then(async ([list, tList]) => {
-      // 団体戦に紐付いたmatch_idを取得して個人戦一覧から除外
-      const { data: tmGames } = await supabase
-        .from("team_match_games")
-        .select("match_id")
-        .not("match_id", "is", null);
-      const teamMatchIds = new Set((tmGames || []).map(g => g.match_id));
-      const filteredList = list.filter(m => !teamMatchIds.has(m.id));
-      setAllMatches(filteredList);
+      // 団体戦に紐付いたmatch_idを個人戦一覧から除外
+      try {
+        const { data: tmGames } = await supabase
+          .from("team_match_games")
+          .select("match_id")
+          .not("match_id", "is", null);
+        const teamMatchIds = new Set((tmGames || []).map(g => g.match_id).filter(Boolean));
+        setAllMatches(list.filter(m => !teamMatchIds.has(m.id)));
+      } catch(e) {
+        setAllMatches(list);
+      }
       setAllTeamMatches(tList);
       setLoading(false);
     });
@@ -948,10 +951,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (m.status === "finished" && m.match_date >= todayStr) return true;
     return false;
   };
-  // 団体戦の振り分け
+  // 団体戦の振り分け（match_dateがnullでもactive/scheduledは予定・進行中）
   const isUpcomingTeamMatch = (tm) => {
     if (tm.status === "active" || tm.status === "scheduled") return true;
-    if (tm.status === "finished" && tm.match_date >= todayStr) return true;
+    if (tm.status === "finished" && tm.match_date && tm.match_date >= todayStr) return true;
     return false;
   };
 
@@ -989,161 +992,114 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
         <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }} onClick={reload}>🔄 更新</button>
       </div>
-      {toast && (
-        <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast}</div>
-      )}
+      {toast && <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast}</div>}
 
-      {/* 時系列タブ */}
+      {/* 上段：個人戦 / 団体戦 タブ */}
       <div style={{ display:"flex", background:"#f0f2f6", padding:3, margin:"10px 14px 0", borderRadius:10 }}>
-        {[["upcoming","📅 予定・進行中"],["past","📋 過去の記録"]].map(([v,l])=>(
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTimeTab(v)}>{l}</button>
+        {[["individual","🎾 個人戦"],["team","🏆 団体戦"]].map(([v,l])=>(
+          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["individual","team"].includes(timeTab)&&v==="individual")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); setPage(1); }}>{l}</button>
         ))}
       </div>
 
-      {/* 選手絞り込み */}
-      {linkedPlayerName && (
-        <div style={{ padding:"8px 14px 0" }}>
-          <button style={{ ...S.chip(childOnly), fontSize:12 }} onClick={()=>setChildOnly(v=>!v)}>🎾 {linkedPlayerName}さんの試合のみ</button>
-        </div>
-      )}
-
-      <div style={{ padding:"12px 14px", paddingBottom:90 }}>
-        {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
-        {!loading && currentList.length===0 && (
-          <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>
-            <div style={{ fontSize:40,marginBottom:12 }}>{timeTab==="upcoming"?"📅":"📋"}</div>
-            {timeTab==="upcoming" ? "予定・進行中の試合はありません" : "過去の記録はありません"}
-          </div>
-        )}
-
-        {pageItems.map((item, idx) => {
-          if (item.type === "individual") {
-            const m = item.data;
-            const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
-            const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
-            const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
-            const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
-            const aNames = aPlayers.map(p=>p.player_name).join("/");
-            const bNames = bPlayers.map(p=>p.player_name).join("/");
-            const aClub = aPlayers[0]?.club_name || "";
-            const bClub = bPlayers[0]?.club_name || "";
-            const borderColor = m.status==="active" ? C.orange : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
-            const isMyMatch = m.created_by === myId;
-            return (
-              <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-                <div style={{ height:4, background:borderColor }}/>
-                <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <span style={{ fontSize:10, fontWeight:800, color:C.white, background:C.accent, borderRadius:4, padding:"1px 6px" }}>個</span>
-                      <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(m.match_date)}</span>
-                    </div>
-                    <div style={{ display:"flex", gap:4 }}>
-                      {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10 }}>🔴 進行中</span>}
-                      {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10 }}>📅 予定</span>}
-                      <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"1px 6px", borderRadius:6 }}>{m.game_format}G</span>
-                    </div>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec }}>{aClub} </span>}{aNames}</div>
-                      <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec }}>{bClub} </span>}{bNames}</div>
-                    </div>
-                    {m.status!=="scheduled" && (
-                      <div style={{ textAlign:"center", minWidth:48 }}>
-                        <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec }}>{m.match_score_a}-{m.match_score_b}</div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {isMyMatch && (
-                  <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                    <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>
-                    <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>
-                  </div>
-                )}
-              </div>
-            );
-          } else {
-            // 団体戦カード
-            const tm = item.data;
-            const myFullLabel = [mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
-            const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
-            const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
-            const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
-            const dispMyScore = tm.my_score ?? 0;
-            const dispOppScore = tm.opponent_score ?? 0;
-            return (
-              <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
-                <div style={{ height:4, background:statusColor }}/>
-                <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTeamMatch && onOpenTeamMatch(tm.id)}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <span style={{ fontSize:10, fontWeight:800, color:C.white, background:C.navy, borderRadius:4, padding:"1px 6px" }}>団</span>
-                      <span style={{ fontSize:11, color:C.textSec }}>{tm.tournament_name || "団体戦"}{tm.round ? ` · ${tm.round}` : ""}</span>
-                    </div>
-                    <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
-                  </div>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6, flex:1 }}>
-                      <span style={{ fontSize:14, fontWeight:800, color:C.text }}>{myFullLabel}</span>
-                      <span style={{ fontSize:20, fontWeight:900, color:statusColor, minWidth:48, textAlign:"center" }}>{dispMyScore}-{dispOppScore}</span>
-                      <span style={{ fontSize:14, fontWeight:800, color:C.text }}>{oppLabel || "相手"}</span>
-                    </div>
-                  </div>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:6 }}>
-                    <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
-                    <span style={{ fontSize:10, color:C.textSec }}>{tm.format === "best2" ? "2勝先取" : "3試合全部"}</span>
-                  </div>
-                </div>
-                <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                  <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopyTeamMatch && onCopyTeamMatch(tm.id);}}>📋 コピーして新規作成</button>
-                  <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDeleteTeam(tm.id);}}>🗑</button>
-                </div>
-              </div>
-            );
-          }
-        })}
-
-        {/* ページネーション */}
-        {totalPages > 1 && (
-          <div style={{ display:"flex", justifyContent:"center", gap:8, marginTop:12 }}>
-            <button style={{ padding:"8px 16px", background:page===1?C.border:C.navy, color:C.white, border:"none", borderRadius:8, cursor:page===1?"default":"pointer", fontSize:13 }} disabled={page===1} onClick={()=>setPage(p=>p-1)}>←</button>
-            <span style={{ fontSize:13, color:C.textSec, lineHeight:"36px" }}>{page} / {totalPages}</span>
-            <button style={{ padding:"8px 16px", background:page===totalPages?C.border:C.navy, color:C.white, border:"none", borderRadius:8, cursor:page===totalPages?"default":"pointer", fontSize:13 }} disabled={page===totalPages} onClick={()=>setPage(p=>p+1)}>→</button>
-          </div>
-        )}
-      </div>
-
-      {/* FABボタン */}
-      <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>
-
-      <NavBar active="list" onNavigate={onNavigate}/>
-
-      {serveSelectMatch && (
-        <Modal onClose={()=>setServeSelectMatch(null)}>
-          <div style={{ textAlign:"center" }}>
-            <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
-            <h3 style={{ fontSize:16, fontWeight:800, margin:"8px 0 4px" }}>最初のサーブを選択</h3>
-            <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>試合を開始するにはサーブ側を選んでください</p>
-            <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-              {[["A", serveSelectMatch.players?.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "自チーム"],
-                ["B", serveSelectMatch.players?.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
-              ].map(([team, label]) => (
-                <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?"#2ecc71":"#f97316"}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?"#2ecc71":"#f97316" }}
-                  onClick={async ()=>{
-                    const m = serveSelectMatch;
-                    setServeSelectMatch(null);
-                    await onStartScheduled(m.id, team);
-                  }}
-                >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
-              ))}
+      {/* 個人戦タブ */}
+      {timeTab === "individual" && (
+        <>
+          {linkedPlayerName && (
+            <div style={{ padding:"8px 14px 0" }}>
+              <button style={{ ...S.chip(childOnly), fontSize:12 }} onClick={()=>setChildOnly(v=>!v)}>🎾 {linkedPlayerName}さんの試合のみ</button>
             </div>
-            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectMatch(null)}>キャンセル</button>
+          )}
+          <div style={{ padding:"12px 14px", paddingBottom:90 }}>
+            {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
+            {!loading && allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>試合記録がありません</div>}
+            {!loading && allMatches.filter(m=>!childOnly||m.players.some(p=>p.player_name===linkedPlayerName)).map(m => {
+              const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
+              const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
+              const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
+              const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
+              const aNames = aPlayers.map(p=>p.player_name).join("/");
+              const bNames = bPlayers.map(p=>p.player_name).join("/");
+              const aClub = aPlayers[0]?.club_name || "";
+              const bClub = bPlayers[0]?.club_name || "";
+              const borderColor = m.status==="active" ? C.orange : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
+              const isMyMatch = m.created_by === myId;
+              return (
+                <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
+                  <div style={{ height:4, background:borderColor }}/>
+                  <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                      <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(m.match_date)}{m.tournament_name ? ` · ${m.tournament_name}` : ""}</span>
+                      <div style={{ display:"flex", gap:4 }}>
+                        {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10 }}>🔴 進行中</span>}
+                        {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10 }}>📅 予定</span>}
+                        <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"1px 6px", borderRadius:6 }}>{m.game_format}G</span>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec }}>{aClub} </span>}{aNames}</div>
+                        <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec }}>{bClub} </span>}{bNames}</div>
+                      </div>
+                      {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
+                    </div>
+                  </div>
+                  {isMyMatch && (
+                    <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                      <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>
+                      <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        </Modal>
+          {/* 個人戦FAB */}
+          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>
+        </>
       )}
+
+      {/* 団体戦タブ */}
+      {timeTab === "team" && (
+        <>
+          <div style={{ padding:"12px 14px", paddingBottom:90 }}>
+            {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
+            {!loading && allTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>団体戦の記録がありません</div>}
+            {!loading && allTeamMatches.map(tm => {
+              const myFullLabel = [mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
+              const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
+              const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
+              const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
+              return (
+                <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
+                  <div style={{ height:4, background:statusColor }}/>
+                  <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTeamMatch && onOpenTeamMatch(tm.id)}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                      <span style={{ fontSize:12, fontWeight:700 }}>{tm.tournament_name || "団体戦"}{tm.round ? ` · ${tm.round}` : ""}</span>
+                      <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
+                    </div>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:6 }}>
+                      <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1, textAlign:"right" }}>{myFullLabel}</span>
+                      <span style={{ fontSize:20, fontWeight:900, color:statusColor, minWidth:48, textAlign:"center" }}>{tm.my_score??0}-{tm.opponent_score??0}</span>
+                      <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1 }}>{oppLabel || "相手"}</span>
+                    </div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
+                      <span style={{ fontSize:10, color:C.textSec }}>{tm.format === "best2" ? "2勝先取" : "3試合全部"}</span>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                    <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopyTeamMatch&&onCopyTeamMatch(tm.id);}}>📋 コピーして新規作成</button>
+                    <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDeleteTeam(tm.id);}}>🗑</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* 団体戦FAB */}
+          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch&&onNewTeamMatch()}>＋</button>
+        </>
+      )}
+
       <NavBar active="list" onNavigate={onNavigate}/>
 
       {serveSelectMatch && (
@@ -1156,8 +1112,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               {[["A", serveSelectMatch.players?.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "自チーム"],
                 ["B", serveSelectMatch.players?.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "相手チーム"]
               ].map(([team, label]) => (
-                <button key={team}
-                  style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?"#2ecc71":"#f97316"}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?"#2ecc71":"#f97316" }}
+                <button key={team} style={{ flex:1, padding:"14px 8px", borderRadius:10, border:`2px solid ${team==="A"?"#2ecc71":"#f97316"}`, background:"transparent", cursor:"pointer", fontSize:13, fontWeight:700, color:team==="A"?"#2ecc71":"#f97316" }}
                   onClick={async ()=>{ const m = serveSelectMatch; setServeSelectMatch(null); await onStartScheduled(m.id, team); }}
                 >{label}<br/><span style={{ fontSize:11, fontWeight:400 }}>（サーブ）</span></button>
               ))}
@@ -1166,7 +1121,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </div>
         </Modal>
       )}
-
       {confirmDelete && (
         <Modal onClose={()=>setConfirmDelete(null)}>
           <div style={{ textAlign:"center" }}>
