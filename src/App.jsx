@@ -1077,6 +1077,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 団体戦一覧 */}
       {matchMode === "team" && (
         <div style={{ padding:"12px 14px", paddingBottom:90 }}>
+          {/* 団体戦更新ボタン */}
+          <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
+            <button
+              style={{ background:C.navy, border:"none", borderRadius:8, color:C.white, fontSize:12, padding:"6px 12px", cursor:"pointer" }}
+              onClick={reload}
+            >🔄 今すぐ更新</button>
+          </div>
           {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
           {!loading && allTeamMatches.length===0 && (
             <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>
@@ -4597,13 +4604,21 @@ export default function App() {
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
         onBack={async ()=>{
-          // 中断確認は ScoreRecord 内の ✕中断ボタンで処理済みなので、ここは単純に戻る
           await recalcTeamMatchScore(teamMatchId);
+          // team_match_gamesのstatusも更新
+          const tmData = await getTeamMatch(teamMatchId);
+          const g = tmData?.games?.find(g=>g.order_num===teamMatchOrderNum);
+          if (g) {
+            const { data: m } = await supabase.from("matches").select("status").eq("id", matchId).single();
+            if (m?.status === "finished") {
+              await updateTeamMatchGame(g.id, { status:"finished", recorder_id:null, recorder_name:null });
+            }
+          }
           setMatchId(null); setTick(t=>t+1);
           setTimeout(()=>setScreen("teamMatchDetail"), 50);
         }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
+        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
     );
   }
