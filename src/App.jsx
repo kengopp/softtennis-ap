@@ -1087,19 +1087,25 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
                 <div style={{ height:4, background:statusColor }}/>
                 <div style={{ padding:"12px 14px", cursor:"pointer" }} onClick={()=>onOpenTeamMatch && onOpenTeamMatch(tm.id)}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                     <span style={{ fontSize:13, fontWeight:700 }}>{tm.tournament_name || "団体戦"}{tm.round ? ` · ${tm.round}` : ""}</span>
                     <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
                   </div>
                   {tm.venue && <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>📍 {tm.venue}</div>}
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+                  {/* 対戦情報：大きく表示 */}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
                     <div style={{ flex:1 }}>
-                      <div style={{ fontSize:12, color:C.textSec, marginBottom:2 }}>自チーム{myLabel ? `（${myLabel}）` : ""}</div>
-                      <div style={{ fontSize:12, color:C.textSec }}>vs {oppLabel || "相手チーム"}</div>
+                      <div style={{ fontSize:16, fontWeight:800, color:C.teamA }}>
+                        自チーム{myLabel ? `（${myLabel}）` : ""}
+                      </div>
+                      <div style={{ fontSize:13, fontWeight:700, color:C.textSec, margin:"2px 0" }}>vs</div>
+                      <div style={{ fontSize:16, fontWeight:800, color:C.teamB }}>
+                        {oppLabel || "相手チーム"}
+                      </div>
                     </div>
                     {tm.status !== "scheduled" && (
-                      <div style={{ textAlign:"center", minWidth:60 }}>
-                        <div style={{ fontSize:24, fontWeight:900, color:statusColor }}>{tm.my_score} - {tm.opponent_score}</div>
+                      <div style={{ textAlign:"center", minWidth:70 }}>
+                        <div style={{ fontSize:28, fontWeight:900, color:statusColor }}>{tm.my_score}-{tm.opponent_score}</div>
                       </div>
                     )}
                   </div>
@@ -1410,12 +1416,22 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
   const [venues, setVenues] = useState([]);
   const [mySchoolId, setMySchoolId] = useState(null);
   const [existingId, setExistingId] = useState(null);
+  // 過去の団体戦から候補を取得
+  const [pastTournaments, setPastTournaments] = useState([]);
+  const [pastRounds, setPastRounds] = useState([]);
+  const [pastCourtNumbers, setPastCourtNumbers] = useState([]);
+  const [pastDivisions, setPastDivisions] = useState([]);
 
   useEffect(() => {
-    Promise.all([getKnownSchools(), getKnownVenues(), getMyProfile()]).then(([s, v, p]) => {
+    Promise.all([getKnownSchools(), getKnownVenues(), getMyProfile(), getTeamMatches()]).then(([s, v, p, tms]) => {
       setSchools(s);
       setVenues(v);
       if (p?.school_id) setMySchoolId(p.school_id);
+      // 過去の団体戦からサジェスト候補を生成
+      setPastTournaments([...new Set(tms.map(m=>m.tournament_name).filter(Boolean))]);
+      setPastRounds([...new Set(tms.map(m=>m.round).filter(Boolean))]);
+      setPastCourtNumbers([...new Set(tms.map(m=>m.court_number).filter(Boolean))]);
+      setPastDivisions([...new Set(tms.map(m=>m.my_team_division).filter(Boolean))]);
     });
     if (editId) {
       getTeamMatch(editId).then(tm => {
@@ -1481,7 +1497,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
       <div style={S.hdr}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onCancel}>←</button>
-          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>🏆 団体戦 {editId ? "編集" : "予定登録"}</span>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>🏆 団体戦情報登録{editId ? "（編集）" : ""}</span>
         </div>
       </div>
       <div style={{ padding:14 }}>
@@ -1490,16 +1506,16 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
             <input type="date" style={S.inp} value={matchDate} onChange={e=>setMatchDate(e.target.value)}/>
           </FormRow>
           <FormRow label="大会名">
-            <input style={S.inp} placeholder="例：○○高校選手権" value={tournamentName} onChange={e=>setTournamentName(e.target.value)}/>
+            <VenueField value={tournamentName} onChange={setTournamentName} venues={pastTournaments} placeholder="例：○○高校選手権"/>
           </FormRow>
           <FormRow label="何回戦">
-            <input style={S.inp} placeholder="例：準々決勝" value={round} onChange={e=>setRound(e.target.value)}/>
+            <VenueField value={round} onChange={setRound} venues={pastRounds} placeholder="例：準々決勝"/>
           </FormRow>
           <FormRow label="会場">
             <VenueField value={venue} onChange={setVenue} venues={venues}/>
           </FormRow>
           <FormRow label="コート番号（任意）">
-            <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e=>setCourtNumber(e.target.value)}/>
+            <VenueField value={courtNumber} onChange={setCourtNumber} venues={pastCourtNumbers} placeholder="例：3番コート"/>
           </FormRow>
           <FormRow label="若番 / 遅番（必須）">
             <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
@@ -1516,7 +1532,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
 
         <FormSec title="チーム情報">
           <FormRow label="自チーム区分（任意）">
-            <input style={S.inp} placeholder="例：Aチーム" value={myTeamDivision} onChange={e=>setMyTeamDivision(e.target.value)}/>
+            <VenueField value={myTeamDivision} onChange={setMyTeamDivision} venues={pastDivisions} placeholder="例：Aチーム"/>
           </FormRow>
           <FormRow label="相手校名（必須）">
             <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業"/>
@@ -1727,7 +1743,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onEdit 
 // ============================================================
 // 団体戦 番手ペア登録→試合開始（v1.0のMatchSetupFormを流用）
 // ============================================================
-function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onCancel }) {
+function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOnly, onCancel }) {
   const [tm, setTm] = useState(null);
   const [ready, setReady] = useState(false);
 
@@ -1741,7 +1757,6 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onCancel }) 
   if (!ready) return <div style={S.page}><div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div></div>;
 
   const orderLabel = ["1番手","2番手","3番手"][orderNum-1] || `${orderNum}番手`;
-  const oppName = [tm?.opponent_name, tm?.opponent_division].filter(Boolean).join("");
 
   return (
     <MatchSetup
@@ -1760,6 +1775,7 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onCancel }) 
       teamMatchOppDivision={tm?.opponent_division || ""}
       onScheduled={null}
       onSave={onSave}
+      onSavePairOnly={onSavePairOnly}
       onCancel={onCancel}
     />
   );
@@ -2225,14 +2241,14 @@ function PrefMiniFilter({ value, onChange, options }) {
 }
 
 // 会場名入力＋候補サジェストコンポーネント
-function VenueField({ value, onChange, venues }) {
+function VenueField({ value, onChange, venues, placeholder }) {
   const safeValue = value ?? "";
   const safeVenues = venues ?? [];
-  const filtered = safeValue.trim() ? safeVenues.filter(v => v.includes(safeValue.trim())) : [];
+  const filtered = safeValue.trim() ? safeVenues.filter(v => v.includes(safeValue.trim())) : safeVenues.slice(0, 5);
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position:"relative" }}>
-      <input style={S.inp} placeholder="例：○○市民コート" value={safeValue}
+      <input style={S.inp} placeholder={placeholder || "例：○○市民コート"} value={safeValue}
         onChange={e => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 200)}
@@ -2323,7 +2339,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, onSavePairOnly }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -2349,10 +2365,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} onSavePairOnly={onSavePairOnly} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, onSavePairOnly }) {
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -2701,6 +2717,39 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             onClick={handleSchedule}
           >
             {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
+          </button>
+        )}
+        {/* 団体戦ペア登録モード：ペアだけ保存して戻るボタン */}
+        {isTeamMatchGame && onSavePairOnly && (
+          <button
+            style={{ ...S.btn(canSave && !saving ? C.navy : C.border, canSave && !saving ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
+            disabled={!canSave || saving}
+            onClick={async ()=>{
+              setSaving(true);
+              try {
+                const mid = uid();
+                const players = [
+                  { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
+                  ...(isDoubles && aP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:null, order_num:2 }] : []),
+                  { id:uid(), match_id:mid, team:"B", player_name:bP1.trim(), club_name:bClub.trim(), position:null, order_num:1 },
+                  ...(isDoubles && bP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP2.trim(), club_name:bClub.trim(), position:null, order_num:2 }] : []),
+                ];
+                const match = {
+                  id:mid, created_by:"me",
+                  match_date:matchDate, venue, tournament_name:tournamentName, round,
+                  match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server: "A",
+                  status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+                };
+                await saveMatch(match);
+                onSavePairOnly(mid, { aP1: aP1.trim(), aP2: aP2.trim(), bP1: bP1.trim(), bP2: bP2.trim() });
+              } catch(e) {
+                alert("保存エラー: " + (e.message || e));
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "保存中..." : "💾 ペアを登録して戻る"}
           </button>
         )}
         <button
@@ -4466,7 +4515,6 @@ export default function App() {
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
         onSave={async (matchId)=>{
-          // team_match_gamesを更新してteamMatchDetailへ戻る
           const { data: { user } } = await supabase.auth.getUser();
           const profile = await getMyProfile();
           const existingGame = (await getTeamMatch(teamMatchId))?.games?.find(g=>g.order_num===teamMatchOrderNum);
@@ -4475,11 +4523,23 @@ export default function App() {
           } else {
             await saveTeamMatchGame({ team_match_id: teamMatchId, order_num: teamMatchOrderNum, match_id: matchId, status:"active", recorder_id: user?.id, recorder_name: profile?.name || "" });
           }
-          // team_matchのstatusをactiveに
           await supabase.from("team_matches").update({ status:"active" }).eq("id", teamMatchId).eq("status","scheduled");
           setMatchId(matchId);
           setTick(t=>t+1);
           setScreen("teamMatchRecord");
+        }}
+        onSavePairOnly={async (matchId, pairInfo)=>{
+          // ペアのみ登録してteamMatchDetailへ戻る（試合開始しない）
+          const { data: { user } } = await supabase.auth.getUser();
+          const existingGame = (await getTeamMatch(teamMatchId))?.games?.find(g=>g.order_num===teamMatchOrderNum);
+          if (existingGame) {
+            await updateTeamMatchGame(existingGame.id, { match_id: matchId, status:"waiting", recorder_id: null, recorder_name: null });
+          } else {
+            await saveTeamMatchGame({ team_match_id: teamMatchId, order_num: teamMatchOrderNum, match_id: matchId, status:"waiting", recorder_id: null, recorder_name: null });
+          }
+          setListMatchMode("team");
+          setTick(t=>t+1);
+          setTimeout(()=>setScreen("teamMatchDetail"), 50);
         }}
         onCancel={()=>{ setListMatchMode("team"); setScreen("teamMatchDetail"); }}
       />
