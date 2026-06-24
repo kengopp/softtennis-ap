@@ -904,9 +904,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
-  // 団体戦絞り込み
-  const [tmStatusFilter, setTmStatusFilter] = useState("all"); // all | upcoming | finished
-  const [tmSearch, setTmSearch] = useState("");
+  // 共通絞り込み（個人戦・団体戦で共有）
+  const [filterSearch, setFilterSearch] = useState("");       // フリーワード
+  const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -961,17 +961,26 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return false;
   };
 
-  const upcomingMatches = allMatches.filter(isUpcomingMatch).filter(m => !childOnly || m.players.some(p => p.player_name === linkedPlayerName));
-  const pastMatches = allMatches.filter(m => !isUpcomingMatch(m)).filter(m => !childOnly || m.players.some(p => p.player_name === linkedPlayerName));
-  const upcomingTeamMatches = allTeamMatches.filter(isUpcomingTeamMatch);
-  const pastTeamMatches = allTeamMatches.filter(tm => !isUpcomingTeamMatch(tm));
+  // 共通絞り込みロジック
+  const filteredMatches = allMatches.filter(m => {
+    if (filterStatus === "upcoming" && !isUpcomingMatch(m)) return false;
+    if (filterStatus === "finished" && isUpcomingMatch(m)) return false;
+    if (childOnly && linkedPlayerName && !m.players.some(p => p.player_name === linkedPlayerName)) return false;
+    if (filterSearch.trim()) {
+      const q = filterSearch.trim().toLowerCase();
+      const players = m.players.map(p => p.player_name).join(" ").toLowerCase();
+      const tour = (m.tournament_name || "").toLowerCase();
+      const opp = m.players.filter(p=>p.team==="B").map(p=>p.club_name||"").join(" ").toLowerCase();
+      if (!players.includes(q) && !tour.includes(q) && !opp.includes(q)) return false;
+    }
+    return true;
+  });
 
-  // 団体戦絞り込み適用
   const filteredTeamMatches = allTeamMatches.filter(tm => {
-    if (tmStatusFilter === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
-    if (tmStatusFilter === "finished" && isUpcomingTeamMatch(tm)) return false;
-    if (tmSearch.trim()) {
-      const q = tmSearch.trim().toLowerCase();
+    if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
+    if (filterStatus === "finished" && isUpcomingTeamMatch(tm)) return false;
+    if (filterSearch.trim()) {
+      const q = filterSearch.trim().toLowerCase();
       const opp = (tm.opponent_name || "").toLowerCase();
       const tour = (tm.tournament_name || "").toLowerCase();
       if (!opp.includes(q) && !tour.includes(q)) return false;
@@ -979,20 +988,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return true;
   });
 
-  // 統合リスト（日付降順）
-  const makeUnifiedList = (matches, teamMatches) => {
-    const items = [
-      ...matches.map(m => ({ type:"individual", data:m, date:m.match_date||"" })),
-      ...teamMatches.map(tm => ({ type:"team", data:tm, date:tm.match_date||"" })),
-    ];
-    return items.sort((a,b) => b.date.localeCompare(a.date));
-  };
-
-  const upcomingList = makeUnifiedList(upcomingMatches, upcomingTeamMatches);
-  const pastList = makeUnifiedList(pastMatches, pastTeamMatches);
-  const currentList = timeTab === "upcoming" ? upcomingList : pastList;
-
-  useEffect(() => { setPage(1); }, [timeTab, childOnly]);
+  useEffect(() => { setPage(1); }, [timeTab, childOnly, filterSearch, filterStatus]);
   const totalPages = Math.max(1, Math.ceil(currentList.length / PAGE_SIZE));
   const pageItems = currentList.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
 
@@ -1017,18 +1013,36 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         ))}
       </div>
 
+      {/* 共通絞り込みUI */}
+      <div style={{ padding:"10px 14px 0" }}>
+        <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", marginBottom:8 }}>
+          <span style={{ fontSize:14, marginRight:6, color:C.textSec }}>🔍</span>
+          <input
+            value={filterSearch}
+            onChange={e=>setFilterSearch(e.target.value)}
+            placeholder={timeTab==="team" ? "相手校名・大会名で検索" : "選手名・相手校・大会名で検索"}
+            style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+          />
+          {filterSearch && <button onClick={()=>setFilterSearch("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }}>✕</button>}
+        </div>
+        <div style={{ display:"flex", gap:6, marginBottom:6, flexWrap:"wrap" }}>
+          {[["all","すべて"],["upcoming","予定・進行中"],["finished","完了"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setFilterStatus(v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+(filterStatus===v?C.navy:C.border), background:filterStatus===v?C.navy:"transparent", color:filterStatus===v?C.white:C.textSec, fontSize:12, fontWeight:700, cursor:"pointer" }}>{l}</button>
+          ))}
+          {linkedPlayerName && timeTab==="individual" && (
+            <button style={{ ...S.chip(childOnly), fontSize:12, padding:"4px 12px" }} onClick={()=>setChildOnly(v=>!v)}>🎾 {linkedPlayerName}さんのみ</button>
+          )}
+        </div>
+      </div>
+
       {/* 個人戦タブ */}
       {timeTab === "individual" && (
         <>
-          {linkedPlayerName && (
-            <div style={{ padding:"8px 14px 0" }}>
-              <button style={{ ...S.chip(childOnly), fontSize:12 }} onClick={()=>setChildOnly(v=>!v)}>🎾 {linkedPlayerName}さんの試合のみ</button>
-            </div>
-          )}
-          <div style={{ padding:"12px 14px", paddingBottom:90 }}>
+          <div style={{ padding:"8px 14px", paddingBottom:90 }}>
             {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {!loading && allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>試合記録がありません</div>}
-            {!loading && allMatches.filter(m=>!childOnly||m.players.some(p=>p.player_name===linkedPlayerName)).map(m => {
+            {!loading && allMatches.length>0 && filteredMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う試合がありません</div>}
+            {!loading && filteredMatches.map(m => {
               const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
               const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
               const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
@@ -1077,26 +1091,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 団体戦タブ */}
       {timeTab === "team" && (
         <>
-          {/* 絞り込みUI */}
-          <div style={{ padding:"10px 14px 0" }}>
-            {/* フリーワード検索 */}
-            <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", marginBottom:8 }}>
-              <span style={{ fontSize:14, marginRight:6, color:C.textSec }}>🔍</span>
-              <input
-                value={tmSearch}
-                onChange={e=>setTmSearch(e.target.value)}
-                placeholder="相手校名・大会名で検索"
-                style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
-              />
-              {tmSearch && <button onClick={()=>setTmSearch("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }}>✕</button>}
-            </div>
-            {/* ステータス絞り込み */}
-            <div style={{ display:"flex", gap:6, marginBottom:6, flexWrap:"wrap" }}>
-              {[["all","すべて"],["upcoming","予定・進行中"],["finished","完了"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setTmStatusFilter(v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+(tmStatusFilter===v?C.navy:C.border), background:tmStatusFilter===v?C.navy:"transparent", color:tmStatusFilter===v?C.white:C.textSec, fontSize:12, fontWeight:700, cursor:"pointer" }}>{l}</button>
-              ))}
-            </div>
-          </div>
           <div style={{ padding:"8px 14px", paddingBottom:90 }}>
             {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {!loading && allTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>団体戦の記録がありません</div>}
