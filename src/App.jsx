@@ -2816,7 +2816,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 // ============================================================
 // スコア記録
 // ============================================================
-function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
+function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
   const [initialMatch, setInitialMatch] = useState(null);
   const [loadKey, setLoadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -2866,12 +2866,13 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate }) {
         refreshing={refreshing}
         onNavigate={onNavigate}
         viewOnly={viewOnly}
+        teamMatchId={teamMatchId}
       />
     </ErrorBoundary>
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
   const [tab,    setTab]    = useState(viewOnly ? "score" : "record");
   const [fault,  setFault]  = useState(0);
@@ -2888,6 +2889,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const [addingPoint, setAddingPoint] = useState(null); // 追加位置 { gameId, atIndex }
   const [memoDraft, setMemoDraft] = useState(initialMatch.memo || ""); // 試合メモ（下書き）
   const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
+  const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
 
   // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
   const saveQueueRef = useRef(Promise.resolve());
@@ -3366,6 +3368,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 </button>
               </div>
               <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={undo}>↩ 1つ前に戻す</button>
+              {teamMatchId && (
+                <button style={{ width:"100%",padding:11,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setSuspendConfirm(true)}>✕ 試合を中断する</button>
+              )}
 
               {/* 直近記録 */}
               {currentGame.points.length>0&&(
@@ -3473,6 +3478,25 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               ))}
             </div>
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectModal(false)}>キャンセル</button>
+          </div>
+        </Modal>
+      )}
+
+      {suspendConfirm && (
+        <Modal onClose={()=>setSuspendConfirm(false)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>⏹️</div>
+            <h3 style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>試合を中断しますか？</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:20 }}>現在のスコアが保存され、この試合は中断扱いになります。</p>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setSuspendConfirm(false)}>キャンセル</button>
+              <button style={{ padding:11, background:"#b45309", color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={async ()=>{
+                setSuspendConfirm(false);
+                const updated = { ...match, status:"finished" };
+                persist(updated);
+                onBack();
+              }}>中断して終了</button>
+            </div>
           </div>
         </Modal>
       )}
@@ -4604,11 +4628,11 @@ export default function App() {
               await updateTeamMatchGame(g.id, { status:"finished", recorder_id:null, recorder_name:null });
             }
           }
-          setMatchId(null); setTick(t=>t+1);
-          setTimeout(()=>setScreen("teamMatchDetail"), 50);
+          setTick(t=>t+1);
+          setTimeout(()=>{ setMatchId(null); setScreen("teamMatchDetail"); }, 50);
         }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); goNav(key); }}
+        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); setTeamMatchId(null); goNav(key); }}
       />
     );
   }
