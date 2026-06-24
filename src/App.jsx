@@ -907,8 +907,15 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([getMatches(), getTeamMatches()]).then(([list, tList]) => {
-      setAllMatches(list);
+    Promise.all([getMatches(), getTeamMatches()]).then(async ([list, tList]) => {
+      // 団体戦に紐付いたmatch_idを取得して個人戦一覧から除外
+      const { data: tmGames } = await supabase
+        .from("team_match_games")
+        .select("match_id")
+        .not("match_id", "is", null);
+      const teamMatchIds = new Set((tmGames || []).map(g => g.match_id));
+      const filteredList = list.filter(m => !teamMatchIds.has(m.id));
+      setAllMatches(filteredList);
       setAllTeamMatches(tList);
       setLoading(false);
     });
