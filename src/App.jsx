@@ -596,7 +596,6 @@ async function updateTeamMatchGame(id, updates) {
 async function recalcTeamMatchScore(teamMatchId) {
   const { data: games } = await supabase.from("team_match_games").select("*").eq("team_match_id", teamMatchId);
   if (!games) return;
-  // 各番手のmatch_idからmatchesを取得して勝敗を判定
   const matchIds = games.filter(g => g.match_id).map(g => g.match_id);
   if (matchIds.length === 0) return;
   const { data: matches } = await supabase.from("matches").select("id,match_score_a,match_score_b,status").in("id", matchIds);
@@ -605,18 +604,34 @@ async function recalcTeamMatchScore(teamMatchId) {
   const matchMap = {};
   matches.forEach(m => { matchMap[m.id] = m; });
 
+  // team_match_gamesのstatusをmatch.statusと同期させる
+  for (const g of games) {
+    if (!g.match_id) continue;
+    const m = matchMap[g.match_id];
+    if (!m) continue;
+    if (m.status === "finished" && g.status !== "finished") {
+      await supabase.from("team_match_games").update({ status:"finished", recorder_id:null, recorder_name:null }).eq("id", g.id);
+      g.status = "finished"; // ローカルも更新
+    }
+  }
+
   let myScore = 0, oppScore = 0;
   for (const g of games) {
-    if (!g.match_id || g.status === "waiting") continue;
+    if (!g.match_id) continue;
     const m = matchMap[g.match_id];
+    // match.statusがfinishedなら集計（team_match_games.statusに依存しない）
     if (!m || m.status !== "finished") continue;
     if (m.match_score_a > m.match_score_b) myScore++;
     else if (m.match_score_b > m.match_score_a) oppScore++;
   }
 
-  const allDone = games.every(g => g.status === "finished" || g.status === "suspended");
   const { data: tm } = await supabase.from("team_matches").select("format").eq("id", teamMatchId).single();
   const winTarget = tm?.format === "best2" ? 2 : 3;
+  const allDone = games.every(g => {
+    if (!g.match_id) return false;
+    const m = matchMap[g.match_id];
+    return m?.status === "finished" || g.status === "suspended";
+  });
   const newStatus = (myScore >= winTarget || oppScore >= winTarget || allDone) ? "finished" : "active";
 
   await supabase.from("team_matches").update({
@@ -1426,6 +1441,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
   const [pastRounds, setPastRounds] = useState([]);
   const [pastCourtNumbers, setPastCourtNumbers] = useState([]);
   const [pastDivisions, setPastDivisions] = useState([]);
+  const [oppPrefFilter, setOppPrefFilter] = useState("");
 
   useEffect(() => {
     Promise.all([getKnownSchools(), getKnownVenues(), getMyProfile(), getTeamMatches()]).then(([s, v, p, tms]) => {
@@ -1539,8 +1555,8 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
           <FormRow label="自チーム区分（任意）">
             <VenueField value={myTeamDivision} onChange={setMyTeamDivision} venues={pastDivisions} placeholder="例：Aチーム"/>
           </FormRow>
-          <FormRow label="相手校名（必須）">
-            <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業"/>
+          <FormRow label="相手校名（必須）" labelRight={<PrefMiniFilter value={oppPrefFilter} onChange={setOppPrefFilter} options={knownPrefsFrom(schools)} />}>
+            <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業" prefFilter={oppPrefFilter}/>
           </FormRow>
           <FormRow label="相手チーム区分（任意）">
             <input style={S.inp} placeholder="例：Bチーム" value={opponentDivision} onChange={e=>setOpponentDivision(e.target.value)}/>
@@ -1586,9 +1602,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const INACTIVITY_MS = 20 * 60 * 1000; // 20分
 
   async function loadData() {
+    // まずスコアを再集計してからデータを取得
+    await recalcTeamMatchScore(teamMatchId);
     const data = await getTeamMatch(teamMatchId);
     if (!data) return;
-    // 各番手のmatch_idからスコアを取得
     const matchIds = (data.games || []).filter(g => g.match_id).map(g => g.match_id);
     if (matchIds.length > 0) {
       const { data: matches } = await supabase.from("matches").select("id,match_score_a,match_score_b,status,match_players(team,player_name,club_name,order_num)").in("id", matchIds);
