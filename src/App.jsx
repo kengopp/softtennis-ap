@@ -1089,6 +1089,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
             const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
             const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "引き分け") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
+            const dispMyScore = tm.status === "scheduled" ? 0 : tm.my_score;
+            const dispOppScore = tm.status === "scheduled" ? 0 : tm.opponent_score;
             return (
               <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
                 <div style={{ height:4, background:statusColor }}/>
@@ -1099,19 +1101,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
                   </div>
                   {tm.venue && <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>📍 {tm.venue}</div>}
-                  {/* 対戦情報：学校名中央・スコア右 */}
-                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                    <div style={{ flex:1, textAlign:"center" }}>
-                      <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{myFullLabel}</div>
-                      <div style={{ fontSize:11, fontWeight:600, color:C.textSec, margin:"2px 0" }}>vs</div>
-                      <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{oppLabel || "相手チーム"}</div>
-                    </div>
-                    {tm.status !== "scheduled" && (
-                      <div style={{ textAlign:"center", minWidth:64, background: tm.status==="finished" ? (tm.my_score>tm.opponent_score?"#e8f5e9":"#fdecea") : "#fff8e6", borderRadius:10, padding:"8px 4px" }}>
-                        <div style={{ fontSize:11, color:C.textSec, marginBottom:2 }}>団体</div>
-                        <div style={{ fontSize:22, fontWeight:900, color:statusColor }}>{tm.my_score}-{tm.opponent_score}</div>
-                      </div>
-                    )}
+                  {/* 対戦情報：1行横並び「東福岡 1-0 嘉穂」 */}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:8 }}>
+                    <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1, textAlign:"right" }}>{myFullLabel}</span>
+                    <span style={{ fontSize:20, fontWeight:900, color:statusColor, minWidth:56, textAlign:"center" }}>{dispMyScore}-{dispOppScore}</span>
+                    <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1, textAlign:"left" }}>{oppLabel || "相手"}</span>
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
