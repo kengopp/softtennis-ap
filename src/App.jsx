@@ -4757,14 +4757,14 @@ export default function App() {
       />
     );
   }
-  if (screen==="teamMatchRecord" && teamMatchId) {
+  if (screen==="teamMatchRecord" && matchId && teamMatchId) {
     return (
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
-        onBack={()=>{ setTeamMatchOrderNum(null); setScreen("teamMatchDetail"); setMatchId(null); }}
+        onBack={()=>{ setTeamMatchOrderNum(null); setMatchId(null); setScreen("teamMatchDetail"); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
