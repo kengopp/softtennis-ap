@@ -2968,9 +2968,16 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
         setInitialMatch(m);
         if (m && user) {
           if (teamMatchId) {
-            // 団体戦：recorder_idが自分でない場合は観戦モード
-            // （recorder_idはteamMatchGameから取得済みなのでmatchのcreated_byは使わない）
-            // 団体戦の場合は記録者ロックはteam_match_gamesで管理するため観戦モードにしない
+            // 団体戦：team_match_gamesのrecorder_idと自分のIDを比較
+            const { data: tmg } = await supabase
+              .from("team_match_games")
+              .select("recorder_id")
+              .eq("match_id", matchId)
+              .single();
+            // recorder_idが自分以外なら観戦モード
+            if (tmg && tmg.recorder_id && tmg.recorder_id !== user.id) {
+              setViewOnly(true);
+            }
           } else {
             // 個人戦：作成者以外は観戦モード
             if (m.created_by !== user.id) setViewOnly(true);
@@ -4884,4 +4891,3 @@ export default function App() {
     />
   );
 }
- 
