@@ -1716,7 +1716,13 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const myLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム", tm.my_team_division].filter(Boolean).join("");
   const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
   const isSameSchool = false; // 同校対決は学校ID比較で判定（簡略化）
-  const isCreator = tm.created_by === myUserId;
+  const isCreator = tm.created_by === myUserId; // 編集・削除権限用（維持）
+  // 番手ごとの操作権限：recorder_idがnull（未ロック）または自分の場合に操作可能
+  const canOperateGame = (game) => {
+    if (!game) return true; // 未作成は誰でも操作可
+    if (!game.recorder_id) return true; // 未ロックは誰でも操作可
+    return game.recorder_id === myUserId; // 自分がロック中なら操作可
+  };
 
   // 番手ごとの状態表示
   const gameStatuses = [1,2,3].map(num => {
@@ -1817,7 +1823,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 ) : (
                   <div style={{ fontSize:12,color:C.textSec,marginBottom:8 }}>ペア未登録</div>
                 )}
-                {isCreator && (
+                {canOperateGame(game) && (
                   <>
                     {/* ペア登録済みで未開始 → 試合開始ボタン（選び直しではなく直接開始） */}
                     {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
@@ -2960,7 +2966,16 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
         ]);
         if (cancelled) return;
         setInitialMatch(m);
-        if (m && user && m.created_by !== user.id) setViewOnly(true);
+        if (m && user) {
+          if (teamMatchId) {
+            // 団体戦：recorder_idが自分でない場合は観戦モード
+            // （recorder_idはteamMatchGameから取得済みなのでmatchのcreated_byは使わない）
+            // 団体戦の場合は記録者ロックはteam_match_gamesで管理するため観戦モードにしない
+          } else {
+            // 個人戦：作成者以外は観戦モード
+            if (m.created_by !== user.id) setViewOnly(true);
+          }
+        }
       } catch(e) {
         if (!cancelled) alert("試合読み込みエラー: " + (e?.message || e));
       }
