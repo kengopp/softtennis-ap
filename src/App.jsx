@@ -986,7 +986,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const filteredTeamMatches = allTeamMatches.filter(tm => {
     if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
     if (filterStatus === "finished" && isUpcomingTeamMatch(tm)) return false;
-    if (tmMySchoolOnly && mySchoolId && tm.my_school_id !== mySchoolId) return false;
+    if (tmMySchoolOnly && mySchoolId) {
+      // my_school_idがnullの場合はプロフィールの学校の試合とみなす
+      const tmSchoolId = tm.my_school_id || mySchoolId;
+      if (tmSchoolId !== mySchoolId) return false;
+    }
     if (filterSearch.trim()) {
       const q = filterSearch.trim().toLowerCase();
       const opp = (tm.opponent_name || "").toLowerCase();
@@ -2521,13 +2525,20 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
-  // 団体戦で自チームが変更されている場合、team_nameでも自チーム選手を引く
-  const ownRoster = roster.filter(p => {
-    if (p.is_own_team !== false) return true;
-    if (isTeamMatchGame && aClub && p.team_name === aClub) return true;
-    return false;
-  });
-  const oppRosterBase = roster.filter(p => p.is_own_team === false && !(isTeamMatchGame && aClub && p.team_name === aClub));
+  // 自チーム選手リスト
+  // 団体戦で自チームが変更されている場合はaClubのteam_nameで絞り込む（相手チームと同じ仕様）
+  // 通常時はis_own_team===trueの選手を表示
+  const ownRoster = (() => {
+    if (isTeamMatchGame && aClub) {
+      // 自チームが東福岡の場合はis_own_team、それ以外はteam_nameで絞り込む
+      const byTeamName = roster.filter(p => p.team_name === aClub);
+      const byOwnTeam = roster.filter(p => p.is_own_team !== false);
+      // team_nameに一致する選手がいればそちらを優先、なければis_own_teamで
+      return byTeamName.length > 0 ? byTeamName : byOwnTeam;
+    }
+    return roster.filter(p => p.is_own_team !== false);
+  })();
+  const oppRosterBase = roster.filter(p => p.is_own_team === false && p.team_name !== aClub);
   // 同校対決：相手チームが自チームと同じ学校名の場合、自チームの選手もチップに表示
   const isSameSchool = aClub && bClub && aClub.trim() === bClub.trim();
   const oppRoster = isSameSchool
