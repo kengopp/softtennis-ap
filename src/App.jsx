@@ -912,7 +912,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([getMatches(), getTeamMatches(), getKnownSchools()]).then(async ([list, tList, schools]) => {
+    Promise.all([getMatches(), getTeamMatches(), getSchools()]).then(async ([list, tList, schools]) => {
       // 学校IDから名前へのマップを作成
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
@@ -1418,6 +1418,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
   const [venues, setVenues] = useState([]);
   const [mySchoolId, setMySchoolId] = useState(null);
   const [mySchoolName, setMySchoolName] = useState(""); // 表示用
+  const [mySchoolInitialized, setMySchoolInitialized] = useState(false); // プロフィール初期化済みフラグ
   const [mySchoolChanging, setMySchoolChanging] = useState(false); // 変更確認ポップ
   const [mySchoolPrefFilter, setMySchoolPrefFilter] = useState(""); // 自チーム側の都道府県フィルタ
   const [existingId, setExistingId] = useState(null);
@@ -1429,14 +1430,20 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
   const [oppPrefFilter, setOppPrefFilter] = useState("");
 
   useEffect(() => {
-    Promise.all([getKnownSchools(), getKnownVenues(), getMyProfile(), getTeamMatches()]).then(([s, v, p, tms]) => {
-      setSchools(s);
+    Promise.all([getSchools(), getKnownSchools(), getKnownVenues(), getMyProfile(), getTeamMatches()]).then(([sWithId, sForUI, v, p, tms]) => {
+      setSchools(sForUI); // SchoolField用（名前リスト）
       setVenues(v);
+      // mySchoolIdの初期化はsWithId（id付き）を使う
+      const s = sWithId;
       if (p?.school_id) {
         // 手動変更済みでない場合のみプロフィールの学校で初期化
-        setMySchoolId(prev => { if (prev) return prev; return p.school_id; });
-        const found = s.find(sc => sc.id === p.school_id);
-        if (found) setMySchoolName(prev => { if (prev) return prev; return found.name; });
+        setMySchoolInitialized(alreadyInit => {
+          if (alreadyInit) return true; // 変更済みなら何もしない
+          setMySchoolId(p.school_id);
+          const found = s.find(sc => sc.id === p.school_id);
+          if (found) setMySchoolName(found.name);
+          return true;
+        });
       }
       // 過去の団体戦からサジェスト候補を生成
       setPastTournaments([...new Set(tms.map(m=>m.tournament_name).filter(Boolean))]);
@@ -1458,10 +1465,11 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
         setFormat(tm.format || "best2");
         setCourtNumber(tm.court_number || "");
         setIsYounger(tm.is_younger !== false);
-        // 編集時：保存済みmy_school_idで名前を復元
+        // 編集時：保存済みmy_school_idで名前を復元し、プロフィールによる上書きを防ぐ
         if (tm.my_school_id) {
           setMySchoolId(tm.my_school_id);
-          Promise.all([getKnownSchools()]).then(([sc])=>{
+          setMySchoolInitialized(true);
+          Promise.all([getSchools()]).then(([sc])=>{
             const found = sc.find(s=>s.id===tm.my_school_id);
             if (found) setMySchoolName(found.name);
           });
@@ -1601,7 +1609,13 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
               value={mySchoolName}
               onChange={name => {
                 const found = schools.find(s => s.name === name);
-                if (found) { setMySchoolId(found.id); setMySchoolName(found.name); setMySchoolChanging(false); setMySchoolPrefFilter(""); }
+                if (found) {
+                  setMySchoolId(found.id);
+                  setMySchoolName(found.name);
+                  setMySchoolInitialized(true); // プロフィールによる上書きを防ぐ
+                  setMySchoolChanging(false);
+                  setMySchoolPrefFilter("");
+                }
               }}
               schools={schools}
               placeholder="学校名を選択"
