@@ -4695,7 +4695,7 @@ export default function App() {
       <TeamMatchDetail
         teamMatchId={teamMatchId}
         onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); setScreen("list"); }}
-        onOpenMatch={id=>{ setMatchId(id); setScreen("teamMatchRecord"); }}
+        onOpenMatch={id=>{ setMatchId(id); setTeamMatchOrderNum(null); setScreen("teamMatchRecord"); }}
         onNewMatch={async (tm, orderNum, existingGame)=>{
           setTeamMatchOrderNum(orderNum);
           setCopySourceId(null);
@@ -4764,25 +4764,7 @@ export default function App() {
         matchId={matchId}
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
-        onBack={async ()=>{
-          const _matchId = matchId;
-          const _teamMatchId = teamMatchId;
-          const _orderNum = teamMatchOrderNum;
-          // まず画面を切り替え、matchIdは少し遅らせてクリア
-          setScreen("teamMatchDetail");
-          setTimeout(()=>setMatchId(null), 100);
-          try {
-            await recalcTeamMatchScore(_teamMatchId);
-            const tmData = await getTeamMatch(_teamMatchId);
-            const g = tmData?.games?.find(g=>g.order_num===_orderNum);
-            if (g) {
-              const { data: m } = await supabase.from("matches").select("status").eq("id", _matchId).single();
-              if (m?.status === "finished") {
-                await updateTeamMatchGame(g.id, { status:"finished", recorder_id:null, recorder_name:null });
-              }
-            }
-          } catch(e) { console.error(e); }
-        }}
+        onBack={()=>{ setScreen("teamMatchDetail"); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); setTeamMatchId(null); goNav(key); }}
       />
