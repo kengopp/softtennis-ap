@@ -804,7 +804,7 @@ function NavBar({ active, onNavigate }) {
   return (
     <div style={{ position:"fixed",bottom:0,left:0,right:0,background:C.white,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:10 }}>
       {items.map(([key,icon,label])=>(
-        <div key={key} onClick={()=>onNavigate&&onNavigate(key)} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0 4px",fontSize:9,fontWeight:600,color:active===key?C.accent:C.textSec,cursor:"pointer" }}>
+        <div key={key} onClick={()=>onNavigate&&onNavigate(key)} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0 4px",fontSize:9,fontWeight:600,color:active===key?C.accent:C.textSec,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none" }}>
           <span style={{ fontSize:20 }}>{icon}</span>{label}
         </div>
       ))}
@@ -4768,6 +4768,9 @@ export default function App() {
 
   // ★下部ナビゲーション（ホーム/履歴/分析/マスター）の共通遷移ハンドラ
   function goNav(key) {
+    // 現在表示中の画面と同じタブを押しても何もしない
+    const screenMap = { home:"home", list:"list", stats:"stats", master:"master" };
+    if (screen === screenMap[key]) return;
     if (key==="home") setScreen("home");
     else if (key==="list") setScreen("list");
     else if (key==="stats") setScreen("stats");
