@@ -902,8 +902,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [mySchoolName, setMySchoolName] = useState("");
   const [toast, setToast] = useState(initialToast || null);
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
-  const [page, setPage] = useState(1);
-  const PAGE_SIZE = 10;
   // 共通絞り込み（個人戦・団体戦で共有）
   const [filterSearch, setFilterSearch] = useState("");       // フリーワード
   const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
@@ -988,9 +986,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return true;
   });
 
-  useEffect(() => { setPage(1); }, [timeTab, childOnly, filterSearch, filterStatus]);
-  const totalPages = Math.max(1, Math.ceil(currentList.length / PAGE_SIZE));
-  const pageItems = currentList.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+
 
   async function handleDelete(id) {
     await deleteMatch(id);
@@ -1009,7 +1005,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 上段：個人戦 / 団体戦 タブ */}
       <div style={{ display:"flex", background:"#f0f2f6", padding:3, margin:"10px 14px 0", borderRadius:10 }}>
         {[["individual","🎾 個人戦"],["team","🏆 団体戦"]].map(([v,l])=>(
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["individual","team"].includes(timeTab)&&v==="individual")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); setPage(1); }}>{l}</button>
+          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["individual","team"].includes(timeTab)&&v==="individual")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); }}>{l}</button>
         ))}
       </div>
 
