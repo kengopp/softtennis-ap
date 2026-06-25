@@ -4618,18 +4618,25 @@ export default function App() {
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
         onBack={async ()=>{
-          await recalcTeamMatchScore(teamMatchId);
-          // team_match_gamesのstatusも更新
-          const tmData = await getTeamMatch(teamMatchId);
-          const g = tmData?.games?.find(g=>g.order_num===teamMatchOrderNum);
-          if (g) {
-            const { data: m } = await supabase.from("matches").select("status").eq("id", matchId).single();
-            if (m?.status === "finished") {
-              await updateTeamMatchGame(g.id, { status:"finished", recorder_id:null, recorder_name:null });
-            }
-          }
+          // 先に画面遷移してから非同期処理（白画面防止）
+          const _matchId = matchId;
+          const _teamMatchId = teamMatchId;
+          const _orderNum = teamMatchOrderNum;
+          setMatchId(null);
           setTick(t=>t+1);
-          setTimeout(()=>{ setMatchId(null); setScreen("teamMatchDetail"); }, 50);
+          setScreen("teamMatchDetail");
+          // バックグラウンドでスコア再集計・status更新
+          try {
+            await recalcTeamMatchScore(_teamMatchId);
+            const tmData = await getTeamMatch(_teamMatchId);
+            const g = tmData?.games?.find(g=>g.order_num===_orderNum);
+            if (g) {
+              const { data: m } = await supabase.from("matches").select("status").eq("id", _matchId).single();
+              if (m?.status === "finished") {
+                await updateTeamMatchGame(g.id, { status:"finished", recorder_id:null, recorder_name:null });
+              }
+            }
+          } catch(e) { console.error(e); }
         }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); setTeamMatchId(null); goNav(key); }}
@@ -4711,7 +4718,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{ setMatchId(null); setTick(t=>t+1); setTimeout(()=>setScreen(prevScreen==="home" ? "home" : "list"), 50); }}
+        onBack={()=>{ setTick(t=>t+1); setScreen(prevScreen==="home" ? "home" : "list"); setMatchId(null); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
