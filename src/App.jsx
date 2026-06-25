@@ -4757,7 +4757,7 @@ export default function App() {
       />
     );
   }
-  if (screen==="teamMatchRecord" && matchId && teamMatchId) {
+  if (screen==="teamMatchRecord" && teamMatchId) {
     return (
       <ScoreRecord
         key={matchId+tick}
@@ -4765,14 +4765,12 @@ export default function App() {
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
         onBack={async ()=>{
-          // 先に画面遷移してから非同期処理（白画面防止）
           const _matchId = matchId;
           const _teamMatchId = teamMatchId;
           const _orderNum = teamMatchOrderNum;
-          setMatchId(null);
-          setTick(t=>t+1);
+          // まず画面を切り替え、matchIdは少し遅らせてクリア
           setScreen("teamMatchDetail");
-          // バックグラウンドでスコア再集計・status更新
+          setTimeout(()=>setMatchId(null), 100);
           try {
             await recalcTeamMatchScore(_teamMatchId);
             const tmData = await getTeamMatch(_teamMatchId);
