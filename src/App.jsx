@@ -2971,12 +2971,15 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
             // 団体戦：team_match_gamesのrecorder_idと自分のIDを比較
             const { data: tmg } = await supabase
               .from("team_match_games")
-              .select("recorder_id")
+              .select("recorder_id, status")
               .eq("match_id", matchId)
               .single();
-            // recorder_idが自分以外なら観戦モード
-            if (tmg && tmg.recorder_id && tmg.recorder_id !== user.id) {
-              setViewOnly(true);
+            if (tmg) {
+              // recorder_idが設定されていて自分以外 → 観戦モード
+              // recorder_idがnull（誰も記録していない）→ 観戦モード（スコア詳細から入った場合）
+              if (!tmg.recorder_id || tmg.recorder_id !== user.id) {
+                setViewOnly(true);
+              }
             }
           } else {
             // 個人戦：作成者以外は観戦モード
@@ -4692,7 +4695,7 @@ export default function App() {
       <TeamMatchDetail
         teamMatchId={teamMatchId}
         onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); setScreen("list"); }}
-        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); }}
+        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); /* teamMatchIdはそのまま保持してviewOnly判定に使う */ }}
         onNewMatch={async (tm, orderNum, existingGame)=>{
           setTeamMatchOrderNum(orderNum);
           setCopySourceId(null);
