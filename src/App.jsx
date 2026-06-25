@@ -4766,7 +4766,7 @@ export default function App() {
         orderNum={teamMatchOrderNum}
         onBack={()=>{ setScreen("teamMatchDetail"); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); setTeamMatchId(null); goNav(key); }}
+        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
     );
   }
