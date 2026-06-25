@@ -900,6 +900,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [myId, setMyId] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
   const [mySchoolName, setMySchoolName] = useState("");
+  const [mySchoolId, setMySchoolId] = useState(null);
+  const [tmMySchoolOnly, setTmMySchoolOnly] = useState(false); // 自校のみ絞り込み
   const [toast, setToast] = useState(initialToast || null);
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
   // 共通絞り込み（個人戦・団体戦で共有）
@@ -937,6 +939,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         setLinkedPlayerName(found?.player_name ?? null);
       }
       if (p?.school_id) {
+        setMySchoolId(p.school_id);
         const schools = await getSchools();
         const s = schools.find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
@@ -977,6 +980,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const filteredTeamMatches = allTeamMatches.filter(tm => {
     if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
     if (filterStatus === "finished" && isUpcomingTeamMatch(tm)) return false;
+    if (tmMySchoolOnly && mySchoolId && tm.my_school_id !== mySchoolId) return false;
     if (filterSearch.trim()) {
       const q = filterSearch.trim().toLowerCase();
       const opp = (tm.opponent_name || "").toLowerCase();
@@ -1027,6 +1031,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           ))}
           {linkedPlayerName && timeTab==="individual" && (
             <button style={{ ...S.chip(childOnly), fontSize:12, padding:"4px 12px" }} onClick={()=>setChildOnly(v=>!v)}>🎾 {linkedPlayerName}さんのみ</button>
+          )}
+          {mySchoolName && timeTab==="team" && (
+            <button style={{ ...S.chip(tmMySchoolOnly), fontSize:12, padding:"4px 12px" }} onClick={()=>setTmMySchoolOnly(v=>!v)}>🏫 {mySchoolName}のみ</button>
           )}
         </div>
       </div>
