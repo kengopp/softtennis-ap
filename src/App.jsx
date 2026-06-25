@@ -2525,20 +2525,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
-  // 自チーム選手リスト
-  // 団体戦で自チームが変更されている場合はaClubのteam_nameで絞り込む（相手チームと同じ仕様）
-  // 通常時はis_own_team===trueの選手を表示
-  const ownRoster = (() => {
-    if (isTeamMatchGame && aClub) {
-      // 自チームが東福岡の場合はis_own_team、それ以外はteam_nameで絞り込む
-      const byTeamName = roster.filter(p => p.team_name === aClub);
-      const byOwnTeam = roster.filter(p => p.is_own_team !== false);
-      // team_nameに一致する選手がいればそちらを優先、なければis_own_teamで
-      return byTeamName.length > 0 ? byTeamName : byOwnTeam;
-    }
-    return roster.filter(p => p.is_own_team !== false);
-  })();
-  const oppRosterBase = roster.filter(p => p.is_own_team === false && p.team_name !== aClub);
+  // 自チーム・相手チームとも team_name で絞り込む（同じ仕様）
+  const ownRosterAll = roster; // チップ表示時に team_name で絞る
+  const oppRosterBase = roster;
   // 同校対決：相手チームが自チームと同じ学校名の場合、自チームの選手もチップに表示
   const isSameSchool = aClub && bClub && aClub.trim() === bClub.trim();
   const oppRoster = isSameSchool
@@ -2780,9 +2769,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={aP1} onChange={e => setAP1(e.target.value)}/>
-            {ownRoster.length>0 && (
+            {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).length>0 && (
               <div style={{ marginTop:6 }}>
-                {ownRoster.map(p=>(
+                {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).map(p=>(
                   <span key={p.id} style={S.chip(aP1===p.player_name)} onClick={()=>setAP1(p.player_name)}>{p.player_name}</span>
                 ))}
               </div>
@@ -2791,19 +2780,14 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           {isDoubles && (
             <FormRow label="選手2（ペア）">
               <input style={S.inp} placeholder="選手名" value={aP2} onChange={e => setAP2(e.target.value)}/>
-              {ownRoster.length>0 && (
+              {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).length>0 && (
                 <div style={{ marginTop:6 }}>
-                  {ownRoster.map(p=>(
+                  {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).map(p=>(
                     <span key={p.id} style={S.chip(aP2===p.player_name)} onClick={()=>setAP2(p.player_name)}>{p.player_name}</span>
                   ))}
                 </div>
               )}
             </FormRow>
-          )}
-          {ownRoster.length===0 && (
-            <div style={{ padding:"0 14px 12px",fontSize:11,color:C.textSec }}>
-              マスター画面の「👥 選手マスター」(自チーム)から選手を登録すると、ここで選んで入力できるようになります。
-            </div>
           )}
         </FormSec>
 
