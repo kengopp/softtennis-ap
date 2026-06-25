@@ -4695,7 +4695,7 @@ export default function App() {
       <TeamMatchDetail
         teamMatchId={teamMatchId}
         onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); setScreen("list"); }}
-        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); /* teamMatchIdはそのまま保持してviewOnly判定に使う */ }}
+        onOpenMatch={id=>{ setMatchId(id); setScreen("teamMatchRecord"); }}
         onNewMatch={async (tm, orderNum, existingGame)=>{
           setTeamMatchOrderNum(orderNum);
           setCopySourceId(null);
