@@ -908,9 +908,15 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [filterSearch, setFilterSearch] = useState("");       // フリーワード
   const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
 
+  const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
+
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([getMatches(), getTeamMatches()]).then(async ([list, tList]) => {
+    Promise.all([getMatches(), getTeamMatches(), getKnownSchools()]).then(async ([list, tList, schools]) => {
+      // 学校IDから名前へのマップを作成
+      const smap = {};
+      (schools || []).forEach(s => { smap[s.id] = s.name; });
+      setSchoolMap(smap);
       // 団体戦に紐付いたmatch_idを個人戦一覧から除外
       try {
         const { data: tmGames } = await supabase
@@ -1099,7 +1105,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {!loading && allTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>団体戦の記録がありません</div>}
             {!loading && allTeamMatches.length>0 && filteredTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う団体戦がありません</div>}
             {!loading && filteredTeamMatches.map(tm => {
-              const myFullLabel = [mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
+              const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
               const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
               const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
               const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
@@ -1641,6 +1647,12 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       setMatchDetails(map);
     }
     setTm(data);
+    // my_school_idから自チーム学校名を取得
+    if (data.my_school_id) {
+      const schools = await getSchools();
+      const s = schools.find(sc => sc.id === data.my_school_id);
+      if (s) setMySchoolName(s.name);
+    }
     setLoading(false);
     setLastUpdated(Date.now());
   }
@@ -1651,11 +1663,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     });
     getMyProfile().then(async p => {
       setMyUserName(p?.name || "");
-      if (p?.school_id) {
-        const schools = await getSchools();
-        const s = schools.find(s => s.id === p.school_id);
-        if (s) setMySchoolName(s.name);
-      }
     });
     loadData();
   }, [teamMatchId]);
