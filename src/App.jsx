@@ -1656,6 +1656,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [myUserName, setMyUserName] = useState("");
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
   const [matchDetails, setMatchDetails] = useState({});
+  const [serveSelectInfo, setServeSelectInfo] = useState(null); // サーブ選択モーダル用
   const intervalRef = useRef(null);
   const inactiveRef = useRef(null);
 
@@ -1822,7 +1823,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                     {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
                       <button
                         style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13, marginTop:8 }}
-                        onClick={()=>onStartMatch && onStartMatch(tm, orderNum, game)}
+                        onClick={async ()=>{
+                          const { data: matchData } = await supabase.from("matches").select("id,match_players(team,player_name,order_num)").eq("id", game.match_id).single();
+                          setServeSelectInfo({ matchData, orderNum, game });
+                        }}
                       >
                         🎾 試合開始
                       </button>
@@ -1839,7 +1843,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                     {isSuspended && (
                       <button
                         style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13, marginTop:8 }}
-                        onClick={()=>onStartMatch && onStartMatch(tm, orderNum, game)}
+                        onClick={async ()=>{
+                          const { data: matchData } = await supabase.from("matches").select("id,match_players(team,player_name,order_num)").eq("id", game.match_id).single();
+                          setServeSelectInfo({ matchData, orderNum, game });
+                        }}
                       >
                         🎾 試合を再開する
                       </button>
@@ -1852,6 +1859,31 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         })}
       </div>
       <NavBar active="list" onNavigate={()=>{}}/>
+
+      {/* サーブ選択モーダル */}
+      {serveSelectInfo && (() => {
+        const { matchData, orderNum, game } = serveSelectInfo;
+        const aP = (matchData?.match_players||[]).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "自チーム";
+        const bP = (matchData?.match_players||[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "相手チーム";
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 }}>
+            <div style={{ background:C.white, borderRadius:16, padding:24, width:"100%", maxWidth:360, textAlign:"center" }}>
+              <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
+              <h3 style={{ fontSize:16, fontWeight:800, marginBottom:4 }}>最初のサーブを選択</h3>
+              <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
+              <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+                <button style={{ flex:1, padding:"14px 8px", borderRadius:12, border:`2px solid ${C.teamA}`, background:"transparent", color:C.teamA, fontWeight:800, fontSize:13, cursor:"pointer" }} onClick={()=>{ setServeSelectInfo(null); onStartMatch && onStartMatch(matchData.id, orderNum, game, "A"); }}>
+                  <div>{aP}</div><div style={{ fontSize:11, opacity:0.8 }}>（サーブ）</div>
+                </button>
+                <button style={{ flex:1, padding:"14px 8px", borderRadius:12, border:`2px solid ${C.orange}`, background:"transparent", color:C.orange, fontWeight:800, fontSize:13, cursor:"pointer" }} onClick={()=>{ setServeSelectInfo(null); onStartMatch && onStartMatch(matchData.id, orderNum, game, "B"); }}>
+                  <div>{bP}</div><div style={{ fontSize:11, opacity:0.8 }}>（サーブ）</div>
+                </button>
+              </div>
+              <button style={{ width:"100%", padding:12, borderRadius:10, border:`1px solid ${C.border}`, background:C.gray, color:C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setServeSelectInfo(null)}>キャンセル</button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -4647,64 +4679,20 @@ export default function App() {
           setPrevScreen("teamMatchDetail");
           setScreen("teamMatchGameSetup");
         }}
-        onStartMatch={async (tm, orderNum, existingGame)=>{
-          // ペア登録済みの番手 → サーブ選択ダイアログを表示してから試合開始
-          if (existingGame?.match_id) {
-            // 選手情報を取得してサーブ選択ダイアログを表示
-            const { data: matchData } = await supabase.from("matches").select("id,match_players(team,player_name,order_num)").eq("id", existingGame.match_id).single();
-            setServeSelectForTeam({ match: matchData, orderNum, existingGame, teamMatchData: tm });
-          }
+        onStartMatch={async (matchId, orderNum, existingGame, firstServer)=>{
+          // サーブ選択済み → 試合開始
+          const { data:{ user } } = await supabase.auth.getUser();
+          const profile = await getMyProfile();
+          await startScheduledMatch(matchId, firstServer);
+          await updateTeamMatchGame(existingGame.id, { status:"active", recorder_id: user?.id, recorder_name: profile?.name || "" });
+          await supabase.from("team_matches").update({ status:"active" }).eq("id", teamMatchId).eq("status","scheduled");
+          setMatchId(matchId);
+          setTeamMatchOrderNum(orderNum);
+          setTick(t=>t+1);
+          setScreen("teamMatchRecord");
         }}
         onEdit={id=>{ setTeamMatchEditId(id); setScreen("teamMatchSetup"); }}
       />
-    );
-  }
-  // 団体戦 ペア登録済み試合開始 サーブ選択ダイアログ
-  if (serveSelectForTeam) {
-    const { match, orderNum, existingGame } = serveSelectForTeam;
-    const aPlayers = (match?.match_players||[]).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "自チーム";
-    const bPlayers = (match?.match_players||[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "相手チーム";
-    return (
-      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 }}>
-        <div style={{ background:C.white, borderRadius:16, padding:24, width:"100%", maxWidth:360, textAlign:"center" }}>
-          <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
-          <h3 style={{ fontSize:16, fontWeight:800, marginBottom:4 }}>最初のサーブを選択</h3>
-          <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
-          <div style={{ display:"flex", gap:10, marginBottom:12 }}>
-            <button style={{ flex:1, padding:"14px 8px", borderRadius:12, border:`2px solid ${C.teamA}`, background:"transparent", color:C.teamA, fontWeight:800, fontSize:13, cursor:"pointer" }} onClick={async ()=>{
-              const { data:{ user } } = await supabase.auth.getUser();
-              const profile = await getMyProfile();
-              setServeSelectForTeam(null);
-              await startScheduledMatch(match.id, "A");
-              await updateTeamMatchGame(existingGame.id, { status:"active", recorder_id: user?.id, recorder_name: profile?.name || "" });
-              await supabase.from("team_matches").update({ status:"active" }).eq("id", teamMatchId).eq("status","scheduled");
-              setMatchId(match.id);
-              setTeamMatchOrderNum(orderNum);
-              setTick(t=>t+1);
-              setScreen("teamMatchRecord");
-            }}>
-              <div>{aPlayers}</div>
-              <div style={{ fontSize:11, opacity:0.8 }}>（サーブ）</div>
-            </button>
-            <button style={{ flex:1, padding:"14px 8px", borderRadius:12, border:`2px solid ${C.orange}`, background:"transparent", color:C.orange, fontWeight:800, fontSize:13, cursor:"pointer" }} onClick={async ()=>{
-              const { data:{ user } } = await supabase.auth.getUser();
-              const profile = await getMyProfile();
-              setServeSelectForTeam(null);
-              await startScheduledMatch(match.id, "B");
-              await updateTeamMatchGame(existingGame.id, { status:"active", recorder_id: user?.id, recorder_name: profile?.name || "" });
-              await supabase.from("team_matches").update({ status:"active" }).eq("id", teamMatchId).eq("status","scheduled");
-              setMatchId(match.id);
-              setTeamMatchOrderNum(orderNum);
-              setTick(t=>t+1);
-              setScreen("teamMatchRecord");
-            }}>
-              <div>{bPlayers}</div>
-              <div style={{ fontSize:11, opacity:0.8 }}>（サーブ）</div>
-            </button>
-          </div>
-          <button style={{ width:"100%", padding:12, borderRadius:10, border:`1px solid ${C.border}`, background:C.gray, color:C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setServeSelectForTeam(null)}>キャンセル</button>
-        </div>
-      </div>
     );
   }
 
