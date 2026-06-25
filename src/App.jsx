@@ -1411,6 +1411,9 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
   const [schools, setSchools] = useState([]);
   const [venues, setVenues] = useState([]);
   const [mySchoolId, setMySchoolId] = useState(null);
+  const [mySchoolName, setMySchoolName] = useState(""); // 表示用
+  const [mySchoolChanging, setMySchoolChanging] = useState(false); // 変更確認ポップ
+  const [mySchoolPrefFilter, setMySchoolPrefFilter] = useState(""); // 自チーム側の都道府県フィルタ
   const [existingId, setExistingId] = useState(null);
   // 過去の団体戦から候補を取得
   const [pastTournaments, setPastTournaments] = useState([]);
@@ -1423,7 +1426,11 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
     Promise.all([getKnownSchools(), getKnownVenues(), getMyProfile(), getTeamMatches()]).then(([s, v, p, tms]) => {
       setSchools(s);
       setVenues(v);
-      if (p?.school_id) setMySchoolId(p.school_id);
+      if (p?.school_id) {
+        setMySchoolId(p.school_id);
+        const found = s.find(sc => sc.id === p.school_id);
+        if (found) setMySchoolName(found.name);
+      }
       // 過去の団体戦からサジェスト候補を生成
       setPastTournaments([...new Set(tms.map(m=>m.tournament_name).filter(Boolean))]);
       setPastRounds([...new Set(tms.map(m=>m.round).filter(Boolean))]);
@@ -1444,6 +1451,14 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
         setFormat(tm.format || "best2");
         setCourtNumber(tm.court_number || "");
         setIsYounger(tm.is_younger !== false);
+        // 編集時：保存済みmy_school_idで名前を復元
+        if (tm.my_school_id) {
+          setMySchoolId(tm.my_school_id);
+          Promise.all([getKnownSchools()]).then(([sc])=>{
+            const found = sc.find(s=>s.id===tm.my_school_id);
+            if (found) setMySchoolName(found.name);
+          });
+        }
         setReady(true);
       });
     } else if (copyId) {
@@ -1528,6 +1543,17 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
         </FormSec>
 
         <FormSec title="チーム情報">
+          <FormRow label="自チーム名">
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ ...S.inp, flex:1, background:C.gray, color:C.text, display:"flex", alignItems:"center", minHeight:38 }}>
+                {mySchoolName || "（プロフィールから自動入力）"}
+              </div>
+              <button
+                style={{ padding:"8px 12px", borderRadius:8, border:"1px solid "+C.border, background:C.white, color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
+                onClick={()=>setMySchoolChanging(true)}
+              >変更</button>
+            </div>
+          </FormRow>
           <FormRow label="自チーム区分（任意）">
             <VenueField value={myTeamDivision} onChange={setMyTeamDivision} venues={pastDivisions} placeholder="例：Aチーム"/>
           </FormRow>
@@ -1556,6 +1582,30 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
           {saving ? "保存中..." : "💾 保存する"}
         </button>
       </div>
+
+      {/* 自チーム変更確認ポップ */}
+      {mySchoolChanging && (
+        <Modal onClose={()=>{ setMySchoolChanging(false); setMySchoolPrefFilter(""); }}>
+          <div>
+            <h3 style={{ fontSize:15, fontWeight:800, marginBottom:6 }}>自チームを変更しますか？</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:14 }}>他校の団体戦を記録する場合など、自チームを変更できます。</p>
+            <PrefMiniFilter value={mySchoolPrefFilter} onChange={setMySchoolPrefFilter} options={knownPrefsFrom(schools)} />
+            <SchoolField
+              value={mySchoolName}
+              onChange={name => {
+                const found = schools.find(s => s.name === name);
+                if (found) { setMySchoolId(found.id); setMySchoolName(found.name); setMySchoolChanging(false); setMySchoolPrefFilter(""); }
+              }}
+              schools={schools}
+              placeholder="学校名を選択"
+              prefFilter={mySchoolPrefFilter}
+            />
+            <div style={{ display:"flex", gap:8, marginTop:14 }}>
+              <button style={{ flex:1, padding:10, borderRadius:10, border:"1px solid "+C.border, background:C.white, color:C.text, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>{ setMySchoolChanging(false); setMySchoolPrefFilter(""); }}>キャンセル</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
