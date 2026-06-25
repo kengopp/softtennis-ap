@@ -1427,9 +1427,10 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
       setSchools(s);
       setVenues(v);
       if (p?.school_id) {
-        setMySchoolId(p.school_id);
+        // 手動変更済みでない場合のみプロフィールの学校で初期化
+        setMySchoolId(prev => { if (prev) return prev; return p.school_id; });
         const found = s.find(sc => sc.id === p.school_id);
-        if (found) setMySchoolName(found.name);
+        if (found) setMySchoolName(prev => { if (prev) return prev; return found.name; });
       }
       // 過去の団体戦からサジェスト候補を生成
       setPastTournaments([...new Set(tms.map(m=>m.tournament_name).filter(Boolean))]);
@@ -1855,6 +1856,7 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOn
       isTeamMatchGame={true}
       teamMatchMyDivision={tm?.my_team_division || ""}
       teamMatchOppDivision={tm?.opponent_division || ""}
+      teamMatchMySchoolId={tm?.my_school_id || null}
       onScheduled={null}
       onSave={onSave}
       onSavePairOnly={onSavePairOnly}
@@ -2421,7 +2423,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, onSavePairOnly }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -2447,10 +2449,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} onSavePairOnly={onSavePairOnly} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, onSavePairOnly }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly }) {
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -2490,8 +2492,13 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
-  const ownRoster = roster.filter(p => p.is_own_team !== false);
-  const oppRosterBase = roster.filter(p => p.is_own_team === false);
+  // 団体戦で自チームが変更されている場合、team_nameでも自チーム選手を引く
+  const ownRoster = roster.filter(p => {
+    if (p.is_own_team !== false) return true;
+    if (isTeamMatchGame && aClub && p.team_name === aClub) return true;
+    return false;
+  });
+  const oppRosterBase = roster.filter(p => p.is_own_team === false && !(isTeamMatchGame && aClub && p.team_name === aClub));
   // 同校対決：相手チームが自チームと同じ学校名の場合、自チームの選手もチップに表示
   const isSameSchool = aClub && bClub && aClub.trim() === bClub.trim();
   const oppRoster = isSameSchool
@@ -2510,13 +2517,18 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [aClubPref, setAClubPref] = useState("");
   const [bClubPref, setBClubPref] = useState("");
 
-  // ★新規作成時（編集・コピーではない場合）は、自チームの学校名をプロフィールの学校で初期化する
+  // ★自チーム学校名の初期化
+  // 団体戦ペア登録時はteamMatchMySchoolIdを優先、通常はプロフィールの学校名
   useEffect(() => {
     if (base) return; // 編集・コピー時は既存のチーム名をそのまま使う
     (async () => {
+      const allSchools = await getSchools();
+      if (isTeamMatchGame && teamMatchMySchoolId) {
+        const mine = allSchools.find(s => s.id === teamMatchMySchoolId);
+        if (mine) { setAClub(mine.name); return; }
+      }
       const profile = await getMyProfile();
       if (!profile?.school_id) return;
-      const allSchools = await getSchools();
       const mine = allSchools.find(s => s.id === profile.school_id);
       if (mine) setAClub(prev => prev || mine.name);
     })();
