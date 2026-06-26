@@ -3020,7 +3020,8 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
 
 function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
-  const [tab,    setTab]    = useState(viewOnly ? "score" : "record");
+  const [tab,    setTab]    = useState("record");
+  useEffect(() => { if (viewOnly) setTab("score"); }, [viewOnly]);
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
   const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
