@@ -2968,9 +2968,19 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
         setInitialMatch(m);
         if (m && user) {
           if (teamMatchId) {
-            // 団体戦：recorder_idが自分でない場合は観戦モード
-            // （recorder_idはteamMatchGameから取得済みなのでmatchのcreated_byは使わない）
-            // 団体戦の場合は記録者ロックはteam_match_gamesで管理するため観戦モードにしない
+            // 団体戦：team_match_gamesのrecorder_idと自分のIDを比較
+            const { data: tmg } = await supabase
+              .from("team_match_games")
+              .select("recorder_id, status")
+              .eq("match_id", matchId)
+              .single();
+            if (tmg) {
+              // recorder_idが設定されていて自分以外 → 観戦モード
+              // recorder_idがnull（誰も記録していない）→ 観戦モード（スコア詳細から入った場合）
+              if (!tmg.recorder_id || tmg.recorder_id !== user.id) {
+                setViewOnly(true);
+              }
+            }
           } else {
             // 個人戦：作成者以外は観戦モード
             if (m.created_by !== user.id) setViewOnly(true);
@@ -3010,7 +3020,8 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
 
 function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
-  const [tab,    setTab]    = useState(viewOnly ? "score" : "record");
+  const [tab,    setTab]    = useState("record");
+  useEffect(() => { if (viewOnly) setTab("score"); }, [viewOnly]);
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
   const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
@@ -4685,7 +4696,7 @@ export default function App() {
       <TeamMatchDetail
         teamMatchId={teamMatchId}
         onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); setScreen("list"); }}
-        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); }}
+        onOpenMatch={id=>{ setMatchId(id); setTeamMatchOrderNum(null); setTick(t=>t+1); setScreen("teamMatchRecord"); }}
         onNewMatch={async (tm, orderNum, existingGame)=>{
           setTeamMatchOrderNum(orderNum);
           setCopySourceId(null);
@@ -4754,29 +4765,9 @@ export default function App() {
         matchId={matchId}
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
-        onBack={async ()=>{
-          // 先に画面遷移してから非同期処理（白画面防止）
-          const _matchId = matchId;
-          const _teamMatchId = teamMatchId;
-          const _orderNum = teamMatchOrderNum;
-          setMatchId(null);
-          setTick(t=>t+1);
-          setScreen("teamMatchDetail");
-          // バックグラウンドでスコア再集計・status更新
-          try {
-            await recalcTeamMatchScore(_teamMatchId);
-            const tmData = await getTeamMatch(_teamMatchId);
-            const g = tmData?.games?.find(g=>g.order_num===_orderNum);
-            if (g) {
-              const { data: m } = await supabase.from("matches").select("status").eq("id", _matchId).single();
-              if (m?.status === "finished") {
-                await updateTeamMatchGame(g.id, { status:"finished", recorder_id:null, recorder_name:null });
-              }
-            }
-          } catch(e) { console.error(e); }
-        }}
+        onBack={()=>{ setTeamMatchOrderNum(null); setMatchId(null); setScreen("teamMatchDetail"); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); setTeamMatchId(null); goNav(key); }}
+        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
     );
   }
@@ -4858,7 +4849,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{ setTick(t=>t+1); setScreen(prevScreen==="home" ? "home" : "list"); setMatchId(null); }}
+        onBack={()=>{ setTick(t=>t+1); setScreen(prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : "list"); setMatchId(null); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
