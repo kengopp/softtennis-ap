@@ -3958,9 +3958,10 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           <FormRow label="お子さん／ご自身の選手登録（任意）">
             {(() => {
               // 選択中の学校でフィルタリング
-              const filteredRoster = schoolId
-                ? roster.filter(p => p.school_id === schoolId)
-                : roster;
+              const filteredRoster = roster.filter(p =>
+                p.is_own_team !== false &&
+                (!schoolId || p.school_id === schoolId || p.school_id === null)
+              );
               const currentPlayer = linkedPlayerId ? roster.find(p => p.id === linkedPlayerId) : null;
 
               return (
