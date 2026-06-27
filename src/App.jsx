@@ -4227,47 +4227,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           </FormRow>
         </div>
 
-        {/* 管理者メニュー */}
-        {isAdmin && isApproved && (
-          <div style={{ background:C.white,borderRadius:12,padding:14,marginBottom:12 }}>
-            <div style={{ fontSize:12,fontWeight:800,color:C.navy,borderBottom:`2px solid ${C.navy}`,paddingBottom:6,marginBottom:12 }}>👑 管理者メニュー</div>
-            <div style={{ background:"#f0f4ff",border:"1.5px solid #6366f1",borderRadius:10,padding:"12px 14px",marginBottom:10 }}>
-              <div style={{ fontSize:12,fontWeight:700,color:"#6366f1",marginBottom:8 }}>チームの招待コード</div>
-              <div style={{ background:C.white,border:"1.5px dashed #6366f1",borderRadius:8,padding:14,textAlign:"center",fontSize:24,fontWeight:800,letterSpacing:8,color:C.navy,marginBottom:8 }}>{inviteCodeDisplay}</div>
-              <div style={{ display:"flex",gap:8,marginBottom:8 }}>
-                <button
-                  style={{ flex:1,background:"#6366f1",color:C.white,border:"none",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
-                  onClick={()=>{ navigator.clipboard?.writeText(inviteCodeDisplay); alert("招待コードをコピーしました！"); }}
-                >📋 コードをコピー</button>
-                <button
-                  style={{ flex:1,background:C.white,color:"#6366f1",border:"1.5px solid #6366f1",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
-                  onClick={async ()=>{
-                    if (!window.confirm("招待コードを再発行しますか？\n古いコードは使えなくなりますが、既存メンバーへの影響はありません。")) return;
-                    try {
-                      const newCode = await reissueInviteCode(schoolId);
-                      setInviteCodeDisplay(newCode);
-                      alert("招待コードを再発行しました。");
-                    } catch(e) { alert("再発行に失敗しました: " + (e.message||"")); }
-                  }}
-                >🔄 再発行</button>
-              </div>
-              <div style={{ fontSize:11,color:C.textSec }}>このコードをLINEなどで部員に共有してください。再発行しても既存メンバーへの影響はありません。</div>
-            </div>
-            <button
-              style={{ width:"100%",background:C.white,color:C.text,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left",marginBottom:8 }}
-              onClick={async ()=>{
-                const members = await getApprovedMembers();
-                setMemberList(members);
-                setShowTransferScreen(true);
-              }}
-            >👤 管理者を移譲する ›</button>
-            <button
-              style={{ width:"100%",background:C.white,color:C.red,border:`1.5px solid ${C.red}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left" }}
-              onClick={()=>setDissolveStep(1)}
-            >🚨 チームを解散する ›</button>
-          </div>
-        )}
-
+        {/* 招待コード説明 */}
         <div style={{ background:"#f5f5f5",border:"1px solid #e0e0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:C.textSec,marginBottom:12 }}>
           ℹ️ 学校名を変更すると、共有される試合・選手マスターの範囲が変わります。
         </div>
@@ -4285,14 +4245,54 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         </button>
 
         {!forced && (
-          <div style={{ marginTop:32, borderTop:`1px solid ${C.border}`, paddingTop:20 }}>
+          <div style={{ marginTop:32, borderTop:`1px solid ${C.border}`, paddingTop:20, display:"flex", flexDirection:"column", gap:12 }}>
+
+            {/* 管理者メニュー（保存ボタンの下） */}
+            {isAdmin && isApproved && (
+              <div style={{ background:C.white,borderRadius:12,padding:14 }}>
+                <div style={{ fontSize:12,fontWeight:800,color:C.navy,borderBottom:`2px solid ${C.navy}`,paddingBottom:6,marginBottom:12 }}>👑 管理者メニュー</div>
+                <div style={{ background:"#f0f4ff",border:"1.5px solid #6366f1",borderRadius:10,padding:"12px 14px",marginBottom:10 }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:"#6366f1",marginBottom:8 }}>チームの招待コード</div>
+                  <div style={{ background:C.white,border:"1.5px dashed #6366f1",borderRadius:8,padding:14,textAlign:"center",fontSize:24,fontWeight:800,letterSpacing:8,color:C.navy,marginBottom:8 }}>{inviteCodeDisplay}</div>
+                  <div style={{ display:"flex",gap:8,marginBottom:8 }}>
+                    <button
+                      style={{ flex:1,background:"#6366f1",color:C.white,border:"none",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
+                      onClick={()=>{ navigator.clipboard?.writeText(inviteCodeDisplay); alert("招待コードをコピーしました！"); }}
+                    >📋 コードをコピー</button>
+                    <button
+                      style={{ flex:1,background:C.white,color:"#6366f1",border:"1.5px solid #6366f1",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
+                      onClick={async ()=>{
+                        if (!window.confirm("招待コードを再発行しますか？\n古いコードは使えなくなりますが、既存メンバーへの影響はありません。")) return;
+                        try {
+                          const newCode = await reissueInviteCode(schoolId);
+                          setInviteCodeDisplay(newCode);
+                          alert("招待コードを再発行しました。");
+                        } catch(e) { alert("再発行に失敗しました: " + (e.message||"")); }
+                      }}
+                    >🔄 再発行</button>
+                  </div>
+                  <div style={{ fontSize:11,color:C.textSec }}>このコードをLINEなどで部員に共有してください。再発行しても既存メンバーへの影響はありません。</div>
+                </div>
+                {/* 管理者を移譲する */}
+                <button
+                  style={{ width:"100%",background:C.white,color:C.text,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left" }}
+                  onClick={async ()=>{
+                    const members = await getApprovedMembers();
+                    setMemberList(members);
+                    setShowTransferScreen(true);
+                  }}
+                >👤 管理者を移譲する ›</button>
+              </div>
+            )}
+
+            {/* アカウントを削除する */}
             {isAdmin ? (
               <>
                 <button style={{ ...S.btn("transparent"), color:C.textSec, border:`1px solid ${C.border}`, fontSize:13, opacity:0.5, cursor:"not-allowed" }} disabled>
                   🗑 アカウントを削除する
                 </button>
-                <div style={{ fontSize:11, color:C.red, marginTop:8, textAlign:"center", fontWeight:700 }}>
-                  ※先に管理者を移譲するか、チームを解散してください
+                <div style={{ fontSize:11, color:C.red, marginTop:-8, textAlign:"center", fontWeight:700 }}>
+                  ※先に管理者を移譲してください
                 </div>
               </>
             ) : (
@@ -4313,9 +4313,19 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                 >
                   🗑 アカウントを削除する
                 </button>
-                <div style={{ fontSize:11, color:C.textSec, marginTop:8, textAlign:"center" }}>
+                <div style={{ fontSize:11, color:C.textSec, marginTop:-8, textAlign:"center" }}>
                   ※試合データは削除されません
                 </div>
+              </>
+            )}
+
+            {/* チームを解散する（管理者のみ・一番下） */}
+            {isAdmin && isApproved && (
+              <>
+                <button
+                  style={{ width:"100%",background:C.white,color:C.red,border:`1.5px solid ${C.red}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left" }}
+                  onClick={()=>setDissolveStep(1)}
+                >🚨 チームを解散する ›</button>
               </>
             )}
           </div>
