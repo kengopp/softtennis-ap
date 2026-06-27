@@ -382,14 +382,60 @@ async function getMyProfile() {
 async function saveMyProfile(profile) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
-  const { error } = await supabase.from("users").update({
+  const updates = {
     name: profile.name,
     school_id: profile.school_id,
     prefecture: profile.prefecture,
     category: profile.category,
     gender_category: profile.gender_category,
     linked_player_id: profile.linked_player_id ?? null,
-  }).eq("id", user.id);
+  };
+  if (profile.is_approved !== undefined) updates.is_approved = profile.is_approved;
+  const { error } = await supabase.from("users").update(updates).eq("id", user.id);
+  if (error) throw error;
+}
+
+// 招待コード・管理者情報を取得
+async function getSchoolInviteInfo(schoolId) {
+  if (!schoolId) return null;
+  const { data, error } = await supabase.from("schools").select("invite_code, admin_user_id").eq("id", schoolId).single();
+  if (error) { console.error(error); return null; }
+  return data;
+}
+
+// 招待コードを照合
+async function verifyInviteCode(schoolId, code) {
+  const info = await getSchoolInviteInfo(schoolId);
+  if (!info) return false;
+  return info.invite_code === code.trim().toUpperCase();
+}
+
+// 招待コードを再発行
+async function reissueInviteCode(schoolId) {
+  const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const { error } = await supabase.from("schools").update({ invite_code: newCode }).eq("id", schoolId);
+  if (error) throw error;
+  return newCode;
+}
+
+// 承認済みメンバー一覧を取得（移譲先選択用）
+async function getApprovedMembers() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data, error } = await supabase.from("users").select("id, name").eq("is_approved", true);
+  if (error) { console.error(error); return []; }
+  return (data || []).filter(m => m.id !== user.id);
+}
+
+// 管理者を移譲
+async function transferAdmin(schoolId, toUserId) {
+  const { error } = await supabase.from("schools").update({ admin_user_id: toUserId }).eq("id", schoolId);
+  if (error) throw error;
+}
+
+// チームを解散（全データ削除）
+async function dissolveTeam() {
+  const { error } = await supabase.rpc("dissolve_team");
   if (error) throw error;
 }
 
@@ -1086,12 +1132,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                     </div>
                   </div>
-                  {isMyMatch && (
-                    <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                      <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>
-                      <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>
-                    </div>
-                  )}
+                  <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                    <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>
+                    <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>
+                  </div>
                 </div>
               );
             })}
@@ -1716,7 +1760,13 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const myLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム", tm.my_team_division].filter(Boolean).join("");
   const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
   const isSameSchool = false; // 同校対決は学校ID比較で判定（簡略化）
-  const isCreator = tm.created_by === myUserId;
+  const isCreator = tm.created_by === myUserId; // 編集・削除権限用（維持）
+  // 番手ごとの操作権限：recorder_idがnull（未ロック）または自分の場合に操作可能
+  const canOperateGame = (game) => {
+    if (!game) return true; // 未作成は誰でも操作可
+    if (!game.recorder_id) return true; // 未ロックは誰でも操作可
+    return game.recorder_id === myUserId; // 自分がロック中なら操作可
+  };
 
   // 番手ごとの状態表示
   const gameStatuses = [1,2,3].map(num => {
@@ -1817,7 +1867,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 ) : (
                   <div style={{ fontSize:12,color:C.textSec,marginBottom:8 }}>ペア未登録</div>
                 )}
-                {isCreator && (
+                {canOperateGame(game) && (
                   <>
                     {/* ペア登録済みで未開始 → 試合開始ボタン（選び直しではなく直接開始） */}
                     {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
@@ -2960,7 +3010,26 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
         ]);
         if (cancelled) return;
         setInitialMatch(m);
-        if (m && user && m.created_by !== user.id) setViewOnly(true);
+        if (m && user) {
+          if (teamMatchId) {
+            // 団体戦：team_match_gamesのrecorder_idと自分のIDを比較
+            const { data: tmg } = await supabase
+              .from("team_match_games")
+              .select("recorder_id, status")
+              .eq("match_id", matchId)
+              .single();
+            if (tmg) {
+              // recorder_idが設定されていて自分以外 → 観戦モード
+              // recorder_idがnull（誰も記録していない）→ 観戦モード（スコア詳細から入った場合）
+              if (!tmg.recorder_id || tmg.recorder_id !== user.id) {
+                setViewOnly(true);
+              }
+            }
+          } else {
+            // 個人戦：作成者以外は観戦モード
+            if (m.created_by !== user.id) setViewOnly(true);
+          }
+        }
       } catch(e) {
         if (!cancelled) alert("試合読み込みエラー: " + (e?.message || e));
       }
@@ -2995,7 +3064,8 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
 
 function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
-  const [tab,    setTab]    = useState(viewOnly ? "score" : "record");
+  const [tab,    setTab]    = useState("record");
+  useEffect(() => { if (viewOnly) setTab("score"); }, [viewOnly]);
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
   const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
@@ -3841,13 +3911,31 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
+  const [linkedPlayerMode, setLinkedPlayerMode] = useState("select");
+  const [linkedPlayerInput, setLinkedPlayerInput] = useState("");
+  const [linkedPlayerSaving, setLinkedPlayerSaving] = useState(false);
+
+  // 招待コード・管理者関連
+  const [isApproved, setIsApproved] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteInput, setInviteInput] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [inviteCodeDisplay, setInviteCodeDisplay] = useState("");
+  const [showTransferScreen, setShowTransferScreen] = useState(false);
+  const [memberList, setMemberList] = useState([]);
+  const [dissolveStep, setDissolveStep] = useState(0); // 0=非表示 1=1回目 2=2回目
+  const [dissolving, setDissolving] = useState(false);
+  const [transferring, setTransferring] = useState(false);
+  const [myUserId, setMyUserId] = useState(null);
 
   useEffect(() => { getSchools().then(setSchools); }, []);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
 
   useEffect(() => {
     let cancelled = false;
-    getMyProfile().then(p => {
+    (async () => {
+      const p = await getMyProfile();
       if (cancelled) return;
       if (p) {
         setName(p.name ?? "");
@@ -3856,9 +3944,18 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         setGenderCategory(p.gender_category ?? null);
         setCategory(p.category ?? null);
         setLinkedPlayerId(p.linked_player_id ?? null);
+        setIsApproved(!!p.is_approved);
+        setMyUserId(p.id);
+        if (p.school_id) {
+          const info = await getSchoolInviteInfo(p.school_id);
+          if (!cancelled && info) {
+            setInviteCodeDisplay(info.invite_code || "");
+            setIsAdmin(info.admin_user_id === p.id);
+          }
+        }
       }
       setReady(true);
-    });
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -3868,9 +3965,15 @@ function ProfileScreen({ onBack, forced, onSaved }) {
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
     if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
+    if (!isApproved) {
+      // 招待コード照合
+      const ok = await verifyInviteCode(schoolId, inviteInput);
+      if (!ok) { setInviteError("招待コードが正しくありません。管理者に確認してください。"); return; }
+    }
     setSaving(true);
     try {
-      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId });
+      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId, is_approved: true });
+      setIsApproved(true);
       onSaved?.();
       onBack();
     } catch (e) {
@@ -3878,6 +3981,55 @@ function ProfileScreen({ onBack, forced, onSaved }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  // 管理者移譲画面
+  if (showTransferScreen) {
+    return (
+      <div style={S.page}>
+        <div style={S.hdr}>
+          <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+            <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={()=>setShowTransferScreen(false)}>←</button>
+            <span style={{ fontSize:18,fontWeight:800,color:C.white }}>管理者を移譲する</span>
+          </div>
+        </div>
+        <div style={{ padding:14 }}>
+          <div style={{ background:"#fff3e0",border:"1px solid #ffb74d",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#e65100",marginBottom:14 }}>
+            ⚠️ 移譲後は相手が管理者になります。元に戻すには相手の操作が必要です。
+          </div>
+          <FormSec title="移譲先を選択">
+            {memberList.length === 0 ? (
+              <div style={{ fontSize:13,color:C.textSec,padding:"8px 0" }}>他の承認済みメンバーがいません。</div>
+            ) : memberList.map(m => (
+              <div key={m.id} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}` }}>
+                <div>
+                  <div style={{ fontSize:14,fontWeight:700,color:C.text }}>{m.name}</div>
+                  <div style={{ fontSize:11,color:C.textSec }}>参加中</div>
+                </div>
+                <button
+                  style={{ background:C.navy,color:C.white,border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",opacity:transferring?0.6:1 }}
+                  disabled={transferring}
+                  onClick={async () => {
+                    if (!window.confirm(`${m.name}さんに管理者を移譲します。\n元に戻すには相手の操作が必要です。\n本当によろしいですか？`)) return;
+                    setTransferring(true);
+                    try {
+                      await transferAdmin(schoolId, m.id);
+                      setIsAdmin(false);
+                      setShowTransferScreen(false);
+                      alert(`${m.name}さんに管理者を移譲しました。`);
+                    } catch(e) {
+                      alert("移譲に失敗しました: " + (e.message||""));
+                    } finally {
+                      setTransferring(false);
+                    }
+                  }}
+                >この人に移譲</button>
+              </div>
+            ))}
+          </FormSec>
+        </div>
+      </div>
+    );
   }
 
   if (!ready) {
@@ -3890,6 +4042,47 @@ function ProfileScreen({ onBack, forced, onSaved }) {
 
   return (
     <div style={S.page}>
+      {/* 解散1回目ダイアログ */}
+      {dissolveStep === 1 && (
+        <div style={{ position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"flex-end",padding:20 }}>
+          <div style={{ background:C.white,borderRadius:16,padding:24,width:"100%",display:"flex",flexDirection:"column",gap:16 }}>
+            <div style={{ fontSize:16,fontWeight:800,color:C.text,textAlign:"center" }}>🚨 チームを解散しますか？</div>
+            <div style={{ fontSize:13,color:C.textSec,textAlign:"center",lineHeight:1.6 }}>解散すると<b style={{color:C.text}}>他の参加者も全員退会</b>となります。<br/>本当に解散しますか？</div>
+            <div style={{ display:"flex",gap:10 }}>
+              <button style={{ flex:1,background:C.gray,color:C.textSec,border:"none",borderRadius:10,padding:14,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>setDissolveStep(0)}>キャンセル</button>
+              <button style={{ flex:1,background:C.red,color:C.white,border:"none",borderRadius:10,padding:14,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>setDissolveStep(2)}>解散する</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 解散2回目ダイアログ */}
+      {dissolveStep === 2 && (
+        <div style={{ position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"flex-end",padding:20 }}>
+          <div style={{ background:C.white,borderRadius:16,padding:24,width:"100%",display:"flex",flexDirection:"column",gap:16 }}>
+            <div style={{ fontSize:16,fontWeight:800,color:C.red,textAlign:"center" }}>🚨 最終確認</div>
+            <div style={{ fontSize:13,color:C.textSec,textAlign:"center",lineHeight:1.6 }}>試合・選手マスター・団体戦などの<b style={{color:C.text}}>データもすべて消去</b>となりますが、本当に解散しますか？<br/><br/><span style={{color:C.red,fontWeight:700}}>この操作は元に戻せません。</span></div>
+            <div style={{ display:"flex",gap:10 }}>
+              <button style={{ flex:1,background:C.gray,color:C.textSec,border:"none",borderRadius:10,padding:14,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>setDissolveStep(0)}>キャンセル</button>
+              <button
+                style={{ flex:1,background:C.red,color:C.white,border:"none",borderRadius:10,padding:14,fontSize:14,fontWeight:700,cursor:"pointer",opacity:dissolving?0.6:1 }}
+                disabled={dissolving}
+                onClick={async ()=>{
+                  setDissolving(true);
+                  try {
+                    await dissolveTeam();
+                    await supabase.auth.signOut();
+                  } catch(e) {
+                    alert("解散に失敗しました: " + (e.message||""));
+                    setDissolving(false);
+                    setDissolveStep(0);
+                  }
+                }}
+              >{dissolving ? "処理中..." : "解散する"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={S.hdr}>
         <div style={{ display:"flex",alignItems:"center",gap:12 }}>
           {!forced && <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>}
@@ -3902,7 +4095,17 @@ function ProfileScreen({ onBack, forced, onSaved }) {
             ⚠️ 学校名・男子女子区分の設定が完了していないため、試合の閲覧・作成ができません。設定して保存してください。
           </div>
         )}
-        <FormSec title="基本情報">
+
+        {/* 基本情報（役割バッジ付き） */}
+        <div style={{ background:C.white,borderRadius:12,padding:14,marginBottom:12 }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`2px solid ${C.navy}`,paddingBottom:6,marginBottom:12 }}>
+            <span style={{ fontSize:12,fontWeight:800,color:C.navy }}>基本情報</span>
+            {isApproved && (
+              <span style={{ background:isAdmin?"#6366f1":C.textSec,color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20 }}>
+                {isAdmin ? "👑 管理者" : "メンバー"}
+              </span>
+            )}
+          </div>
           <FormRow label="お名前">
             <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} />
           </FormRow>
@@ -3912,7 +4115,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
             </select>
           </FormRow>
           <FormRow label="学校名またはチーム名" labelRight={<PrefMiniFilter value={schoolPrefFilter} onChange={setSchoolPrefFilter} options={knownPrefsFrom(schools)} />}>
-            <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} genderCategory={genderCategory} />
+            <SchoolIdSelect value={schoolId} onChange={v=>{ setSchoolId(v); setIsApproved(false); setInviteInput(""); setInviteError(""); }} schools={schools} prefFilter={schoolPrefFilter} genderCategory={genderCategory} />
           </FormRow>
           <FormRow label="男子・女子・共通">
             <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
@@ -3928,22 +4131,142 @@ function ProfileScreen({ onBack, forced, onSaved }) {
               ))}
             </div>
           </FormRow>
+
+          {/* 招待コード（未承認のみ表示） */}
+          {!isApproved && schoolId && (
+            <div style={{ background:"#fff8e1",border:"1.5px solid #ffb74d",borderRadius:10,padding:"12px 14px",marginTop:8 }}>
+              <div style={{ fontSize:12,fontWeight:700,color:"#e65100",marginBottom:8 }}>🔑 招待コードを入力してください</div>
+              <input
+                style={{ ...S.inp,textAlign:"center",fontSize:18,fontWeight:800,letterSpacing:6 }}
+                placeholder="XXXXXX"
+                value={inviteInput}
+                maxLength={6}
+                onChange={e=>{ setInviteInput(e.target.value.toUpperCase()); setInviteError(""); }}
+              />
+              {inviteError && <div style={{ fontSize:11,color:C.red,fontWeight:700,marginTop:4 }}>⚠️ {inviteError}</div>}
+              <div style={{ fontSize:11,color:C.textSec,marginTop:4 }}>チームの管理者からコードを受け取り入力してください。</div>
+            </div>
+          )}
+
+          {/* 認証済みバッジ */}
+          {isApproved && (
+            <div style={{ background:C.accentL,border:`1.5px solid ${C.accent}`,borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8 }}>
+              <span style={{ fontSize:13,fontWeight:700,color:C.navy }}>🔑 招待コード認証済み</span>
+              <span style={{ background:C.accent,color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20 }}>✓ 参加中</span>
+            </div>
+          )}
+
           <FormRow label="お子さん／ご自身の選手登録（任意）">
-            {roster.length===0 ? (
-              <div style={{ fontSize:12,color:C.textSec,padding:"6px 0" }}>選手マスターに登録がまだありません。先に「選手マスター」から登録してください。</div>
-            ) : (
-              <select
-                style={{ ...S.inp, background:"transparent" }}
-                value={linkedPlayerId || ""}
-                onChange={e=>setLinkedPlayerId(e.target.value || null)}
-              >
-                <option value="">設定しない</option>
-                {roster.map(p => <option key={p.id} value={p.id}>{p.player_name}</option>)}
-              </select>
-            )}
-            <div style={{ fontSize:11,color:C.textSec,marginTop:4 }}>設定すると、ホーム画面でその選手の戦績だけをまとめて確認できます。保護者の方は「お子さん」、選手ご本人は「自分」を選んでください。</div>
+            {(() => {
+              const filteredRoster = roster.filter(p =>
+                p.is_own_team !== false &&
+                (!schoolId || p.school_id === schoolId || p.school_id === null)
+              );
+              const currentPlayer = linkedPlayerId ? roster.find(p => p.id === linkedPlayerId) : null;
+              return (
+                <div>
+                  <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                    <button style={{ ...S.togBtn(linkedPlayerMode==="select"), fontSize:12, padding:"5px 12px" }} onClick={()=>setLinkedPlayerMode("select")}>一覧から選択</button>
+                    <button style={{ ...S.togBtn(linkedPlayerMode==="input"), fontSize:12, padding:"5px 12px" }} onClick={()=>setLinkedPlayerMode("input")}>直接入力して登録</button>
+                  </div>
+                  {linkedPlayerMode==="select" ? (
+                    <>
+                      {filteredRoster.length===0 ? (
+                        <div style={{ fontSize:12,color:C.textSec,padding:"6px 0" }}>{schoolId ? "この学校の選手マスターにまだ登録がありません。「直接入力して登録」から追加できます。" : "選手マスターに登録がまだありません。"}</div>
+                      ) : (
+                        <select style={{ ...S.inp, background:"transparent" }} value={linkedPlayerId || ""} onChange={e=>setLinkedPlayerId(e.target.value || null)}>
+                          <option value="">設定しない</option>
+                          {filteredRoster.map(p => <option key={p.id} value={p.id}>{p.player_name}</option>)}
+                        </select>
+                      )}
+                      {currentPlayer && schoolId && currentPlayer.school_id !== schoolId && (
+                        <div style={{ fontSize:11,color:C.orange,marginTop:4 }}>⚠️ 現在「{currentPlayer.player_name}」（別の学校）が設定されています</div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                      <input style={{ ...S.inp, flex:1, marginBottom:0 }} placeholder="選手名を入力（例：清見 祐吾）" value={linkedPlayerInput} onChange={e=>setLinkedPlayerInput(e.target.value)} />
+                      <button
+                        style={{ background:C.accent, color:C.white, border:"none", borderRadius:8, padding:"10px 14px", fontSize:13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", opacity:linkedPlayerSaving?0.6:1 }}
+                        disabled={linkedPlayerSaving || !linkedPlayerInput.trim()}
+                        onClick={async () => {
+                          const pname = linkedPlayerInput.trim();
+                          if (!pname) return;
+                          setLinkedPlayerSaving(true);
+                          try {
+                            const existing = roster.find(p => p.player_name === pname);
+                            if (existing) { setLinkedPlayerId(existing.id); }
+                            else {
+                              await savePlayer({ player_name: pname, is_own_team: true });
+                              const refreshed = await getPlayerRoster();
+                              setRoster(refreshed);
+                              const saved = refreshed.find(p => p.player_name === pname);
+                              if (saved) setLinkedPlayerId(saved.id);
+                            }
+                            setLinkedPlayerInput("");
+                            setLinkedPlayerMode("select");
+                          } catch(e) {
+                            setErrorMsg("選手登録に失敗しました: " + (e.message||""));
+                          } finally {
+                            setLinkedPlayerSaving(false);
+                          }
+                        }}
+                      >{linkedPlayerSaving ? "登録中…" : "登録して選択"}</button>
+                    </div>
+                  )}
+                  {linkedPlayerId && currentPlayer && (
+                    <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:C.accentL,border:`1px solid ${C.accent}`,borderRadius:8,padding:"6px 10px",marginTop:8 }}>
+                      <span style={{ fontSize:13,fontWeight:700,color:C.navy }}>🎾 {currentPlayer.player_name}</span>
+                      <button style={{ background:"none",border:"none",color:C.textSec,fontSize:18,cursor:"pointer",padding:"0 4px",lineHeight:1 }} onClick={()=>setLinkedPlayerId(null)}>×</button>
+                    </div>
+                  )}
+                  <div style={{ fontSize:11,color:C.textSec,marginTop:6 }}>設定すると、ホーム画面でその選手の戦績だけをまとめて確認できます。保護者の方は「お子さん」、選手ご本人は「自分」を選んでください。</div>
+                </div>
+              );
+            })()}
           </FormRow>
-        </FormSec>
+        </div>
+
+        {/* 管理者メニュー */}
+        {isAdmin && isApproved && (
+          <div style={{ background:C.white,borderRadius:12,padding:14,marginBottom:12 }}>
+            <div style={{ fontSize:12,fontWeight:800,color:C.navy,borderBottom:`2px solid ${C.navy}`,paddingBottom:6,marginBottom:12 }}>👑 管理者メニュー</div>
+            <div style={{ background:"#f0f4ff",border:"1.5px solid #6366f1",borderRadius:10,padding:"12px 14px",marginBottom:10 }}>
+              <div style={{ fontSize:12,fontWeight:700,color:"#6366f1",marginBottom:8 }}>チームの招待コード</div>
+              <div style={{ background:C.white,border:"1.5px dashed #6366f1",borderRadius:8,padding:14,textAlign:"center",fontSize:24,fontWeight:800,letterSpacing:8,color:C.navy,marginBottom:8 }}>{inviteCodeDisplay}</div>
+              <div style={{ display:"flex",gap:8,marginBottom:8 }}>
+                <button
+                  style={{ flex:1,background:"#6366f1",color:C.white,border:"none",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
+                  onClick={()=>{ navigator.clipboard?.writeText(inviteCodeDisplay); alert("招待コードをコピーしました！"); }}
+                >📋 コードをコピー</button>
+                <button
+                  style={{ flex:1,background:C.white,color:"#6366f1",border:"1.5px solid #6366f1",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
+                  onClick={async ()=>{
+                    if (!window.confirm("招待コードを再発行しますか？\n古いコードは使えなくなりますが、既存メンバーへの影響はありません。")) return;
+                    try {
+                      const newCode = await reissueInviteCode(schoolId);
+                      setInviteCodeDisplay(newCode);
+                      alert("招待コードを再発行しました。");
+                    } catch(e) { alert("再発行に失敗しました: " + (e.message||"")); }
+                  }}
+                >🔄 再発行</button>
+              </div>
+              <div style={{ fontSize:11,color:C.textSec }}>このコードをLINEなどで部員に共有してください。再発行しても既存メンバーへの影響はありません。</div>
+            </div>
+            <button
+              style={{ width:"100%",background:C.white,color:C.text,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left",marginBottom:8 }}
+              onClick={async ()=>{
+                const members = await getApprovedMembers();
+                setMemberList(members);
+                setShowTransferScreen(true);
+              }}
+            >👤 管理者を移譲する ›</button>
+            <button
+              style={{ width:"100%",background:C.white,color:C.red,border:`1.5px solid ${C.red}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left" }}
+              onClick={()=>setDissolveStep(1)}
+            >🚨 チームを解散する ›</button>
+          </div>
+        )}
 
         <div style={{ background:"#f5f5f5",border:"1px solid #e0e0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:C.textSec,marginBottom:12 }}>
           ℹ️ 学校名を変更すると、共有される試合・選手マスターの範囲が変わります。
@@ -3963,25 +4286,38 @@ function ProfileScreen({ onBack, forced, onSaved }) {
 
         {!forced && (
           <div style={{ marginTop:32, borderTop:`1px solid ${C.border}`, paddingTop:20 }}>
-            <button
-              style={{ ...S.btn("transparent"), color:C.red, border:`1px solid ${C.red}`, fontSize:13 }}
-              onClick={async ()=>{
-                if (!window.confirm("アカウントを削除しますか？\n\n※試合データは削除されません。\nこの操作は取り消せません。")) return;
-                if (!window.confirm("本当に削除しますか？\nアカウントは完全に削除されます。")) return;
-                try {
-                  const { error } = await supabase.rpc("delete_my_account");
-                  if (error) throw error;
-                  await supabase.auth.signOut();
-                } catch(e) {
-                  alert("削除に失敗しました: " + (e.message || e));
-                }
-              }}
-            >
-              🗑 アカウントを削除する
-            </button>
-            <div style={{ fontSize:11, color:C.textSec, marginTop:8, textAlign:"center" }}>
-              ※試合データは削除されません
-            </div>
+            {isAdmin ? (
+              <>
+                <button style={{ ...S.btn("transparent"), color:C.textSec, border:`1px solid ${C.border}`, fontSize:13, opacity:0.5, cursor:"not-allowed" }} disabled>
+                  🗑 アカウントを削除する
+                </button>
+                <div style={{ fontSize:11, color:C.red, marginTop:8, textAlign:"center", fontWeight:700 }}>
+                  ※先に管理者を移譲するか、チームを解散してください
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  style={{ ...S.btn("transparent"), color:C.red, border:`1px solid ${C.red}`, fontSize:13 }}
+                  onClick={async ()=>{
+                    if (!window.confirm("アカウントを削除しますか？\n\n※試合データは削除されません。\nこの操作は取り消せません。")) return;
+                    if (!window.confirm("本当に削除しますか？\nアカウントは完全に削除されます。")) return;
+                    try {
+                      const { error } = await supabase.rpc("delete_my_account");
+                      if (error) throw error;
+                      await supabase.auth.signOut();
+                    } catch(e) {
+                      alert("削除に失敗しました: " + (e.message || e));
+                    }
+                  }}
+                >
+                  🗑 アカウントを削除する
+                </button>
+                <div style={{ fontSize:11, color:C.textSec, marginTop:8, textAlign:"center" }}>
+                  ※試合データは削除されません
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -4350,8 +4686,9 @@ function AdminSchoolsScreen({ onBack }) {
                     <button key={g.key} style={S.togBtn(editGenderRestriction===g.key)} onClick={()=>setEditGenderRestriction(g.key)}>{g.label}</button>
                   ))}
                 </div>
+                {errorMsg && <div style={{ color:C.red,fontSize:12,marginBottom:8,padding:"6px 8px",background:"#fdecea",borderRadius:6 }}>{errorMsg}</div>}
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                  <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
+                  <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>{setEditingId(null);setErrorMsg("");}}>キャンセル</button>
                   <button style={{ ...S.btn(C.accent),fontSize:12 }} onClick={()=>handleUpdate(s.id)}>保存</button>
                 </div>
               </div>
@@ -4670,7 +5007,7 @@ export default function App() {
       <TeamMatchDetail
         teamMatchId={teamMatchId}
         onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); setScreen("list"); }}
-        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("teamMatchDetail"); setScreen("record"); }}
+        onOpenMatch={id=>{ setMatchId(id); setTeamMatchOrderNum(null); setTick(t=>t+1); setScreen("teamMatchRecord"); }}
         onNewMatch={async (tm, orderNum, existingGame)=>{
           setTeamMatchOrderNum(orderNum);
           setCopySourceId(null);
@@ -4739,29 +5076,9 @@ export default function App() {
         matchId={matchId}
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
-        onBack={async ()=>{
-          // 先に画面遷移してから非同期処理（白画面防止）
-          const _matchId = matchId;
-          const _teamMatchId = teamMatchId;
-          const _orderNum = teamMatchOrderNum;
-          setMatchId(null);
-          setTick(t=>t+1);
-          setScreen("teamMatchDetail");
-          // バックグラウンドでスコア再集計・status更新
-          try {
-            await recalcTeamMatchScore(_teamMatchId);
-            const tmData = await getTeamMatch(_teamMatchId);
-            const g = tmData?.games?.find(g=>g.order_num===_orderNum);
-            if (g) {
-              const { data: m } = await supabase.from("matches").select("status").eq("id", _matchId).single();
-              if (m?.status === "finished") {
-                await updateTeamMatchGame(g.id, { status:"finished", recorder_id:null, recorder_name:null });
-              }
-            }
-          } catch(e) { console.error(e); }
-        }}
+        onBack={()=>{ setTeamMatchOrderNum(null); setMatchId(null); setScreen("teamMatchDetail"); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); setTeamMatchId(null); goNav(key); }}
+        onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
     );
   }
@@ -4843,7 +5160,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={()=>{ setTick(t=>t+1); setScreen(prevScreen==="home" ? "home" : "list"); setMatchId(null); }}
+        onBack={()=>{ setTick(t=>t+1); setScreen(prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : "list"); setMatchId(null); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
