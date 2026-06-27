@@ -4374,8 +4374,9 @@ function AdminSchoolsScreen({ onBack }) {
                     <button key={g.key} style={S.togBtn(editGenderRestriction===g.key)} onClick={()=>setEditGenderRestriction(g.key)}>{g.label}</button>
                   ))}
                 </div>
+                {errorMsg && <div style={{ color:C.red,fontSize:12,marginBottom:8,padding:"6px 8px",background:"#fdecea",borderRadius:6 }}>{errorMsg}</div>}
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                  <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
+                  <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>{setEditingId(null);setErrorMsg("");}}>キャンセル</button>
                   <button style={{ ...S.btn(C.accent),fontSize:12 }} onClick={()=>handleUpdate(s.id)}>保存</button>
                 </div>
               </div>
