@@ -427,6 +427,13 @@ async function getApprovedMembers() {
   return (data || []).filter(m => m.id !== user.id);
 }
 
+// グループ参加者一覧を取得（自分含む全員）
+async function getGroupMembers() {
+  const { data, error } = await supabase.from("users").select("id, name, is_approved").eq("is_approved", true).order("name");
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+
 // 管理者を移譲
 async function transferAdmin(schoolId, toUserId) {
   const { error } = await supabase.from("schools").update({ admin_user_id: toUserId }).eq("id", schoolId);
@@ -1239,9 +1246,78 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   );
 }
 // ============================================================
+// グループ参加者画面
+// ============================================================
+function GroupMembersScreen({ onBack }) {
+  const [members, setMembers] = useState([]);
+  const [myProfile, setMyProfile] = useState(null);
+  const [schoolInfo, setSchoolInfo] = useState(null);
+  const [mySchoolName, setMySchoolName] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const p = await getMyProfile();
+      setMyProfile(p);
+      if (p?.school_id) {
+        const [info, schools] = await Promise.all([
+          getSchoolInviteInfo(p.school_id),
+          getSchools(),
+        ]);
+        setSchoolInfo(info);
+        const school = schools.find(s => s.id === p.school_id);
+        setMySchoolName(school ? `${school.name}（${school.category}・${school.prefecture}）` : "");
+      }
+      const list = await getGroupMembers();
+      setMembers(list);
+      setLoading(false);
+    })();
+  }, []);
+
+  const adminId = schoolInfo?.admin_user_id;
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>グループ参加者</span>
+        </div>
+      </div>
+      <div style={{ padding:14 }}>
+        {loading ? (
+          <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>読み込み中...</div>
+        ) : (
+          <div style={{ background:C.white,borderRadius:12,padding:14 }}>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`2px solid ${C.navy}`,paddingBottom:6,marginBottom:12 }}>
+              <span style={{ fontSize:12,fontWeight:800,color:C.navy }}>{mySchoolName}</span>
+              <span style={{ background:C.navy,color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20 }}>{members.length}人</span>
+            </div>
+            {members.map(m => (
+              <div key={m.id} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}` }}>
+                <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                  <div style={{ width:36,height:36,borderRadius:"50%",background:C.accentL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:C.accent,flexShrink:0 }}>
+                    {m.name?.charAt(0) || "?"}
+                  </div>
+                  <span style={{ fontSize:14,fontWeight:700,color:C.text }}>{m.name}</span>
+                </div>
+                {m.id === adminId ? (
+                  <span style={{ background:"#6366f1",color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap" }}>👑 管理者</span>
+                ) : (
+                  <span style={{ background:C.textSec,color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap" }}>メンバー</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // マスター管理ハブ画面（選手マスター・学校マスターへの入口）
 // ============================================================
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin }) {
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers }) {
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
@@ -1263,7 +1339,7 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin }) {
         </div>
         {isAdmin && (
           <div
-            style={{ ...S.card, padding:"16px 14px", cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+            style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
             onClick={onSchoolAdmin}
           >
             <div>
@@ -1273,6 +1349,16 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin }) {
             <span style={{ fontSize:16,color:C.textSec }}>→</span>
           </div>
         )}
+        <div
+          style={{ ...S.card, padding:"16px 14px", cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onGroupMembers}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>👤 グループ参加者</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>参加中のメンバーを確認</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
       </div>
       <NavBar active="master" onNavigate={onNavigate}/>
     </div>
@@ -5141,8 +5227,12 @@ export default function App() {
         onNavigate={goNav}
         onRoster={()=>setScreen("roster")}
         onSchoolAdmin={()=>setScreen("schoolAdmin")}
+        onGroupMembers={()=>setScreen("groupMembers")}
       />
     );
+  }
+  if (screen==="groupMembers") {
+    return <GroupMembersScreen onBack={()=>setScreen("master")} />;
   }
   if (screen==="stats") {
     return (
