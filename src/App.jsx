@@ -3865,6 +3865,9 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
+  const [linkedPlayerMode, setLinkedPlayerMode] = useState("select"); // "select" | "input"
+  const [linkedPlayerInput, setLinkedPlayerInput] = useState("");
+  const [linkedPlayerSaving, setLinkedPlayerSaving] = useState(false);
 
   useEffect(() => { getSchools().then(setSchools); }, []);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
@@ -3953,19 +3956,104 @@ function ProfileScreen({ onBack, forced, onSaved }) {
             </div>
           </FormRow>
           <FormRow label="お子さん／ご自身の選手登録（任意）">
-            {roster.length===0 ? (
-              <div style={{ fontSize:12,color:C.textSec,padding:"6px 0" }}>選手マスターに登録がまだありません。先に「選手マスター」から登録してください。</div>
-            ) : (
-              <select
-                style={{ ...S.inp, background:"transparent" }}
-                value={linkedPlayerId || ""}
-                onChange={e=>setLinkedPlayerId(e.target.value || null)}
-              >
-                <option value="">設定しない</option>
-                {roster.map(p => <option key={p.id} value={p.id}>{p.player_name}</option>)}
-              </select>
-            )}
-            <div style={{ fontSize:11,color:C.textSec,marginTop:4 }}>設定すると、ホーム画面でその選手の戦績だけをまとめて確認できます。保護者の方は「お子さん」、選手ご本人は「自分」を選んでください。</div>
+            {(() => {
+              // 選択中の学校でフィルタリング
+              const filteredRoster = schoolId
+                ? roster.filter(p => p.school_id === schoolId)
+                : roster;
+              const currentPlayer = linkedPlayerId ? roster.find(p => p.id === linkedPlayerId) : null;
+
+              return (
+                <div>
+                  {/* モード切り替えタブ */}
+                  <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                    <button
+                      style={{ ...S.togBtn(linkedPlayerMode==="select"), fontSize:12, padding:"5px 12px" }}
+                      onClick={()=>setLinkedPlayerMode("select")}
+                    >一覧から選択</button>
+                    <button
+                      style={{ ...S.togBtn(linkedPlayerMode==="input"), fontSize:12, padding:"5px 12px" }}
+                      onClick={()=>setLinkedPlayerMode("input")}
+                    >直接入力して登録</button>
+                  </div>
+
+                  {linkedPlayerMode==="select" ? (
+                    <>
+                      {filteredRoster.length===0 ? (
+                        <div style={{ fontSize:12,color:C.textSec,padding:"6px 0" }}>
+                          {schoolId ? "この学校の選手マスターにまだ登録がありません。「直接入力して登録」から追加できます。" : "選手マスターに登録がまだありません。"}
+                        </div>
+                      ) : (
+                        <select
+                          style={{ ...S.inp, background:"transparent" }}
+                          value={linkedPlayerId || ""}
+                          onChange={e=>setLinkedPlayerId(e.target.value || null)}
+                        >
+                          <option value="">設定しない</option>
+                          {filteredRoster.map(p => <option key={p.id} value={p.id}>{p.player_name}</option>)}
+                        </select>
+                      )}
+                      {/* 現在設定中の選手が別学校の場合は表示 */}
+                      {currentPlayer && schoolId && currentPlayer.school_id !== schoolId && (
+                        <div style={{ fontSize:11,color:C.orange,marginTop:4 }}>
+                          ⚠️ 現在「{currentPlayer.player_name}」（別の学校）が設定されています
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                      <input
+                        style={{ ...S.inp, flex:1, marginBottom:0 }}
+                        placeholder="選手名を入力（例：清見 祐吾）"
+                        value={linkedPlayerInput}
+                        onChange={e=>setLinkedPlayerInput(e.target.value)}
+                      />
+                      <button
+                        style={{ background:C.accent, color:C.white, border:"none", borderRadius:8, padding:"10px 14px", fontSize:13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", opacity:linkedPlayerSaving?0.6:1 }}
+                        disabled={linkedPlayerSaving || !linkedPlayerInput.trim()}
+                        onClick={async () => {
+                          const pname = linkedPlayerInput.trim();
+                          if (!pname) return;
+                          setLinkedPlayerSaving(true);
+                          try {
+                            // 同名チェック
+                            const existing = roster.find(p => p.player_name === pname);
+                            if (existing) {
+                              setLinkedPlayerId(existing.id);
+                            } else {
+                              await savePlayer({ player_name: pname, is_own_team: true });
+                              const refreshed = await getPlayerRoster();
+                              setRoster(refreshed);
+                              const saved = refreshed.find(p => p.player_name === pname);
+                              if (saved) setLinkedPlayerId(saved.id);
+                            }
+                            setLinkedPlayerInput("");
+                            setLinkedPlayerMode("select");
+                          } catch(e) {
+                            setErrorMsg("選手登録に失敗しました: " + (e.message||""));
+                          } finally {
+                            setLinkedPlayerSaving(false);
+                          }
+                        }}
+                      >{linkedPlayerSaving ? "登録中…" : "登録して選択"}</button>
+                    </div>
+                  )}
+
+                  {/* 現在の選択表示 */}
+                  {linkedPlayerId && currentPlayer && (
+                    <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:C.accentL,border:`1px solid ${C.accent}`,borderRadius:8,padding:"6px 10px",marginTop:8 }}>
+                      <span style={{ fontSize:13,fontWeight:700,color:C.navy }}>🎾 {currentPlayer.player_name}</span>
+                      <button
+                        style={{ background:"none",border:"none",color:C.textSec,fontSize:18,cursor:"pointer",padding:"0 4px",lineHeight:1 }}
+                        onClick={()=>setLinkedPlayerId(null)}
+                      >×</button>
+                    </div>
+                  )}
+
+                  <div style={{ fontSize:11,color:C.textSec,marginTop:6 }}>設定すると、ホーム画面でその選手の戦績だけをまとめて確認できます。保護者の方は「お子さん」、選手ご本人は「自分」を選んでください。</div>
+                </div>
+              );
+            })()}
           </FormRow>
         </FormSec>
 
