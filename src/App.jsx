@@ -4138,7 +4138,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
               <div style={{ fontSize:12,fontWeight:700,color:"#e65100",marginBottom:8 }}>🔑 招待コードを入力してください</div>
               <input
                 style={{ ...S.inp,textAlign:"center",fontSize:18,fontWeight:800,letterSpacing:6 }}
-                placeholder="XXXXXX"
+                placeholder=""
                 value={inviteInput}
                 maxLength={6}
                 onChange={e=>{ setInviteInput(e.target.value.toUpperCase()); setInviteError(""); }}
@@ -4860,7 +4860,7 @@ function AuthScreen({ onAuthed }) {
               <label style={S.lbl}>招待コード</label>
               <input
                 style={{ ...S.inp, textAlign:"center", fontSize:18, fontWeight:800, letterSpacing:6 }}
-                placeholder="XXXXXX"
+                placeholder=""
                 value={inviteInput}
                 maxLength={6}
                 onChange={e=>setInviteInput(e.target.value.toUpperCase())}
