@@ -4737,6 +4737,7 @@ function AuthScreen({ onAuthed }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
+  const [inviteInput, setInviteInput] = useState("");
 
   useEffect(() => { getSchools().then(setSchools); }, []);
 
@@ -4765,6 +4766,12 @@ function AuthScreen({ onAuthed }) {
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
     if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
+    if (!inviteInput.trim()) { setErrorMsg("招待コードを入力してください"); return; }
+
+    // 招待コードを照合
+    const codeOk = await verifyInviteCode(schoolId, inviteInput);
+    if (!codeOk) { setErrorMsg("招待コードが正しくありません。管理者に確認してください。"); return; }
+
     setLoading(true);
     try {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
@@ -4777,6 +4784,7 @@ function AuthScreen({ onAuthed }) {
           prefecture,
           gender_category: genderCategory,
           category,
+          is_approved: true,
         });
         if (profileErr) throw profileErr;
       }
@@ -4847,6 +4855,17 @@ function AuthScreen({ onAuthed }) {
                   <button key={c.key} style={S.togBtn(category===c.key)} onClick={()=>setCategory(c.key)}>{c.label}</button>
                 ))}
               </div>
+            </div>
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <label style={S.lbl}>招待コード</label>
+              <input
+                style={{ ...S.inp, textAlign:"center", fontSize:18, fontWeight:800, letterSpacing:6 }}
+                placeholder="XXXXXX"
+                value={inviteInput}
+                maxLength={6}
+                onChange={e=>setInviteInput(e.target.value.toUpperCase())}
+              />
+              <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>チームの管理者から招待コードを受け取り入力してください。</div>
             </div>
           </>
         )}
