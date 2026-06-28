@@ -4217,6 +4217,9 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           {!forced && <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>}
           <span style={{ fontSize:18,fontWeight:800,color:C.white }}>プロフィール</span>
         </div>
+        {forced && (
+          <button style={{ background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:13,cursor:"pointer" }} onClick={onBack}>スキップ →</button>
+        )}
       </div>
       <div style={{ padding:14 }}>
         {forced && (
