@@ -2698,8 +2698,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const oppRosterBase = roster;
   // 同校対決：相手チームが自チームと同じ学校名の場合、自チームの選手もチップに表示
   const isSameSchool = aClub && bClub && aClub.trim() === bClub.trim();
+  const ownRosterLocal = roster.filter(p => p.is_own_team !== false);
   const oppRoster = isSameSchool
-    ? [...ownRoster, ...oppRosterBase.filter(p => p.team_name === bClub)]
+    ? [...ownRosterLocal, ...oppRosterBase.filter(p => p.team_name === bClub && p.is_own_team === false)]
     : oppRosterBase;
 
   // ★学校名の候補一覧（誤入力防止）
