@@ -5037,8 +5037,8 @@ function AuthScreen({ onAuthed }) {
           }
         }
 
-        // 保護者で直接入力の場合：お子さん選手を登録
-        if (registerMode === "guardian" && childMode === "input") {
+        // 保護者でお子さん名が入力されている場合：選手を登録
+        if (registerMode === "guardian") {
           const childName = [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ");
           if (childName) {
             await savePlayer({ player_name: childName, position: childPosition, dominant_hand: childHand, is_own_team: true });
@@ -5195,29 +5195,21 @@ function AuthScreen({ onAuthed }) {
                 </div>
                 {registerMode==="guardian" && (
                   <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}` }} onClick={e=>e.stopPropagation()}>
-                    <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-                      <button style={{ ...S.togBtn(childMode==="select"), fontSize:12, padding:"5px 12px" }} onClick={()=>setChildMode("select")}>一覧から選択</button>
-                      <button style={{ ...S.togBtn(childMode==="input"), fontSize:12, padding:"5px 12px" }} onClick={()=>setChildMode("input")}>直接入力して登録</button>
+                    <div style={{ fontSize:12, color:C.textSec, marginBottom:10 }}>お子さん／関連選手を登録します（任意）</div>
+                    <div style={{ display:"flex", gap:10, marginBottom:4 }}>
+                      <input style={{ ...S.inp, flex:1 }} placeholder="姓（名字）" value={childLastName} onChange={e=>setChildLastName(e.target.value)} onClick={e=>e.stopPropagation()}/>
+                      <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={childFirstName} onChange={e=>setChildFirstName(e.target.value)} onClick={e=>e.stopPropagation()}/>
                     </div>
-                    {childMode==="select" ? (
-                      <div style={{ fontSize:12, color:C.textSec }}>保存後にプロフィール画面から選手を選択できます。</div>
-                    ) : (
-                      <div>
-                        <div style={{ display:"flex", gap:10, marginBottom:4 }}>
-                          <input style={{ ...S.inp, flex:1 }} placeholder="姓（名字）" value={childLastName} onChange={e=>setChildLastName(e.target.value)} onClick={e=>e.stopPropagation()}/>
-                          <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={childFirstName} onChange={e=>setChildFirstName(e.target.value)} onClick={e=>e.stopPropagation()}/>
-                        </div>
-                        <div style={{ fontSize:11, color:"#aaa", marginBottom:10 }}>💡 姓だけでも登録できます</div>
-                        <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
-                        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-                          {["前衛","後衛"].map(v => <button key={v} style={S.togBtn(childPosition===v)} onClick={e=>{ e.stopPropagation(); setChildPosition(childPosition===v?null:v); }}>{v}</button>)}
-                        </div>
-                        <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
-                        <div style={{ display:"flex", gap:8 }}>
-                          {["右","左"].map(v => <button key={v} style={S.togBtn(childHand===v)} onClick={e=>{ e.stopPropagation(); setChildHand(childHand===v?null:v); }}>{v}</button>)}
-                        </div>
-                      </div>
-                    )}
+                    <div style={{ fontSize:11, color:"#aaa", marginBottom:10 }}>💡 姓だけでも登録できます</div>
+                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
+                    <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                      {["前衛","後衛"].map(v => <button key={v} style={S.togBtn(childPosition===v)} onClick={e=>{ e.stopPropagation(); setChildPosition(childPosition===v?null:v); }}>{v}</button>)}
+                    </div>
+                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      {["右","左"].map(v => <button key={v} style={S.togBtn(childHand===v)} onClick={e=>{ e.stopPropagation(); setChildHand(childHand===v?null:v); }}>{v}</button>)}
+                    </div>
+                    <div style={{ fontSize:11, color:C.textSec, marginTop:10 }}>※ 入力しなくても登録後にプロフィール画面から選手を選択できます。</div>
                   </div>
                 )}
               </div>
