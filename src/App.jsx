@@ -4965,6 +4965,18 @@ function AdminSchoolsScreen({ onBack }) {
 // ============================================================
 // ログイン／新規登録画面
 // ============================================================
+function translateAuthError(msg) {
+  if (!msg) return "登録に失敗しました";
+  if (msg.includes("User already registered") || msg.includes("already been registered")) return "このメールアドレスはすでに登録されています。ログインしてください。";
+  if (msg.includes("Email rate limit exceeded") || msg.includes("email rate limit")) return "短時間に何度も登録しようとしています。しばらく待ってから再試行してください。";
+  if (msg.includes("Invalid email")) return "メールアドレスの形式が正しくありません。";
+  if (msg.includes("Password should be")) return "パスワードは6文字以上で入力してください。";
+  if (msg.includes("signup is disabled")) return "現在新規登録は無効になっています。管理者にお問い合わせください。";
+  if (msg.includes("network") || msg.includes("fetch")) return "通信エラーが発生しました。インターネット接続を確認してください。";
+  if (msg.includes("duplicate") || msg.includes("unique")) return "すでに登録済みのデータと重複しています。";
+  return "登録に失敗しました（" + msg + "）";
+}
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login"); // login | signup
   const [email,    setEmail]    = useState("");
@@ -5003,7 +5015,7 @@ function AuthScreen({ onAuthed }) {
       if (error) throw error;
       onAuthed();
     } catch (e) {
-      setErrorMsg(e.message === "Invalid login credentials" ? "メールアドレスまたはパスワードが違います" : (e.message || "ログインに失敗しました"));
+      setErrorMsg(e.message === "Invalid login credentials" ? "メールアドレスまたはパスワードが違います" : translateAuthError(e.message));
     } finally {
       setLoading(false);
     }
@@ -5077,7 +5089,7 @@ function AuthScreen({ onAuthed }) {
       }
       onAuthed();
     } catch (e) {
-      setErrorMsg(e.message || "登録に失敗しました");
+      setErrorMsg(translateAuthError(e.message) || "登録に失敗しました");
     } finally {
       setLoading(false);
     }
