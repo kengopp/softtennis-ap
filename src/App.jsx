@@ -5103,12 +5103,6 @@ function AuthScreen({ onAuthed }) {
               </select>
             </div>
 
-            {/* 学校名（都道府県連動） */}
-            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>学校名またはチーム名</label>
-              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} genderCategory={genderCategory} />
-            </div>
-
             {/* 男女区分 */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>男子・女子・共通</label>
@@ -5117,6 +5111,12 @@ function AuthScreen({ onAuthed }) {
                   <button key={g.key} style={S.togBtn(genderCategory===g.key)} onClick={()=>setGenderCategory(g.key)}>{g.label}</button>
                 ))}
               </div>
+            </div>
+
+            {/* 学校名（都道府県・男女連動） */}
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <label style={S.lbl}>学校名またはチーム名</label>
+              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} genderCategory={genderCategory} />
             </div>
 
             {/* 区分 */}
