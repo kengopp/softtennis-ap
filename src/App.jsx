@@ -2969,10 +2969,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={bP1} onChange={e => setBP1(e.target.value)}/>
-            {oppRoster.filter(p => !bClub || p.team_name === bClub).length>0 && (
+            {bClub && oppRoster.filter(p => p.team_name === bClub).length>0 && (
               <div style={{ marginTop:6 }}>
-                {oppRoster.filter(p => !bClub || p.team_name === bClub).map(p=>(
-                  <span key={p.id} style={S.chip(bP1===p.player_name)} onClick={()=>{ setBP1(p.player_name); if (!bClub && p.team_name) setBClub(p.team_name); }}>{p.player_name}</span>
+                {oppRoster.filter(p => p.team_name === bClub).map(p=>(
+                  <span key={p.id} style={S.chip(bP1===p.player_name)} onClick={()=>setBP1(p.player_name)}>{p.player_name}</span>
                 ))}
               </div>
             )}
@@ -2980,10 +2980,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           {isDoubles && (
             <FormRow label="選手2（ペア）">
               <input style={S.inp} placeholder="選手名" value={bP2} onChange={e => setBP2(e.target.value)}/>
-              {oppRoster.filter(p => !bClub || p.team_name === bClub).length>0 && (
+              {bClub && oppRoster.filter(p => p.team_name === bClub).length>0 && (
                 <div style={{ marginTop:6 }}>
-                  {oppRoster.filter(p => !bClub || p.team_name === bClub).map(p=>(
-                    <span key={p.id} style={S.chip(bP2===p.player_name)} onClick={()=>{ setBP2(p.player_name); if (!bClub && p.team_name) setBClub(p.team_name); }}>{p.player_name}</span>
+                  {oppRoster.filter(p => p.team_name === bClub).map(p=>(
+                    <span key={p.id} style={S.chip(bP2===p.player_name)} onClick={()=>setBP2(p.player_name)}>{p.player_name}</span>
                   ))}
                 </div>
               )}
