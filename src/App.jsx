@@ -3986,7 +3986,8 @@ function schoolMatchesGender(school, genderCategory) {
 // ============================================================
 function ProfileScreen({ onBack, forced, onSaved }) {
   const [ready, setReady] = useState(false);
-  const [name, setName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState("");
   const [schoolId, setSchoolId] = useState(null);
   const [prefecture, setPrefecture] = useState("東京都");
   const [genderCategory, setGenderCategory] = useState(null);
@@ -3998,8 +3999,13 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [schools, setSchools] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
   const [linkedPlayerMode, setLinkedPlayerMode] = useState("select");
-  const [linkedPlayerInput, setLinkedPlayerInput] = useState("");
+  const [linkedPlayerLastName, setLinkedPlayerLastName] = useState("");
+  const [linkedPlayerFirstName, setLinkedPlayerFirstName] = useState("");
   const [linkedPlayerSaving, setLinkedPlayerSaving] = useState(false);
+  // 登録区分: null=未選択, "player"=選手, "guardian"=保護者
+  const [registerMode, setRegisterMode] = useState(null);
+  const [playerPosition, setPlayerPosition] = useState(null);
+  const [playerHand, setPlayerHand] = useState(null);
 
   // 招待コード・管理者関連
   const [isApproved, setIsApproved] = useState(false);
@@ -4024,9 +4030,13 @@ function ProfileScreen({ onBack, forced, onSaved }) {
       const p = await getMyProfile();
       if (cancelled) return;
       if (p) {
-        setName(p.name ?? "");
+        // nameを姓・名に分割（スペース区切り）
+        const parts = (p.name ?? "").split(/\s+/);
+        setLastName(parts[0] || "");
+        setFirstName(parts.slice(1).join(" ") || "");
         setSchoolId(p.school_id ?? null);
         setPrefecture(p.prefecture ?? "東京都");
+        setSchoolPrefFilter(p.prefecture ?? "");
         setGenderCategory(p.gender_category ?? null);
         setCategory(p.category ?? null);
         setLinkedPlayerId(p.linked_player_id ?? null);
@@ -4047,18 +4057,39 @@ function ProfileScreen({ onBack, forced, onSaved }) {
 
   async function handleSave() {
     setErrorMsg("");
-    if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
+    const fullName = [lastName.trim(), firstName.trim()].filter(Boolean).join(" ");
+    if (!fullName) { setErrorMsg("お名前（姓）を入力してください"); return; }
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
     if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
     if (!isApproved) {
-      // 招待コード照合
       const ok = await verifyInviteCode(schoolId, inviteInput);
       if (!ok) { setInviteError("招待コードが正しくありません。管理者に確認してください。"); return; }
     }
     setSaving(true);
     try {
-      await saveMyProfile({ name: name.trim(), school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId, is_approved: true });
+      let newLinkedPlayerId = linkedPlayerId;
+
+      // 選手として登録する場合：選手マスターに自動登録
+      if (registerMode === "player") {
+        const existing = roster.find(p => p.player_name === fullName && p.is_own_team);
+        if (existing) {
+          newLinkedPlayerId = existing.id;
+          // ポジション・利き手を更新
+          if (playerPosition || playerHand) {
+            await savePlayer({ ...existing, player_name: fullName, position: playerPosition || existing.position, dominant_hand: playerHand || existing.dominant_hand, is_own_team: true });
+          }
+        } else {
+          const saved = await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
+          const refreshed = await getPlayerRoster();
+          setRoster(refreshed);
+          const found = refreshed.find(p => p.player_name === fullName && p.is_own_team);
+          if (found) newLinkedPlayerId = found.id;
+        }
+      }
+
+      await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: newLinkedPlayerId, is_approved: true });
+      setLinkedPlayerId(newLinkedPlayerId);
       setIsApproved(true);
       onSaved?.();
       onBack();
@@ -4193,10 +4224,18 @@ function ProfileScreen({ onBack, forced, onSaved }) {
             )}
           </div>
           <FormRow label="お名前">
-            <input style={S.inp} value={name} onChange={e=>setName(e.target.value)} />
+            <div style={{ display:"flex", gap:10 }}>
+              <div style={{ flex:1 }}>
+                <input style={S.inp} placeholder="姓（名字）" value={lastName} onChange={e=>setLastName(e.target.value)} />
+              </div>
+              <div style={{ flex:1 }}>
+                <input style={S.inp} placeholder="名（任意）" value={firstName} onChange={e=>setFirstName(e.target.value)} />
+              </div>
+            </div>
+            <div style={{ fontSize:11, color:"#aaa", marginTop:4 }}>💡 姓だけでも登録できます</div>
           </FormRow>
           <FormRow label="都道府県">
-            <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>setPrefecture(e.target.value)}>
+            <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>{ setPrefecture(e.target.value); setSchoolPrefFilter(e.target.value); }}>
               {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </FormRow>
@@ -4242,54 +4281,164 @@ function ProfileScreen({ onBack, forced, onSaved }) {
             </div>
           )}
 
-          <FormRow label="お子さん／ご自身の選手登録（任意）">
-            {(() => {
-              const filteredRoster = roster.filter(p =>
-                p.is_own_team !== false &&
-                (!schoolId || p.school_id === schoolId || p.school_id === null)
-              );
-              const currentPlayer = linkedPlayerId ? roster.find(p => p.id === linkedPlayerId) : null;
-              return (
+          {/* 登録区分選択 */}
+          <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:14, marginTop:4 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:C.textSec }}>登録区分を選んでください</div>
+              {registerMode && (
+                <button
+                  style={{ fontSize:12, color:C.textSec, background:"none", border:"none", cursor:"pointer", textDecoration:"underline" }}
+                  onClick={()=>setRegisterMode(null)}
+                >選択をリセット</button>
+              )}
+            </div>
+
+            {/* ブロックA: 選手 */}
+            <div
+              onClick={()=>{ if(registerMode!=="player") setRegisterMode("player"); }}
+              style={{
+                border:`1.5px solid ${registerMode==="player" ? C.navy : C.border}`,
+                borderRadius:10, marginBottom:8, overflow:"hidden", cursor:"pointer",
+                opacity: registerMode==="guardian" ? 0.4 : 1,
+                pointerEvents: registerMode==="guardian" ? "none" : "auto",
+                transition:"opacity 0.2s",
+              }}
+            >
+              <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background: registerMode==="player" ? "#eef1f8" : "#fafafa" }}>
+                <div style={{
+                  width:20, height:20, borderRadius:"50%",
+                  border:`2px solid ${registerMode==="player" ? C.navy : "#ccc"}`,
+                  background: registerMode==="player" ? C.navy : "white",
+                  flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
+                }}>
+                  {registerMode==="player" && <div style={{ width:8, height:8, borderRadius:"50%", background:"white" }} />}
+                </div>
                 <div>
-                  <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                  <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>🎾 選手として登録する</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>自分自身が選手です（部員・選手本人）</div>
+                </div>
+              </div>
+              {registerMode==="player" && (
+                <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}` }} onClick={e=>e.stopPropagation()}>
+                  <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
+                  <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                    {["前衛","後衛"].map(v => (
+                      <button key={v} style={S.togBtn(playerPosition===v)} onClick={()=>setPlayerPosition(playerPosition===v ? null : v)}>{v}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    {["右","左"].map(v => (
+                      <button key={v} style={S.togBtn(playerHand===v)} onClick={()=>setPlayerHand(playerHand===v ? null : v)}>{v}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ブロックB: 保護者・関係者 */}
+            <div
+              onClick={()=>{ if(registerMode!=="guardian") setRegisterMode("guardian"); }}
+              style={{
+                border:`1.5px solid ${registerMode==="guardian" ? C.navy : C.border}`,
+                borderRadius:10, overflow:"hidden", cursor:"pointer",
+                opacity: registerMode==="player" ? 0.4 : 1,
+                pointerEvents: registerMode==="player" ? "none" : "auto",
+                transition:"opacity 0.2s",
+              }}
+            >
+              <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background: registerMode==="guardian" ? "#eef1f8" : "#fafafa" }}>
+                <div style={{
+                  width:20, height:20, borderRadius:"50%",
+                  border:`2px solid ${registerMode==="guardian" ? C.navy : "#ccc"}`,
+                  background: registerMode==="guardian" ? C.navy : "white",
+                  flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
+                }}>
+                  {registerMode==="guardian" && <div style={{ width:8, height:8, borderRadius:"50%", background:"white" }} />}
+                </div>
+                <div>
+                  <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>👤 保護者・関係者として登録する</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>お子さんや関連選手の戦績を確認したい方</div>
+                </div>
+              </div>
+              {registerMode==="guardian" && (
+                <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}` }} onClick={e=>e.stopPropagation()}>
+                  {/* 一覧/直接入力切替 */}
+                  <div style={{ display:"flex", gap:6, marginBottom:12 }}>
                     <button style={{ ...S.togBtn(linkedPlayerMode==="select"), fontSize:12, padding:"5px 12px" }} onClick={()=>setLinkedPlayerMode("select")}>一覧から選択</button>
                     <button style={{ ...S.togBtn(linkedPlayerMode==="input"), fontSize:12, padding:"5px 12px" }} onClick={()=>setLinkedPlayerMode("input")}>直接入力して登録</button>
                   </div>
                   {linkedPlayerMode==="select" ? (
-                    <>
-                      {filteredRoster.length===0 ? (
-                        <div style={{ fontSize:12,color:C.textSec,padding:"6px 0" }}>{schoolId ? "この学校の選手マスターにまだ登録がありません。「直接入力して登録」から追加できます。" : "選手マスターに登録がまだありません。"}</div>
-                      ) : (
-                        <select style={{ ...S.inp, background:"transparent" }} value={linkedPlayerId || ""} onChange={e=>setLinkedPlayerId(e.target.value || null)}>
-                          <option value="">設定しない</option>
-                          {filteredRoster.map(p => <option key={p.id} value={p.id}>{p.player_name}</option>)}
-                        </select>
-                      )}
-                      {currentPlayer && schoolId && currentPlayer.school_id !== schoolId && (
-                        <div style={{ fontSize:11,color:C.orange,marginTop:4 }}>⚠️ 現在「{currentPlayer.player_name}」（別の学校）が設定されています</div>
-                      )}
-                    </>
+                    (() => {
+                      const filteredRoster = roster.filter(p =>
+                        p.is_own_team !== false &&
+                        (!schoolId || p.school_id === schoolId || p.school_id === null)
+                      );
+                      const currentPlayer = linkedPlayerId ? roster.find(p => p.id === linkedPlayerId) : null;
+                      return (
+                        <>
+                          {filteredRoster.length===0 ? (
+                            <div style={{ fontSize:12, color:C.textSec, padding:"6px 0" }}>
+                              {schoolId ? "この学校の選手マスターにまだ登録がありません。「直接入力して登録」から追加できます。" : "選手マスターに登録がまだありません。"}
+                            </div>
+                          ) : (
+                            <select style={{ ...S.inp, background:"transparent" }} value={linkedPlayerId || ""} onChange={e=>setLinkedPlayerId(e.target.value || null)}>
+                              <option value="">設定しない</option>
+                              {filteredRoster.map(p => <option key={p.id} value={p.id}>{p.player_name}</option>)}
+                            </select>
+                          )}
+                          {currentPlayer && schoolId && currentPlayer.school_id !== schoolId && (
+                            <div style={{ fontSize:11, color:C.orange, marginTop:4 }}>⚠️ 現在「{currentPlayer.player_name}」（別の学校）が設定されています</div>
+                          )}
+                          {linkedPlayerId && currentPlayer && (
+                            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:C.accentL, border:`1px solid ${C.accent}`, borderRadius:8, padding:"6px 10px", marginTop:8 }}>
+                              <span style={{ fontSize:13, fontWeight:700, color:C.navy }}>🎾 {currentPlayer.player_name}</span>
+                              <button style={{ background:"none", border:"none", color:C.textSec, fontSize:18, cursor:"pointer", padding:"0 4px" }} onClick={()=>setLinkedPlayerId(null)}>×</button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()
                   ) : (
-                    <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                      <input style={{ ...S.inp, flex:1, marginBottom:0 }} placeholder="選手名を入力（例：清見 祐吾）" value={linkedPlayerInput} onChange={e=>setLinkedPlayerInput(e.target.value)} />
+                    <div>
+                      <div style={{ display:"flex", gap:10, marginBottom:4 }}>
+                        <input style={{ ...S.inp, flex:1 }} placeholder="姓（名字）" value={linkedPlayerLastName} onChange={e=>setLinkedPlayerLastName(e.target.value)} />
+                        <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={linkedPlayerFirstName} onChange={e=>setLinkedPlayerFirstName(e.target.value)} />
+                      </div>
+                      <div style={{ fontSize:11, color:"#aaa", marginBottom:10 }}>💡 姓だけでも登録できます</div>
+                      <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
+                      <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                        {["前衛","後衛"].map(v => (
+                          <button key={v} style={S.togBtn(playerPosition===v)} onClick={()=>setPlayerPosition(playerPosition===v ? null : v)}>{v}</button>
+                        ))}
+                      </div>
+                      <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
+                      <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                        {["右","左"].map(v => (
+                          <button key={v} style={S.togBtn(playerHand===v)} onClick={()=>setPlayerHand(playerHand===v ? null : v)}>{v}</button>
+                        ))}
+                      </div>
                       <button
-                        style={{ background:C.accent, color:C.white, border:"none", borderRadius:8, padding:"10px 14px", fontSize:13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", opacity:linkedPlayerSaving?0.6:1 }}
-                        disabled={linkedPlayerSaving || !linkedPlayerInput.trim()}
+                        style={{ background:C.accent, color:C.white, border:"none", borderRadius:8, padding:"10px 14px", fontSize:13, fontWeight:700, cursor:"pointer", opacity:linkedPlayerSaving?0.6:1, width:"100%" }}
+                        disabled={linkedPlayerSaving || !linkedPlayerLastName.trim()}
                         onClick={async () => {
-                          const pname = linkedPlayerInput.trim();
+                          const pname = [linkedPlayerLastName.trim(), linkedPlayerFirstName.trim()].filter(Boolean).join(" ");
                           if (!pname) return;
                           setLinkedPlayerSaving(true);
                           try {
                             const existing = roster.find(p => p.player_name === pname);
                             if (existing) { setLinkedPlayerId(existing.id); }
                             else {
-                              await savePlayer({ player_name: pname, is_own_team: true });
+                              await savePlayer({ player_name: pname, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
                               const refreshed = await getPlayerRoster();
                               setRoster(refreshed);
                               const saved = refreshed.find(p => p.player_name === pname);
                               if (saved) setLinkedPlayerId(saved.id);
                             }
-                            setLinkedPlayerInput("");
+                            setLinkedPlayerLastName("");
+                            setLinkedPlayerFirstName("");
+                            setPlayerPosition(null);
+                            setPlayerHand(null);
                             setLinkedPlayerMode("select");
                           } catch(e) {
                             setErrorMsg("選手登録に失敗しました: " + (e.message||""));
@@ -4300,17 +4449,11 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                       >{linkedPlayerSaving ? "登録中…" : "登録して選択"}</button>
                     </div>
                   )}
-                  {linkedPlayerId && currentPlayer && (
-                    <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:C.accentL,border:`1px solid ${C.accent}`,borderRadius:8,padding:"6px 10px",marginTop:8 }}>
-                      <span style={{ fontSize:13,fontWeight:700,color:C.navy }}>🎾 {currentPlayer.player_name}</span>
-                      <button style={{ background:"none",border:"none",color:C.textSec,fontSize:18,cursor:"pointer",padding:"0 4px",lineHeight:1 }} onClick={()=>setLinkedPlayerId(null)}>×</button>
-                    </div>
-                  )}
-                  <div style={{ fontSize:11,color:C.textSec,marginTop:6 }}>設定すると、ホーム画面でその選手の戦績だけをまとめて確認できます。保護者の方は「お子さん」、選手ご本人は「自分」を選んでください。</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>設定すると、ホーム画面でその選手の戦績をまとめて確認できます。</div>
                 </div>
-              );
-            })()}
-          </FormRow>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* 招待コード説明 */}
