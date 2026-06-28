@@ -5142,7 +5142,7 @@ function AuthScreen({ onAuthed }) {
 
             {/* 男女区分 */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>男子・女子・共通</label>
+              <label style={S.lbl}>チーム区分</label>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                 {GENDER_OPTIONS.map(g => (
                   <button key={g.key} style={S.togBtn(genderCategory===g.key)} onClick={()=>setGenderCategory(g.key)}>{g.label}</button>
@@ -5152,7 +5152,7 @@ function AuthScreen({ onAuthed }) {
 
             {/* 区分 */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>区分</label>
+              <label style={S.lbl}>世代区分</label>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
                 {CATEGORY_OPTIONS.map(c => (
                   <button key={c.key} style={S.togBtn(category===c.key)} onClick={()=>setCategory(c.key)}>{c.label}</button>
@@ -5182,7 +5182,7 @@ function AuthScreen({ onAuthed }) {
             {/* 登録区分 2ブロック */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-                <label style={S.lbl}>登録区分（任意）</label>
+                <label style={S.lbl}>選手登録</label>
                 {registerMode && (
                   <button style={{ fontSize:12, color:C.textSec, background:"none", border:"none", cursor:"pointer", textDecoration:"underline" }} onClick={()=>setRegisterMode(null)}>選択をリセット</button>
                 )}
