@@ -5027,25 +5027,38 @@ function AuthScreen({ onAuthed }) {
         });
         if (profileErr) throw profileErr;
 
-        // 選手として登録する場合：選手マスターに自動登録
+        // 選手として登録する場合：選手マスターに自動登録（同名チェックあり）
         if (registerMode === "player") {
-          await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
           const roster = await getPlayerRoster();
-          const saved = roster.find(p => p.player_name === fullName && p.is_own_team);
-          if (saved) {
-            await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
+          const existing = roster.find(p => p.player_name === fullName && p.is_own_team);
+          if (existing) {
+            // 同名が既存マスターにあれば既存IDにリンク
+            await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", data.user.id);
+          } else {
+            await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
+            const refreshed = await getPlayerRoster();
+            const saved = refreshed.find(p => p.player_name === fullName && p.is_own_team);
+            if (saved) {
+              await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
+            }
           }
         }
 
-        // 保護者でお子さん名が入力されている場合：選手を登録
+        // 保護者でお子さん名が入力されている場合：選手を登録（同名チェックあり）
         if (registerMode === "guardian") {
           const childName = [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ");
           if (childName) {
-            await savePlayer({ player_name: childName, position: childPosition, dominant_hand: childHand, is_own_team: true });
             const roster = await getPlayerRoster();
-            const saved = roster.find(p => p.player_name === childName);
-            if (saved) {
-              await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
+            const existing = roster.find(p => p.player_name === childName && p.is_own_team);
+            if (existing) {
+              await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", data.user.id);
+            } else {
+              await savePlayer({ player_name: childName, position: childPosition, dominant_hand: childHand, is_own_team: true });
+              const refreshed = await getPlayerRoster();
+              const saved = refreshed.find(p => p.player_name === childName && p.is_own_team);
+              if (saved) {
+                await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
+              }
             }
           }
         }
