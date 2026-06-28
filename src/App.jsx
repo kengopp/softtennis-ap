@@ -3312,13 +3312,23 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
   const allPlayers = match.players.map(p=>({ id:p.id, name:p.player_name, team:p.team }));
 
+  const [navigatingBack, setNavigatingBack] = useState(false);
+  async function handleBack() {
+    setNavigatingBack(true);
+    try {
+      await saveQueueRef.current;
+    } catch(e) {
+      // 保存失敗はpersist側でalert済み
+    }
+    onBack();
+  }
+
   return (
     <div style={S.page}>
       {/* スコアボードヘッダー */}
       <div style={{ background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, padding:"10px 14px" }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
-          <div style={{ textAlign:"center" }}>
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer", opacity:navigatingBack?0.5:1 }} disabled={navigatingBack} onClick={handleBack}>{navigatingBack?"…":"←"}</button>
             {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700 }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
             <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""}{match.court_number?` · ${match.court_number}`:""} · {match.game_format}Gマッチ</div>
           </div>
