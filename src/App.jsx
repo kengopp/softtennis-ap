@@ -5373,7 +5373,7 @@ export default function App() {
     return (
       <ProfileScreen
         forced
-        onBack={()=>setScreen("list")}
+        onBack={()=>{ getMyProfile().then(p=>{ setProfile(p); setScreen("list"); }); }}
         onSaved={()=>{ getMyProfile().then(setProfile); }}
       />
     );
