@@ -4957,7 +4957,8 @@ function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login"); // login | signup
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
-  const [name,        setName]        = useState("");
+  const [lastName,     setLastName]     = useState("");
+  const [firstName,    setFirstName]    = useState("");
   const [schoolId,    setSchoolId]    = useState(null);
   const [prefecture,  setPrefecture]  = useState("東京都");
   const [genderCategory, setGenderCategory] = useState(null);
@@ -4967,9 +4968,18 @@ function AuthScreen({ onAuthed }) {
   const [schools, setSchools] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
   const [inviteInput, setInviteInput] = useState("");
+  // 登録区分: null=未選択, "player"=選手, "guardian"=保護者
+  const [registerMode, setRegisterMode] = useState(null);
+  const [playerPosition, setPlayerPosition] = useState(null);
+  const [playerHand, setPlayerHand] = useState(null);
+  // 保護者：直接入力用
+  const [childLastName, setChildLastName] = useState("");
+  const [childFirstName, setChildFirstName] = useState("");
+  const [childMode, setChildMode] = useState("select"); // select | input
+  const [childPosition, setChildPosition] = useState(null);
+  const [childHand, setChildHand] = useState(null);
 
   useEffect(() => { getSchools().then(setSchools); }, []);
-
 
   async function handleLogin() {
     setErrorMsg("");
@@ -4989,15 +4999,15 @@ function AuthScreen({ onAuthed }) {
 
   async function handleSignup() {
     setErrorMsg("");
+    const fullName = [lastName.trim(), firstName.trim()].filter(Boolean).join(" ");
     if (!email.trim()) { setErrorMsg("メールアドレスを入力してください"); return; }
     if (password.length < 6) { setErrorMsg("パスワードは6文字以上で入力してください"); return; }
-    if (!name.trim()) { setErrorMsg("お名前を入力してください"); return; }
+    if (!fullName) { setErrorMsg("お名前（姓）を入力してください"); return; }
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
     if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
     if (!inviteInput.trim()) { setErrorMsg("招待コードを入力してください"); return; }
 
-    // 招待コードを照合
     const codeOk = await verifyInviteCode(schoolId, inviteInput);
     if (!codeOk) { setErrorMsg("招待コードが正しくありません。管理者に確認してください。"); return; }
 
@@ -5008,7 +5018,7 @@ function AuthScreen({ onAuthed }) {
       if (data.user) {
         const { error: profileErr } = await supabase.from("users").insert({
           id: data.user.id,
-          name: name.trim(),
+          name: fullName,
           school_id: schoolId,
           prefecture,
           gender_category: genderCategory,
@@ -5016,6 +5026,29 @@ function AuthScreen({ onAuthed }) {
           is_approved: true,
         });
         if (profileErr) throw profileErr;
+
+        // 選手として登録する場合：選手マスターに自動登録
+        if (registerMode === "player") {
+          await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
+          const roster = await getPlayerRoster();
+          const saved = roster.find(p => p.player_name === fullName && p.is_own_team);
+          if (saved) {
+            await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
+          }
+        }
+
+        // 保護者で直接入力の場合：お子さん選手を登録
+        if (registerMode === "guardian" && childMode === "input") {
+          const childName = [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ");
+          if (childName) {
+            await savePlayer({ player_name: childName, position: childPosition, dominant_hand: childHand, is_own_team: true });
+            const roster = await getPlayerRoster();
+            const saved = roster.find(p => p.player_name === childName);
+            if (saved) {
+              await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
+            }
+          }
+        }
       }
       onAuthed();
     } catch (e) {
@@ -5052,23 +5085,31 @@ function AuthScreen({ onAuthed }) {
 
         {mode==="signup" && (
           <>
+            {/* 姓・名 */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>お名前</label>
-              <input style={S.inp} placeholder="例：田中 蓮" value={name} onChange={e=>setName(e.target.value)}/>
+              <div style={{ display:"flex", gap:10 }}>
+                <input style={{ ...S.inp, flex:1 }} placeholder="姓（名字）" value={lastName} onChange={e=>setLastName(e.target.value)}/>
+                <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={firstName} onChange={e=>setFirstName(e.target.value)}/>
+              </div>
+              <div style={{ fontSize:11, color:"#aaa", marginTop:4 }}>💡 姓だけでも登録できます</div>
             </div>
+
+            {/* 都道府県（学校リストと連動） */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>都道府県</label>
-              <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>setPrefecture(e.target.value)}>
+              <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>{ setPrefecture(e.target.value); setSchoolPrefFilter(e.target.value); setSchoolId(null); }}>
                 {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
+
+            {/* 学校名（都道府県連動） */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
-                <label style={{ fontSize:11,color:C.textSec }}>学校名またはチーム名</label>
-                <PrefMiniFilter value={schoolPrefFilter} onChange={setSchoolPrefFilter} options={knownPrefsFrom(schools)} />
-              </div>
+              <label style={S.lbl}>学校名またはチーム名</label>
               <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} genderCategory={genderCategory} />
             </div>
+
+            {/* 男女区分 */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>男子・女子・共通</label>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -5077,6 +5118,8 @@ function AuthScreen({ onAuthed }) {
                 ))}
               </div>
             </div>
+
+            {/* 区分 */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>区分</label>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -5085,6 +5128,8 @@ function AuthScreen({ onAuthed }) {
                 ))}
               </div>
             </div>
+
+            {/* 招待コード */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>招待コード</label>
               <input
@@ -5095,6 +5140,87 @@ function AuthScreen({ onAuthed }) {
                 onChange={e=>setInviteInput(e.target.value.toUpperCase())}
               />
               <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>チームの管理者から招待コードを受け取り入力してください。</div>
+            </div>
+
+            {/* 登録区分 2ブロック */}
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                <label style={S.lbl}>登録区分（任意）</label>
+                {registerMode && (
+                  <button style={{ fontSize:12, color:C.textSec, background:"none", border:"none", cursor:"pointer", textDecoration:"underline" }} onClick={()=>setRegisterMode(null)}>選択をリセット</button>
+                )}
+              </div>
+
+              {/* ブロックA: 選手 */}
+              <div
+                onClick={()=>{ if(registerMode!=="player") setRegisterMode("player"); }}
+                style={{ border:`1.5px solid ${registerMode==="player" ? C.navy : C.border}`, borderRadius:10, marginBottom:8, overflow:"hidden", cursor:"pointer", opacity:registerMode==="guardian"?0.4:1, pointerEvents:registerMode==="guardian"?"none":"auto", transition:"opacity 0.2s" }}
+              >
+                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background:registerMode==="player"?"#eef1f8":"#fafafa" }}>
+                  <div style={{ width:20, height:20, borderRadius:"50%", border:`2px solid ${registerMode==="player"?C.navy:"#ccc"}`, background:registerMode==="player"?C.navy:"white", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {registerMode==="player" && <div style={{ width:8, height:8, borderRadius:"50%", background:"white" }} />}
+                  </div>
+                  <div>
+                    <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>🎾 選手として登録する</div>
+                    <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>自分自身が選手です（部員・選手本人）</div>
+                  </div>
+                </div>
+                {registerMode==="player" && (
+                  <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}` }} onClick={e=>e.stopPropagation()}>
+                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
+                    <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                      {["前衛","後衛"].map(v => <button key={v} style={S.togBtn(playerPosition===v)} onClick={()=>setPlayerPosition(playerPosition===v?null:v)}>{v}</button>)}
+                    </div>
+                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      {["右","左"].map(v => <button key={v} style={S.togBtn(playerHand===v)} onClick={()=>setPlayerHand(playerHand===v?null:v)}>{v}</button>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ブロックB: 保護者 */}
+              <div
+                onClick={()=>{ if(registerMode!=="guardian") setRegisterMode("guardian"); }}
+                style={{ border:`1.5px solid ${registerMode==="guardian"?C.navy:C.border}`, borderRadius:10, overflow:"hidden", cursor:"pointer", opacity:registerMode==="player"?0.4:1, pointerEvents:registerMode==="player"?"none":"auto", transition:"opacity 0.2s" }}
+              >
+                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background:registerMode==="guardian"?"#eef1f8":"#fafafa" }}>
+                  <div style={{ width:20, height:20, borderRadius:"50%", border:`2px solid ${registerMode==="guardian"?C.navy:"#ccc"}`, background:registerMode==="guardian"?C.navy:"white", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {registerMode==="guardian" && <div style={{ width:8, height:8, borderRadius:"50%", background:"white" }} />}
+                  </div>
+                  <div>
+                    <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>👤 保護者・関係者として登録する</div>
+                    <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>お子さんや関連選手の戦績を確認したい方</div>
+                  </div>
+                </div>
+                {registerMode==="guardian" && (
+                  <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}` }} onClick={e=>e.stopPropagation()}>
+                    <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+                      <button style={{ ...S.togBtn(childMode==="select"), fontSize:12, padding:"5px 12px" }} onClick={()=>setChildMode("select")}>一覧から選択</button>
+                      <button style={{ ...S.togBtn(childMode==="input"), fontSize:12, padding:"5px 12px" }} onClick={()=>setChildMode("input")}>直接入力して登録</button>
+                    </div>
+                    {childMode==="select" ? (
+                      <div style={{ fontSize:12, color:C.textSec }}>保存後にプロフィール画面から選手を選択できます。</div>
+                    ) : (
+                      <div>
+                        <div style={{ display:"flex", gap:10, marginBottom:4 }}>
+                          <input style={{ ...S.inp, flex:1 }} placeholder="姓（名字）" value={childLastName} onChange={e=>setChildLastName(e.target.value)} onClick={e=>e.stopPropagation()}/>
+                          <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={childFirstName} onChange={e=>setChildFirstName(e.target.value)} onClick={e=>e.stopPropagation()}/>
+                        </div>
+                        <div style={{ fontSize:11, color:"#aaa", marginBottom:10 }}>💡 姓だけでも登録できます</div>
+                        <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
+                        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                          {["前衛","後衛"].map(v => <button key={v} style={S.togBtn(childPosition===v)} onClick={e=>{ e.stopPropagation(); setChildPosition(childPosition===v?null:v); }}>{v}</button>)}
+                        </div>
+                        <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
+                        <div style={{ display:"flex", gap:8 }}>
+                          {["右","左"].map(v => <button key={v} style={S.togBtn(childHand===v)} onClick={e=>{ e.stopPropagation(); setChildHand(childHand===v?null:v); }}>{v}</button>)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
