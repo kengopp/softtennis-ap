@@ -4218,7 +4218,10 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           <span style={{ fontSize:18,fontWeight:800,color:C.white }}>プロフィール</span>
         </div>
         {forced && (
-          <button style={{ background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:13,cursor:"pointer" }} onClick={onBack}>スキップ →</button>
+          <div style={{ display:"flex", gap:8 }}>
+            <button style={{ background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:13,cursor:"pointer" }} onClick={onBack}>スキップ →</button>
+            <button style={{ background:"rgba(255,255,255,0.15)",border:"none",color:"white",fontSize:12,cursor:"pointer",borderRadius:6,padding:"4px 10px" }} onClick={async()=>{ await supabase.auth.signOut(); window.location.reload(); }}>ログアウト</button>
+          </div>
         )}
       </div>
       <div style={{ padding:14 }}>
