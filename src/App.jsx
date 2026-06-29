@@ -4491,6 +4491,12 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           {saving ? "保存中..." : "保存する"}
         </button>
 
+        {/* ログアウトボタン（常に表示） */}
+        <button
+          style={{ display:"block", width:"100%", marginTop:12, padding:"14px", background:"none", border:`1.5px solid ${C.border}`, borderRadius:12, fontSize:15, fontWeight:700, color:C.textSec, cursor:"pointer" }}
+          onClick={async()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); window.location.reload(); } }}
+        >ログアウト</button>
+
         {!forced && (
           <div style={{ marginTop:32, borderTop:`1px solid ${C.border}`, paddingTop:20, display:"flex", flexDirection:"column", gap:12 }}>
 
