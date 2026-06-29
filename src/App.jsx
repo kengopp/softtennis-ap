@@ -4318,7 +4318,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                       </div>
                       {!editingPlayerInfo && (
                         <button
-                          style={{ flexShrink:0, background:C.navy, border:"none", borderRadius:8, padding:"6px 12px", fontSize:12, fontWeight:700, color:"white", cursor:"pointer" }}
+                          style={{ flexShrink:0, background:C.navy, border:"none", borderRadius:8, padding:"6px 10px", fontSize:11, fontWeight:700, color:"white", cursor:"pointer", whiteSpace:"nowrap" }}
                           onClick={()=>setEditingPlayerInfo(true)}
                         >✏️ 修正</button>
                       )}
@@ -4575,7 +4575,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
             {isAdmin && isApproved && (
               <>
                 <button
-                  style={{ width:"100%",background:C.white,color:C.red,border:`1.5px solid ${C.red}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left" }}
+                  style={{ width:"100%",background:C.white,color:C.red,border:`1.5px solid ${C.red}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"center" }}
                   onClick={()=>setDissolveStep(1)}
                 >🚨 チームを解散する ›</button>
               </>
