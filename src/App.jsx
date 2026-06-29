@@ -960,6 +960,18 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // 共通絞り込み（個人戦・団体戦で共有）
   const [filterSearch, setFilterSearch] = useState("");       // フリーワード
   const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
+  // 日付フィルタ
+  const [dateFilterOpen, setDateFilterOpen] = useState(false);
+  const [dateFilterMode, setDateFilterMode] = useState("day"); // day | range | month
+  const [dateFilterDay, setDateFilterDay] = useState(null);
+  const [dateFilterRangeStart, setDateFilterRangeStart] = useState(null);
+  const [dateFilterRangeEnd, setDateFilterRangeEnd] = useState(null);
+  const [dateFilterMonth, setDateFilterMonth] = useState(null); // "YYYY-MM"
+  const [dateFilterApplied, setDateFilterApplied] = useState(null);
+  const [calViewYear, setCalViewYear] = useState(new Date().getFullYear());
+  const [calViewMonth, setCalViewMonth] = useState(new Date().getMonth()); // 0-11
+  const [rangeStep, setRangeStep] = useState("start"); // "start" | "end"
+  const [monthViewYear, setMonthViewYear] = useState(new Date().getFullYear());
 
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
 
@@ -1011,20 +1023,36 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // 個人戦の振り分け
   const isUpcomingMatch = (m) => {
     if (m.status === "active" || m.status === "scheduled") return true;
-    if (m.status === "finished" && m.match_date >= todayStr) return true;
     return false;
   };
   // 団体戦の振り分け（match_dateがnullでもactive/scheduledは予定・進行中）
   const isUpcomingTeamMatch = (tm) => {
     if (tm.status === "active" || tm.status === "scheduled") return true;
-    if (tm.status === "finished" && tm.match_date && tm.match_date >= todayStr) return true;
     return false;
+  };
+
+  // 日付フィルタ判定
+  const matchesDateFilter = (dateStr) => {
+    if (!dateFilterApplied || !dateStr) return true;
+    if (dateFilterApplied.mode === "day") return dateStr === dateFilterApplied.day;
+    if (dateFilterApplied.mode === "range") return dateStr >= dateFilterApplied.start && dateStr <= dateFilterApplied.end;
+    if (dateFilterApplied.mode === "month") return dateStr.slice(0,7) === dateFilterApplied.month;
+    return true;
+  };
+  // 日付フィルタのラベル表示
+  const dateBadgeLabel = () => {
+    if (!dateFilterApplied) return null;
+    if (dateFilterApplied.mode === "day") return `📅 ${fmtDate(dateFilterApplied.day)}`;
+    if (dateFilterApplied.mode === "range") return `📅 ${fmtDate(dateFilterApplied.start)} 〜 ${fmtDate(dateFilterApplied.end)}`;
+    if (dateFilterApplied.mode === "month") return `📅 ${dateFilterApplied.month.replace("-","年")}月`;
+    return null;
   };
 
   // 共通絞り込みロジック
   const filteredMatches = allMatches.filter(m => {
     if (filterStatus === "upcoming" && !isUpcomingMatch(m)) return false;
     if (filterStatus === "finished" && isUpcomingMatch(m)) return false;
+    if (!matchesDateFilter(m.match_date)) return false;
     if (childOnly && linkedPlayerName && !m.players.some(p => p.player_name === linkedPlayerName)) return false;
     if (filterSearch.trim()) {
       const q = filterSearch.trim().toLowerCase();
@@ -1039,6 +1067,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const filteredTeamMatches = allTeamMatches.filter(tm => {
     if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
     if (filterStatus === "finished" && isUpcomingTeamMatch(tm)) return false;
+    if (!matchesDateFilter(tm.match_date)) return false;
     if (tmMySchoolOnly && mySchoolId) {
       // my_school_idがnullの場合はプロフィールの学校の試合とみなす
       const tmSchoolId = tm.my_school_id || mySchoolId;
@@ -1099,6 +1128,133 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             <button style={{ ...S.chip(tmMySchoolOnly), fontSize:12, padding:"4px 12px" }} onClick={()=>setTmMySchoolOnly(v=>!v)}>🏫 {mySchoolName}のみ</button>
           )}
         </div>
+        {/* 日付フィルタボタン */}
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+          {dateFilterApplied ? (
+            <div style={{ display:"inline-flex", alignItems:"center", gap:4, background:C.accentL, border:"1.5px solid "+C.accent, color:"#00874f", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:700 }}>
+              <span onClick={()=>setDateFilterOpen(v=>!v)} style={{ cursor:"pointer" }}>{dateBadgeLabel()}</span>
+              <span onClick={()=>{ setDateFilterApplied(null); setDateFilterOpen(false); }} style={{ cursor:"pointer", marginLeft:2, fontSize:13 }}>✕</span>
+            </div>
+          ) : (
+            <button onClick={()=>setDateFilterOpen(v=>!v)} style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 12px", borderRadius:20, border:"1.5px solid "+C.border, background:C.white, fontSize:12, fontWeight:600, color:C.textSec, cursor:"pointer" }}>
+              📅 日付で絞り込む
+            </button>
+          )}
+        </div>
+        {/* 日付ピッカーパネル */}
+        {dateFilterOpen && (() => {
+          const daysInMonth = new Date(calViewYear, calViewMonth+1, 0).getDate();
+          const firstDow = new Date(calViewYear, calViewMonth, 1).getDay(); // 0=日
+          const todayIso = today();
+          const padMonth = (m) => String(m+1).padStart(2,"0");
+          const toIso = (d) => `${calViewYear}-${padMonth(calViewMonth)}-${String(d).padStart(2,"0")}`;
+          const handleDayClick = (d) => {
+            const iso = toIso(d);
+            if (dateFilterMode === "day") {
+              setDateFilterDay(iso);
+            } else if (dateFilterMode === "range") {
+              if (rangeStep === "start") {
+                setDateFilterRangeStart(iso); setDateFilterRangeEnd(null); setRangeStep("end");
+              } else {
+                if (iso < dateFilterRangeStart) { setDateFilterRangeStart(iso); setRangeStep("end"); }
+                else { setDateFilterRangeEnd(iso); setRangeStep("start"); }
+              }
+            }
+          };
+          const getDayClass = (iso) => {
+            if (dateFilterMode === "day") return iso === dateFilterDay ? "sel" : "";
+            if (dateFilterMode === "range") {
+              if (iso === dateFilterRangeStart) return "rs";
+              if (iso === dateFilterRangeEnd) return "re";
+              if (dateFilterRangeStart && dateFilterRangeEnd && iso > dateFilterRangeStart && iso < dateFilterRangeEnd) return "ir";
+            }
+            return "";
+          };
+          const applyFilter = () => {
+            if (dateFilterMode === "day" && dateFilterDay) {
+              setDateFilterApplied({ mode:"day", day:dateFilterDay });
+              setDateFilterOpen(false);
+            } else if (dateFilterMode === "range" && dateFilterRangeStart && dateFilterRangeEnd) {
+              setDateFilterApplied({ mode:"range", start:dateFilterRangeStart, end:dateFilterRangeEnd });
+              setDateFilterOpen(false);
+            } else if (dateFilterMode === "month" && dateFilterMonth) {
+              setDateFilterApplied({ mode:"month", month:dateFilterMonth });
+              setDateFilterOpen(false);
+            }
+          };
+          const canApply = (dateFilterMode==="day"&&dateFilterDay)||(dateFilterMode==="range"&&dateFilterRangeStart&&dateFilterRangeEnd)||(dateFilterMode==="month"&&dateFilterMonth);
+          const DOW = ["日","月","火","水","木","金","土"];
+          return (
+            <div style={{ background:C.white, borderRadius:14, border:"1.5px solid "+C.border, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.07)", marginBottom:8 }}>
+              {/* タブ */}
+              <div style={{ display:"flex", borderBottom:"1.5px solid "+C.border }}>
+                {[["day","1日指定"],["range","期間指定"],["month","月指定"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>{ setDateFilterMode(v); if(v==="range"){setDateFilterRangeStart(null);setDateFilterRangeEnd(null);setRangeStep("start");} }} style={{ flex:1, padding:"10px 4px", textAlign:"center", fontSize:13, fontWeight:700, color:dateFilterMode===v?C.accent:C.textSec, border:"none", background:"none", cursor:"pointer", borderBottom:dateFilterMode===v?"2px solid "+C.accent:"2px solid transparent" }}>{l}</button>
+                ))}
+              </div>
+              <div style={{ padding:"12px 14px 0" }}>
+                {/* 1日指定 / 期間指定：カレンダー */}
+                {(dateFilterMode==="day"||dateFilterMode==="range") && (<>
+                  {dateFilterMode==="range" && (
+                    <p style={{ fontSize:11, color:C.textSec, textAlign:"center", marginBottom:8 }}>
+                      {rangeStep==="start" ? <>開始日 → 終了日の順にタップ（<b style={{color:C.accent}}>開始日</b>を選択中）</> : <>開始日 → 終了日の順にタップ（<b style={{color:C.accent}}>終了日</b>を選択中）</>}
+                    </p>
+                  )}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                    <button onClick={()=>{ if(calViewMonth===0){setCalViewMonth(11);setCalViewYear(y=>y-1);}else setCalViewMonth(m=>m-1); }} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:C.navy, padding:"4px 8px" }}>‹</button>
+                    <span style={{ fontSize:15, fontWeight:800, color:C.navy }}>{calViewYear}年{calViewMonth+1}月</span>
+                    <button onClick={()=>{ if(calViewMonth===11){setCalViewMonth(0);setCalViewYear(y=>y+1);}else setCalViewMonth(m=>m+1); }} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:C.navy, padding:"4px 8px" }}>›</button>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:10 }}>
+                    {DOW.map((d,i)=>(
+                      <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:i===0?"#e53935":i===6?"#1565c0":C.textSec, padding:"3px 0" }}>{d}</div>
+                    ))}
+                    {Array.from({length:firstDow}).map((_,i)=><div key={"e"+i}/>)}
+                    {Array.from({length:daysInMonth}).map((_,i)=>{
+                      const d=i+1; const iso=toIso(d); const dc=getDayClass(iso);
+                      const dow=(firstDow+i)%7;
+                      const isToday=iso===todayIso;
+                      const isSel=dc==="sel"||dc==="rs"||dc==="re";
+                      const isInRange=dc==="ir";
+                      return (
+                        <button key={d} onClick={()=>handleDayClick(d)} style={{
+                          textAlign:"center", fontSize:13, padding:"7px 2px", borderRadius: dc==="rs"?"8px 0 0 8px":dc==="re"?"0 8px 8px 0":"8px",
+                          cursor:"pointer", fontWeight:600, border:"none",
+                          background:isSel?C.accent:isInRange?C.accentL:"transparent",
+                          color:isSel?"#fff":isInRange?"#00874f":dow===0?"#e53935":dow===6?"#1565c0":isToday?C.accent:C.text,
+                          outline:isToday&&!isSel?"1.5px solid "+C.accent:"none",
+                        }}>{d}</button>
+                      );
+                    })}
+                  </div>
+                </>)}
+                {/* 月指定 */}
+                {dateFilterMode==="month" && (<>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:16, marginBottom:10 }}>
+                    <button onClick={()=>setMonthViewYear(y=>y-1)} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:C.navy }}>‹</button>
+                    <span style={{ fontSize:15, fontWeight:800, color:C.navy }}>{monthViewYear}年</span>
+                    <button onClick={()=>setMonthViewYear(y=>y+1)} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:C.navy }}>›</button>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:10 }}>
+                    {Array.from({length:12}).map((_,i)=>{
+                      const mStr=`${monthViewYear}-${String(i+1).padStart(2,"0")}`;
+                      const isSel=dateFilterMonth===mStr;
+                      const hasData=[...allMatches,...allTeamMatches].some(m=>(m.match_date||"").slice(0,7)===mStr);
+                      return (
+                        <button key={i} onClick={()=>setDateFilterMonth(mStr)} style={{ padding:"10px 4px", textAlign:"center", borderRadius:8, cursor:"pointer", fontSize:14, fontWeight:700, border: isSel?"1.5px solid "+C.accent:hasData?"1.5px solid "+C.accent:"1.5px solid "+C.border, background:isSel?C.accent:"#fff", color:isSel?"#fff":hasData?"#00874f":C.text }}>{i+1}月</button>
+                      );
+                    })}
+                  </div>
+                  <p style={{ fontSize:11, color:C.textSec, textAlign:"center", marginBottom:10 }}>枠線あり＝試合データあり</p>
+                </>)}
+              </div>
+              <div style={{ padding:"0 14px 14px", display:"flex", gap:8 }}>
+                <button onClick={()=>setDateFilterOpen(false)} style={{ padding:"10px 14px", background:"#f0f2f6", color:C.textSec, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }}>閉じる</button>
+                <button onClick={applyFilter} disabled={!canApply} style={{ flex:1, padding:"10px", background:canApply?C.accent:"#ccc", color:"#fff", border:"none", borderRadius:10, fontSize:14, fontWeight:800, cursor:canApply?"pointer":"default" }}>この条件で絞り込む</button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 個人戦タブ */}
