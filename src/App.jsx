@@ -4256,7 +4256,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
               {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </FormRow>
-          <FormRow label="学校名またはチーム名" labelRight={<PrefMiniFilter value={schoolPrefFilter} onChange={setSchoolPrefFilter} options={knownPrefsFrom(schools)} />}>
+          <FormRow label="学校名またはチーム名">
             <SchoolIdSelect value={schoolId} onChange={v=>{ setSchoolId(v); setIsApproved(false); setInviteInput(""); setInviteError(""); }} schools={schools} prefFilter={schoolPrefFilter} genderCategory={genderCategory} />
           </FormRow>
           <FormRow label="男子・女子・共通">
