@@ -4306,17 +4306,17 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                 const linkedPlayer = roster.find(p => p.id === linkedPlayerId);
                 return linkedPlayer ? (
                   <div>
-                    <div style={{ background:"#eef1f8", border:`1.5px solid ${C.navy}`, borderRadius:10, padding:14 }}>
-                      <div style={{ fontSize:11, fontWeight:700, color:C.navy, marginBottom:6 }}>
+                    <div style={{ background:"#eef1f8", border:`1.5px solid ${C.navy}`, borderRadius:10, padding:"10px 14px" }}>
+                      <div style={{ fontSize:11, fontWeight:700, color:C.navy, marginBottom:4 }}>
                         {linkedPlayer.linked_user_id ? "✅ 選手として登録済み" : "✅ 関連選手として登録済み"}
                       </div>
-                      <div style={{ fontSize:18, fontWeight:800, color:C.navy, marginBottom:4 }}>{linkedPlayer.player_name}</div>
-                      <div style={{ fontSize:12, color:C.textSec, marginBottom:10 }}>
-                        {[linkedPlayer.position, linkedPlayer.dominant_hand ? linkedPlayer.dominant_hand+"利き" : null].filter(Boolean).join("・") || "ポジション・利き手未設定"}
+                      <div style={{ fontSize:16, fontWeight:800, color:C.navy, marginBottom:2 }}>{linkedPlayer.player_name}</div>
+                      <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>
+                        {[linkedPlayer.position, linkedPlayer.dominant_hand==="right"?"右利き":linkedPlayer.dominant_hand==="left"?"左利き":null].filter(Boolean).join("・") || "ポジション・利き手未設定"}
                       </div>
                       {!editingPlayerInfo ? (
                         <button
-                          style={{ display:"inline-flex", alignItems:"center", gap:6, background:C.navy, border:"none", borderRadius:8, padding:"8px 16px", fontSize:13, fontWeight:700, color:"white", cursor:"pointer" }}
+                          style={{ display:"inline-flex", alignItems:"center", gap:6, background:C.navy, border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, fontWeight:700, color:"white", cursor:"pointer" }}
                           onClick={()=>setEditingPlayerInfo(true)}
                         >✏️ 登録内容を修正する</button>
                       ) : null}
