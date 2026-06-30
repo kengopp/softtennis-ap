@@ -507,11 +507,19 @@ async function autoRegisterPlayerToRoster(playerName, teamName, isOwnTeam) {
 async function savePlayer(player) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
-  const profile = await getMyProfile();
+  // school_id / gender_category は呼び出し元から明示的に渡された値を優先する
+  // （新規登録フローでは、この時点でまだ自分のプロフィールがDBに保存されていないことがあるため）
+  let schoolId = player.school_id;
+  let genderCategory = player.gender_category;
+  if (schoolId === undefined || genderCategory === undefined) {
+    const profile = await getMyProfile();
+    if (schoolId === undefined) schoolId = profile?.school_id || null;
+    if (genderCategory === undefined) genderCategory = profile?.gender_category || null;
+  }
   const row = {
     id: player.id || uid(),
-    school_id: profile?.school_id || null,
-    gender_category: profile?.gender_category || null,
+    school_id: schoolId || null,
+    gender_category: genderCategory || null,
     player_name: player.player_name,
     position: player.position || null,
     dominant_hand: player.dominant_hand || null,
@@ -4250,10 +4258,10 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           newLinkedPlayerId = existing.id;
           // ポジション・利き手を更新
           if (playerPosition || playerHand) {
-            await savePlayer({ ...existing, player_name: fullName, position: playerPosition || existing.position, dominant_hand: playerHand || existing.dominant_hand, is_own_team: true });
+            await savePlayer({ ...existing, player_name: fullName, position: playerPosition || existing.position, dominant_hand: playerHand || existing.dominant_hand, is_own_team: true, school_id: schoolId, gender_category: genderCategory });
           }
         } else {
-          const saved = await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
+          const saved = await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true, school_id: schoolId, gender_category: genderCategory });
           const refreshed = await getPlayerRoster();
           setRoster(refreshed);
           const found = refreshed.find(p => p.player_name === fullName && p.is_own_team);
