@@ -1068,6 +1068,14 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
     if (filterStatus === "finished" && isUpcomingTeamMatch(tm)) return false;
     if (!matchesDateFilter(tm.match_date)) return false;
+    if (childOnly && linkedPlayerName) {
+      // 団体戦はgames内の選手名で絞り込む
+      const games = tm.games || [];
+      const hasPlayer = games.some(g =>
+        [g.a_player1, g.a_player2, g.b_player1, g.b_player2].some(n => n === linkedPlayerName)
+      );
+      if (!hasPlayer) return false;
+    }
     if (tmMySchoolOnly && mySchoolId) {
       // my_school_idがnullの場合はプロフィールの学校の試合とみなす
       const tmSchoolId = tm.my_school_id || mySchoolId;
@@ -1095,7 +1103,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          {linkedPlayerName && timeTab==="individual" && (
+          {linkedPlayerName && (
             <button onClick={()=>setChildOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(childOnly?"#fff":"rgba(255,255,255,0.4)"), background:childOnly?"#fff":"transparent", color:childOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>🎾 {linkedPlayerName}</button>
           )}
           {mySchoolName && timeTab==="team" && (
@@ -1120,7 +1128,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           <input
             value={filterSearch}
             onChange={e=>setFilterSearch(e.target.value)}
-            placeholder={timeTab==="team" ? "相手校名・大会名で検索" : "選手名・相手校・大会名で検索"}
+            placeholder={timeTab==="team" ? "学校名・大会名で検索" : "選手名・相手校・大会名で検索"}
             style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
           />
           {filterSearch && <button onClick={()=>setFilterSearch("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }}>✕</button>}
