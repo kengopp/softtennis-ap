@@ -1094,7 +1094,15 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     <div style={S.page}>
       <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
-        <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }} onClick={reload}>🔄 更新</button>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          {linkedPlayerName && timeTab==="individual" && (
+            <button onClick={()=>setChildOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(childOnly?"#fff":"rgba(255,255,255,0.4)"), background:childOnly?"#fff":"transparent", color:childOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>🎾 {linkedPlayerName}</button>
+          )}
+          {mySchoolName && timeTab==="team" && (
+            <button onClick={()=>setTmMySchoolOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(tmMySchoolOnly?"#fff":"rgba(255,255,255,0.4)"), background:tmMySchoolOnly?"#fff":"transparent", color:tmMySchoolOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>🏫 {mySchoolName}</button>
+          )}
+          <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }} onClick={reload}>🔄 更新</button>
+        </div>
       </div>
       {toast && <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast}</div>}
 
@@ -1121,24 +1129,14 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           {[["all","すべて"],["upcoming","予定・進行中"],["finished","完了"]].map(([v,l])=>(
             <button key={v} onClick={()=>setFilterStatus(v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+(filterStatus===v?C.navy:C.border), background:filterStatus===v?C.navy:"transparent", color:filterStatus===v?C.white:C.textSec, fontSize:12, fontWeight:700, cursor:"pointer" }}>{l}</button>
           ))}
-          {linkedPlayerName && timeTab==="individual" && (
-            <button style={{ ...S.chip(childOnly), fontSize:12, padding:"4px 12px" }} onClick={()=>setChildOnly(v=>!v)}>🎾 {linkedPlayerName}さんのみ</button>
-          )}
-          {mySchoolName && timeTab==="team" && (
-            <button style={{ ...S.chip(tmMySchoolOnly), fontSize:12, padding:"4px 12px" }} onClick={()=>setTmMySchoolOnly(v=>!v)}>🏫 {mySchoolName}のみ</button>
-          )}
-        </div>
-        {/* 日付フィルタボタン */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+          {/* 日付フィルタボタン（ステータスボタンと同行・同スタイル） */}
           {dateFilterApplied ? (
-            <div style={{ display:"inline-flex", alignItems:"center", gap:4, background:C.accentL, border:"1.5px solid "+C.accent, color:"#00874f", borderRadius:20, padding:"4px 10px", fontSize:12, fontWeight:700 }}>
+            <div style={{ display:"inline-flex", alignItems:"center", gap:2, padding:"4px 10px", borderRadius:20, border:"1px solid "+C.navy, background:C.navy, fontSize:12, fontWeight:700, color:C.white }}>
               <span onClick={()=>setDateFilterOpen(v=>!v)} style={{ cursor:"pointer" }}>{dateBadgeLabel()}</span>
-              <span onClick={()=>{ setDateFilterApplied(null); setDateFilterOpen(false); }} style={{ cursor:"pointer", marginLeft:2, fontSize:13 }}>✕</span>
+              <span onClick={()=>{ setDateFilterApplied(null); setDateFilterOpen(false); }} style={{ cursor:"pointer", marginLeft:4, fontSize:13, opacity:0.8 }}>✕</span>
             </div>
           ) : (
-            <button onClick={()=>setDateFilterOpen(v=>!v)} style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 12px", borderRadius:20, border:"1.5px solid "+C.border, background:C.white, fontSize:12, fontWeight:600, color:C.textSec, cursor:"pointer" }}>
-              📅 日付で絞り込む
-            </button>
+            <button onClick={()=>setDateFilterOpen(v=>!v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+C.border, background:"transparent", fontSize:12, fontWeight:700, color:C.textSec, cursor:"pointer" }}>📅 日付</button>
           )}
         </div>
         {/* 日付ピッカーパネル */}
