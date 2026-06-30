@@ -1042,9 +1042,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // 日付フィルタのラベル表示
   const dateBadgeLabel = () => {
     if (!dateFilterApplied) return null;
-    if (dateFilterApplied.mode === "day") return `📅 ${fmtDate(dateFilterApplied.day)}`;
-    if (dateFilterApplied.mode === "range") return `📅 ${fmtDate(dateFilterApplied.start)} 〜 ${fmtDate(dateFilterApplied.end)}`;
-    if (dateFilterApplied.mode === "month") return `📅 ${dateFilterApplied.month.replace("-","年")}月`;
+    if (dateFilterApplied.mode === "day") return fmtDate(dateFilterApplied.day);
+    if (dateFilterApplied.mode === "range") return `${fmtDate(dateFilterApplied.start)} 〜 ${fmtDate(dateFilterApplied.end)}`;
+    if (dateFilterApplied.mode === "month") return `${dateFilterApplied.month.replace("-","年")}月`;
     return null;
   };
 
@@ -1104,10 +1104,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
           {linkedPlayerName && (
-            <button onClick={()=>setChildOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(childOnly?"#fff":"rgba(255,255,255,0.4)"), background:childOnly?"#fff":"transparent", color:childOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>🎾 {linkedPlayerName}</button>
+            <button onClick={()=>setChildOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(childOnly?"#fff":"rgba(255,255,255,0.4)"), background:childOnly?"#fff":"transparent", color:childOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>{linkedPlayerName}</button>
           )}
           {mySchoolName && timeTab==="team" && (
-            <button onClick={()=>setTmMySchoolOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(tmMySchoolOnly?"#fff":"rgba(255,255,255,0.4)"), background:tmMySchoolOnly?"#fff":"transparent", color:tmMySchoolOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>🏫 {mySchoolName}</button>
+            <button onClick={()=>setTmMySchoolOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(tmMySchoolOnly?"#fff":"rgba(255,255,255,0.4)"), background:tmMySchoolOnly?"#fff":"transparent", color:tmMySchoolOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>{mySchoolName}</button>
           )}
           <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }} onClick={reload}>🔄 更新</button>
         </div>
@@ -1144,7 +1144,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               <span onClick={()=>{ setDateFilterApplied(null); setDateFilterOpen(false); }} style={{ cursor:"pointer", marginLeft:4, fontSize:13, opacity:0.8 }}>✕</span>
             </div>
           ) : (
-            <button onClick={()=>setDateFilterOpen(v=>!v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+C.border, background:"transparent", fontSize:12, fontWeight:700, color:C.textSec, cursor:"pointer" }}>📅 日付</button>
+            <button onClick={()=>setDateFilterOpen(v=>!v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+C.border, background:"transparent", fontSize:12, fontWeight:700, color:C.textSec, cursor:"pointer" }}>日付</button>
           )}
         </div>
         {/* 日付ピッカーパネル */}
