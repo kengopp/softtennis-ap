@@ -736,19 +736,39 @@ function finalServer(first, played) {
 // ============================================================
 // 統計計算（play_type / result_type ベースに対応）
 // ============================================================
+// そのチームの「選手1」（order_num最小＝サーブ/レシーブ担当）を返す
+function getFirstServerPlayer(match, team) {
+  const teamPlayers = match.players.filter(p => p.team === team).sort((a,b) => a.order_num - b.order_num);
+  return teamPlayers[0]?.player_name ?? null;
+}
+
 function calcPlayerStats(match) {
   // 選手名 -> 所属チーム('A'/'B') の対応表（match_playersが正、scoring_teamには依存しない）
   const teamOf = {};
   for (const p of match.players) teamOf[p.player_name] = p.team;
 
   const result = {};
+  const ensure = (playerTeam, playerName) => {
+    const key = playerTeam + "__" + playerName;
+    if (!result[key]) {
+      result[key] = {
+        team: playerTeam, player_name: playerName, total: 0, winners: 0, errors: 0, plays: {}, results: {},
+        // ★1stサーブ確率・レシーブミス率用（選手1＝サーブ/レシーブ担当のみ加算される）
+        serveTotal: 0, serveFault: 0, receiveTotal: 0, receiveMiss: 0,
+      };
+    }
+    return result[key];
+  };
+
+  // 各チームの「選手1」（order_num最小＝サーブ/レシーブ担当）
+  const firstServerA = getFirstServerPlayer(match, "A");
+  const firstServerB = getFirstServerPlayer(match, "B");
+
   for (const g of match.games) {
     for (const pt of g.points) {
       if (!pt.player_name) continue;
       const playerTeam = teamOf[pt.player_name] ?? pt.scoring_team;
-      const key = playerTeam + "__" + pt.player_name;
-      if (!result[key]) result[key] = { team: playerTeam, player_name: pt.player_name, total: 0, winners: 0, errors: 0, plays: {}, results: {} };
-      const r = result[key];
+      const r = ensure(playerTeam, pt.player_name);
       r.total++;
       if (pt.is_winner) r.winners++; else r.errors++;
       if (pt.play_type)   r.plays[pt.play_type]     = (r.plays[pt.play_type]   ?? 0) + 1;
@@ -757,9 +777,40 @@ function calcPlayerStats(match) {
     for (const f of (g.faults ?? [])) {
       if (!f.player_name) continue;
       const playerTeam = teamOf[f.player_name] ?? f.server_team;
-      const key = playerTeam + "__" + f.player_name;
-      if (!result[key]) result[key] = { team: playerTeam, player_name: f.player_name, total: 0, winners: 0, errors: 0, plays: {}, results: {} };
-      result[key].plays["fault"] = (result[key].plays["fault"] ?? 0) + 1;
+      const r = ensure(playerTeam, f.player_name);
+      r.plays["fault"] = (r.plays["fault"] ?? 0) + 1;
+    }
+
+    // ★1stサーブ確率・レシーブミス率の集計（ゲーム単位。選手1のみに加算）
+    const total = g.points.length;
+    let serveCountA = 0, serveCountB = 0;
+    for (let idx = 0; idx < total; idx++) {
+      const serverTeam = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
+      if (serverTeam === "A") serveCountA++; else serveCountB++;
+    }
+    const faultCountA = (g.faults ?? []).filter(f => f.server_team === "A").length;
+    const faultCountB = (g.faults ?? []).filter(f => f.server_team === "B").length;
+
+    if (firstServerA && serveCountA > 0) {
+      const r = ensure("A", firstServerA);
+      r.serveTotal += serveCountA;
+      r.serveFault += faultCountA;
+    }
+    if (firstServerB && serveCountB > 0) {
+      const r = ensure("B", firstServerB);
+      r.serveTotal += serveCountB;
+      r.serveFault += faultCountB;
+    }
+    // レシーブミス率：相手がサーブしたポイント数が分母、選手1の「レシーブ×エラー」タグ数が分子
+    if (firstServerA && serveCountB > 0) {
+      const r = ensure("A", firstServerA);
+      r.receiveTotal += serveCountB;
+      r.receiveMiss += g.points.filter(pt => pt.play_type==="receive" && pt.result_type==="error" && pt.player_name===firstServerA).length;
+    }
+    if (firstServerB && serveCountA > 0) {
+      const r = ensure("B", firstServerB);
+      r.receiveTotal += serveCountA;
+      r.receiveMiss += g.points.filter(pt => pt.play_type==="receive" && pt.result_type==="error" && pt.player_name===firstServerB).length;
     }
   }
   return Object.values(result);
@@ -4057,8 +4108,28 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   </div>
                 ))}
               </div>
+              {/* ★サーブ・レシーブ（選手1＝サーブ/レシーブ担当のみ表示） */}
+              {(p.serveTotal>0||p.receiveTotal>0)&&(
+                <>
+                  <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>🎾 サーブ・レシーブ</div>
+                  {p.serveTotal>0&&(()=>{ const inCount=p.serveTotal-p.serveFault; const rate=Math.round(inCount/p.serveTotal*100); return (
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                      <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>1stサーブ確率</span>
+                      <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:C.accent,borderRadius:3 }}/></div>
+                      <span style={{ fontSize:11,fontWeight:700,color:C.navy,width:62,textAlign:"right" }}>{inCount}/{p.serveTotal}・{rate}%</span>
+                    </div>
+                  );})()}
+                  {p.receiveTotal>0&&(()=>{ const rate=Math.round(p.receiveMiss/p.receiveTotal*100); return (
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                      <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス率</span>
+                      <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:C.red,borderRadius:3 }}/></div>
+                      <span style={{ fontSize:11,fontWeight:700,color:C.navy,width:62,textAlign:"right" }}>{p.receiveMiss}/{p.receiveTotal}・{rate}%</span>
+                    </div>
+                  );})()}
+                </>
+              )}
               {/* プレイ内容内訳 */}
-              {topPlays.length>0&&<div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容の内訳</div>}
+              {topPlays.length>0&&<div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6,marginTop:8 }}>プレイ内容の内訳</div>}
               {topPlays.map(([k,n])=>{
                 const isWin=p.results["winner"]>0||p.results["ace"]>0;
                 return (
