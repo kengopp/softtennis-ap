@@ -736,12 +736,6 @@ function finalServer(first, played) {
 // ============================================================
 // 統計計算（play_type / result_type ベースに対応）
 // ============================================================
-// そのチームの「選手1」（order_num最小＝サーブ/レシーブ担当）を返す
-function getFirstServerPlayer(match, team) {
-  const teamPlayers = match.players.filter(p => p.team === team).sort((a,b) => a.order_num - b.order_num);
-  return teamPlayers[0]?.player_name ?? null;
-}
-
 function calcPlayerStats(match) {
   // 選手名 -> 所属チーム('A'/'B') の対応表（match_playersが正、scoring_teamには依存しない）
   const teamOf = {};
@@ -753,16 +747,22 @@ function calcPlayerStats(match) {
     if (!result[key]) {
       result[key] = {
         team: playerTeam, player_name: playerName, total: 0, winners: 0, errors: 0, plays: {}, results: {},
-        // ★1stサーブ確率・レシーブミス率用（選手1＝サーブ/レシーブ担当のみ加算される）
+        // ★1stサーブ確率・レシーブミス率用
         serveTotal: 0, serveFault: 0, receiveTotal: 0, receiveMiss: 0,
       };
     }
     return result[key];
   };
 
-  // 各チームの「選手1」（order_num最小＝サーブ/レシーブ担当）
-  const firstServerA = getFirstServerPlayer(match, "A");
-  const firstServerB = getFirstServerPlayer(match, "B");
+  // チームごとの選手をorder_num順に並べる（[0]=選手1, [1]=選手2）
+  const teamPlayers = {
+    A: match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
+    B: match.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
+  };
+  // ソフトテニスのダブルス規則：1ゲーム内、サーブ側ペアは2ポイントずつ交代でサーブする
+  // （選手1が1-2点目、選手2が3-4点目...）。レシーブ側も同じ交代タイミングに対応する選手が受ける。
+  // シングルスの場合はteamPlayersが1人なので常にその選手に集計される。
+  const individualAt = (players, turn) => players.length<=1 ? (players[0]??null) : (Math.floor(turn/2)%2===0 ? players[0] : players[1]);
 
   for (const g of match.games) {
     for (const pt of g.points) {
@@ -781,36 +781,34 @@ function calcPlayerStats(match) {
       r.plays["fault"] = (r.plays["fault"] ?? 0) + 1;
     }
 
-    // ★1stサーブ確率・レシーブミス率の集計（ゲーム単位。選手1のみに加算）
-    const total = g.points.length;
-    let serveCountA = 0, serveCountB = 0;
-    for (let idx = 0; idx < total; idx++) {
-      const serverTeam = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
-      if (serverTeam === "A") serveCountA++; else serveCountB++;
-    }
-    const faultCountA = (g.faults ?? []).filter(f => f.server_team === "A").length;
-    const faultCountB = (g.faults ?? []).filter(f => f.server_team === "B").length;
+    // ★1stサーブ確率・レシーブミス率（2ポイントごとの選手交代を反映して個人に按分）
+    let beforeA = 0, beforeB = 0;       // このポイント開始時点のスコア（フォルト記録との突き合わせ用）
+    let serveTurnA = 0, serveTurnB = 0; // 各チームがこのゲームで通算何ポイント目のサーブか
+    for (let idx=0; idx<g.points.length; idx++) {
+      const pt = g.points[idx];
+      const serverTeam  = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
+      const receiveTeam = serverTeam==="A" ? "B" : "A";
+      const serveTurn   = serverTeam==="A" ? serveTurnA : serveTurnB;
 
-    if (firstServerA && serveCountA > 0) {
-      const r = ensure("A", firstServerA);
-      r.serveTotal += serveCountA;
-      r.serveFault += faultCountA;
-    }
-    if (firstServerB && serveCountB > 0) {
-      const r = ensure("B", firstServerB);
-      r.serveTotal += serveCountB;
-      r.serveFault += faultCountB;
-    }
-    // レシーブミス率：相手がサーブしたポイント数が分母、選手1の「レシーブ×エラー」タグ数が分子
-    if (firstServerA && serveCountB > 0) {
-      const r = ensure("A", firstServerA);
-      r.receiveTotal += serveCountB;
-      r.receiveMiss += g.points.filter(pt => pt.play_type==="receive" && pt.result_type==="error" && pt.player_name===firstServerA).length;
-    }
-    if (firstServerB && serveCountA > 0) {
-      const r = ensure("B", firstServerB);
-      r.receiveTotal += serveCountA;
-      r.receiveMiss += g.points.filter(pt => pt.play_type==="receive" && pt.result_type==="error" && pt.player_name===firstServerB).length;
+      const serverPlayer   = individualAt(teamPlayers[serverTeam],  serveTurn);
+      const receiverPlayer = individualAt(teamPlayers[receiveTeam], serveTurn);
+
+      // このポイントの直前に1stフォルトが記録されていたか（スコア一致で突き合わせ）
+      const hadFault = (g.faults ?? []).some(f => f.server_team===serverTeam && f.score_a_at===beforeA && f.score_b_at===beforeB);
+
+      if (serverPlayer) {
+        const r = ensure(serverTeam, serverPlayer);
+        r.serveTotal++;
+        if (hadFault) r.serveFault++;
+      }
+      if (receiverPlayer) {
+        const r = ensure(receiveTeam, receiverPlayer);
+        r.receiveTotal++;
+        if (pt.play_type==="receive" && pt.result_type==="error" && pt.player_name===receiverPlayer) r.receiveMiss++;
+      }
+
+      if (serverTeam==="A") serveTurnA++; else serveTurnB++;
+      beforeA = pt.score_a_after; beforeB = pt.score_b_after;
     }
   }
   return Object.values(result);
@@ -4108,7 +4106,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   </div>
                 ))}
               </div>
-              {/* ★サーブ・レシーブ（選手1＝サーブ/レシーブ担当のみ表示） */}
+              {/* ★サーブ・レシーブ（2ポイントごとの交代を反映。関与があった選手のみ表示） */}
               {(p.serveTotal>0||p.receiveTotal>0)&&(
                 <>
                   <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>🎾 サーブ・レシーブ</div>
