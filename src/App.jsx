@@ -3401,7 +3401,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const currentGameIsFinal = currentGame ? currentGame.is_final : isFinalGame(match.game_format,match.match_score_a,match.match_score_b);
   const nonFaultPts = currentGame?.points??[];
   const curServer = currentGame ? (currentGame.is_final ? finalServer(currentGame.server_team,nonFaultPts.length) : currentGame.server_team) : null;
-  const serverLabel = curServer==="A" ? match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") : match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+  // ★サーブ表示：2ポイントごとの交代ルールを反映し、今まさにサーブする「個人」を出す
+  const curServerPlayers = curServer ? match.players.filter(p=>p.team===curServer).sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name) : [];
+  const curServeTurn = currentGame ? (currentGameIsFinal
+    ? nonFaultPts.filter((_,i)=>finalServer(currentGame.server_team,i)===curServer).length
+    : nonFaultPts.length) : 0;
+  const curServerIndividual = curServerPlayers.length<=1 ? (curServerPlayers[0]??null) : (Math.floor(curServeTurn/2)%2===0 ? curServerPlayers[0] : curServerPlayers[1]);
+  const serverLabel = curServerIndividual ?? (curServer==="A" ? match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") : match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/"));
   const teamALabel = match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
   const teamBLabel = match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
   // 若番=自チーム左、遅番=自チーム右
@@ -5558,6 +5564,14 @@ export default function App() {
   const [listMatchMode, setListMatchMode] = useState("individual");
   const [serveSelectForTeam, setServeSelectForTeam] = useState(null); // 団体戦サーブ選択 // 履歴画面のタブ状態
 
+
+  // 自動ping：24時間ごとにDBへアクセスしてSupabaseの自動停止を防ぐ
+  useEffect(() => {
+    const ping = () => supabase.from("schools").select("id").limit(1);
+    ping();
+    const interval = setInterval(ping, 1000 * 60 * 60 * 24);
+    return () => clearInterval(interval);
+  }, []);
   // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
   useEffect(() => {
     const handler = (e) => {
