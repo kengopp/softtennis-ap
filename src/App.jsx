@@ -3555,6 +3555,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const [memoDraft, setMemoDraft] = useState(initialMatch.memo || ""); // 試合メモ（下書き）
   const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
   const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
+  const [undoConfirm, setUndoConfirm] = useState(false); // 1点前に戻す確認ダイアログ
 
   // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
   const saveQueueRef = useRef(Promise.resolve());
@@ -4054,7 +4055,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               </div>
 
               {/* ★得点ボタン（サービスのすぐ下に移動） */}
-              <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どちらが得点しましたか？</div>
+              <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どっちが得点？</div>
               {fault===2&&<div style={{ fontSize:10,color:"#c0392b",textAlign:"center",marginBottom:8 }}>※ダブルフォルトのため、レシーブ側の得点ボタンを押してください</div>}
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
                 {(()=>{
@@ -4077,7 +4078,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                   );
                 })()}
               </div>
-              <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:10 }} onClick={undo}>↩ 1点前に戻す</button>
+              <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:10 }} onClick={()=>setUndoConfirm(true)}>↩ 1点前に戻す</button>
 
               {/* ★直前の記録（今チップで編集中の対象を明示。まだ得点がない場合はチップを無効化） */}
               {(()=>{
@@ -4131,7 +4132,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
               {/* ★プレイ内容 */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どんなプレイ（任意）</div>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どんなプレイで（任意）</div>
                 <div>
                   {PLAY_TYPES.map(p=>{
                     const hasLast = nonFaultPts.length>0;
@@ -4292,6 +4293,20 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               ))}
             </div>
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setServeSelectModal(false)}>キャンセル</button>
+          </div>
+        </Modal>
+      )}
+
+      {undoConfirm && (
+        <Modal onClose={()=>setUndoConfirm(false)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>↩️</div>
+            <h3 style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>1点前に戻しますか？</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:20 }}>直前に記録した1点が取り消されます。</p>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setUndoConfirm(false)}>キャンセル</button>
+              <button style={{ padding:11, background:C.navy, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>{ setUndoConfirm(false); undo(); }}>はい</button>
+            </div>
           </div>
         </Modal>
       )}
