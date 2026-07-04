@@ -817,7 +817,7 @@ function calcPlayerStats(match) {
 function calcAutoComment(stats, team) {
   const comments = [];
   for (const p of stats.filter(s => s.team === team)) {
-    const topPlay   = Object.entries(p.plays).sort((a,b)=>b[1]-a[1])[0];
+    const topPlay   = Object.entries(p.plays).filter(([k])=>k!=="fault").sort((a,b)=>b[1]-a[1])[0];
     const topResult = Object.entries(p.results).sort((a,b)=>b[1]-a[1])[0];
     if (topPlay && p.winners > 0) {
       const pct = Math.round((p.plays[topPlay[0]] ?? 0) / p.total * 100);
@@ -3467,8 +3467,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
     const updM={...match,games:match.games.map(g=>g.id===cg.id?updG:g),match_score_a:newMA,match_score_b:newMB};
     resetSel(); setFault(0);
     if(gWin){
-      if(newMA>=winGames||newMB>=winGames){ persist({...updM,status:"finished"}); }
-      else { persist(updM); setModal({type:"gameOver",winner:gWin,num:cg.game_number,sA:newMA,sB:newMB}); }
+      if(newMA>=winGames||newMB>=winGames){ persist(updM); setModal({type:"matchOver",winner:gWin,gameId:cg.id,sA:newMA,sB:newMB}); }
+      else { persist(updM); setModal({type:"gameOver",winner:gWin,num:cg.game_number,gameId:cg.id,sA:newMA,sB:newMB}); }
     } else { persist(updM); }
   }
 
@@ -3500,19 +3500,45 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
     }
   }
 
-  // ★得点ボタンを先に押す流れ用：直前に作成したポイントの詳細を後から書き換える
-  function updateLastPoint(field, value){
-    if(!currentGame || currentGame.points.length===0) return;
-    const cg = currentGame;
-    const idx = cg.points.length-1;
-    const lastPt = cg.points[idx];
+  // ★得点ボタンを先に押す流れ用：指定したゲームの最後のポイントの詳細を後から書き換える（試合中・ゲーム終了直後どちらでも使える汎用版）
+  function updatePointDetail(gameId, field, value){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g || g.points.length===0) return;
+    const idx = g.points.length-1;
+    const lastPt = g.points[idx];
     const newVal = lastPt[field]===value ? null : value; // 同じチップをもう一度押したら解除
     const updatedPt = {...lastPt, [field]:newVal};
     if(field==="result_type"){
       updatedPt.is_winner = newVal ? isWinnerResult(newVal) : null;
     }
-    const newPoints = cg.points.map((p,i)=> i===idx ? updatedPt : p);
-    persist({...match, games: match.games.map(g=>g.id===cg.id?{...cg,points:newPoints}:g)});
+    const newPoints = g.points.map((p,i)=> i===idx ? updatedPt : p);
+    persist({...match, games: match.games.map(gm=>gm.id===gameId?{...g,points:newPoints}:gm)});
+  }
+  function updateLastPoint(field, value){
+    if(!currentGame) return;
+    updatePointDetail(currentGame.id, field, value);
+  }
+  // ★ゲーム終了直後の「最後の1点」に詳細を追記するための共通UIブロック
+  function renderPointDetailEditor(gameId){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g || g.points.length===0) return null;
+    const lp = g.points[g.points.length-1];
+    const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
+    return (
+      <div style={{ textAlign:"left",marginTop:14,paddingTop:14,borderTop:`1px solid ${C.border}` }}>
+        <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:4 }}>最後の1点の詳細を追加（任意）</div>
+        <div style={{ fontSize:10,color:"#5b8bc9",marginBottom:8 }}>{detailParts.length>0?detailParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
+        <div style={{ marginBottom:8 }}>
+          {allPlayers.map(p=>{ const isSel=lp.player_name===p.name; return <span key={p.id} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"player_name",p.name)}>{p.name}</span>; })}
+        </div>
+        <div style={{ marginBottom:8 }}>
+          {RESULT_TYPES.map(r=>{ const isSel=lp.result_type===r.key; return <span key={r.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"result_type",r.key)}>{r.label}</span>; })}
+        </div>
+        <div>
+          {PLAY_TYPES.map(p=>{ const isSel=lp.play_type===p.key; return <span key={p.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"play_type",p.key)}>{p.label}</span>; })}
+        </div>
+      </div>
+    );
   }
 
   function undo(){
@@ -4023,7 +4049,21 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
             <h3 style={{ fontSize:18,fontWeight:800,margin:"8px 0" }}>第{modal.num}ゲーム終了！</h3>
             <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
             <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
-            <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>{setModal(null);startNewGame();}}>次のゲームへ</button>
+            {renderPointDetailEditor(modal.gameId)}
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:14 }} onClick={()=>{setModal(null);startNewGame();}}>次のゲームへ</button>
+          </div>
+        </Modal>
+      )}
+
+      {modal?.type==="matchOver"&&(
+        <Modal>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:44 }}>🏆</div>
+            <h3 style={{ fontSize:18,fontWeight:800,margin:"8px 0" }}>試合終了！</h3>
+            <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
+            <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
+            {renderPointDetailEditor(modal.gameId)}
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:14 }} onClick={()=>{ persist({...match,status:"finished"}); setModal(null); }}>結果を見る</button>
           </div>
         </Modal>
       )}
@@ -4156,7 +4196,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         </div>
       )}
       {filtered.map(p=>{
-        const topPlays = Object.entries(p.plays).sort((a,b)=>b[1]-a[1]).slice(0,4);
+        const topPlays = Object.entries(p.plays).filter(([k])=>k!=="fault").sort((a,b)=>b[1]-a[1]).slice(0,4);
         return (
           <div key={`${p.team}__${p.player_name}`} style={{ ...S.card,marginBottom:10 }}>
             <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"8px 12px",display:"flex",alignItems:"center",gap:8 }}>
