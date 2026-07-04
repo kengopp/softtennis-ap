@@ -467,6 +467,16 @@ async function updateSchoolMaster(id, updates) {
   if (error) throw error;
 }
 
+// ★チーム共通の目標設定（学校＝チーム単位で1セットのみ保持）
+async function getSchoolGoals(schoolId) {
+  if (!schoolId) return null;
+  const { data, error } = await supabase.from("schools")
+    .select("goal_first_serve_pct, goal_receive_miss_pct, goal_winner_count, goal_error_count, goal_point_diff")
+    .eq("id", schoolId).single();
+  if (error) { console.error(error); return null; }
+  return data;
+}
+
 async function deleteSchoolMaster(id) {
   const { error } = await supabase.from("schools").delete().eq("id", id);
   if (error) throw error;
@@ -747,6 +757,7 @@ function calcPlayerStats(match) {
     if (!result[key]) {
       result[key] = {
         team: playerTeam, player_name: playerName, total: 0, winners: 0, errors: 0, plays: {}, results: {},
+        playsWin: {}, playsErr: {}, // ★決めたプレイ／ミスしたプレイの内訳用
         // ★1stサーブ確率・レシーブミス率用
         serveTotal: 0, serveFault: 0, receiveTotal: 0, receiveMiss: 0,
       };
@@ -773,6 +784,10 @@ function calcPlayerStats(match) {
       if (pt.is_winner) r.winners++; else r.errors++;
       if (pt.play_type)   r.plays[pt.play_type]     = (r.plays[pt.play_type]   ?? 0) + 1;
       if (pt.result_type) r.results[pt.result_type] = (r.results[pt.result_type] ?? 0) + 1;
+      if (pt.play_type) {
+        const bucket = pt.is_winner ? r.playsWin : r.playsErr;
+        bucket[pt.play_type] = (bucket[pt.play_type] ?? 0) + 1;
+      }
     }
     for (const f of (g.faults ?? [])) {
       if (!f.player_name) continue;
@@ -909,7 +924,7 @@ function NavBar({ active, onNavigate }) {
     ["home",   "🏠", "ホーム"],
     ["list",   "📋", "履歴"],
     ["stats",  "📊", "分析"],
-    ["master", "🗂",  "マスター"],
+    ["master", "🗂",  "設定"],
   ];
   return (
     <div style={{ position:"fixed",bottom:0,left:0,right:0,background:C.white,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:10 }}>
@@ -1536,16 +1551,28 @@ function GroupMembersScreen({ onBack }) {
 
 // マスター管理ハブ画面（選手マスター・学校マスターへの入口）
 // ============================================================
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers }) {
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings }) {
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
   return (
     <div style={S.page}>
       <div style={S.hdr}>
-        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>マスター管理</span>
+        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>設定</span>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
+        {isAdmin && (
+          <div
+            style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center", border:`1px solid #ffd699`, background:"#fff8ea" }}
+            onClick={onGoalSettings}
+          >
+            <div>
+              <div style={{ fontSize:14,fontWeight:700 }}>🎯 目標設定</div>
+              <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・レシーブミス率などチーム共通の目標（管理者専用）</div>
+            </div>
+            <span style={{ fontSize:16,color:C.textSec }}>→</span>
+          </div>
+        )}
         <div
           style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
           onClick={onRoster}
@@ -1580,6 +1607,98 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers }) {
         </div>
       </div>
       <NavBar active="master" onNavigate={onNavigate}/>
+    </div>
+  );
+}
+
+// ============================================================
+// 目標設定画面（チーム共通・1セットのみ・管理者専用）
+// ============================================================
+function GoalSettingsScreen({ onBack }) {
+  const [schoolId, setSchoolId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [firstServe, setFirstServe] = useState("");
+  const [receiveMiss, setReceiveMiss] = useState("");
+  const [winnerCount, setWinnerCount] = useState("");
+  const [errorCount, setErrorCount] = useState("");
+  const [pointDiff, setPointDiff] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const profile = await getMyProfile();
+      if (!profile?.school_id) { setLoading(false); return; }
+      setSchoolId(profile.school_id);
+      const goals = await getSchoolGoals(profile.school_id);
+      if (goals) {
+        setFirstServe(goals.goal_first_serve_pct ?? "");
+        setReceiveMiss(goals.goal_receive_miss_pct ?? "");
+        setWinnerCount(goals.goal_winner_count ?? "");
+        setErrorCount(goals.goal_error_count ?? "");
+        setPointDiff(goals.goal_point_diff ?? "");
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  async function handleSave() {
+    if (!schoolId) return;
+    setSaving(true);
+    try {
+      await updateSchoolMaster(schoolId, {
+        goal_first_serve_pct: firstServe===""?null:Number(firstServe),
+        goal_receive_miss_pct: receiveMiss===""?null:Number(receiveMiss),
+        goal_winner_count: winnerCount===""?null:Number(winnerCount),
+        goal_error_count: errorCount===""?null:Number(errorCount),
+        goal_point_diff: pointDiff===""?null:Number(pointDiff),
+      });
+      alert("目標を保存しました");
+    } catch(e) {
+      alert("保存に失敗しました: "+(e.message||e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputStyle = { width:64, textAlign:"center", border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 4px", fontSize:14, fontWeight:700, color:C.navy };
+  const row = (num, label, value, setValue, unit) => (
+    <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+      <span style={{ fontSize:12,color:C.text,fontWeight:700 }}><span style={{ color:C.textSec,fontWeight:400,marginRight:4 }}>{num}</span>{label}</span>
+      <div style={{ display:"flex",alignItems:"center",gap:4 }}>
+        <input style={inputStyle} type="number" value={value} onChange={e=>setValue(e.target.value)} />
+        <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{unit}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <button style={S.backBtn} onClick={onBack}>←</button>
+        <span style={{ fontSize:18,fontWeight:800,color:C.white }}>目標設定</span>
+      </div>
+      <div style={{ padding:14, paddingBottom:90 }}>
+        {loading ? (
+          <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>読み込み中...</div>
+        ) : !schoolId ? (
+          <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のため目標を設定できません</div>
+        ) : (
+          <>
+            <div style={{ fontSize:20,fontWeight:800,marginBottom:4 }}>🎯 目標設定</div>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:14 }}>ここで設定した目標は、チーム全選手のスタッツ画面に共通で適用されます</div>
+            <div style={{ ...S.card, padding:14 }}>
+              {row("①", "1stサーブ確率", firstServe, setFirstServe, "%以上")}
+              {row("②", "レシーブミス率", receiveMiss, setReceiveMiss, "%以下")}
+              {row("③", "決めたプレイ回数", winnerCount, setWinnerCount, "回以上")}
+              {row("④", "ミスしたプレイ回数", errorCount, setErrorCount, "回以下")}
+              {row("⑤", "得点差（決めた−ミス）", pointDiff, setPointDiff, "以上")}
+            </div>
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.navy},#12213f)`), marginTop:14, width:"100%" }} disabled={saving} onClick={handleSave}>
+              {saving?"保存中...":"保存する"}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -4131,6 +4250,15 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
   // ★修正: teamFilterで絞る（Bも正しく表示）
   const filtered = stats.filter(s => s.team === teamFilter);
 
+  // ★チーム共通の目標値（自チーム＝Aのみに適用）
+  const [goals, setGoals] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const profile = await getMyProfile();
+      if (profile?.school_id) setGoals(await getSchoolGoals(profile.school_id));
+    })();
+  }, []);
+
   const allPts = match.games.flatMap(g => g.points);
   const totalA = allPts.filter(p=>p.scoring_team==="A").length;
   const totalB = allPts.filter(p=>p.scoring_team==="B").length;
@@ -4196,7 +4324,11 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         </div>
       )}
       {filtered.map(p=>{
-        const topPlays = Object.entries(p.plays).filter(([k])=>k!=="fault").sort((a,b)=>b[1]-a[1]).slice(0,4);
+        const winPlays = Object.entries(p.playsWin).sort((a,b)=>b[1]-a[1]);
+        const errPlays = Object.entries(p.playsErr).sort((a,b)=>b[1]-a[1]);
+        const hasGoals = p.team==="A" && !!goals; // ★目標は自チームのみ適用
+        const pointDiff = p.winners - p.errors;
+        const diffGood = hasGoals && goals.goal_point_diff!=null ? pointDiff >= goals.goal_point_diff : null;
         return (
           <div key={`${p.team}__${p.player_name}`} style={{ ...S.card,marginBottom:10 }}>
             <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"8px 12px",display:"flex",alignItems:"center",gap:8 }}>
@@ -4206,65 +4338,101 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
             </div>
             <div style={{ padding:12 }}>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10 }}>
-                {[["得点",p.winners,C.accent],["ミス",p.errors,C.red],["得点率",p.total>0?`${Math.round(p.winners/p.total*100)}%`:"—",C.orange]].map(([l,v,c])=>(
+                {[
+                  ["得点",p.winners,C.accent],
+                  ["ミス",p.errors,C.red],
+                  ["得点差", pointDiff>=0?`+${pointDiff}`:`${pointDiff}`, diffGood===null?C.orange:(diffGood?C.accent:C.red)],
+                ].map(([l,v,c])=>(
                   <div key={l} style={{ background:`${c}11`,borderRadius:8,padding:"8px 4px",textAlign:"center" }}>
                     <div style={{ fontSize:18,fontWeight:700,color:c }}>{v}</div>
                     <div style={{ fontSize:9,color:C.textSec,fontWeight:700 }}>{l}</div>
                   </div>
                 ))}
               </div>
-              {/* ★サーブ・レシーブ（2ポイントごとの交代を反映。関与があった選手のみ表示） */}
+              {/* ★サーブ・レシーブ（2ポイントごとの交代を反映。関与があった選手のみ表示。目標比較で色分け） */}
               {(p.serveTotal>0||p.receiveTotal>0)&&(
                 <>
                   <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>🎾 サーブ・レシーブ</div>
-                  {p.serveTotal>0&&(()=>{ const inCount=p.serveTotal-p.serveFault; const rate=Math.round(inCount/p.serveTotal*100); return (
-                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                      <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>1stサーブ確率</span>
-                      <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:C.accent,borderRadius:3 }}/></div>
-                      <span style={{ fontSize:11,fontWeight:700,color:C.navy,width:62,textAlign:"right" }}>{inCount}/{p.serveTotal}・{rate}%</span>
-                    </div>
-                  );})()}
-                  {p.receiveTotal>0&&(()=>{ const rate=Math.round(p.receiveMiss/p.receiveTotal*100); return (
-                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                      <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス率</span>
-                      <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:C.red,borderRadius:3 }}/></div>
-                      <span style={{ fontSize:11,fontWeight:700,color:C.navy,width:62,textAlign:"right" }}>{p.receiveMiss}/{p.receiveTotal}・{rate}%</span>
-                    </div>
-                  );})()}
-                </>
-              )}
-              {/* プレイ内容内訳 */}
-              {topPlays.length>0&&<div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6,marginTop:8 }}>プレイ内容の内訳</div>}
-              {topPlays.map(([k,n])=>{
-                const isWin=p.results["winner"]>0||p.results["ace"]>0;
-                return (
-                  <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                    <span style={{ fontSize:10,color:C.textSec,width:80,flexShrink:0 }}>{k==="fault"?"1stフォルト":getPlayLabel(k)}</span>
-                    <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${Math.round(n/p.total*100)}%`,height:"100%",background:C.accent,borderRadius:3 }}/></div>
-                    <span style={{ fontSize:11,fontWeight:700,color:C.navy,width:28,textAlign:"right" }}>{n}回</span>
-                  </div>
-                );
-              })}
-              {/* 結果内訳 */}
-              {Object.keys(p.results).length>0&&(
-                <>
-                  <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6,marginTop:8 }}>結果の内訳</div>
-                  {Object.entries(p.results).map(([k,n])=>{
-                    const iw=isWinnerResult(k);
+                  {p.serveTotal>0&&(()=>{
+                    const inCount=p.serveTotal-p.serveFault; const rate=Math.round(inCount/p.serveTotal*100);
+                    const good = hasGoals && goals.goal_first_serve_pct!=null ? rate>=goals.goal_first_serve_pct : null;
+                    const barColor = good===null?C.accent:(good?C.accent:C.red);
                     return (
-                      <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                        <span style={{ fontSize:10,color:C.textSec,width:80,flexShrink:0 }}>{getResultLabel(k)}</span>
-                        <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${Math.round(n/(p.total||1)*100)}%`,height:"100%",background:iw===false?C.red:C.accent,borderRadius:3 }}/></div>
-                        <span style={{ fontSize:11,fontWeight:700,color:C.navy,width:28,textAlign:"right" }}>{n}回</span>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>1stサーブ確率</span>
+                        <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
+                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),width:80,textAlign:"right",display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4 }}>
+                          {inCount}/{p.serveTotal}・{rate}%
+                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
+                        </span>
                       </div>
                     );
-                  })}
+                  })()}
+                  {p.receiveTotal>0&&(()=>{
+                    const rate=Math.round(p.receiveMiss/p.receiveTotal*100);
+                    const good = hasGoals && goals.goal_receive_miss_pct!=null ? rate<=goals.goal_receive_miss_pct : null;
+                    const barColor = good===null?C.red:(good?C.accent:C.red);
+                    return (
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス率</span>
+                        <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
+                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),width:80,textAlign:"right",display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4 }}>
+                          {p.receiveMiss}/{p.receiveTotal}・{rate}%
+                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </>
+              )}
+
+              {/* ★プレイ結果と内訳（決めた／ミスしたの2グループに分解。目標比較で色分け） */}
+              {(winPlays.length>0||errPlays.length>0)&&(
+                <div style={{ marginTop:8 }}>
+                  <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ結果と内訳</div>
+                  {winPlays.length>0&&(()=>{
+                    const good = hasGoals && goals.goal_winner_count!=null ? p.winners>=goals.goal_winner_count : null;
+                    return (
+                      <div style={{ background:good===false?`${C.red}0d`:(good===true?`${C.accent}0d`:"#fafbfc"),borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
+                        <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                          ✓ 決めたプレイ（{p.winners}回）
+                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
+                        </div>
+                        {winPlays.map(([k,n])=>(
+                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                            <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
+                            <div style={{ flex:1,height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
+                            <span style={{ fontSize:10,fontWeight:700,color:"#555",width:26,textAlign:"right" }}>{n}回</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {errPlays.length>0&&(()=>{
+                    const good = hasGoals && goals.goal_error_count!=null ? p.errors<=goals.goal_error_count : null;
+                    return (
+                      <div style={{ background:good===false?`${C.red}0d`:(good===true?`${C.accent}0d`:"#fafbfc"),borderRadius:8,padding:"8px 10px" }}>
+                        <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                          ✕ ミスしたプレイ（{p.errors}回）
+                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
+                        </div>
+                        {errPlays.map(([k,n])=>(
+                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                            <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
+                            <div style={{ flex:1,height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
+                            <span style={{ fontSize:10,fontWeight:700,color:"#555",width:26,textAlign:"right" }}>{n}回</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
               )}
             </div>
           </div>
         );
       })}
+
 
       {/* 自動コメント */}
       {comments.length>0&&(
@@ -5930,8 +6098,12 @@ export default function App() {
         onRoster={()=>setScreen("roster")}
         onSchoolAdmin={()=>setScreen("schoolAdmin")}
         onGroupMembers={()=>setScreen("groupMembers")}
+        onGoalSettings={()=>setScreen("goalSettings")}
       />
     );
+  }
+  if (screen==="goalSettings") {
+    return <GoalSettingsScreen onBack={()=>setScreen("master")} />;
   }
   if (screen==="groupMembers") {
     return <GroupMembersScreen onBack={()=>setScreen("master")} />;
