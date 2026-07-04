@@ -4471,7 +4471,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   {winPlays.length>0&&(()=>{
                     const good = hasGoals && goals.goal_winner_count!=null ? p.winners>=goals.goal_winner_count : null;
                     return (
-                      <div style={{ background:`${C.accent}11`,borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
+                      <div style={{ background:C.white,borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
                         <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✓ 決めたプレイ（{p.winners}回）
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
@@ -4489,7 +4489,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   {errPlays.length>0&&(()=>{
                     const good = hasGoals && goals.goal_error_count!=null ? p.errors<=goals.goal_error_count : null;
                     return (
-                      <div style={{ background:`${C.red}11`,borderRadius:8,padding:"8px 10px" }}>
+                      <div style={{ background:C.white,borderRadius:8,padding:"8px 10px" }}>
                         <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✕ ミスしたプレイ（{p.errors}回）
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
