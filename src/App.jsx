@@ -4056,19 +4056,20 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
           {currentGame&&match.status!=="finished"&&(
             <>
-              {/* サーブ表示：コンパクトなラジオ式(1st/2nd/df) */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-                <span style={{ fontSize:13,fontWeight:700,color:"#c9740b",display:"flex",alignItems:"center",gap:4 }}>🎾 {serverLabel}</span>
-                <div style={{ display:"flex",alignItems:"center",gap:14 }}>
-                  <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>サービス</span>
-                  <div style={{ display:"flex",gap:16 }}>
-                    {[{v:"1st",on:fault===0},{v:"2nd",on:fault===1},{v:"df",on:fault===2}].map(opt=>(
-                      <div key={opt.v} onClick={()=>handleServeRadio(opt.v)} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer" }}>
-                        <div style={{ width:16,height:16,borderRadius:"50%",border:`2px solid ${opt.on?"#3b6fe0":"#ccc"}`,background:opt.on?"#3b6fe0":"#fff",boxShadow:opt.on?"inset 0 0 0 3px #fff":"none" }}/>
-                        <span style={{ fontSize:10,fontWeight:700,color:opt.on?"#3b6fe0":"#999" }}>{opt.v}</span>
-                      </div>
-                    ))}
-                  </div>
+              {/* サーブ表示：大型セグメントボタン（1st=緑／2nd=黄／df=赤、案①の配色＋案②サイズ） */}
+              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10 }}>
+                <div style={{ fontSize:13,fontWeight:800,color:"#c9740b",display:"flex",alignItems:"center",gap:6,marginBottom:8 }}>🎾 {serverLabel}</div>
+                <div style={{ display:"flex",gap:8 }}>
+                  {[{v:"1st",on:fault===0,color:"#2ecc71"},{v:"2nd",on:fault===1,color:"#f5a623"},{v:"df",on:fault===2,color:"#e74c3c"}].map(opt=>(
+                    <div key={opt.v} onClick={()=>handleServeRadio(opt.v)} style={{
+                      flex:1,textAlign:"center",padding:"10px 0",borderRadius:11,cursor:"pointer",userSelect:"none",
+                      border:`2px solid ${opt.on?opt.color:C.border}`,
+                      background:opt.on?opt.color:C.white,
+                      transition:"all .15s ease",
+                    }}>
+                      <span style={{ fontSize:14,fontWeight:800,color:opt.on?C.white:"#a7adb8" }}>{opt.v==="df"?"DF":opt.v}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
