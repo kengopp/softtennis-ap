@@ -4078,17 +4078,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 })()}
               </div>
 
-              {/* ★直前の記録 or 次の得点への反映（今チップが何を編集中か明示） */}
-              {nonFaultPts.length>0 ? (()=>{
-                const lp=nonFaultPts[nonFaultPts.length-1];
-                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
-                return (
-                  <div style={{ background:"#eef7ff",border:"1px solid #b8dcff",borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#2569b3" }}>
-                    <div style={{ fontWeight:700 }}>✎ 直前の記録を編集中：{lp.scoring_team==="A"?teamALabel:teamBLabel} {lp.score_a_after}-{lp.score_b_after}</div>
-                    <div style={{ marginTop:2,color:"#5b8bc9" }}>{detailParts.length>0?detailParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
-                  </div>
-                );
-              })() : (()=>{
+              {/* ★これから入る得点への反映内容を表示（常にこれから記録するポイント用のプレビュー） */}
+              {(()=>{
                 const preParts=[selPlayer,selPlay&&getPlayLabel(selPlay),selResult&&getResultLabel(selResult),selSide&&getSideLabel(selSide)].filter(Boolean);
                 return (
                   <div style={{ background:"#eef7ff",border:"1px solid #b8dcff",borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#2569b3" }}>
@@ -4103,12 +4094,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手（任意）</div>
                 <div>
                   {allPlayers.map(p=>{
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = nonFaultPts.length>0 ? lp?.player_name===p.name : selPlayerId===p.id;
+                    const isSel = selPlayerId===p.id;
                     return (
                       <span key={p.id} style={S.chip(isSel)} onClick={()=>{
-                        if(nonFaultPts.length>0){ updateLastPoint("player_name",p.name); }
-                        else if(selPlayerId===p.id){ setSelPlayer(null); setSelPlayerId(null); }
+                        if(selPlayerId===p.id){ setSelPlayer(null); setSelPlayerId(null); }
                         else { setSelPlayer(p.name); setSelPlayerId(p.id); }
                       }}>{p.name}</span>
                     );
@@ -4121,13 +4110,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果（任意）</div>
                 <div>
                   {RESULT_TYPES.map(r=>{
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = nonFaultPts.length>0 ? lp?.result_type===r.key : selResult===r.key;
+                    const isSel = selResult===r.key;
                     return (
-                      <span key={r.key} style={S.chip(isSel)} onClick={()=>{
-                        if(nonFaultPts.length>0){ updateLastPoint("result_type",r.key); }
-                        else { setSelResult(prev=>prev===r.key?null:r.key); }
-                      }}>{r.label}</span>
+                      <span key={r.key} style={S.chip(isSel)} onClick={()=>setSelResult(prev=>prev===r.key?null:r.key)}>{r.label}</span>
                     );
                   })}
                 </div>
@@ -4138,13 +4123,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容（任意）</div>
                 <div>
                   {PLAY_TYPES.map(p=>{
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = nonFaultPts.length>0 ? lp?.play_type===p.key : selPlay===p.key;
+                    const isSel = selPlay===p.key;
                     return (
-                      <span key={p.key} style={S.chip(isSel)} onClick={()=>{
-                        if(nonFaultPts.length>0){ updateLastPoint("play_type",p.key); }
-                        else { setSelPlay(prev=>prev===p.key?null:p.key); }
-                      }}>{p.label}</span>
+                      <span key={p.key} style={S.chip(isSel)} onClick={()=>setSelPlay(prev=>prev===p.key?null:p.key)}>{p.label}</span>
                     );
                   })}
                 </div>
@@ -4155,13 +4136,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック（任意）</div>
                 <div>
                   {SIDE_TYPES.map(s=>{
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = nonFaultPts.length>0 ? lp?.side_type===s.key : selSide===s.key;
+                    const isSel = selSide===s.key;
                     return (
-                      <span key={s.key} style={S.chip(isSel)} onClick={()=>{
-                        if(nonFaultPts.length>0){ updateLastPoint("side_type",s.key); }
-                        else { setSelSide(prev=>prev===s.key?null:s.key); }
-                      }}>{s.label}</span>
+                      <span key={s.key} style={S.chip(isSel)} onClick={()=>setSelSide(prev=>prev===s.key?null:s.key)}>{s.label}</span>
                     );
                   })}
                 </div>
@@ -4483,7 +4460,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     const good = hasGoals && goals.goal_winner_count!=null ? p.winners>=goals.goal_winner_count : null;
                     return (
                       <div style={{ background:C.white,borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
-                        <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                        <div style={{ fontSize:10,fontWeight:700,color:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✓ 決めたプレイ（{p.winners}回）
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
                         </div>
@@ -4501,7 +4478,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     const good = hasGoals && goals.goal_error_count!=null ? p.errors<=goals.goal_error_count : null;
                     return (
                       <div style={{ background:C.white,borderRadius:8,padding:"8px 10px" }}>
-                        <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                        <div style={{ fontSize:10,fontWeight:700,color:C.red,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✕ ミスしたプレイ（{p.errors}回）
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
                         </div>
