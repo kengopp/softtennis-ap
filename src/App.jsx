@@ -1568,7 +1568,7 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           >
             <div>
               <div style={{ fontSize:14,fontWeight:700 }}>🎯 目標設定</div>
-              <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・レシーブミス率などチーム共通の目標（管理者専用）</div>
+              <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・レシーブミス率などチーム共通の目標<br/>（管理者専用）</div>
             </div>
             <span style={{ fontSize:16,color:C.textSec }}>→</span>
           </div>
@@ -4471,7 +4471,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   {winPlays.length>0&&(()=>{
                     const good = hasGoals && goals.goal_winner_count!=null ? p.winners>=goals.goal_winner_count : null;
                     return (
-                      <div style={{ background:good===false?`${C.red}0d`:(good===true?`${C.accent}0d`:"#fafbfc"),borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
+                      <div style={{ background:`${C.accent}11`,borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
                         <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✓ 決めたプレイ（{p.winners}回）
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
@@ -4489,7 +4489,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   {errPlays.length>0&&(()=>{
                     const good = hasGoals && goals.goal_error_count!=null ? p.errors<=goals.goal_error_count : null;
                     return (
-                      <div style={{ background:good===false?`${C.red}0d`:(good===true?`${C.accent}0d`:"#fafbfc"),borderRadius:8,padding:"8px 10px" }}>
+                      <div style={{ background:`${C.red}11`,borderRadius:8,padding:"8px 10px" }}>
                         <div style={{ fontSize:10,fontWeight:700,color:good===false?C.red:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✕ ミスしたプレイ（{p.errors}回）
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
@@ -4516,8 +4516,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       {comments.length>0&&(
         <div style={{ marginBottom:16 }}>
           {comments.map((c,i)=>(
-            <div key={i} style={{ background:c.type==="strength"?C.accentL:c.type==="warning"?"#fff3cd":C.redL,border:`1px solid ${c.type==="strength"?C.accent:c.type==="warning"?"#f5a623":C.red}`,borderRadius:10,padding:"10px 12px",marginBottom:8 }}>
-              <div style={{ fontSize:11,fontWeight:700,color:c.type==="strength"?C.accent:c.type==="warning"?"#7a5800":C.red,marginBottom:3 }}>{c.type==="strength"?"💪 強み":"⚠️ 課題"} — {c.player}</div>
+            <div key={i} style={{ background:c.type==="strength"?C.accentL:c.type==="warning"?C.redL:C.redL, border:`1px solid ${c.type==="strength"?C.accent:c.type==="warning"?C.red:C.red}`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+              <div style={{ fontSize:11,fontWeight:700,color:c.type==="strength"?C.accent:c.type==="warning"?C.red:C.red,marginBottom:3 }}>{c.type==="strength"?"💪 強み":"⚠️ 課題"} — {c.player}</div>
               <p style={{ fontSize:12,color:C.navy,lineHeight:1.6 }}>{c.text}</p>
             </div>
           ))}
