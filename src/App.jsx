@@ -391,6 +391,11 @@ async function saveMyProfile(profile) {
     gender_category: profile.gender_category,
     linked_player_id: profile.linked_player_id ?? null,
   };
+  // ★usersテーブルの school_name は NOT NULL 制約があるため、school_id から必ず引いてセットする
+  if (profile.school_id) {
+    const { data: schoolRow } = await supabase.from("schools").select("name").eq("id", profile.school_id).single();
+    updates.school_name = schoolRow?.name ?? "";
+  }
   if (profile.is_approved !== undefined) updates.is_approved = profile.is_approved;
   // ★update だと usersテーブルに行がまだ存在しない場合、0件更新のままエラーも出さずに終わってしまい、
   // 保存できたように見えて実は何も保存されていない、という無限ループの原因になっていた。
@@ -5633,10 +5638,16 @@ function translateAuthError(msg) {
 // メール確認が必須の設定だと、登録直後はまだセッションがなく保存に失敗するため、
 // その場合は一時保存しておき、確認メール経由で初めてログインできた時にこの関数を呼んで自動で仕上げる。
 async function completeProfileRegistration(userId, payload) {
+  let schoolName = "";
+  if (payload.schoolId) {
+    const { data: schoolRow } = await supabase.from("schools").select("name").eq("id", payload.schoolId).single();
+    schoolName = schoolRow?.name ?? "";
+  }
   const { error: profileErr } = await supabase.from("users").insert({
     id: userId,
     name: payload.fullName,
     school_id: payload.schoolId,
+    school_name: schoolName,
     prefecture: payload.prefecture,
     gender_category: payload.genderCategory,
     category: payload.category,
