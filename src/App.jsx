@@ -3495,8 +3495,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         const f={id:uid(),game_id:cg.id,match_id:match.id,fault_number:(cg.faults?.length??0)+1,server_team:curServer,player_name:curServerIndividual??null,score_a_at:cg.score_a,score_b_at:cg.score_b};
         persist({...match,games:match.games.map(g=>g.id===cg.id?{...cg,faults:[...(cg.faults??[]),f]}:g)});
       }
-      setFault(0);
-      addPoint(curServer==="A"?"B":"A");
+      // dfはここでは即座に得点を入れず、「レシーブ側の得点ボタン」を押して初めて確定する状態にする
+      setFault(2);
     }
   }
 
@@ -3845,29 +3845,42 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               {/* サーブ表示：コンパクトなラジオ式(1st/2nd/df) */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
                 <span style={{ fontSize:13,fontWeight:700,color:"#c9740b",display:"flex",alignItems:"center",gap:4 }}>🎾 {serverLabel}</span>
-                <div style={{ display:"flex",gap:16 }}>
-                  {[{v:"1st",on:fault===0},{v:"2nd",on:fault===1},{v:"df",on:false}].map(opt=>(
-                    <div key={opt.v} onClick={()=>handleServeRadio(opt.v)} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer" }}>
-                      <div style={{ width:16,height:16,borderRadius:"50%",border:`2px solid ${opt.on?"#3b6fe0":"#ccc"}`,background:opt.on?"#3b6fe0":"#fff",boxShadow:opt.on?"inset 0 0 0 3px #fff":"none" }}/>
-                      <span style={{ fontSize:10,fontWeight:700,color:opt.on?"#3b6fe0":"#999" }}>{opt.v}</span>
-                    </div>
-                  ))}
+                <div style={{ display:"flex",alignItems:"center",gap:14 }}>
+                  <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>サービス</span>
+                  <div style={{ display:"flex",gap:16 }}>
+                    {[{v:"1st",on:fault===0},{v:"2nd",on:fault===1},{v:"df",on:fault===2}].map(opt=>(
+                      <div key={opt.v} onClick={()=>handleServeRadio(opt.v)} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer" }}>
+                        <div style={{ width:16,height:16,borderRadius:"50%",border:`2px solid ${opt.on?"#3b6fe0":"#ccc"}`,background:opt.on?"#3b6fe0":"#fff",boxShadow:opt.on?"inset 0 0 0 3px #fff":"none" }}/>
+                        <span style={{ fontSize:10,fontWeight:700,color:opt.on?"#3b6fe0":"#999" }}>{opt.v}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
               {/* ★得点ボタン（サービスのすぐ下に移動） */}
               <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どちらが得点しましたか？</div>
+              {fault===2&&<div style={{ fontSize:10,color:"#c0392b",textAlign:"center",marginBottom:8 }}>※ダブルフォルトのため、レシーブ側の得点ボタンを押してください</div>}
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
-                {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
-                <button style={{ height:70,background:isYounger?"#2ecc71":"#f97316",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(249,115,22,0.35)" }} onClick={()=>addPoint(leftTeam)}>
-                  <span style={{ fontSize:22 }}>得点</span>
-                  <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||"自チーム"}</span>
-                </button>
-                {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
-                <button style={{ height:70,background:isYounger?"#f97316":"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)" }} onClick={()=>addPoint(rightTeam)}>
-                  <span style={{ fontSize:22 }}>得点</span>
-                  <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
-                </button>
+                {(()=>{
+                  const leftIsServer = curServer===leftTeam;
+                  const leftDisabled = fault===2 && leftIsServer;
+                  const rightDisabled = fault===2 && !leftIsServer;
+                  return (
+                    <>
+                      {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
+                      <button disabled={leftDisabled} style={{ height:70,background:isYounger?"#2ecc71":"#f97316",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:leftDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(249,115,22,0.35)",opacity:leftDisabled?0.35:1 }} onClick={()=>{ if(!leftDisabled) addPoint(leftTeam); }}>
+                        <span style={{ fontSize:22 }}>得点</span>
+                        <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||"自チーム"}</span>
+                      </button>
+                      {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
+                      <button disabled={rightDisabled} style={{ height:70,background:isYounger?"#f97316":"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:rightDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)",opacity:rightDisabled?0.35:1 }} onClick={()=>{ if(!rightDisabled) addPoint(rightTeam); }}>
+                        <span style={{ fontSize:22 }}>得点</span>
+                        <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* ★直前の記録（今チップで編集中の対象を明示） */}
@@ -5281,6 +5294,48 @@ function translateAuthError(msg) {
   return "登録に失敗しました（" + msg + "）";
 }
 
+// ★新規登録時のusersテーブル保存＋選手マスター連携をまとめた共通処理。
+// メール確認が必須の設定だと、登録直後はまだセッションがなく保存に失敗するため、
+// その場合は一時保存しておき、確認メール経由で初めてログインできた時にこの関数を呼んで自動で仕上げる。
+async function completeProfileRegistration(userId, payload) {
+  const { error: profileErr } = await supabase.from("users").insert({
+    id: userId,
+    name: payload.fullName,
+    school_id: payload.schoolId,
+    prefecture: payload.prefecture,
+    gender_category: payload.genderCategory,
+    category: payload.category,
+    is_approved: true,
+  });
+  if (profileErr) throw profileErr;
+
+  if (payload.registerMode === "player") {
+    const roster = await getPlayerRoster();
+    const existing = roster.find(p => p.player_name === payload.fullName && p.is_own_team);
+    if (existing) {
+      await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", userId);
+    } else {
+      await savePlayer({ player_name: payload.fullName, position: payload.playerPosition, dominant_hand: payload.playerHand, is_own_team: true });
+      const refreshed = await getPlayerRoster();
+      const saved = refreshed.find(p => p.player_name === payload.fullName && p.is_own_team);
+      if (saved) await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", userId);
+    }
+  }
+
+  if (payload.registerMode === "guardian" && payload.childName) {
+    const roster = await getPlayerRoster();
+    const existing = roster.find(p => p.player_name === payload.childName && p.is_own_team);
+    if (existing) {
+      await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", userId);
+    } else {
+      await savePlayer({ player_name: payload.childName, position: payload.childPosition, dominant_hand: payload.childHand, is_own_team: true });
+      const refreshed = await getPlayerRoster();
+      const saved = refreshed.find(p => p.player_name === payload.childName && p.is_own_team);
+      if (saved) await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", userId);
+    }
+  }
+}
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login"); // login | signup
   const [email,    setEmail]    = useState("");
@@ -5344,51 +5399,21 @@ function AuthScreen({ onAuthed }) {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) throw error;
       if (data.user) {
-        const { error: profileErr } = await supabase.from("users").insert({
-          id: data.user.id,
-          name: fullName,
-          school_id: schoolId,
-          prefecture,
-          gender_category: genderCategory,
-          category,
-          is_approved: true,
-        });
-        if (profileErr) throw profileErr;
-
-        // 選手として登録する場合：選手マスターに自動登録（同名チェックあり）
-        if (registerMode === "player") {
-          const roster = await getPlayerRoster();
-          const existing = roster.find(p => p.player_name === fullName && p.is_own_team);
-          if (existing) {
-            // 同名が既存マスターにあれば既存IDにリンク
-            await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", data.user.id);
-          } else {
-            await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
-            const refreshed = await getPlayerRoster();
-            const saved = refreshed.find(p => p.player_name === fullName && p.is_own_team);
-            if (saved) {
-              await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
-            }
-          }
-        }
-
-        // 保護者でお子さん名が入力されている場合：選手を登録（同名チェックあり）
-        if (registerMode === "guardian") {
-          const childName = [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ");
-          if (childName) {
-            const roster = await getPlayerRoster();
-            const existing = roster.find(p => p.player_name === childName && p.is_own_team);
-            if (existing) {
-              await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", data.user.id);
-            } else {
-              await savePlayer({ player_name: childName, position: childPosition, dominant_hand: childHand, is_own_team: true });
-              const refreshed = await getPlayerRoster();
-              const saved = refreshed.find(p => p.player_name === childName && p.is_own_team);
-              if (saved) {
-                await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", data.user.id);
-              }
-            }
-          }
+        const payload = {
+          fullName, schoolId, prefecture, genderCategory, category, registerMode,
+          playerPosition, playerHand,
+          childName: [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" "),
+          childPosition, childHand,
+        };
+        if (data.session) {
+          // メール確認不要 or 即セッション確立 → その場で登録を完了させる
+          await completeProfileRegistration(data.user.id, payload);
+        } else {
+          // メール確認が必須の設定 → 今は保存できないので一時保存し、確認後の初回ログイン時に自動で仕上げる
+          try { localStorage.setItem("pendingProfile_"+email.trim(), JSON.stringify(payload)); } catch(e){}
+          setLoading(false);
+          alert("確認メールを送信しました。メール内のリンクをタップしてから、このアプリにログインしてください。選手情報は自動で登録されます。");
+          return;
         }
       }
       onAuthed();
@@ -5646,6 +5671,33 @@ export default function App() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // ★メール確認が必須の設定で登録直後に保存できなかった場合、確認後の初回ログイン時に
+  //   一時保存しておいた選手情報を自動で登録完了させる（お子さんが再入力しなくて済むように）
+  const [pendingApplied, setPendingApplied] = useState(false);
+  useEffect(() => { setPendingApplied(false); }, [user?.id]);
+  useEffect(() => {
+    if (!user || !profileChecked || pendingApplied) return;
+    const incomplete = !profile || !profile.school_id || !profile.gender_category;
+    if (!incomplete) { setPendingApplied(true); return; }
+    const key = "pendingProfile_" + (user.email || "");
+    let raw = null;
+    try { raw = localStorage.getItem(key); } catch(e){}
+    if (!raw) { setPendingApplied(true); return; }
+    (async () => {
+      try {
+        const payload = JSON.parse(raw);
+        await completeProfileRegistration(user.id, payload);
+        try { localStorage.removeItem(key); } catch(e){}
+        const p = await getMyProfile();
+        setProfile(p);
+      } catch(e) {
+        console.error("保留中の選手情報の自動登録に失敗しました", e);
+      } finally {
+        setPendingApplied(true);
+      }
+    })();
+  }, [user, profileChecked, profile, pendingApplied]);
+
   // ログイン状態確認中は簡易ローディング表示
   if (!authChecked) {
     return (
@@ -5663,8 +5715,8 @@ export default function App() {
     return <AuthScreen onAuthed={()=>{}} />;
   }
 
-  // プロフィール確認中は簡易ローディング表示
-  if (!profileChecked) {
+  // プロフィール確認中、または保留中データの自動適用中は簡易ローディング表示
+  if (!profileChecked || !pendingApplied) {
     return (
       <div style={{ ...S.page, display:"flex", alignItems:"center", justifyContent:"center" }}>
         <div style={{ textAlign:"center", color:C.textSec }}>
