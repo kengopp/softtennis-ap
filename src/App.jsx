@@ -284,7 +284,7 @@ function rowToMatchFull(m, players, games, points, faults) {
         id: pt.id, game_id: pt.game_id, match_id: m.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name,
         play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, result_type: pt.result_type ?? null,
-        is_winner: pt.is_winner, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
+        is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
       })),
     })),
   };
@@ -338,7 +338,7 @@ async function saveMatch(match) {
         scoring_team: pt.scoring_team, player_name: pt.player_name || null,
         shot_type: toShotType(pt.play_type, pt.result_type),
         play_type: pt.play_type || null, side_type: pt.side_type || null, result_type: pt.result_type || null,
-        is_winner: pt.is_winner, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
+        is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
       }));
       const { error: ptErr } = await supabase.from("points").upsert(pointRows);
       if (ptErr) throw ptErr;
@@ -3625,6 +3625,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       side_type:selSide??null,
       result_type:selResult??null,
       is_winner:isWin,
+      fault_count:fault, // ★このポイントの前に何回フォルトがあったか（0=1stイン、1=2ndイン、2=ダブルフォルト）
       score_a_after:newA, score_b_after:newB,
     };
     const updG={...cg,points:[...cg.points,pt],score_a:newA,score_b:newB};
@@ -4203,11 +4204,18 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               </div>
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
-                  {g.points.map(pt=>(
-                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
-                      <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
-                    </div>
-                  ))}
+                  {g.points.map(pt=>{
+                    const faultLabel = pt.fault_count===2 ? "DF" : pt.fault_count===1 ? "F" : null;
+                    const titleParts=[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):"",faultLabel==="DF"?"ダブルフォルト":faultLabel==="F"?"1stフォルト（2ndで決着）":""].filter(Boolean).join(" ");
+                    return (
+                      <div key={pt.id} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:1 }}>
+                        <div title={titleParts} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
+                          <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
+                        </div>
+                        {faultLabel && <span style={{ fontSize:8,fontWeight:800,color:faultLabel==="DF"?"#c0392b":"#e08e0b",lineHeight:1 }}>{faultLabel}</span>}
+                      </div>
+                    );
+                  })}
                 </div>
                 <div style={{ overflowX:"auto" }}>
                   <table style={{ borderCollapse:"collapse",minWidth:280,fontSize:10 }}>
@@ -4221,6 +4229,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                                 <div>
                                   <div style={{ fontSize:10,fontWeight:700,color:team==="A"?C.teamA:C.teamB }}>{pt.score_a_after}-{pt.score_b_after}</div>
                                   {pt.play_type&&<div style={{ fontSize:8,color:C.textSec }}>{getPlayLabel(pt.play_type).slice(0,4)}</div>}
+                                  {pt.fault_count===1&&<div style={{ fontSize:8,fontWeight:800,color:"#e08e0b" }}>F</div>}
+                                  {pt.fault_count===2&&<div style={{ fontSize:8,fontWeight:800,color:"#c0392b" }}>DF</div>}
                                 </div>
                               )}
                             </td>
@@ -4406,7 +4416,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         const errPlays = Object.entries(p.playsErr).sort((a,b)=>b[1]-a[1]);
         const hasGoals = p.team==="A" && !!goals; // ★目標は自チームのみ適用
         const pointDiff = p.winners - p.errors;
-        const diffGood = hasGoals && goals.goal_point_diff!=null ? pointDiff >= goals.goal_point_diff : null;
+        const diffGood = hasGoals && goals.goal_point_diff!=null ? pointDiff >= goals.goal_point_diff : pointDiff > 0;
         return (
           <div key={`${p.team}__${p.player_name}`} style={{ ...S.card,marginBottom:10 }}>
             <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"8px 12px",display:"flex",alignItems:"center",gap:8 }}>
@@ -4419,7 +4429,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                 {[
                   ["得点",p.winners,C.accent],
                   ["ミス",p.errors,C.red],
-                  ["得点差", pointDiff>=0?`+${pointDiff}`:`${pointDiff}`, diffGood===null?C.orange:(diffGood?C.accent:C.red)],
+                  ["得点差", pointDiff>=0?`+${pointDiff}`:`${pointDiff}`, diffGood?C.accent:C.red],
                 ].map(([l,v,c])=>(
                   <div key={l} style={{ background:`${c}11`,borderRadius:8,padding:"8px 4px",textAlign:"center" }}>
                     <div style={{ fontSize:18,fontWeight:700,color:c }}>{v}</div>
