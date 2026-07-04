@@ -383,6 +383,7 @@ async function saveMyProfile(profile) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
   const updates = {
+    id: user.id,
     name: profile.name,
     school_id: profile.school_id,
     prefecture: profile.prefecture,
@@ -391,7 +392,10 @@ async function saveMyProfile(profile) {
     linked_player_id: profile.linked_player_id ?? null,
   };
   if (profile.is_approved !== undefined) updates.is_approved = profile.is_approved;
-  const { error } = await supabase.from("users").update(updates).eq("id", user.id);
+  // ★update だと usersテーブルに行がまだ存在しない場合、0件更新のままエラーも出さずに終わってしまい、
+  // 保存できたように見えて実は何も保存されていない、という無限ループの原因になっていた。
+  // upsert にすることで、行がなければ新規作成、あれば更新、のどちらでも確実に保存されるようにする。
+  const { error } = await supabase.from("users").upsert(updates);
   if (error) throw error;
 }
 
