@@ -4382,8 +4382,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
           <span style={{ fontSize:12,fontWeight:700,color:C.teamB }}>相手チーム</span>
         </div>
         <Bar a={totalA} b={totalB} label="総ポイント"/>
-        <Bar a={winA}   b={winB}   label="ウィナー"/>
-        <Bar a={totalA-winA} b={totalB-winB} label="相手ミス"/>
+        <Bar a={winA}   b={winB}   label="決めた得点"/>
+        <Bar a={totalA-winA} b={totalB-winB} label="相手ミスで得点"/>
       </div>
 
       {/* ★自チーム/相手チーム切替タブ */}
