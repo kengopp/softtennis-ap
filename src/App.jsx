@@ -3657,11 +3657,29 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
   function handleServeRadio(v){
     if(!currentGame) return;
-    if(v==="1st") return; // 1stは初期状態の表示のみ（操作不要）
-    if(v==="2nd"){ if(fault===0) handleFault(); return; }
-    if(v==="df"){
+    const cg=currentGame;
+    if(v==="1st"){
+      if(fault===0) return; // すでに1stの表示のまま：何もしない
+      // 2nd/df から選び直した場合：この得点用に仮登録していたフォルトを取り消して1stに戻す
+      const faults = cg.faults ?? [];
+      const newFaults = faults.length>0 ? faults.slice(0,-1) : faults;
+      persist({...match,games:match.games.map(g=>g.id===cg.id?{...cg,faults:newFaults}:g)});
+      setFault(0);
+      return;
+    }
+    if(v==="2nd"){
+      if(fault===1) return; // すでに2nd：何もしない
       if(fault===0){
-        const cg=currentGame;
+        const f={id:uid(),game_id:cg.id,match_id:match.id,fault_number:(cg.faults?.length??0)+1,server_team:curServer,player_name:curServerIndividual??null,score_a_at:cg.score_a,score_b_at:cg.score_b};
+        persist({...match,games:match.games.map(g=>g.id===cg.id?{...cg,faults:[...(cg.faults??[]),f]}:g)});
+      }
+      // df(2)から2ndへ選び直す場合はフォルト登録は既にあるのでそのまま件数据え置き
+      setFault(1);
+      return;
+    }
+    if(v==="df"){
+      if(fault===2) return; // すでにdf：何もしない
+      if(fault===0){
         const f={id:uid(),game_id:cg.id,match_id:match.id,fault_number:(cg.faults?.length??0)+1,server_team:curServer,player_name:curServerIndividual??null,score_a_at:cg.score_a,score_b_at:cg.score_b};
         persist({...match,games:match.games.map(g=>g.id===cg.id?{...cg,faults:[...(cg.faults??[]),f]}:g)});
       }
