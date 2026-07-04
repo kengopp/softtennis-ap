@@ -1561,18 +1561,16 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>設定</span>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
-        {isAdmin && (
-          <div
-            style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
-            onClick={onGoalSettings}
-          >
-            <div>
-              <div style={{ fontSize:14,fontWeight:700 }}>🎯 目標設定</div>
-              <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・レシーブミス率などチーム共通の目標<br/>（管理者専用）</div>
-            </div>
-            <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        <div
+          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onGoalSettings}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>🎯 目標設定</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・レシーブミス率などチーム共通の目標<br/>（編集は管理者専用）</div>
           </div>
-        )}
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
         <div
           style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
           onClick={onRoster}
@@ -1624,6 +1622,7 @@ const DEFAULT_GOALS = {
 
 function GoalSettingsScreen({ onBack }) {
   const [schoolId, setSchoolId] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -1637,6 +1636,7 @@ function GoalSettingsScreen({ onBack }) {
   useEffect(() => {
     (async () => {
       const profile = await getMyProfile();
+      setIsAdmin(!!profile?.is_admin);
       if (!profile?.school_id) { setLoading(false); return; }
       setSchoolId(profile.school_id);
       const goals = await getSchoolGoals(profile.school_id);
@@ -1652,6 +1652,7 @@ function GoalSettingsScreen({ onBack }) {
   }, []);
 
   function handleEdit() {
+    if (!isAdmin) return;
     // 編集開始前の値を保持しておき、キャンセル時に復元できるようにする
     backupRef.current = { firstServe, receiveMiss, winnerCount, errorCount, pointDiff };
     setEditMode(true);
@@ -1669,7 +1670,7 @@ function GoalSettingsScreen({ onBack }) {
   }
 
   async function handleSave() {
-    if (!schoolId) return;
+    if (!schoolId || !isAdmin) return;
     setSaving(true);
     try {
       await updateSchoolMaster(schoolId, {
@@ -1688,25 +1689,24 @@ function GoalSettingsScreen({ onBack }) {
     }
   }
 
+  const canEditNow = isAdmin && editMode;
   const inputStyle = (disabled) => ({
     width:64, textAlign:"center", border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 4px", fontSize:14, fontWeight:700,
     color: disabled ? C.textSec : C.navy,
     background: disabled ? "#f0f1f3" : C.white,
   });
   const row = (num, label, value, setValue, unit) => (
-    <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+    <>
       <span style={{ fontSize:12,color:C.text,fontWeight:700 }}><span style={{ color:C.textSec,fontWeight:400,marginRight:4 }}>{num}</span>{label}</span>
-      <div style={{ display:"flex",alignItems:"center",gap:4 }}>
-        <input style={inputStyle(!editMode)} type="number" value={value} disabled={!editMode} onChange={e=>setValue(e.target.value)} />
-        <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{unit}</span>
-      </div>
-    </div>
+      <input style={inputStyle(!canEditNow)} type="number" value={value} disabled={!canEditNow} onChange={e=>setValue(e.target.value)} />
+      <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{unit}</span>
+    </>
   );
 
   return (
     <div style={S.page}>
       <div style={S.hdr}>
-        <button style={S.backBtn} onClick={onBack}>←</button>
+        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
         <span style={{ fontSize:18,fontWeight:800,color:C.white }}>目標設定</span>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
@@ -1718,7 +1718,7 @@ function GoalSettingsScreen({ onBack }) {
           <>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
               <div style={{ fontSize:20,fontWeight:800 }}>🎯 目標設定</div>
-              {!editMode && (
+              {isAdmin && !editMode && (
                 <button
                   style={{ background:C.navy, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, padding:"7px 12px", cursor:"pointer" }}
                   onClick={handleEdit}
@@ -1726,14 +1726,14 @@ function GoalSettingsScreen({ onBack }) {
               )}
             </div>
             <div style={{ fontSize:11,color:C.textSec,marginBottom:14 }}>ここで設定した目標は、チーム全選手のスタッツ画面に共通で適用されます</div>
-            <div style={{ ...S.card, padding:14 }}>
+            <div style={{ ...S.card, padding:14, display:"grid", gridTemplateColumns:"1fr 68px 56px", columnGap:8, rowGap:14, alignItems:"center" }}>
               {row("①", "1stサーブ確率", firstServe, setFirstServe, "%以上")}
               {row("②", "レシーブミス率", receiveMiss, setReceiveMiss, "%以下")}
               {row("③", "決めたプレイ回数", winnerCount, setWinnerCount, "回以上")}
               {row("④", "ミスしたプレイ回数", errorCount, setErrorCount, "回以下")}
               {row("⑤", "得点差（決めた−ミス）", pointDiff, setPointDiff, "以上")}
             </div>
-            {editMode && (
+            {canEditNow && (
               <>
                 <button style={{ ...S.btn(`linear-gradient(135deg,${C.navy},#12213f)`), marginTop:14, width:"100%" }} disabled={saving} onClick={handleSave}>
                   {saving?"保存中...":"保存する"}
@@ -4438,11 +4438,11 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     return (
                       <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
                         <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>1stサーブ確率</span>
-                        <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
-                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),width:80,textAlign:"right",display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4 }}>
+                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {inCount}/{p.serveTotal}・{rate}%
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
                         </span>
+                        <div style={{ flex:1,maxWidth:"50%",height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
                       </div>
                     );
                   })()}
@@ -4453,11 +4453,11 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     return (
                       <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
                         <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス率</span>
-                        <div style={{ flex:1,height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
-                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),width:80,textAlign:"right",display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4 }}>
+                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {p.receiveMiss}/{p.receiveTotal}・{rate}%
                           {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
                         </span>
+                        <div style={{ flex:1,maxWidth:"50%",height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
                       </div>
                     );
                   })()}
@@ -4479,8 +4479,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                         {winPlays.map(([k,n])=>(
                           <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
                             <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
-                            <div style={{ flex:1,height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
-                            <span style={{ fontSize:10,fontWeight:700,color:"#555",width:26,textAlign:"right" }}>{n}回</span>
+                            <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0 }}>{n}回</span>
+                            <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
                           </div>
                         ))}
                       </div>
@@ -4497,8 +4497,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                         {errPlays.map(([k,n])=>(
                           <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
                             <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
-                            <div style={{ flex:1,height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
-                            <span style={{ fontSize:10,fontWeight:700,color:"#555",width:26,textAlign:"right" }}>{n}回</span>
+                            <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0 }}>{n}回</span>
+                            <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
                           </div>
                         ))}
                       </div>
