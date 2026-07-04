@@ -4204,18 +4204,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               </div>
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
-                  {g.points.map(pt=>{
-                    const faultLabel = pt.fault_count===2 ? "DF" : pt.fault_count===1 ? "F" : null;
-                    const titleParts=[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):"",faultLabel==="DF"?"ダブルフォルト":faultLabel==="F"?"1stフォルト（2ndで決着）":""].filter(Boolean).join(" ");
-                    return (
-                      <div key={pt.id} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:1 }}>
-                        <div title={titleParts} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
-                          <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
-                        </div>
-                        {faultLabel && <span style={{ fontSize:8,fontWeight:800,color:faultLabel==="DF"?"#c0392b":"#e08e0b",lineHeight:1 }}>{faultLabel}</span>}
-                      </div>
-                    );
-                  })}
+                  {g.points.map(pt=>(
+                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
+                      <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
+                    </div>
+                  ))}
                 </div>
                 <div style={{ overflowX:"auto" }}>
                   <table style={{ borderCollapse:"collapse",minWidth:280,fontSize:10 }}>
@@ -4229,14 +4222,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                                 <div>
                                   <div style={{ fontSize:10,fontWeight:700,color:team==="A"?C.teamA:C.teamB }}>{pt.score_a_after}-{pt.score_b_after}</div>
                                   {pt.play_type&&<div style={{ fontSize:8,color:C.textSec }}>{getPlayLabel(pt.play_type).slice(0,4)}</div>}
-                                  {pt.fault_count===1&&<div style={{ fontSize:8,fontWeight:800,color:"#e08e0b" }}>F</div>}
-                                  {pt.fault_count===2&&<div style={{ fontSize:8,fontWeight:800,color:"#c0392b" }}>DF</div>}
                                 </div>
                               )}
                             </td>
                           ))}
                         </tr>
                       ))}
+                      {/* ★フォルト行：得点が記載されている列にだけ F / DF を表示 */}
+                      <tr>
+                        <td style={{ fontSize:10,color:C.textSec,fontWeight:700,paddingRight:8,whiteSpace:"nowrap" }}></td>
+                        {g.points.map((pt,i)=>(
+                          <td key={i} style={{ padding:"2px 4px",textAlign:"center",minWidth:28 }}>
+                            {pt.fault_count===1&&<span style={{ fontSize:10,fontWeight:800,color:"#e08e0b" }}>F</span>}
+                            {pt.fault_count===2&&<span style={{ fontSize:10,fontWeight:800,color:"#c0392b" }}>DF</span>}
+                          </td>
+                        ))}
+                      </tr>
                     </tbody>
                   </table>
                 </div>
