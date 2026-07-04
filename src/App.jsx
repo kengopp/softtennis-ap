@@ -4058,7 +4058,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
             <>
               {/* サーブ表示：大型セグメントボタン（1st=緑／2nd=黄／df=赤、案①の配色＋案②サイズ） */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10 }}>
-                <div style={{ fontSize:13,fontWeight:800,color:"#c9740b",display:"flex",alignItems:"center",gap:6,marginBottom:8 }}>🎾 {serverLabel}</div>
+                <div style={{ fontSize:13,fontWeight:800,color:"#c9740b",display:"flex",alignItems:"center",gap:6,marginBottom:2 }}>🎾 {serverLabel}</div>
+                <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:8 }}>サービス</div>
                 <div style={{ display:"flex",gap:8 }}>
                   {[{v:"1st",on:fault===0,color:"#2ecc71"},{v:"2nd",on:fault===1,color:"#f5a623"},{v:"df",on:fault===2,color:"#e74c3c"}].map(opt=>(
                     <div key={opt.v} onClick={()=>handleServeRadio(opt.v)} style={{
