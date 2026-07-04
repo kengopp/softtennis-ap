@@ -1563,7 +1563,7 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
       <div style={{ padding:14, paddingBottom:90 }}>
         {isAdmin && (
           <div
-            style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center", border:`1px solid #ffd699`, background:"#fff8ea" }}
+            style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
             onClick={onGoalSettings}
           >
             <div>
@@ -1614,15 +1614,25 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
 // ============================================================
 // 目標設定画面（チーム共通・1セットのみ・管理者専用）
 // ============================================================
+const DEFAULT_GOALS = {
+  firstServe: "70",
+  receiveMiss: "10",
+  winnerCount: "3",
+  errorCount: "2",
+  pointDiff: "1",
+};
+
 function GoalSettingsScreen({ onBack }) {
   const [schoolId, setSchoolId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [firstServe, setFirstServe] = useState("");
-  const [receiveMiss, setReceiveMiss] = useState("");
-  const [winnerCount, setWinnerCount] = useState("");
-  const [errorCount, setErrorCount] = useState("");
-  const [pointDiff, setPointDiff] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [firstServe, setFirstServe] = useState(DEFAULT_GOALS.firstServe);
+  const [receiveMiss, setReceiveMiss] = useState(DEFAULT_GOALS.receiveMiss);
+  const [winnerCount, setWinnerCount] = useState(DEFAULT_GOALS.winnerCount);
+  const [errorCount, setErrorCount] = useState(DEFAULT_GOALS.errorCount);
+  const [pointDiff, setPointDiff] = useState(DEFAULT_GOALS.pointDiff);
+  const backupRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -1631,15 +1641,32 @@ function GoalSettingsScreen({ onBack }) {
       setSchoolId(profile.school_id);
       const goals = await getSchoolGoals(profile.school_id);
       if (goals) {
-        setFirstServe(goals.goal_first_serve_pct ?? "");
-        setReceiveMiss(goals.goal_receive_miss_pct ?? "");
-        setWinnerCount(goals.goal_winner_count ?? "");
-        setErrorCount(goals.goal_error_count ?? "");
-        setPointDiff(goals.goal_point_diff ?? "");
+        setFirstServe(goals.goal_first_serve_pct!=null ? String(goals.goal_first_serve_pct) : DEFAULT_GOALS.firstServe);
+        setReceiveMiss(goals.goal_receive_miss_pct!=null ? String(goals.goal_receive_miss_pct) : DEFAULT_GOALS.receiveMiss);
+        setWinnerCount(goals.goal_winner_count!=null ? String(goals.goal_winner_count) : DEFAULT_GOALS.winnerCount);
+        setErrorCount(goals.goal_error_count!=null ? String(goals.goal_error_count) : DEFAULT_GOALS.errorCount);
+        setPointDiff(goals.goal_point_diff!=null ? String(goals.goal_point_diff) : DEFAULT_GOALS.pointDiff);
       }
       setLoading(false);
     })();
   }, []);
+
+  function handleEdit() {
+    // 編集開始前の値を保持しておき、キャンセル時に復元できるようにする
+    backupRef.current = { firstServe, receiveMiss, winnerCount, errorCount, pointDiff };
+    setEditMode(true);
+  }
+
+  function handleCancel() {
+    if (backupRef.current) {
+      setFirstServe(backupRef.current.firstServe);
+      setReceiveMiss(backupRef.current.receiveMiss);
+      setWinnerCount(backupRef.current.winnerCount);
+      setErrorCount(backupRef.current.errorCount);
+      setPointDiff(backupRef.current.pointDiff);
+    }
+    setEditMode(false);
+  }
 
   async function handleSave() {
     if (!schoolId) return;
@@ -1653,6 +1680,7 @@ function GoalSettingsScreen({ onBack }) {
         goal_point_diff: pointDiff===""?null:Number(pointDiff),
       });
       alert("目標を保存しました");
+      setEditMode(false);
     } catch(e) {
       alert("保存に失敗しました: "+(e.message||e));
     } finally {
@@ -1660,12 +1688,16 @@ function GoalSettingsScreen({ onBack }) {
     }
   }
 
-  const inputStyle = { width:64, textAlign:"center", border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 4px", fontSize:14, fontWeight:700, color:C.navy };
+  const inputStyle = (disabled) => ({
+    width:64, textAlign:"center", border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 4px", fontSize:14, fontWeight:700,
+    color: disabled ? C.textSec : C.navy,
+    background: disabled ? "#f0f1f3" : C.white,
+  });
   const row = (num, label, value, setValue, unit) => (
     <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
       <span style={{ fontSize:12,color:C.text,fontWeight:700 }}><span style={{ color:C.textSec,fontWeight:400,marginRight:4 }}>{num}</span>{label}</span>
       <div style={{ display:"flex",alignItems:"center",gap:4 }}>
-        <input style={inputStyle} type="number" value={value} onChange={e=>setValue(e.target.value)} />
+        <input style={inputStyle(!editMode)} type="number" value={value} disabled={!editMode} onChange={e=>setValue(e.target.value)} />
         <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{unit}</span>
       </div>
     </div>
@@ -1684,7 +1716,15 @@ function GoalSettingsScreen({ onBack }) {
           <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のため目標を設定できません</div>
         ) : (
           <>
-            <div style={{ fontSize:20,fontWeight:800,marginBottom:4 }}>🎯 目標設定</div>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+              <div style={{ fontSize:20,fontWeight:800 }}>🎯 目標設定</div>
+              {!editMode && (
+                <button
+                  style={{ background:C.navy, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, padding:"7px 12px", cursor:"pointer" }}
+                  onClick={handleEdit}
+                >✏️ 目標値変更</button>
+              )}
+            </div>
             <div style={{ fontSize:11,color:C.textSec,marginBottom:14 }}>ここで設定した目標は、チーム全選手のスタッツ画面に共通で適用されます</div>
             <div style={{ ...S.card, padding:14 }}>
               {row("①", "1stサーブ確率", firstServe, setFirstServe, "%以上")}
@@ -1693,9 +1733,18 @@ function GoalSettingsScreen({ onBack }) {
               {row("④", "ミスしたプレイ回数", errorCount, setErrorCount, "回以下")}
               {row("⑤", "得点差（決めた−ミス）", pointDiff, setPointDiff, "以上")}
             </div>
-            <button style={{ ...S.btn(`linear-gradient(135deg,${C.navy},#12213f)`), marginTop:14, width:"100%" }} disabled={saving} onClick={handleSave}>
-              {saving?"保存中...":"保存する"}
-            </button>
+            {editMode && (
+              <>
+                <button style={{ ...S.btn(`linear-gradient(135deg,${C.navy},#12213f)`), marginTop:14, width:"100%" }} disabled={saving} onClick={handleSave}>
+                  {saving?"保存中...":"保存する"}
+                </button>
+                <button
+                  style={{ ...S.btn(C.white,C.textSec), marginTop:10, width:"100%", border:`1px solid ${C.border}` }}
+                  disabled={saving}
+                  onClick={handleCancel}
+                >キャンセル</button>
+              </>
+            )}
           </>
         )}
       </div>
