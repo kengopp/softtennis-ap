@@ -3384,15 +3384,13 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           )}
         </FormSec>
 
-        {!editing && !isTeamMatchGame && (
-          <button
-            style={{ ...S.btn(canSchedule ? "linear-gradient(135deg,#7b1fa2,#9c27b0)" : C.border, canSchedule ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
-            disabled={!canSchedule || saving}
-            onClick={handleSchedule}
-          >
-            {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
-          </button>
-        )}
+        <button
+          style={{ ...S.btn((canSave&&!saving) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (canSave&&!saving) ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
+          disabled={!canSave || saving}
+          onClick={editing ? ()=>handleSave(null) : handleSaveWithServeSelect}
+        >
+          {saving ? "保存中..." : (editing ? "保存する 💾" : isTeamMatchGame ? "ペアを登録して試合開始 🎾" : "試合を開始する 🎾")}
+        </button>
         {/* 団体戦ペア登録モード：ペアだけ保存して戻るボタン */}
         {isTeamMatchGame && onSavePairOnly && (
           <button
@@ -3426,13 +3424,15 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {saving ? "保存中..." : "💾 ペアを登録して戻る"}
           </button>
         )}
-        <button
-          style={{ ...S.btn((canSave&&!saving) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (canSave&&!saving) ? C.white : C.textSec), marginTop:4 }}
-          disabled={!canSave || saving}
-          onClick={editing ? ()=>handleSave(null) : handleSaveWithServeSelect}
-        >
-          {saving ? "保存中..." : (editing ? "保存する 💾" : isTeamMatchGame ? "ペアを登録して試合開始 🎾" : "試合を開始する 🎾")}
-        </button>
+        {!editing && !isTeamMatchGame && (
+          <button
+            style={{ ...S.btn(canSchedule ? "linear-gradient(135deg,#7b1fa2,#9c27b0)" : C.border, canSchedule ? C.white : C.textSec), marginTop:4 }}
+            disabled={!canSchedule || saving}
+            onClick={handleSchedule}
+          >
+            {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
+          </button>
+        )}
       </div>
 
       {/* サーブ選択モーダル */}
