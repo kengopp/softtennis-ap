@@ -4233,8 +4233,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                         <td style={{ fontSize:10,color:C.textSec,fontWeight:700,paddingRight:8,whiteSpace:"nowrap" }}></td>
                         {g.points.map((pt,i)=>(
                           <td key={i} style={{ padding:"2px 4px",textAlign:"center",minWidth:28 }}>
-                            {pt.fault_count===1&&<span style={{ fontSize:10,fontWeight:800,color:"#e08e0b" }}>F</span>}
-                            {pt.fault_count===2&&<span style={{ fontSize:10,fontWeight:800,color:"#c0392b" }}>DF</span>}
+                            {pt.fault_count===1&&<span style={{ fontSize:10,fontWeight:800,color:C.text }}>F</span>}
+                            {pt.fault_count===2&&<span style={{ fontSize:10,fontWeight:800,color:C.text }}>DF</span>}
                           </td>
                         ))}
                       </tr>
