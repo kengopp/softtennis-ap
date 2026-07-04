@@ -42,8 +42,8 @@ const PLAY_TYPES = [
 
 // 結果（新規記録時の選択肢：ウィナー / エラーの2択）
 const RESULT_TYPES = [
-  { key: "winner", label: "ウィナー", is_winner: true  },
-  { key: "error",  label: "エラー",   is_winner: false },
+  { key: "winner", label: "決めた",   is_winner: true  },
+  { key: "error",  label: "ミスした", is_winner: false },
 ];
 // ラベル・勝敗判定（過去データに残る "ace" も正しく表示できるよう選択肢とは別管理）
 const RESULT_LABELS    = { winner: "ウィナー", ace: "エース", error: "エラー" };
@@ -3476,13 +3476,43 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
     if(!currentGame) return;
     if(fault===0){
       const cg=currentGame;
-      const f={id:uid(),game_id:cg.id,match_id:match.id,fault_number:(cg.faults?.length??0)+1,server_team:curServer,player_name:selPlayer??null,score_a_at:cg.score_a,score_b_at:cg.score_b};
+      const f={id:uid(),game_id:cg.id,match_id:match.id,fault_number:(cg.faults?.length??0)+1,server_team:curServer,player_name:curServerIndividual??null,score_a_at:cg.score_a,score_b_at:cg.score_b};
       persist({...match,games:match.games.map(g=>g.id===cg.id?{...cg,faults:[...(cg.faults??[]),f]}:g)});
       setFault(1);
     } else {
       setFault(0);
       addPoint(curServer==="A"?"B":"A");
     }
+  }
+
+  function handleServeRadio(v){
+    if(!currentGame) return;
+    if(v==="1st") return; // 1stは初期状態の表示のみ（操作不要）
+    if(v==="2nd"){ if(fault===0) handleFault(); return; }
+    if(v==="df"){
+      if(fault===0){
+        const cg=currentGame;
+        const f={id:uid(),game_id:cg.id,match_id:match.id,fault_number:(cg.faults?.length??0)+1,server_team:curServer,player_name:curServerIndividual??null,score_a_at:cg.score_a,score_b_at:cg.score_b};
+        persist({...match,games:match.games.map(g=>g.id===cg.id?{...cg,faults:[...(cg.faults??[]),f]}:g)});
+      }
+      setFault(0);
+      addPoint(curServer==="A"?"B":"A");
+    }
+  }
+
+  // ★得点ボタンを先に押す流れ用：直前に作成したポイントの詳細を後から書き換える
+  function updateLastPoint(field, value){
+    if(!currentGame || currentGame.points.length===0) return;
+    const cg = currentGame;
+    const idx = cg.points.length-1;
+    const lastPt = cg.points[idx];
+    const newVal = lastPt[field]===value ? null : value; // 同じチップをもう一度押したら解除
+    const updatedPt = {...lastPt, [field]:newVal};
+    if(field==="result_type"){
+      updatedPt.is_winner = newVal ? isWinnerResult(newVal) : null;
+    }
+    const newPoints = cg.points.map((p,i)=> i===idx ? updatedPt : p);
+    persist({...match, games: match.games.map(g=>g.id===cg.id?{...cg,points:newPoints}:g)});
   }
 
   function undo(){
@@ -3812,62 +3842,20 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
           {currentGame&&match.status!=="finished"&&(
             <>
-              {/* フォルトカウントバー */}
-              <div style={{ background:"#fff3e0",border:`1px solid #ffd699`,borderRadius:10,padding:"6px 12px",marginBottom:10,display:"flex",alignItems:"center",gap:8 }}>
-                <span style={{ fontSize:11,fontWeight:700,color:"#e65100",flex:1 }}>🎾 {serverLabel} のサーブ</span>
-                <span style={{ fontSize:10,color:"#666" }}>1st:</span>
-                <div style={{ width:12,height:12,borderRadius:"50%",background:fault>=1?C.orange:C.border }}/>
-                <div style={{ width:12,height:12,borderRadius:"50%",background:fault>=2?C.orange:C.border }}/>
-                <button style={{ background:fault===1?"#dc2626":C.purple,color:C.white,border:"none",borderRadius:7,fontSize:11,fontWeight:700,padding:"4px 10px",cursor:"pointer" }} onClick={handleFault}>
-                  {fault===1?"フォルト→DF":"フォルト"}
-                </button>
-              </div>
-
-              {/* ★段階1: プレイ内容 */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容（任意）</div>
-                <div>
-                  {PLAY_TYPES.map(p=>(
-                    <span key={p.key} style={S.chip(selPlay===p.key)} onClick={()=>setSelPlay(selPlay===p.key?null:p.key)}>{p.label}</span>
+              {/* サーブ表示：コンパクトなラジオ式(1st/2nd/df) */}
+              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+                <span style={{ fontSize:13,fontWeight:700,color:"#c9740b",display:"flex",alignItems:"center",gap:4 }}>🎾 {serverLabel}</span>
+                <div style={{ display:"flex",gap:16 }}>
+                  {[{v:"1st",on:fault===0},{v:"2nd",on:fault===1},{v:"df",on:false}].map(opt=>(
+                    <div key={opt.v} onClick={()=>handleServeRadio(opt.v)} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer" }}>
+                      <div style={{ width:16,height:16,borderRadius:"50%",border:`2px solid ${opt.on?"#3b6fe0":"#ccc"}`,background:opt.on?"#3b6fe0":"#fff",boxShadow:opt.on?"inset 0 0 0 3px #fff":"none" }}/>
+                      <span style={{ fontSize:10,fontWeight:700,color:opt.on?"#3b6fe0":"#999" }}>{opt.v}</span>
+                    </div>
                   ))}
                 </div>
               </div>
 
-              {/* ★段階2: フォア / バック */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック（任意）</div>
-                <div>
-                  {SIDE_TYPES.map(s=>(
-                    <span key={s.key} style={S.chip(selSide===s.key)} onClick={()=>setSelSide(selSide===s.key?null:s.key)}>{s.label}</span>
-                  ))}
-                </div>
-              </div>
-
-              {/* ★段階3: 結果 */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果（任意）</div>
-                <div>
-                  {RESULT_TYPES.map(r=>(
-                    <span key={r.key} style={S.chip(selResult===r.key)} onClick={()=>setSelResult(selResult===r.key?null:r.key)}>{r.label}</span>
-                  ))}
-                </div>
-              </div>
-
-              {/* ★段階4: 選手 */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:10 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手（任意）</div>
-                <div>
-                  {allPlayers.map(p=>(
-                    <span
-                      key={p.id}
-                      style={S.chip(selPlayerId===p.id)}
-                      onClick={()=>{ setSelPlayerId(selPlayerId===p.id?null:p.id); setSelPlayer(selPlayerId===p.id?null:p.name); }}
-                    >{p.name}</span>
-                  ))}
-                </div>
-              </div>
-
-              {/* ★得点ボタン（◯✕→「得点」表記に変更） */}
+              {/* ★得点ボタン（サービスのすぐ下に移動） */}
               <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どちらが得点しましたか？</div>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
                 {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
@@ -3880,6 +3868,66 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                   <span style={{ fontSize:22 }}>得点</span>
                   <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
                 </button>
+              </div>
+
+              {/* ★直前の記録（今チップで編集中の対象を明示） */}
+              {nonFaultPts.length>0&&(()=>{
+                const lp=nonFaultPts[nonFaultPts.length-1];
+                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
+                return (
+                  <div style={{ background:"#eef7ff",border:"1px solid #b8dcff",borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#2569b3" }}>
+                    <div style={{ fontWeight:700 }}>✎ 直前の記録を編集中：{lp.scoring_team==="A"?teamALabel:teamBLabel} {lp.score_a_after}-{lp.score_b_after}</div>
+                    <div style={{ marginTop:2,color:"#5b8bc9" }}>{detailParts.length>0?detailParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
+                  </div>
+                );
+              })()}
+
+              {/* ★選手 */}
+              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手（任意）</div>
+                <div>
+                  {allPlayers.map(p=>{
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = lp?.player_name===p.name;
+                    return <span key={p.id} style={S.chip(isSel)} onClick={()=>updateLastPoint("player_name",p.name)}>{p.name}</span>;
+                  })}
+                </div>
+              </div>
+
+              {/* ★結果 */}
+              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果（任意）</div>
+                <div>
+                  {RESULT_TYPES.map(r=>{
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = lp?.result_type===r.key;
+                    return <span key={r.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("result_type",r.key)}>{r.label}</span>;
+                  })}
+                </div>
+              </div>
+
+              {/* ★プレイ内容 */}
+              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容（任意）</div>
+                <div>
+                  {PLAY_TYPES.map(p=>{
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = lp?.play_type===p.key;
+                    return <span key={p.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("play_type",p.key)}>{p.label}</span>;
+                  })}
+                </div>
+              </div>
+
+              {/* ★フォア / バック */}
+              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:10 }}>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック（任意）</div>
+                <div>
+                  {SIDE_TYPES.map(s=>{
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = lp?.side_type===s.key;
+                    return <span key={s.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("side_type",s.key)}>{s.label}</span>;
+                  })}
+                </div>
               </div>
               <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={undo}>↩ 1つ前に戻す</button>
               {teamMatchId && (
