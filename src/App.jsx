@@ -4078,13 +4078,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 })()}
               </div>
 
-              {/* ★これから入る得点への反映内容を表示（常にこれから記録するポイント用のプレビュー） */}
+              {/* ★直前の記録（今チップで編集中の対象を明示。まだ得点がない場合はチップを無効化） */}
               {(()=>{
-                const preParts=[selPlayer,selPlay&&getPlayLabel(selPlay),selResult&&getResultLabel(selResult),selSide&&getSideLabel(selSide)].filter(Boolean);
+                const hasLast = nonFaultPts.length>0;
+                if(!hasLast){
+                  return (
+                    <div style={{ background:"#f5f6f8",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:C.textSec }}>
+                      得点を入れると、その点の選手やプレイ内容をここで選べるようになります
+                    </div>
+                  );
+                }
+                const lp=nonFaultPts[nonFaultPts.length-1];
+                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
                 return (
                   <div style={{ background:"#eef7ff",border:"1px solid #b8dcff",borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#2569b3" }}>
-                    <div style={{ fontWeight:700 }}>✎ これから入る得点に反映されます</div>
-                    <div style={{ marginTop:2,color:"#5b8bc9" }}>{preParts.length>0?preParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
+                    <div style={{ fontWeight:700 }}>✎ 直前の記録を編集中：{lp.scoring_team==="A"?teamALabel:teamBLabel} {lp.score_a_after}-{lp.score_b_after}</div>
+                    <div style={{ marginTop:2,color:"#5b8bc9" }}>{detailParts.length>0?detailParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
                   </div>
                 );
               })()}
@@ -4094,12 +4103,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手（任意）</div>
                 <div>
                   {allPlayers.map(p=>{
-                    const isSel = selPlayerId===p.id;
+                    const hasLast = nonFaultPts.length>0;
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = hasLast && lp?.player_name===p.name;
                     return (
-                      <span key={p.id} style={S.chip(isSel)} onClick={()=>{
-                        if(selPlayerId===p.id){ setSelPlayer(null); setSelPlayerId(null); }
-                        else { setSelPlayer(p.name); setSelPlayerId(p.id); }
-                      }}>{p.name}</span>
+                      <span key={p.id} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("player_name",p.name); }}>{p.name}</span>
                     );
                   })}
                 </div>
@@ -4110,9 +4118,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果（任意）</div>
                 <div>
                   {RESULT_TYPES.map(r=>{
-                    const isSel = selResult===r.key;
+                    const hasLast = nonFaultPts.length>0;
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = hasLast && lp?.result_type===r.key;
                     return (
-                      <span key={r.key} style={S.chip(isSel)} onClick={()=>setSelResult(prev=>prev===r.key?null:r.key)}>{r.label}</span>
+                      <span key={r.key} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("result_type",r.key); }}>{r.label}</span>
                     );
                   })}
                 </div>
@@ -4123,9 +4133,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容（任意）</div>
                 <div>
                   {PLAY_TYPES.map(p=>{
-                    const isSel = selPlay===p.key;
+                    const hasLast = nonFaultPts.length>0;
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = hasLast && lp?.play_type===p.key;
                     return (
-                      <span key={p.key} style={S.chip(isSel)} onClick={()=>setSelPlay(prev=>prev===p.key?null:p.key)}>{p.label}</span>
+                      <span key={p.key} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("play_type",p.key); }}>{p.label}</span>
                     );
                   })}
                 </div>
@@ -4136,9 +4148,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック（任意）</div>
                 <div>
                   {SIDE_TYPES.map(s=>{
-                    const isSel = selSide===s.key;
+                    const hasLast = nonFaultPts.length>0;
+                    const lp=nonFaultPts[nonFaultPts.length-1];
+                    const isSel = hasLast && lp?.side_type===s.key;
                     return (
-                      <span key={s.key} style={S.chip(isSel)} onClick={()=>setSelSide(prev=>prev===s.key?null:s.key)}>{s.label}</span>
+                      <span key={s.key} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("side_type",s.key); }}>{s.label}</span>
                     );
                   })}
                 </div>
