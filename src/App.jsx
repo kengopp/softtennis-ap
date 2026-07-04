@@ -4077,6 +4077,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                   );
                 })()}
               </div>
+              <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:10 }} onClick={undo}>↩ 1点前に戻す</button>
 
               {/* ★直前の記録（今チップで編集中の対象を明示。まだ得点がない場合はチップを無効化） */}
               {(()=>{
@@ -4100,7 +4101,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
               {/* ★選手 */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手（任意）</div>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どの選手が（任意）</div>
                 <div>
                   {allPlayers.map(p=>{
                     const hasLast = nonFaultPts.length>0;
@@ -4115,7 +4116,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
               {/* ★結果 */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果（任意）</div>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どうした（任意）</div>
                 <div>
                   {RESULT_TYPES.map(r=>{
                     const hasLast = nonFaultPts.length>0;
@@ -4130,7 +4131,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
               {/* ★プレイ内容 */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容（任意）</div>
+                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どんなプレイ（任意）</div>
                 <div>
                   {PLAY_TYPES.map(p=>{
                     const hasLast = nonFaultPts.length>0;
@@ -4157,7 +4158,6 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                   })}
                 </div>
               </div>
-              <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={undo}>↩ 1つ前に戻す</button>
               {teamMatchId && (
                 <button style={{ width:"100%",padding:11,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setSuspendConfirm(true)}>✕ 試合を中断する</button>
               )}
