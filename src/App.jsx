@@ -4712,6 +4712,13 @@ function ProfileScreen({ onBack, forced, onSaved }) {
     }
     setSaving(true);
     try {
+      // ★先に自分のusers行を「承認済み」で確定させる。
+      // players（選手マスター）へのINSERTはRLSで「同じチームの承認済みユーザーのみ」という
+      // 判定になっており、usersの行がまだ無い/未承認のままだと選手登録が権限エラーで弾かれていた。
+      // そのため、選手マスターへの登録より先にプロフィールを保存して承認状態にする。
+      await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId, is_approved: true });
+      setIsApproved(true);
+
       let newLinkedPlayerId = linkedPlayerId;
 
       // 選手として登録する場合：選手マスターに自動登録
@@ -4732,9 +4739,10 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         }
       }
 
-      await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: newLinkedPlayerId, is_approved: true });
+      if (newLinkedPlayerId !== linkedPlayerId) {
+        await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: newLinkedPlayerId, is_approved: true });
+      }
       setLinkedPlayerId(newLinkedPlayerId);
-      setIsApproved(true);
       onSaved?.();
       onBack();
     } catch (e) {
