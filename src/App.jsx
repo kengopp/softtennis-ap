@@ -4436,7 +4436,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     const good = hasGoals && goals.goal_first_serve_pct!=null ? rate>=goals.goal_first_serve_pct : null;
                     const barColor = good===null?C.accent:(good?C.accent:C.red);
                     return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
                         <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>1stサーブ確率</span>
                         <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {inCount}/{p.serveTotal}・{rate}%
@@ -4451,7 +4451,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     const good = hasGoals && goals.goal_receive_miss_pct!=null ? rate<=goals.goal_receive_miss_pct : null;
                     const barColor = good===null?C.red:(good?C.accent:C.red);
                     return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
                         <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス率</span>
                         <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {p.receiveMiss}/{p.receiveTotal}・{rate}%
