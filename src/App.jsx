@@ -5658,22 +5658,16 @@ function translateAuthError(msg) {
 // メール確認が必須の設定だと、登録直後はまだセッションがなく保存に失敗するため、
 // その場合は一時保存しておき、確認メール経由で初めてログインできた時にこの関数を呼んで自動で仕上げる。
 async function completeProfileRegistration(userId, payload) {
-  let schoolName = "";
-  if (payload.schoolId) {
-    const { data: schoolRow } = await supabase.from("schools").select("name").eq("id", payload.schoolId).single();
-    schoolName = schoolRow?.name ?? "";
-  }
-  const { error: profileErr } = await supabase.from("users").insert({
-    id: userId,
+  // ★school_name の取得やNOT NULL対応、エラー処理などを二重に持たず、
+  // 必ず saveMyProfile を通すことで保存ロジックを一本化する（今回のような食い違いバグの再発防止）
+  await saveMyProfile({
     name: payload.fullName,
     school_id: payload.schoolId,
-    school_name: schoolName,
     prefecture: payload.prefecture,
     gender_category: payload.genderCategory,
     category: payload.category,
     is_approved: true,
   });
-  if (profileErr) throw profileErr;
 
   if (payload.registerMode === "player") {
     const roster = await getPlayerRoster();
