@@ -376,32 +376,52 @@ async function getMyProfile() {
   if (!user) return null;
   const { data, error } = await supabase.from("users").select("*").eq("id", user.id).single();
   if (error) { console.error(error); return null; }
+  // ★school_name が空のまま保存されてしまっていた場合に備え、読み込み時に自動修復する
+  if (data && data.school_id && !data.school_name) {
+    const { data: schoolRow } = await supabase.from("schools").select("name").eq("id", data.school_id).single();
+    if (schoolRow?.name) {
+      await supabase.from("users").update({ school_name: schoolRow.name }).eq("id", user.id);
+      data.school_name = schoolRow.name;
+    }
+  }
   return data;
 }
 
 async function saveMyProfile(profile) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
+  if (!profile.school_id) throw new Error("学校を選択してください。");
+
+  // ★usersテーブルの school_name は NOT NULL 制約があるため、school_id から必ず引いてセットする。
+  // 取得できなかった場合は空文字でごまかさず、はっきりエラーにして呼び出し元に伝える。
+  const { data: schoolRow, error: schoolError } = await supabase
+    .from("schools")
+    .select("name")
+    .eq("id", profile.school_id)
+    .single();
+  if (schoolError || !schoolRow) {
+    throw new Error("学校情報を取得できませんでした。もう一度学校を選択してください。");
+  }
+
   const updates = {
     id: user.id,
     name: profile.name,
     school_id: profile.school_id,
+    school_name: schoolRow.name,
     prefecture: profile.prefecture,
     category: profile.category,
     gender_category: profile.gender_category,
     linked_player_id: profile.linked_player_id ?? null,
   };
-  // ★usersテーブルの school_name は NOT NULL 制約があるため、school_id から必ず引いてセットする
-  if (profile.school_id) {
-    const { data: schoolRow } = await supabase.from("schools").select("name").eq("id", profile.school_id).single();
-    updates.school_name = schoolRow?.name ?? "";
-  }
   if (profile.is_approved !== undefined) updates.is_approved = profile.is_approved;
   // ★update だと usersテーブルに行がまだ存在しない場合、0件更新のままエラーも出さずに終わってしまい、
   // 保存できたように見えて実は何も保存されていない、という無限ループの原因になっていた。
   // upsert にすることで、行がなければ新規作成、あれば更新、のどちらでも確実に保存されるようにする。
   const { error } = await supabase.from("users").upsert(updates);
-  if (error) throw error;
+  if (error) {
+    console.error(error);
+    throw error;
+  }
 }
 
 // 招待コード・管理者情報を取得
