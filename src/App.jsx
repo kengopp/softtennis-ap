@@ -2423,7 +2423,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
                 <div style={{ fontSize:10, color:C.textSec, marginTop:4 }}>📅 大会期間（{fmtDate(tournamentStartDate)}〜{fmtDate(tournamentEndDate)}）内から選択できます</div>
               </div>
             ) : lockTournament ? (
-              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
                 <span>{fmtDate(matchDate)}</span>
                 <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 大会の日程</span>
               </div>
@@ -2433,7 +2433,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           </FormRow>
           <FormRow label="大会名">
             {lockTournament ? (
-              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
                 <span>{tournamentName}</span>
                 <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
               </div>
@@ -3658,24 +3658,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         {!isTeamMatchGame && (
           <>
         <FormSec title="試合情報">
-          <FormRow label="試合日">
-            {lockTournament && tournamentStartDate && tournamentEndDate && tournamentStartDate !== tournamentEndDate ? (
-              <div>
-                <input type="date" style={S.inp} value={matchDate} min={tournamentStartDate} max={tournamentEndDate} onChange={e => setMatchDate(e.target.value)}/>
-                <div style={{ fontSize:10, color:C.textSec, marginTop:4 }}>📅 大会期間（{fmtDate(tournamentStartDate)}〜{fmtDate(tournamentEndDate)}）内から選択できます</div>
-              </div>
-            ) : lockTournament ? (
-              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <span>{fmtDate(matchDate)}</span>
-                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 大会の日程</span>
-              </div>
-            ) : (
-              <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
-            )}
-          </FormRow>
           <FormRow label="大会名">
             {lockTournament ? (
-              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
                 <span>{tournamentName}</span>
                 <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
               </div>
@@ -3683,34 +3668,36 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               <input style={S.inp} placeholder="例：○○中学校選手権" value={tournamentName} onChange={e => setTournamentName(e.target.value)}/>
             )}
           </FormRow>
-          <FormRow label="試合の種別">
-            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-              {MATCH_TYPES.map(({key,label}) => (
-                <button key={key} style={S.togBtn(matchType===key)} onClick={() => setMatchType(key)}>{label}</button>
-              ))}
-            </div>
-          </FormRow>
-          <FormRow label="若番 / 遅番（必須）">
-            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-            <div style={{ display:"flex", gap:8 }}>
-              <button style={{ ...S.togBtn(isYounger===true, C.navy), flex:1, padding:"10px 4px" }} onClick={()=>setIsYounger(true)}>
-                <div style={{ fontSize:13, fontWeight:700 }}>若番</div>
-                <div style={{ fontSize:10, opacity:0.8 }}>スコア左側</div>
-              </button>
-              <button style={{ ...S.togBtn(isYounger===false, C.navy), flex:1, padding:"10px 4px" }} onClick={()=>setIsYounger(false)}>
-                <div style={{ fontSize:13, fontWeight:700 }}>遅番</div>
-                <div style={{ fontSize:10, opacity:0.8 }}>スコア右側</div>
-              </button>
-            </div>
+          <FormRow label="試合日">
+            {lockTournament && tournamentStartDate && tournamentEndDate && tournamentStartDate !== tournamentEndDate ? (
+              <div>
+                <input type="date" style={S.inp} value={matchDate} min={tournamentStartDate} max={tournamentEndDate} onChange={e => setMatchDate(e.target.value)}/>
+                <div style={{ fontSize:10, color:C.textSec, marginTop:4 }}>📅 大会期間（{fmtDate(tournamentStartDate)}〜{fmtDate(tournamentEndDate)}）内から選択できます</div>
+              </div>
+            ) : lockTournament ? (
+              <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
+                <span>{fmtDate(matchDate)}</span>
+                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 大会の日程</span>
+              </div>
+            ) : (
+              <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
+            )}
           </FormRow>
           <FormRow label="場所 / 会場名">
             <VenueField value={venue} onChange={setVenue} venues={venues} />
           </FormRow>
+          <FormRow label="何回戦">
+            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
+          </FormRow>
           <FormRow label="コート番号（任意）">
             <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
           </FormRow>
-          <FormRow label="何回戦">
-            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
+          <FormRow label="若番 / 遅番（必須）">
+            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番（スコア左側）</button>
+              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番（スコア右側）</button>
+            </div>
           </FormRow>
         </FormSec>
 
