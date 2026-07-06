@@ -2172,7 +2172,7 @@ function GoalSettingsScreen({ onBack }) {
   );
 }
 
-function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats, onProfile }) {
+function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats, onProfile, onGoToTournaments }) {
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -2270,6 +2270,13 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                     >
                       <div style={{ fontSize:15, fontWeight:700 }}>🏆 団体戦</div>
                       <div style={{ fontSize:11, opacity:0.85, marginTop:2 }}>3番手制の団体戦を登録</div>
+                    </button>
+                    <button
+                      style={{ ...S.btn(`linear-gradient(135deg,#6366f1,#4f52d1)`), padding:"14px" }}
+                      onClick={()=>{ setShowNewModal(false); onGoToTournaments && onGoToTournaments(); }}
+                    >
+                      <div style={{ fontSize:15, fontWeight:700 }}>📋 大会から作成</div>
+                      <div style={{ fontSize:11, opacity:0.85, marginTop:2 }}>大会に紐づけて試合を記録</div>
                     </button>
                   </div>
                   <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13 }} onClick={()=>setShowNewModal(false)}>キャンセル</button>
@@ -2646,9 +2653,9 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     loadData();
   }, [teamMatchId]);
 
-  // 自動更新
+  // 自動更新（実際に試合が進行中の時だけポーリングする。予定・終了時は通信しない）
   useEffect(() => {
-    if (!liveActive) return;
+    if (!liveActive || tm?.status !== "active") return;
     intervalRef.current = setInterval(async () => {
       const now = Date.now();
       if (now - lastUpdated > INACTIVITY_MS) {
@@ -2659,7 +2666,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       await loadData();
     }, 10000);
     return () => clearInterval(intervalRef.current);
-  }, [liveActive, lastUpdated, teamMatchId]);
+  }, [liveActive, lastUpdated, teamMatchId, tm?.status]);
 
   if (loading || !tm) {
     return <div style={S.page}><div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div></div>;
@@ -6748,6 +6755,7 @@ export default function App() {
         onNavigate={goNav}
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
         onProfile={()=>setScreen("profile")}
+        onGoToTournaments={()=>{ setTournamentContext(null); setListMatchMode("tournament"); setScreen("list"); }}
       />
     );
   }
