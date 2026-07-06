@@ -3695,8 +3695,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <FormRow label="若番 / 遅番（必須）">
             <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番（スコア左側）</button>
-              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番（スコア右側）</button>
+              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
             </div>
           </FormRow>
         </FormSec>
