@@ -2606,7 +2606,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
 // ============================================================
 // 団体戦 詳細画面（リアルタイム観戦含む）
 // ============================================================
-function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit }) {
+function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onNavigate }) {
   const [tm, setTm] = useState(null);
   const [loading, setLoading] = useState(true);
   const [liveActive, setLiveActive] = useState(true);
@@ -2830,7 +2830,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           );
         })}
       </div>
-      <NavBar active="list" onNavigate={()=>{}}/>
+      <NavBar active="list" onNavigate={onNavigate}/>
 
       {/* サーブ選択モーダル */}
       {serveSelectInfo && (() => {
@@ -6687,6 +6687,7 @@ export default function App() {
           setScreen("teamMatchRecord");
         }}
         onEdit={id=>{ setTeamMatchEditId(id); setScreen("teamMatchSetup"); }}
+        onNavigate={key=>{ setTeamMatchId(null); goNav(key); }}
       />
     );
   }
