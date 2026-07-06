@@ -611,13 +611,12 @@ async function savePlayer(player) {
 }
 
 // ★品質改善：ユーザーの「関連選手」として紐づいたままの選手を削除しようとすると、
-// 外部キー制約（あるいはRLS）に阻まれて削除できない、または何も起きずに終わることがあった。
-// 削除前に、この選手を紐づけているユーザーがいれば先に紐づけを解除しておくことで、
-// 安全に削除できるようにする。
+// 外部キー制約に阻まれて削除できないことがあった。
+// クライアント側から他のユーザーの linked_player_id を直接更新しようとしても、
+// RLS（自分の行しか更新できない制限）に阻まれて実際には解除されないケースがあったため、
+// 紐づけ解除＋削除をまとめてDB側（Postgres関数）で安全に行う。
 async function deletePlayerFromRoster(id) {
-  const { error: unlinkError } = await supabase.from("users").update({ linked_player_id: null }).eq("linked_player_id", id);
-  if (unlinkError) throw unlinkError;
-  const { error } = await supabase.from("players").delete().eq("id", id);
+  const { error } = await supabase.rpc("delete_player_and_unlink", { p_player_id: id });
   if (error) throw error;
 }
 
