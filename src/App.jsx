@@ -3928,7 +3928,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         </FormSec>
 
         <FormSec title="試合詳細">
-          <FormRow label="何回戦">
+          <FormRow label="何回戦（任意）">
             <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
           </FormRow>
           <FormRow label="コート番号（任意）">
