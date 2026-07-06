@@ -1713,7 +1713,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam }) {
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch }) {
   const [seg, setSeg] = useState("team"); // team | individual
   const [matches, setMatches] = useState([]);
   const [teamMatches, setTeamMatches] = useState([]);
@@ -1721,6 +1721,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [mySchoolName, setMySchoolName] = useState("");
   const [loading, setLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null);
+  const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -1767,9 +1769,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
           const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
           return (
-            <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10, cursor:"pointer" }} onClick={()=>onOpenTeamMatch(tm.id)}>
+            <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
               <div style={{ height:4, background:statusColor }}/>
-              <div style={{ padding:"10px 14px" }}>
+              <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTeamMatch(tm.id)}>
                 <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                   <span style={{ fontSize:12, fontWeight:700 }}>{tm.round || "団体戦"}</span>
                   <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
@@ -1780,6 +1782,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1 }}>{oppLabel || "相手"}</span>
                 </div>
                 <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
+              </div>
+              <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピーして新規作成</button>
+                <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>
               </div>
             </div>
           );
@@ -1795,9 +1801,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const bNames = bPlayers.map(p=>p.player_name).join("/");
           const borderColor = m.status==="active" ? C.orange : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
           return (
-            <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", cursor:"pointer" }} onClick={()=>onOpenMatch(m.id)}>
+            <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
-              <div style={{ padding:"10px 14px" }}>
+              <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenMatch(m.id)}>
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>{fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}</div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
@@ -1806,6 +1812,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   </div>
                   {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                 </div>
+              </div>
+              <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>
+                <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>
               </div>
             </div>
           );
@@ -1837,6 +1847,33 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               }
             }}
           />
+        </Modal>
+      )}
+
+      {confirmDeleteMatch && (
+        <Modal onClose={()=>setConfirmDeleteMatch(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この試合を削除しますか？</h3>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>削除すると元に戻せません。</p>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(null)}>キャンセル</button>
+              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ await deleteMatch(confirmDeleteMatch); setConfirmDeleteMatch(null); reload(); }}>削除する</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {confirmDeleteTeamMatch && (
+        <Modal onClose={()=>setConfirmDeleteTeamMatch(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この団体戦を削除しますか？</h3>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>削除すると元に戻せません。</p>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(null)}>キャンセル</button>
+              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ await deleteTeamMatch(confirmDeleteTeamMatch); setConfirmDeleteTeamMatch(null); reload(); }}>削除する</button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>
@@ -6745,6 +6782,8 @@ export default function App() {
         onOpenTeamMatch={id=>{ setTeamMatchId(id); setScreen("teamMatchDetail"); }}
         onNewIndividual={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
         onNewTeam={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
+        onCopyMatch={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
+        onCopyTeamMatch={id=>{ setTeamMatchCopyId(id); setTeamMatchEditId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
       />
     );
   }
