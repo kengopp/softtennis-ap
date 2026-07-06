@@ -3259,7 +3259,7 @@ function FormSec({ title, children }) {
   return (
     <div style={{ marginBottom:14 }}>
       <div style={{ fontSize:11,fontWeight:700,color:C.navy,marginBottom:6,letterSpacing:"0.05em" }}>{title}</div>
-      <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,overflow:"hidden" }}>{children}</div>
+      <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,overflow:"visible" }}>{children}</div>
     </div>
   );
 }
