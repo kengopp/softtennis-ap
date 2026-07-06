@@ -1695,7 +1695,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         <input type="date" style={{ ...S.inp, flex:1 }} value={endDate} onChange={e=>setEndDate(e.target.value)}/>
       </div>
       <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>会場（任意）</div>
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>場所 / 会場名（任意）</div>
       <div style={{ marginBottom:16 }}>
         <VenueField value={venue} onChange={setVenue} venues={venues} placeholder="例：○○市民コート"/>
       </div>
@@ -2444,7 +2444,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           <FormRow label="何回戦">
             <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
           </FormRow>
-          <FormRow label="会場">
+          <FormRow label="場所 / 会場名">
             <VenueField value={venue} onChange={setVenue} venues={venues}/>
           </FormRow>
           <FormRow label="コート番号（任意）">
