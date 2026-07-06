@@ -778,6 +778,7 @@ async function saveTournament(t) {
     name: (t.name || "").trim(),
     start_date: t.start_date,
     end_date: t.end_date || t.start_date,
+    venue: t.venue || null,
   };
   const { error } = await supabase.from("tournaments").upsert(row);
   if (error) throw error;
@@ -1256,7 +1257,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     !tournamentSearch.trim() || t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())
   );
 
-  async function handleSaveTournament(name, startDate, endDate) {
+  async function handleSaveTournament(name, startDate, endDate, venue) {
     const trimmed = name.trim();
     if (!trimmed) { alert("大会名を入力してください"); return; }
     if (!startDate) { alert("開始日を選択してください"); return; }
@@ -1266,6 +1267,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         name: trimmed,
         start_date: startDate,
         end_date: endDate || startDate,
+        venue: venue || null,
       });
       setShowTournamentModal(false);
       setEditingTournament(null);
@@ -1677,7 +1679,10 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
   const [name, setName] = useState(initial?.name || "");
   const [startDate, setStartDate] = useState(initial?.start_date || today());
   const [endDate, setEndDate] = useState(initial?.end_date || initial?.start_date || today());
+  const [venue, setVenue] = useState(initial?.venue || "");
+  const [venues, setVenues] = useState([]);
   const [saving, setSaving] = useState(false);
+  useEffect(() => { getKnownVenues().then(setVenues); }, []);
   return (
     <div>
       <h3 style={{ fontSize:16, fontWeight:800, marginBottom:14, textAlign:"center" }}>{initial ? "✏️ 大会を編集" : "📋 大会を作成"}</h3>
@@ -1690,12 +1695,16 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         <input type="date" style={{ ...S.inp, flex:1 }} value={endDate} onChange={e=>setEndDate(e.target.value)}/>
       </div>
       <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>会場（任意）</div>
+      <div style={{ marginBottom:16 }}>
+        <VenueField value={venue} onChange={setVenue} venues={venues} placeholder="例：○○市民コート"/>
+      </div>
       <div style={{ display:"flex", gap:8 }}>
         <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:"#f0f2f6", color:C.textSec, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
         <button
           style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
           disabled={saving}
-          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate); setSaving(false); }}
+          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue); setSaving(false); }}
         >{initial ? "保存する" : "作成する"}</button>
       </div>
     </div>
@@ -1815,12 +1824,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <TournamentFormFields
             initial={tournament}
             onCancel={()=>setShowEditModal(false)}
-            onSave={async (name, startDate, endDate)=>{
+            onSave={async (name, startDate, endDate, venue)=>{
               const trimmed = name.trim();
               if (!trimmed) { alert("大会名を入力してください"); return; }
               if (!startDate) { alert("開始日を選択してください"); return; }
               try {
-                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate });
+                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null });
                 setShowEditModal(false);
                 onSaved && onSaved(saved);
               } catch(e) {
@@ -2277,11 +2286,11 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
 // ============================================================
 // 団体戦 予定登録画面
 // ============================================================
-function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, prefillDate, lockTournament }) {
+function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, prefillDate, prefillVenue, lockTournament, tournamentStartDate, tournamentEndDate }) {
   const [ready, setReady] = useState(!editId && !copyId);
   const [saving, setSaving] = useState(false);
   const [matchDate, setMatchDate] = useState(prefillDate || today());
-  const [venue, setVenue] = useState("");
+  const [venue, setVenue] = useState(prefillVenue || "");
   const [tournamentName, setTournamentName] = useState(prefillTournament || "");
   const [round, setRound] = useState("");
   const [myTeamDivision, setMyTeamDivision] = useState("");
@@ -2408,7 +2417,12 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
       <div style={{ padding:14 }}>
         <FormSec title="試合情報">
           <FormRow label="試合日">
-            {lockTournament ? (
+            {lockTournament && tournamentStartDate && tournamentEndDate && tournamentStartDate !== tournamentEndDate ? (
+              <div>
+                <input type="date" style={S.inp} value={matchDate} min={tournamentStartDate} max={tournamentEndDate} onChange={e=>setMatchDate(e.target.value)}/>
+                <div style={{ fontSize:10, color:C.textSec, marginTop:4 }}>📅 大会期間（{fmtDate(tournamentStartDate)}〜{fmtDate(tournamentEndDate)}）内から選択できます</div>
+              </div>
+            ) : lockTournament ? (
               <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <span>{fmtDate(matchDate)}</span>
                 <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 大会の日程</span>
@@ -2428,7 +2442,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
             )}
           </FormRow>
           <FormRow label="何回戦">
-            <VenueField value={round} onChange={setRound} venues={pastRounds} placeholder="例：準々決勝"/>
+            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
           </FormRow>
           <FormRow label="会場">
             <VenueField value={venue} onChange={setVenue} venues={venues}/>
@@ -3282,6 +3296,36 @@ function PrefMiniFilter({ value, onChange, options }) {
 }
 
 // 会場名入力＋候補サジェストコンポーネント
+// 何回戦の選択肢（決め打ちリスト＋自由入力）
+const ROUND_OPTIONS = [
+  "1回戦","2回戦","3回戦","4回戦","5回戦","6回戦","7回戦","8回戦","9回戦",
+  "準々決勝","準決勝","3位決定戦","決勝",
+  "敗者復活1回戦","敗者復活2回戦","敗者復活3回戦","敗者復活4回戦","敗者復活5回戦",
+];
+function RoundField({ value, onChange, placeholder }) {
+  const safeValue = value ?? "";
+  const filtered = safeValue.trim() ? ROUND_OPTIONS.filter(v => v.includes(safeValue.trim())) : ROUND_OPTIONS;
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position:"relative" }}>
+      <input style={S.inp} placeholder={placeholder || "例：準々決勝（リストから選択、または自由入力）"} value={safeValue}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:200, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", maxHeight:220, overflowY:"auto" }}>
+          {filtered.map(v => (
+            <div key={v} style={{ padding:"11px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
+              onMouseDown={e => { e.preventDefault(); onChange(v); setOpen(false); }}
+            >{v}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function VenueField({ value, onChange, venues, placeholder }) {
   const safeValue = value ?? "";
   const safeVenues = venues ?? [];
@@ -3380,7 +3424,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -3406,10 +3450,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate }) {
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -3610,7 +3654,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <>
         <FormSec title="試合情報">
           <FormRow label="試合日">
-            {lockTournament ? (
+            {lockTournament && tournamentStartDate && tournamentEndDate && tournamentStartDate !== tournamentEndDate ? (
+              <div>
+                <input type="date" style={S.inp} value={matchDate} min={tournamentStartDate} max={tournamentEndDate} onChange={e => setMatchDate(e.target.value)}/>
+                <div style={{ fontSize:10, color:C.textSec, marginTop:4 }}>📅 大会期間（{fmtDate(tournamentStartDate)}〜{fmtDate(tournamentEndDate)}）内から選択できます</div>
+              </div>
+            ) : lockTournament ? (
               <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <span>{fmtDate(matchDate)}</span>
                 <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 大会の日程</span>
@@ -3656,7 +3705,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
           </FormRow>
           <FormRow label="何回戦">
-            <input style={S.inp} placeholder="例：準々決勝" value={round} onChange={e => setRound(e.target.value)}/>
+            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
           </FormRow>
         </FormSec>
 
@@ -6354,6 +6403,14 @@ export default function App() {
   const [tournamentContext, setTournamentContext] = useState(null); // 大会詳細画面から試合作成に入った際の大会情報 {id,name,start_date,end_date}
   const [creatingFromTournament, setCreatingFromTournament] = useState(false); // 大会の＋ボタンから試合作成に入ったかどうか
 
+  // 大会に紐づく試合を新規作成する際のデフォルト試合日
+  // 今日が大会期間内ならその日を、期間外なら大会の初日を使う
+  const smartTournamentDate = (t) => {
+    if (!t) return undefined;
+    const todayStr = today();
+    return (todayStr >= t.start_date && todayStr <= t.end_date) ? todayStr : t.start_date;
+  };
+
   // 大会詳細を経由しているときは、戻る先を「一覧」ではなく「大会詳細」にする
   const backToListOrTournament = () => { setScreen(tournamentContext ? "tournamentDetail" : "list"); };
 
@@ -6495,8 +6552,11 @@ export default function App() {
         editId={teamMatchEditId}
         copyId={teamMatchCopyId}
         prefillTournament={creatingFromTournament && tournamentContext ? tournamentContext.name : undefined}
-        prefillDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
+        prefillDate={creatingFromTournament && tournamentContext ? smartTournamentDate(tournamentContext) : undefined}
+        prefillVenue={creatingFromTournament && tournamentContext ? tournamentContext.venue : undefined}
         lockTournament={creatingFromTournament && !!tournamentContext}
+        tournamentStartDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
+        tournamentEndDate={creatingFromTournament && tournamentContext ? tournamentContext.end_date : undefined}
         onSave={id=>{ setTeamMatchId(id); setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(false); setScreen("teamMatchDetail"); }}
         onCancel={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(false); setListMatchMode("team"); backToListOrTournament(); }}
       />
@@ -6641,8 +6701,11 @@ export default function App() {
         editMatchId={editTargetId}
         initialMatchType={initMatchType}
         prefillTournament={creatingFromTournament && tournamentContext ? tournamentContext.name : undefined}
-        prefillDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
+        prefillDate={creatingFromTournament && tournamentContext ? smartTournamentDate(tournamentContext) : undefined}
+        prefillVenue={creatingFromTournament && tournamentContext ? tournamentContext.venue : undefined}
         lockTournament={creatingFromTournament && !!tournamentContext}
+        tournamentStartDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
+        tournamentEndDate={creatingFromTournament && tournamentContext ? tournamentContext.end_date : undefined}
         onScheduled={()=>{ setInitMatchType(null); setCreatingFromTournament(false); setListFilter("scheduled"); setScreen("list"); setTimeout(()=>setListFilter("all"), 100); }}
         onSave={id=>{
           setCopySourceId(null);
