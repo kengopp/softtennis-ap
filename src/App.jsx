@@ -3588,7 +3588,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [round,          setRound]          = useState(base?.round ?? prefillRound ?? "");
   const [matchType,      setMatchType]      = useState(base?.match_type ?? initialMatchType ?? "tournament");
   const [courtNumber,    setCourtNumber]    = useState(base?.court_number ?? "");
-  const [isYounger,      setIsYounger]      = useState(base ? (base?.is_younger !== false ? true : false) : (prefillIsYounger !== undefined ? prefillIsYounger : true));
+  const [isYounger,      setIsYounger]      = useState(base ? (base?.is_younger !== false ? true : false) : (prefillIsYounger !== undefined ? prefillIsYounger : null));
   const [gameFormat,     setGameFormat]     = useState(base?.game_format ?? 7);
   const [isDoubles,      setIsDoubles]      = useState(base?.is_doubles ?? true);
   const [firstServer,    setFirstServer]    = useState(base?.first_server ?? null);
@@ -3684,6 +3684,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 
   // サーブ選択ポップアップ → handleSave本体を呼ぶ
   function handleSaveWithServeSelect() {
+    if (isYounger === null || isYounger === undefined) { alert("若番／遅番を選択してください"); return; }
     if (editing) { handleSave(null); return; } // 編集時はサーブ選択不要
     // 自チームと相手のラベルを作成
     const aLabel = [aP1.trim(), isDoubles ? aP2.trim() : ""].filter(Boolean).join("/") || "自チーム";
