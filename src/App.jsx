@@ -393,6 +393,24 @@ async function getMyProfile() {
   return data;
 }
 
+// プロフィール画像（LINEのような丸アイコン）
+async function uploadAvatarImage(file) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${user.id}/${uid()}.${ext}`;
+  const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true, contentType: file.type || "image/jpeg" });
+  if (upErr) throw upErr;
+  const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+  return data.publicUrl;
+}
+async function updateMyAvatar(avatarUrl) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const { error } = await supabase.from("users").update({ avatar_url: avatarUrl }).eq("id", user.id);
+  if (error) throw error;
+}
+
 async function saveMyProfile(profile) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
@@ -464,7 +482,7 @@ async function getApprovedMembers() {
 
 // グループ参加者一覧を取得（自分含む全員）
 async function getGroupMembers() {
-  const { data, error } = await supabase.from("users").select("id, name, is_approved").eq("is_approved", true).order("name");
+  const { data, error } = await supabase.from("users").select("id, name, is_approved, avatar_url").eq("is_approved", true).order("name");
   if (error) { console.error(error); return []; }
   return data || [];
 }
@@ -990,7 +1008,7 @@ function Modal({ children, onClose }) {
 function NavBar({ active, onNavigate }) {
   const items = [
     ["home",   "🏠", "ホーム"],
-    ["list",   "📋", "履歴"],
+    ["list",   "📋", "試合"],
     ["stats",  "📊", "分析"],
     ["master", "🗂",  "設定"],
   ];
@@ -1901,7 +1919,8 @@ function GroupMembersScreen({ onBack }) {
         ]);
         setSchoolInfo(info);
         const school = schools.find(s => s.id === p.school_id);
-        setMySchoolName(school ? `${school.name}（${school.category}・${school.prefecture}）` : "");
+        const genderLabel = GENDER_OPTIONS.find(g => g.key === p.gender_category)?.label || "";
+        setMySchoolName(school ? `${school.name}（${school.prefecture}・${categoryLabel(school.category)}${genderLabel ? "・"+genderLabel : ""}）` : "");
       }
       const list = await getGroupMembers();
       setMembers(list);
@@ -1931,8 +1950,8 @@ function GroupMembersScreen({ onBack }) {
             {members.map(m => (
               <div key={m.id} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}` }}>
                 <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                  <div style={{ width:36,height:36,borderRadius:"50%",background:C.accentL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:C.accent,flexShrink:0 }}>
-                    {m.name?.charAt(0) || "?"}
+                  <div style={{ width:36,height:36,borderRadius:"50%",background:C.accentL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:C.accent,flexShrink:0,overflow:"hidden" }}>
+                    {m.avatar_url ? <img src={m.avatar_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : (m.name?.charAt(0) || "?")}
                   </div>
                   <span style={{ fontSize:14,fontWeight:700,color:C.text }}>{m.name}</span>
                 </div>
@@ -2453,6 +2472,16 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
       </div>
       <div style={{ padding:14 }}>
         <FormSec title="試合情報">
+          <FormRow label="大会名">
+            {lockTournament ? (
+              <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
+                <span>{tournamentName}</span>
+                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
+              </div>
+            ) : (
+              <VenueField value={tournamentName} onChange={setTournamentName} venues={pastTournaments} placeholder="例：○○高校選手権"/>
+            )}
+          </FormRow>
           <FormRow label="試合日">
             {lockTournament && tournamentStartDate && tournamentEndDate && tournamentStartDate !== tournamentEndDate ? (
               <div>
@@ -2468,34 +2497,20 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
               <input type="date" style={S.inp} value={matchDate} onChange={e=>setMatchDate(e.target.value)}/>
             )}
           </FormRow>
-          <FormRow label="大会名">
-            {lockTournament ? (
-              <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
-                <span>{tournamentName}</span>
-                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
-              </div>
-            ) : (
-              <VenueField value={tournamentName} onChange={setTournamentName} venues={pastTournaments} placeholder="例：○○高校選手権"/>
-            )}
+          <FormRow label="場所 / 会場名">
+            <VenueField value={venue} onChange={setVenue} venues={venues}/>
           </FormRow>
           <FormRow label="何回戦">
             <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
-          </FormRow>
-          <FormRow label="場所 / 会場名">
-            <VenueField value={venue} onChange={setVenue} venues={venues}/>
           </FormRow>
           <FormRow label="コート番号（任意）">
             <VenueField value={courtNumber} onChange={setCourtNumber} venues={pastCourtNumbers} placeholder="例：3番コート"/>
           </FormRow>
           <FormRow label="若番 / 遅番（必須）">
             <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-            <div style={{ display:"flex", gap:8 }}>
-              <button style={{ ...S.togBtn(isYounger===true, C.navy), flex:1, padding:"10px 4px" }} onClick={()=>setIsYounger(true)}>
-                <div style={{ fontSize:13, fontWeight:700 }}>若番</div>
-              </button>
-              <button style={{ ...S.togBtn(isYounger===false, C.navy), flex:1, padding:"10px 4px" }} onClick={()=>setIsYounger(false)}>
-                <div style={{ fontSize:13, fontWeight:700 }}>遅番</div>
-              </button>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
             </div>
           </FormRow>
         </FormSec>
@@ -4183,8 +4198,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         <div style={{ marginBottom:8 }}>
           {RESULT_TYPES.map(r=>{ const isSel=lp.result_type===r.key; return <span key={r.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"result_type",r.key)}>{r.label}</span>; })}
         </div>
-        <div>
+        <div style={{ marginBottom:8 }}>
           {PLAY_TYPES.map(p=>{ const isSel=lp.play_type===p.key; return <span key={p.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"play_type",p.key)}>{p.label}</span>; })}
+        </div>
+        <div>
+          {SIDE_TYPES.map(s=>{ const isSel=lp.side_type===s.key; return <span key={s.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"side_type",s.key)}>{s.label}</span>; })}
         </div>
       </div>
     );
@@ -5121,6 +5139,8 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [dissolving, setDissolving] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [myUserId, setMyUserId] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   useEffect(() => { getSchools().then(setSchools); }, []);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
@@ -5141,6 +5161,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         setGenderCategory(p.gender_category ?? null);
         setCategory(p.category ?? null);
         setLinkedPlayerId(p.linked_player_id ?? null);
+        setAvatarUrl(p.avatar_url ?? null);
         setIsApproved(!!p.is_approved);
         setMyUserId(p.id);
         if (p.school_id) {
@@ -5337,6 +5358,40 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                 {isAdmin ? "👑 管理者" : "メンバー"}
               </span>
             )}
+          </div>
+          <div style={{ display:"flex", justifyContent:"center", marginBottom:16 }}>
+            <label style={{ position:"relative", cursor:"pointer", display:"inline-block" }}>
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display:"none" }}
+                onChange={async e=>{
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setAvatarUploading(true);
+                  try {
+                    const url = await uploadAvatarImage(file);
+                    await updateMyAvatar(url);
+                    setAvatarUrl(url);
+                  } catch(err) {
+                    alert("画像のアップロードに失敗しました: " + (err.message || err));
+                  } finally {
+                    setAvatarUploading(false);
+                  }
+                }}
+              />
+              <div style={{ width:88, height:88, borderRadius:"50%", background:C.accentL, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", border:`2px solid ${C.border}` }}>
+                {avatarUploading ? (
+                  <span style={{ fontSize:12, color:C.textSec }}>アップロード中…</span>
+                ) : avatarUrl ? (
+                  <img src={avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
+                ) : (
+                  <span style={{ fontSize:32, color:C.accent }}>{(lastName || "?").charAt(0)}</span>
+                )}
+              </div>
+              <div style={{ position:"absolute", bottom:0, right:0, width:28, height:28, borderRadius:"50%", background:C.navy, color:C.white, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, border:`2px solid ${C.white}` }}>📷</div>
+            </label>
           </div>
           <FormRow label="お名前">
             <div style={{ display:"flex", gap:10 }}>
