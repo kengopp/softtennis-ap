@@ -2522,7 +2522,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
             {lockTournament ? (
               <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
                 <span>{tournamentName}</span>
-                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
+                <span style={{ fontSize:12, color:C.textSec, background:"#e2e5eb", padding:"4px 6px", borderRadius:10, fontWeight:700 }}>🔒</span>
               </div>
             ) : (
               <VenueField value={tournamentName} onChange={setTournamentName} venues={pastTournaments} placeholder="例：○○高校選手権"/>
@@ -3784,7 +3784,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {lockTournament ? (
               <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
                 <span>{tournamentName}</span>
-                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
+                <span style={{ fontSize:12, color:C.textSec, background:"#e2e5eb", padding:"4px 6px", borderRadius:10, fontWeight:700 }}>🔒</span>
               </div>
             ) : (
               <input style={S.inp} placeholder="例：○○中学校選手権" value={tournamentName} onChange={e => setTournamentName(e.target.value)}/>
