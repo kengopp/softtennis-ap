@@ -502,22 +502,31 @@ async function dissolveTeam() {
 // ============================================================
 // 学校マスター（閲覧は誰でも可、追加・編集・削除は管理者のみ）
 // ============================================================
+// ★品質改善：学校マスターは追加・編集・削除以外ではほぼ変化しない「参照データ」なので、
+// 毎回の一覧再読み込み（reload）のたびにネットワーク取得していたのをやめ、
+// 一度取得したらメモリ上にキャッシュして使い回す。追加・編集・削除時だけキャッシュを破棄する。
+let __schoolsCache = null;
 async function getSchools() {
+  if (__schoolsCache) return __schoolsCache;
   const { data, error } = await supabase.from("schools").select("*").order("name");
   if (error) { console.error(error); return []; }
+  __schoolsCache = data;
   return data;
 }
+function invalidateSchoolsCache() { __schoolsCache = null; }
 
 async function addSchool(name, prefecture, category, genderRestriction) {
   const row = { id: uid(), name: name.trim(), prefecture: prefecture || null, category: category || null, gender_restriction: genderRestriction || "mixed" };
   const { error } = await supabase.from("schools").insert(row);
   if (error) throw error;
+  invalidateSchoolsCache();
   return row;
 }
 
 async function updateSchoolMaster(id, updates) {
   const { error } = await supabase.from("schools").update(updates).eq("id", id);
   if (error) throw error;
+  invalidateSchoolsCache();
 }
 
 // ★チーム共通の目標設定（学校＝チーム単位で1セットのみ保持）
@@ -533,6 +542,7 @@ async function getSchoolGoals(schoolId) {
 async function deleteSchoolMaster(id) {
   const { error } = await supabase.from("schools").delete().eq("id", id);
   if (error) throw error;
+  invalidateSchoolsCache();
 }
 
 // ============================================================
