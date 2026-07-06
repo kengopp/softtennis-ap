@@ -5215,7 +5215,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
 
       // 選手として登録する場合：選手マスターに自動登録
       if (registerMode === "player") {
-        const existing = roster.find(p => p.player_name === fullName && p.is_own_team);
+        const existing = roster.find(p => p.player_name === fullName && p.is_own_team && p.school_id === schoolId);
         if (existing) {
           newLinkedPlayerId = existing.id;
           // ポジション・利き手を更新
@@ -5226,7 +5226,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           const saved = await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true, school_id: schoolId, gender_category: genderCategory });
           const refreshed = await getPlayerRoster();
           setRoster(refreshed);
-          const found = refreshed.find(p => p.player_name === fullName && p.is_own_team);
+          const found = refreshed.find(p => p.player_name === fullName && p.is_own_team && p.school_id === schoolId);
           if (found) newLinkedPlayerId = found.id;
         }
       }
@@ -5616,13 +5616,13 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                           if (!pname) return;
                           setLinkedPlayerSaving(true);
                           try {
-                            const existing = roster.find(p => p.player_name === pname);
+                            const existing = roster.find(p => p.player_name === pname && p.is_own_team && p.school_id === schoolId);
                             if (existing) { setLinkedPlayerId(existing.id); }
                             else {
-                              await savePlayer({ player_name: pname, position: playerPosition, dominant_hand: playerHand, is_own_team: true });
+                              await savePlayer({ player_name: pname, position: playerPosition, dominant_hand: playerHand, is_own_team: true, school_id: schoolId, gender_category: genderCategory });
                               const refreshed = await getPlayerRoster();
                               setRoster(refreshed);
-                              const saved = refreshed.find(p => p.player_name === pname);
+                              const saved = refreshed.find(p => p.player_name === pname && p.is_own_team && p.school_id === schoolId);
                               if (saved) setLinkedPlayerId(saved.id);
                             }
                             setLinkedPlayerLastName(""); setLinkedPlayerFirstName("");
@@ -6158,42 +6158,69 @@ function translateAuthError(msg) {
 // ★新規登録時のusersテーブル保存＋選手マスター連携をまとめた共通処理。
 // メール確認が必須の設定だと、登録直後はまだセッションがなく保存に失敗するため、
 // その場合は一時保存しておき、確認メール経由で初めてログインできた時にこの関数を呼んで自動で仕上げる。
+//
+// ★品質改善メモ：
+// ・選手を探す際は「名前が同じ」だけでなく「学校IDも同じ」かどうかを見て、
+//   同姓同名の別選手に誤ってリンクしてしまわないようにしている。
+// ・users テーブルの update() は結果(error)を必ず確認し、失敗時ははっきり例外を投げる
+//   （黙って0件更新のまま処理が続いてしまうのを防ぐ）。
+// ・複数ステップ（プロフィール保存→選手検索→選手作成→ユーザー更新）はDBトランザクションではないため、
+//   途中で失敗すると一部だけ保存された状態になり得る。どのステップで失敗したかを例外メッセージに
+//   含めることで、少なくとも原因調査と手動リカバリはしやすくしている。
+//   （将来的にはSupabaseのRPC/Postgres関数にまとめ、DB側で1トランザクションにするのが望ましい）
 async function completeProfileRegistration(userId, payload) {
   // ★school_name の取得やNOT NULL対応、エラー処理などを二重に持たず、
   // 必ず saveMyProfile を通すことで保存ロジックを一本化する（今回のような食い違いバグの再発防止）
-  await saveMyProfile({
-    name: payload.fullName,
-    school_id: payload.schoolId,
-    prefecture: payload.prefecture,
-    gender_category: payload.genderCategory,
-    category: payload.category,
-    is_approved: true,
-  });
+  try {
+    await saveMyProfile({
+      name: payload.fullName,
+      school_id: payload.schoolId,
+      prefecture: payload.prefecture,
+      gender_category: payload.genderCategory,
+      category: payload.category,
+      is_approved: true,
+    });
+  } catch(e) {
+    throw new Error("プロフィール保存に失敗しました: " + (e.message || e));
+  }
 
-  if (payload.registerMode === "player") {
-    const roster = await getPlayerRoster();
-    const existing = roster.find(p => p.player_name === payload.fullName && p.is_own_team);
-    if (existing) {
-      await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", userId);
-    } else {
-      await savePlayer({ player_name: payload.fullName, position: payload.playerPosition, dominant_hand: payload.playerHand, is_own_team: true });
-      const refreshed = await getPlayerRoster();
-      const saved = refreshed.find(p => p.player_name === payload.fullName && p.is_own_team);
-      if (saved) await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", userId);
+  async function linkOrCreatePlayer(playerName, position, hand) {
+    let roster;
+    try {
+      roster = await getPlayerRoster();
+    } catch(e) {
+      throw new Error("選手検索に失敗しました: " + (e.message || e));
+    }
+    // 同姓同名でも別の学校の選手を誤ってリンクしないよう、学校IDも条件に含める
+    const existing = roster.find(p => p.player_name === playerName && p.is_own_team && p.school_id === payload.schoolId);
+    let linkedId = existing?.id;
+    if (!existing) {
+      try {
+        await savePlayer({ player_name: playerName, position, dominant_hand: hand, is_own_team: true, school_id: payload.schoolId });
+      } catch(e) {
+        throw new Error("選手の新規作成に失敗しました: " + (e.message || e));
+      }
+      let refreshed;
+      try {
+        refreshed = await getPlayerRoster();
+      } catch(e) {
+        throw new Error("作成した選手の再取得に失敗しました: " + (e.message || e));
+      }
+      const saved = refreshed.find(p => p.player_name === playerName && p.is_own_team && p.school_id === payload.schoolId);
+      linkedId = saved?.id;
+    }
+    if (linkedId) {
+      const { error } = await supabase.from("users").update({ linked_player_id: linkedId }).eq("id", userId);
+      if (error) throw new Error("ユーザーと選手の紐づけに失敗しました: " + error.message);
     }
   }
 
+  if (payload.registerMode === "player") {
+    await linkOrCreatePlayer(payload.fullName, payload.playerPosition, payload.playerHand);
+  }
+
   if (payload.registerMode === "guardian" && payload.childName) {
-    const roster = await getPlayerRoster();
-    const existing = roster.find(p => p.player_name === payload.childName && p.is_own_team);
-    if (existing) {
-      await supabase.from("users").update({ linked_player_id: existing.id }).eq("id", userId);
-    } else {
-      await savePlayer({ player_name: payload.childName, position: payload.childPosition, dominant_hand: payload.childHand, is_own_team: true });
-      const refreshed = await getPlayerRoster();
-      const saved = refreshed.find(p => p.player_name === payload.childName && p.is_own_team);
-      if (saved) await supabase.from("users").update({ linked_player_id: saved.id }).eq("id", userId);
-    }
+    await linkOrCreatePlayer(payload.childName, payload.childPosition, payload.childHand);
   }
 }
 
