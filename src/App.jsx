@@ -610,7 +610,13 @@ async function savePlayer(player) {
   return row;
 }
 
+// ★品質改善：ユーザーの「関連選手」として紐づいたままの選手を削除しようとすると、
+// 外部キー制約（あるいはRLS）に阻まれて削除できない、または何も起きずに終わることがあった。
+// 削除前に、この選手を紐づけているユーザーがいれば先に紐づけを解除しておくことで、
+// 安全に削除できるようにする。
 async function deletePlayerFromRoster(id) {
+  const { error: unlinkError } = await supabase.from("users").update({ linked_player_id: null }).eq("linked_player_id", id);
+  if (unlinkError) throw unlinkError;
   const { error } = await supabase.from("players").delete().eq("id", id);
   if (error) throw error;
 }
@@ -5910,7 +5916,7 @@ function PlayerRosterScreen({ onBack }) {
     if (!window.confirm("この選手をマスターから削除しますか？")) return;
     setErrorMsg("");
     try { await deletePlayerFromRoster(id); reload(); }
-    catch (e) { setErrorMsg("削除に失敗しました"); }
+    catch (e) { setErrorMsg("削除に失敗しました: " + (e.message || e)); }
   }
 
   return (
