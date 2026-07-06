@@ -92,6 +92,9 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
   }));
 const today  = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => iso ? iso.replace(/-/g, "/") : "";
+// ★品質改善：「清見 祐吾」「清見祐吾」のように空白の有無だけが違う同一人物を
+// 別選手として重複登録してしまわないよう、選手名の比較は空白を除去してから行う
+const normalizePlayerName = (name) => (name || "").replace(/\s+/g, "");
 const fmtDateRange = (start, end) => {
   if (!start) return "";
   const s = fmtDate(start);
@@ -561,13 +564,15 @@ async function autoRegisterPlayerToRoster(playerName, teamName, isOwnTeam) {
   try {
     const roster = await getPlayerRoster();
     const baseName = playerName.trim();
-    const existingNames = new Set(roster.map(p => p.player_name));
-    // すでに完全一致する名前がある場合はスキップ
-    if (existingNames.has(baseName)) return;
+    // ★品質改善：空白の有無だけが違う同一人物を別選手として重複登録しないよう、
+    // 既存名との比較は空白を除去して行う
+    const existingNames = new Set(roster.map(p => normalizePlayerName(p.player_name)));
+    // すでに（空白の違いを除いて）完全一致する名前がある場合はスキップ
+    if (existingNames.has(normalizePlayerName(baseName))) return;
     // 連番チェック（「田中 蓮2」「田中 蓮3」などがある場合に次の番号を使う）
     let finalName = baseName;
     let n = 2;
-    while (existingNames.has(finalName)) {
+    while (existingNames.has(normalizePlayerName(finalName))) {
       finalName = `${baseName}${n}`;
       n++;
     }
@@ -5261,7 +5266,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
 
       // 選手として登録する場合：選手マスターに自動登録
       if (registerMode === "player") {
-        const existing = roster.find(p => p.player_name === fullName && p.is_own_team && p.school_id === schoolId);
+        const existing = roster.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(fullName) && p.is_own_team && p.school_id === schoolId);
         if (existing) {
           newLinkedPlayerId = existing.id;
           // ポジション・利き手を更新
@@ -5272,7 +5277,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           const saved = await savePlayer({ player_name: fullName, position: playerPosition, dominant_hand: playerHand, is_own_team: true, school_id: schoolId, gender_category: genderCategory });
           const refreshed = await getPlayerRoster();
           setRoster(refreshed);
-          const found = refreshed.find(p => p.player_name === fullName && p.is_own_team && p.school_id === schoolId);
+          const found = refreshed.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(fullName) && p.is_own_team && p.school_id === schoolId);
           if (found) newLinkedPlayerId = found.id;
         }
       }
@@ -5662,13 +5667,13 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                           if (!pname) return;
                           setLinkedPlayerSaving(true);
                           try {
-                            const existing = roster.find(p => p.player_name === pname && p.is_own_team && p.school_id === schoolId);
+                            const existing = roster.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(pname) && p.is_own_team && p.school_id === schoolId);
                             if (existing) { setLinkedPlayerId(existing.id); }
                             else {
                               await savePlayer({ player_name: pname, position: playerPosition, dominant_hand: playerHand, is_own_team: true, school_id: schoolId, gender_category: genderCategory });
                               const refreshed = await getPlayerRoster();
                               setRoster(refreshed);
-                              const saved = refreshed.find(p => p.player_name === pname && p.is_own_team && p.school_id === schoolId);
+                              const saved = refreshed.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(pname) && p.is_own_team && p.school_id === schoolId);
                               if (saved) setLinkedPlayerId(saved.id);
                             }
                             setLinkedPlayerLastName(""); setLinkedPlayerFirstName("");
@@ -6261,7 +6266,7 @@ async function completeProfileRegistration(userId, payload) {
       throw new Error("選手検索に失敗しました: " + (e.message || e));
     }
     // 同姓同名でも別の学校の選手を誤ってリンクしないよう、学校IDも条件に含める
-    const existing = roster.find(p => p.player_name === playerName && p.is_own_team && p.school_id === payload.schoolId);
+    const existing = roster.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(playerName) && p.is_own_team && p.school_id === payload.schoolId);
     let linkedId = existing?.id;
     if (!existing) {
       try {
@@ -6275,7 +6280,7 @@ async function completeProfileRegistration(userId, payload) {
       } catch(e) {
         throw new Error("作成した選手の再取得に失敗しました: " + (e.message || e));
       }
-      const saved = refreshed.find(p => p.player_name === playerName && p.is_own_team && p.school_id === payload.schoolId);
+      const saved = refreshed.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(playerName) && p.is_own_team && p.school_id === payload.schoolId);
       linkedId = saved?.id;
     }
     if (linkedId) {
