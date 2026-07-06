@@ -2640,6 +2640,13 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       (matches || []).forEach(m => { map[m.id] = m; });
       setMatchDetails(map);
     }
+    // ★不整合データの自動修復：どの番手も実際には開始されていないのに
+    // 団体戦全体のstatusだけが"active"のまま残っているケースを検知し、"scheduled"に戻す。
+    // （放置すると本当は始まっていない試合でLIVE自動更新が動き続けてしまう）
+    if (data.status === "active" && !(data.games || []).some(g => g.status === "active" || g.status === "finished")) {
+      await supabase.from("team_matches").update({ status:"scheduled" }).eq("id", teamMatchId).eq("status","active");
+      data.status = "scheduled";
+    }
     setTm(data);
     setLoading(false);
     setLastUpdated(Date.now());
