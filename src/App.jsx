@@ -3615,6 +3615,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
   const [serveSelectForSave, setServeSelectForSave] = useState(null);
+  const [showMatchInfo, setShowMatchInfo] = useState(false); // 試合情報の表示/非表示（デフォルト：非表示）
 
   // ★選手マスター（同じ学校のメンバーで共有）を読み込み、入力時にチップで選べるようにする
   const [roster, setRoster] = useState([]);
@@ -3776,10 +3777,21 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       )}
       <div style={{ padding:14 }}>
 
-        {/* 団体戦ペア登録モード：試合情報・形式設定を非表示 */}
+        {/* 団体戦ペア登録モード：試合情報を非表示 */}
         {!isTeamMatchGame && (
           <>
-        <FormSec title="試合情報">
+        <div style={{ marginBottom:14 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+            <span style={{ fontSize:11,fontWeight:700,color:C.navy,letterSpacing:"0.05em" }}>試合情報</span>
+            <button
+              style={{ background:"#eef0f4", border:"none", borderRadius:20, padding:"4px 12px", fontSize:11, fontWeight:700, color:C.navy, cursor:"pointer" }}
+              onClick={() => setShowMatchInfo(v => !v)}
+            >
+              {showMatchInfo ? "非表示 ▲" : "表示 ▼"}
+            </button>
+          </div>
+          {showMatchInfo && (
+          <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,overflow:"visible" }}>
           <FormRow label="大会名">
             {lockTournament ? (
               <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
@@ -3808,22 +3820,6 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <FormRow label="場所 / 会場名">
             <VenueField value={venue} onChange={setVenue} venues={venues} />
           </FormRow>
-          <FormRow label="何回戦">
-            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
-          </FormRow>
-          <FormRow label="コート番号（任意）">
-            <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
-          </FormRow>
-          <FormRow label="若番 / 遅番（必須）">
-            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
-              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
-            </div>
-          </FormRow>
-        </FormSec>
-
-        <FormSec title={locked ? "形式設定（試合開始後は変更不可）" : "形式設定"}>
           <FormRow label="ゲーム数（デフォルト：7G）">
             {locked ? (
               <div style={{ fontSize:14,fontWeight:700,color:C.textSec,padding:"4px 0" }}>{gameFormat}G 🔒</div>
@@ -3846,8 +3842,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               </div>
             )}
           </FormRow>
-
-        </FormSec>
+          </div>
+          )}
+        </div>
           </>
         )}
 
@@ -3928,6 +3925,22 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               マスター画面の「👥 選手マスター」(他チーム)で対戦相手の選手を登録しておくと、ここで選んで入力できます。
             </div>
           )}
+        </FormSec>
+
+        <FormSec title="試合詳細">
+          <FormRow label="何回戦">
+            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
+          </FormRow>
+          <FormRow label="コート番号（任意）">
+            <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
+          </FormRow>
+          <FormRow label="若番 / 遅番（必須）">
+            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
+            </div>
+          </FormRow>
         </FormSec>
 
         <button
