@@ -92,6 +92,12 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
   }));
 const today  = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => iso ? iso.replace(/-/g, "/") : "";
+const fmtDateRange = (start, end) => {
+  if (!start) return "";
+  const s = fmtDate(start);
+  const e = end ? fmtDate(end) : s;
+  return s === e ? s : `${s} 〜 ${e}`;
+};
 
 // ============================================================
 // 統計集計用 共通ヘルパー
@@ -752,6 +758,38 @@ async function recalcTeamMatchScore(teamMatchId) {
 }
 
 // ============================================================
+// 大会マスター
+// ============================================================
+async function getTournaments() {
+  const { data, error } = await supabase
+    .from("tournaments")
+    .select("*")
+    .order("start_date", { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+
+async function saveTournament(t) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const row = {
+    id: t.id || uid(),
+    created_by: t.created_by || user.id,
+    name: (t.name || "").trim(),
+    start_date: t.start_date,
+    end_date: t.end_date || t.start_date,
+  };
+  const { error } = await supabase.from("tournaments").upsert(row);
+  if (error) throw error;
+  return row;
+}
+
+async function deleteTournament(id) {
+  const { error } = await supabase.from("tournaments").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ============================================================
 // ゲームロジック
 // ============================================================
 const calcWinGames = (fmt) => Math.ceil(fmt / 2);
@@ -1041,8 +1079,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode }) {
-  const [timeTab, setTimeTab] = useState(initialMatchMode || "individual"); // individual | team
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament }) {
+  const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [allTeamMatches, setAllTeamMatches] = useState([]);
@@ -1076,13 +1114,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
 
+  // 大会タブ関連
+  const [tournaments, setTournaments] = useState([]);
+  const [tournamentSearch, setTournamentSearch] = useState("");
+  const [tournamentDropdownOpen, setTournamentDropdownOpen] = useState(false);
+  const [showTournamentModal, setShowTournamentModal] = useState(false);
+  const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
+  const [confirmDeleteTournament, setConfirmDeleteTournament] = useState(null);
+
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([getMatches(), getTeamMatches(), getSchools()]).then(async ([list, tList, schools]) => {
+    Promise.all([getMatches(), getTeamMatches(), getSchools(), getTournaments()]).then(async ([list, tList, schools, tnList]) => {
       // 学校IDから名前へのマップを作成
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
       setSchoolMap(smap);
+      setTournaments(tnList || []);
       // 団体戦に紐付いたmatch_idを個人戦一覧から除外
       try {
         const { data: tmGames } = await supabase
@@ -1199,6 +1246,41 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     reload();
   }
 
+  // 大会ごとの団体戦・個人戦の件数（大会名の一致で集計）
+  const countsForTournament = (name) => ({
+    team: allTeamMatches.filter(tm => tm.tournament_name === name).length,
+    individual: allMatches.filter(m => m.tournament_name === name).length,
+  });
+
+  const filteredTournaments = tournaments.filter(t =>
+    !tournamentSearch.trim() || t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())
+  );
+
+  async function handleSaveTournament(name, startDate, endDate) {
+    const trimmed = name.trim();
+    if (!trimmed) { alert("大会名を入力してください"); return; }
+    if (!startDate) { alert("開始日を選択してください"); return; }
+    try {
+      await saveTournament({
+        id: editingTournament?.id,
+        name: trimmed,
+        start_date: startDate,
+        end_date: endDate || startDate,
+      });
+      setShowTournamentModal(false);
+      setEditingTournament(null);
+      reload();
+    } catch(e) {
+      alert("保存エラー: " + (e.message || e));
+    }
+  }
+
+  async function handleDeleteTournament(id) {
+    await deleteTournament(id);
+    setConfirmDeleteTournament(null);
+    reload();
+  }
+
   return (
     <div style={S.page}>
       <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -1215,14 +1297,15 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       </div>
       {toast && <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast}</div>}
 
-      {/* 上段：個人戦 / 団体戦 タブ */}
+      {/* 上段：大会 / 団体戦 / 個人戦 タブ */}
       <div style={{ display:"flex", background:"#f0f2f6", padding:3, margin:"10px 14px 0", borderRadius:10 }}>
-        {[["individual","🎾 個人戦"],["team","🏆 団体戦"]].map(([v,l])=>(
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["individual","team"].includes(timeTab)&&v==="individual")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); }}>{l}</button>
+        {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
+          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); }}>{l}</button>
         ))}
       </div>
 
-      {/* 共通絞り込みUI */}
+      {/* 共通絞り込みUI（大会タブでは非表示） */}
+      {timeTab !== "tournament" && (
       <div style={{ padding:"10px 14px 0" }}>
         <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", marginBottom:8 }}>
           <span style={{ fontSize:14, marginRight:6, color:C.textSec }}>🔍</span>
@@ -1363,6 +1446,64 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           );
         })()}
       </div>
+      )}
+
+      {/* 大会タブ */}
+      {timeTab === "tournament" && (
+        <>
+          <div style={{ position:"relative", margin:"10px 14px 8px" }}>
+            <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
+              <span style={{ fontSize:14, color:C.textSec }}>🔍</span>
+              <input
+                value={tournamentSearch}
+                onChange={e=>setTournamentSearch(e.target.value)}
+                placeholder="キーワード／大会一覧から選択"
+                style={{ flex:1, marginLeft:6, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+              />
+              <button onClick={()=>setTournamentDropdownOpen(v=>!v)} style={{ border:"none", background:"none", color:C.textSec, fontSize:14, cursor:"pointer", padding:"2px 4px" }}>{tournamentDropdownOpen ? "▲" : "▼"}</button>
+            </div>
+            {tournamentDropdownOpen && (
+              <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:20, maxHeight:220, overflowY:"auto" }}>
+                {tournaments.length===0 ? (
+                  <div style={{ padding:"12px 14px", fontSize:12, color:C.textSec }}>大会がまだありません</div>
+                ) : tournaments.map(t => (
+                  <div key={t.id} onClick={()=>{ setTournamentSearch(t.name); setTournamentDropdownOpen(false); }} style={{ padding:"11px 14px", fontSize:13, color:C.text, cursor:"pointer", borderBottom:"1px solid "+C.border }}>{t.name}</div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ padding:"0 14px", paddingBottom:90 }}>
+            {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
+            {!loading && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
+            {!loading && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
+            {!loading && filteredTournaments.map(t => {
+              const counts = countsForTournament(t.name);
+              return (
+                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
+                  <div style={{ height:4, background:C.navy }}/>
+                  <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                    <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{t.name}</div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:8 }}>
+                      <span style={{ fontSize:11, color:C.textSec }}>📅 {fmtDateRange(t.start_date, t.end_date)}</span>
+                      <div style={{ display:"flex", gap:4 }}>
+                        {counts.team>0 && <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"2px 8px", borderRadius:10 }}>🏆 団体 {counts.team}</span>}
+                        {counts.individual>0 && <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"2px 8px", borderRadius:10 }}>🎾 個人 {counts.individual}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                    <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>📂 試合一覧を見る</button>
+                    <button style={{ width:48, padding:"8px", background:"#eef0f4", color:C.textSec, border:"none", borderLeft:"1px solid "+C.border, fontSize:14, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setEditingTournament(t);setShowTournamentModal(true);}}>✏️</button>
+                    <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDeleteTournament(t.id);}}>🗑</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* 大会FAB */}
+          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>
+        </>
+      )}
 
       {/* 個人戦タブ */}
       {timeTab === "individual" && (
@@ -1505,9 +1646,194 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </div>
         </Modal>
       )}
+      {showTournamentModal && (
+        <Modal onClose={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}>
+          <TournamentFormFields
+            initial={editingTournament}
+            onCancel={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}
+            onSave={handleSaveTournament}
+          />
+        </Modal>
+      )}
+      {confirmDeleteTournament && (
+        <Modal onClose={()=>setConfirmDeleteTournament(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この大会を削除しますか？</h3>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>大会の情報のみ削除されます。紐づく試合記録は削除されません。</p>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteTournament(null)}>キャンセル</button>
+              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>handleDeleteTournament(confirmDeleteTournament)}>削除する</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
+
+// 大会 作成/編集フォーム（モーダル内で使用）
+function TournamentFormFields({ initial, onCancel, onSave }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [startDate, setStartDate] = useState(initial?.start_date || today());
+  const [endDate, setEndDate] = useState(initial?.end_date || initial?.start_date || today());
+  const [saving, setSaving] = useState(false);
+  return (
+    <div>
+      <h3 style={{ fontSize:16, fontWeight:800, marginBottom:14, textAlign:"center" }}>{initial ? "✏️ 大会を編集" : "📋 大会を作成"}</h3>
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>大会名</div>
+      <input style={{ ...S.inp, marginBottom:14 }} placeholder="例：令和8年度 新人戦" value={name} onChange={e=>setName(e.target.value)}/>
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>開催期間</div>
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+        <input type="date" style={{ ...S.inp, flex:1 }} value={startDate} onChange={e=>setStartDate(e.target.value)}/>
+        <span style={{ fontSize:12, color:C.textSec }}>〜</span>
+        <input type="date" style={{ ...S.inp, flex:1 }} value={endDate} onChange={e=>setEndDate(e.target.value)}/>
+      </div>
+      <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
+      <div style={{ display:"flex", gap:8 }}>
+        <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:"#f0f2f6", color:C.textSec, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
+        <button
+          style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
+          disabled={saving}
+          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate); setSaving(false); }}
+        >{initial ? "保存する" : "作成する"}</button>
+      </div>
+    </div>
+  );
+}
+// ============================================================
+// 大会 詳細画面（大会に紐づく試合一覧）
+// ============================================================
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam }) {
+  const [seg, setSeg] = useState("team"); // team | individual
+  const [matches, setMatches] = useState([]);
+  const [teamMatches, setTeamMatches] = useState([]);
+  const [schoolMap, setSchoolMap] = useState({});
+  const [mySchoolName, setMySchoolName] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    Promise.all([getMatches(), getTeamMatches(), getSchools(), getMyProfile()]).then(([list, tList, schools, profile]) => {
+      const smap = {};
+      (schools || []).forEach(s => { smap[s.id] = s.name; });
+      setSchoolMap(smap);
+      if (profile?.school_id) {
+        const s = schools.find(s => s.id === profile.school_id);
+        if (s) setMySchoolName(s.name);
+      }
+      setMatches(list.filter(m => m.tournament_name === tournament.name));
+      setTeamMatches(tList.filter(tm => tm.tournament_name === tournament.name));
+      setLoading(false);
+    });
+  }, [tournament.name]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+        <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, padding:"4px 10px", cursor:"pointer" }} onClick={onBack}>←</button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>📅 {fmtDateRange(tournament.start_date, tournament.end_date)}</div>
+        </div>
+        <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:12, padding:"6px 10px", cursor:"pointer", whiteSpace:"nowrap" }} onClick={()=>setShowEditModal(true)}>✏️ 編集</button>
+      </div>
+
+      <div style={{ display:"flex", background:"#f0f2f6", padding:3, margin:"10px 14px 0", borderRadius:10 }}>
+        {[["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
+          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:seg===v?C.white:"transparent", color:seg===v?C.navy:C.textSec, boxShadow:seg===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setSeg(v)}>{l}</button>
+        ))}
+      </div>
+
+      <div style={{ padding:"10px 14px", paddingBottom:90 }}>
+        {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
+
+        {!loading && seg==="team" && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
+        {!loading && seg==="team" && teamMatches.map(tm => {
+          const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
+          const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
+          const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
+          const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
+          return (
+            <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10, cursor:"pointer" }} onClick={()=>onOpenTeamMatch(tm.id)}>
+              <div style={{ height:4, background:statusColor }}/>
+              <div style={{ padding:"10px 14px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                  <span style={{ fontSize:12, fontWeight:700 }}>{tm.round || "団体戦"}</span>
+                  <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:6 }}>
+                  <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1, textAlign:"right" }}>{myFullLabel}</span>
+                  <span style={{ fontSize:20, fontWeight:900, color:statusColor, minWidth:48, textAlign:"center" }}>{tm.my_score??0}-{tm.opponent_score??0}</span>
+                  <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1 }}>{oppLabel || "相手"}</span>
+                </div>
+                <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
+              </div>
+            </div>
+          );
+        })}
+
+        {!loading && seg==="individual" && matches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
+        {!loading && seg==="individual" && matches.map(m => {
+          const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
+          const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
+          const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
+          const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
+          const aNames = aPlayers.map(p=>p.player_name).join("/");
+          const bNames = bPlayers.map(p=>p.player_name).join("/");
+          const borderColor = m.status==="active" ? C.orange : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
+          return (
+            <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", cursor:"pointer" }} onClick={()=>onOpenMatch(m.id)}>
+              <div style={{ height:4, background:borderColor }}/>
+              <div style={{ padding:"10px 14px" }}>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>{fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}</div>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aNames}</div>
+                    <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bNames}</div>
+                  </div>
+                  {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {!loading && <div style={{ textAlign:"center", fontSize:11, color:C.textSec, marginTop:16 }}>＋ボタンから、この大会に紐づく試合を作成できます</div>}
+      </div>
+
+      <button
+        style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:seg==="team"?`linear-gradient(135deg,${C.navy},${C.navyMid})`:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center" }}
+        onClick={()=>seg==="team" ? onNewTeam() : onNewIndividual()}
+      >＋</button>
+
+      {showEditModal && (
+        <Modal onClose={()=>setShowEditModal(false)}>
+          <TournamentFormFields
+            initial={tournament}
+            onCancel={()=>setShowEditModal(false)}
+            onSave={async (name, startDate, endDate)=>{
+              const trimmed = name.trim();
+              if (!trimmed) { alert("大会名を入力してください"); return; }
+              if (!startDate) { alert("開始日を選択してください"); return; }
+              try {
+                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate });
+                setShowEditModal(false);
+                onSaved && onSaved(saved);
+              } catch(e) {
+                alert("保存エラー: " + (e.message || e));
+              }
+            }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ============================================================
 // グループ参加者画面
 // ============================================================
@@ -1951,12 +2277,12 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
 // ============================================================
 // 団体戦 予定登録画面
 // ============================================================
-function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
+function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, prefillDate, lockTournament }) {
   const [ready, setReady] = useState(!editId && !copyId);
   const [saving, setSaving] = useState(false);
-  const [matchDate, setMatchDate] = useState(today());
+  const [matchDate, setMatchDate] = useState(prefillDate || today());
   const [venue, setVenue] = useState("");
-  const [tournamentName, setTournamentName] = useState("");
+  const [tournamentName, setTournamentName] = useState(prefillTournament || "");
   const [round, setRound] = useState("");
   const [myTeamDivision, setMyTeamDivision] = useState("");
   const [opponentName, setOpponentName] = useState("");
@@ -2082,10 +2408,24 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel }) {
       <div style={{ padding:14 }}>
         <FormSec title="試合情報">
           <FormRow label="試合日">
-            <input type="date" style={S.inp} value={matchDate} onChange={e=>setMatchDate(e.target.value)}/>
+            {lockTournament ? (
+              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span>{fmtDate(matchDate)}</span>
+                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 大会の日程</span>
+              </div>
+            ) : (
+              <input type="date" style={S.inp} value={matchDate} onChange={e=>setMatchDate(e.target.value)}/>
+            )}
           </FormRow>
           <FormRow label="大会名">
-            <VenueField value={tournamentName} onChange={setTournamentName} venues={pastTournaments} placeholder="例：○○高校選手権"/>
+            {lockTournament ? (
+              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span>{tournamentName}</span>
+                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
+              </div>
+            ) : (
+              <VenueField value={tournamentName} onChange={setTournamentName} venues={pastTournaments} placeholder="例：○○高校選手権"/>
+            )}
           </FormRow>
           <FormRow label="何回戦">
             <VenueField value={round} onChange={setRound} venues={pastRounds} placeholder="例：準々決勝"/>
@@ -3040,7 +3380,7 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -3066,10 +3406,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament }) {
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -3270,10 +3610,24 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <>
         <FormSec title="試合情報">
           <FormRow label="試合日">
-            <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
+            {lockTournament ? (
+              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span>{fmtDate(matchDate)}</span>
+                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 大会の日程</span>
+              </div>
+            ) : (
+              <input type="date" style={S.inp} value={matchDate} onChange={e => setMatchDate(e.target.value)}/>
+            )}
           </FormRow>
           <FormRow label="大会名">
-            <input style={S.inp} placeholder="例：○○中学校選手権" value={tournamentName} onChange={e => setTournamentName(e.target.value)}/>
+            {lockTournament ? (
+              <div style={{ background:"#f0f2f6", borderRadius:8, padding:"10px 12px", fontSize:14, color:C.text, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span>{tournamentName}</span>
+                <span style={{ fontSize:10, color:C.textSec, background:"#e2e5eb", padding:"2px 8px", borderRadius:10, fontWeight:700 }}>🔒 変更不可</span>
+              </div>
+            ) : (
+              <input style={S.inp} placeholder="例：○○中学校選手権" value={tournamentName} onChange={e => setTournamentName(e.target.value)}/>
+            )}
           </FormRow>
           <FormRow label="試合の種別">
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -5994,8 +6348,14 @@ export default function App() {
   const [teamMatchEditId, setTeamMatchEditId] = useState(null);
   const [teamMatchOrderNum, setTeamMatchOrderNum] = useState(null);
   const [teamMatchCopyId, setTeamMatchCopyId] = useState(null); // コピー元の団体戦ID
-  const [listMatchMode, setListMatchMode] = useState("individual");
+  const [listMatchMode, setListMatchMode] = useState("tournament");
   const [serveSelectForTeam, setServeSelectForTeam] = useState(null); // 団体戦サーブ選択 // 履歴画面のタブ状態
+  // 大会関連
+  const [tournamentContext, setTournamentContext] = useState(null); // 大会詳細画面から試合作成に入った際の大会情報 {id,name,start_date,end_date}
+  const [creatingFromTournament, setCreatingFromTournament] = useState(false); // 大会の＋ボタンから試合作成に入ったかどうか
+
+  // 大会詳細を経由しているときは、戻る先を「一覧」ではなく「大会詳細」にする
+  const backToListOrTournament = () => { setScreen(tournamentContext ? "tournamentDetail" : "list"); };
 
 
   // 自動ping：24時間ごとにDBへアクセスしてSupabaseの自動停止を防ぐ
@@ -6134,8 +6494,11 @@ export default function App() {
       <TeamMatchSetup
         editId={teamMatchEditId}
         copyId={teamMatchCopyId}
-        onSave={id=>{ setTeamMatchId(id); setTeamMatchEditId(null); setTeamMatchCopyId(null); setScreen("teamMatchDetail"); }}
-        onCancel={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setListMatchMode("team"); setScreen("list"); }}
+        prefillTournament={creatingFromTournament && tournamentContext ? tournamentContext.name : undefined}
+        prefillDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
+        lockTournament={creatingFromTournament && !!tournamentContext}
+        onSave={id=>{ setTeamMatchId(id); setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(false); setScreen("teamMatchDetail"); }}
+        onCancel={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(false); setListMatchMode("team"); backToListOrTournament(); }}
       />
     );
   }
@@ -6143,7 +6506,7 @@ export default function App() {
     return (
       <TeamMatchDetail
         teamMatchId={teamMatchId}
-        onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); setScreen("list"); }}
+        onBack={()=>{ setTeamMatchId(null); setListMatchMode("team"); backToListOrTournament(); }}
         onOpenMatch={id=>{ setMatchId(id); setTeamMatchOrderNum(null); setTick(t=>t+1); setScreen("teamMatchRecord"); }}
         onNewMatch={async (tm, orderNum, existingGame)=>{
           setTeamMatchOrderNum(orderNum);
@@ -6225,6 +6588,7 @@ export default function App() {
     // 現在表示中の画面と同じタブを押しても何もしない
     const screenMap = { home:"home", list:"list", stats:"stats", master:"master" };
     if (screen === screenMap[key]) return;
+    setTournamentContext(null); // ボトムナビでの移動時は大会の文脈から抜ける
     if (key==="home") setScreen("home");
     else if (key==="list") setScreen("list");
     else if (key==="stats") setScreen("stats");
@@ -6234,8 +6598,8 @@ export default function App() {
   if (screen==="home") {
     return (
       <HomeScreen
-        onNew={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPrevScreen("home"); setScreen("setup"); }}
-        onNewTeamMatch={()=>{ setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
+        onNew={()=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPrevScreen("home"); setScreen("setup"); }}
+        onNewTeamMatch={()=>{ setTournamentContext(null); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
         onOpen={id=>{ setMatchId(id); setScreen("record"); }}
         onNavigate={goNav}
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
@@ -6276,18 +6640,23 @@ export default function App() {
         sourceMatchId={copySourceId}
         editMatchId={editTargetId}
         initialMatchType={initMatchType}
-        onScheduled={()=>{ setInitMatchType(null); setListFilter("scheduled"); setScreen("list"); setTimeout(()=>setListFilter("all"), 100); }}
+        prefillTournament={creatingFromTournament && tournamentContext ? tournamentContext.name : undefined}
+        prefillDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
+        lockTournament={creatingFromTournament && !!tournamentContext}
+        onScheduled={()=>{ setInitMatchType(null); setCreatingFromTournament(false); setListFilter("scheduled"); setScreen("list"); setTimeout(()=>setListFilter("all"), 100); }}
         onSave={id=>{
           setCopySourceId(null);
           setInitMatchType(null);
           setEditTargetId(null);
           setMatchId(id);
-          setPrevScreen("record");
+          setPrevScreen(creatingFromTournament && tournamentContext ? "tournamentDetail" : "record");
+          setCreatingFromTournament(false);
           setScreen("record");
         }}
         onCancel={()=>{
           setCopySourceId(null);
           setInitMatchType(null);
+          setCreatingFromTournament(false);
           if (editTargetId) {
             const back = editTargetId;
             setEditTargetId(null);
@@ -6305,16 +6674,29 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={async ()=>{ setScreen(prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : "list"); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1); }}
+        onBack={async ()=>{ setScreen(prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : "list"); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
+      />
+    );
+  }
+  if (screen==="tournamentDetail" && tournamentContext) {
+    return (
+      <TournamentDetail
+        tournament={tournamentContext}
+        onBack={()=>{ setTournamentContext(null); setListMatchMode("tournament"); setScreen("list"); }}
+        onSaved={updated=>{ setTournamentContext(updated); setTick(t=>t+1); }}
+        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("tournamentDetail"); setScreen("record"); }}
+        onOpenTeamMatch={id=>{ setTeamMatchId(id); setScreen("teamMatchDetail"); }}
+        onNewIndividual={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
+        onNewTeam={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
       />
     );
   }
   return (
     <MatchList
       key={tick}
-      onNew={f=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
+      onNew={f=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
       onOpen={id=>{setMatchId(id); setPrevScreen("list"); setScreen("record");}}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
       onStartScheduled={async (id, firstServer)=>{ try { await startScheduledMatch(id, firstServer); setMatchId(id); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
@@ -6324,9 +6706,10 @@ export default function App() {
       onNavigate={goNav}
       initialFilter={listFilter}
       initialToast={listFilter==="scheduled" ? "📅 試合予定を登録しました！" : null}
-      onOpenTeamMatch={id=>{ setTeamMatchId(id); setListMatchMode("team"); setScreen("teamMatchDetail"); }}
-      onNewTeamMatch={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setScreen("teamMatchSetup"); }}
-      onCopyTeamMatch={id=>{ setTeamMatchCopyId(id); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
+      onOpenTeamMatch={id=>{ setTournamentContext(null); setTeamMatchId(id); setListMatchMode("team"); setScreen("teamMatchDetail"); }}
+      onNewTeamMatch={()=>{ setTournamentContext(null); setTeamMatchEditId(null); setTeamMatchCopyId(null); setScreen("teamMatchSetup"); }}
+      onCopyTeamMatch={id=>{ setTournamentContext(null); setTeamMatchCopyId(id); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
+      onOpenTournament={t=>{ setTournamentContext(t); setListMatchMode("tournament"); setScreen("tournamentDetail"); }}
       initialMatchMode={listMatchMode}
     />
   );
