@@ -3303,24 +3303,29 @@ const ROUND_OPTIONS = [
   "敗者復活1回戦","敗者復活2回戦","敗者復活3回戦","敗者復活4回戦","敗者復活5回戦",
 ];
 function RoundField({ value, onChange, placeholder }) {
-  const safeValue = value ?? "";
-  const filtered = safeValue.trim() ? ROUND_OPTIONS.filter(v => v.includes(safeValue.trim())) : ROUND_OPTIONS;
-  const [open, setOpen] = useState(false);
+  const isPreset = ROUND_OPTIONS.includes(value);
+  const [customMode, setCustomMode] = useState(!!value && !isPreset);
   return (
-    <div style={{ position:"relative" }}>
-      <input style={S.inp} placeholder={placeholder || "例：準々決勝（リストから選択、または自由入力）"} value={safeValue}
-        onChange={e => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 200)}
-      />
-      {open && filtered.length > 0 && (
-        <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:200, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", maxHeight:220, overflowY:"auto" }}>
-          {filtered.map(v => (
-            <div key={v} style={{ padding:"11px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
-              onMouseDown={e => { e.preventDefault(); onChange(v); setOpen(false); }}
-            >{v}</div>
-          ))}
-        </div>
+    <div>
+      <select
+        style={S.inp}
+        value={customMode ? "__custom__" : (value || "")}
+        onChange={e => {
+          if (e.target.value === "__custom__") { setCustomMode(true); onChange(""); }
+          else { setCustomMode(false); onChange(e.target.value); }
+        }}
+      >
+        <option value="">リストから選択</option>
+        {ROUND_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+        <option value="__custom__">✏️ 自由入力する</option>
+      </select>
+      {customMode && (
+        <input
+          style={{ ...S.inp, marginTop:8 }}
+          placeholder={placeholder || "例：準々決勝"}
+          value={value ?? ""}
+          onChange={e => onChange(e.target.value)}
+        />
       )}
     </div>
   );
