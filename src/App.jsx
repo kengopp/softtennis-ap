@@ -675,6 +675,25 @@ async function getTeamMatch(id) {
   return { ...m, games: games ?? [] };
 }
 
+// ★品質改善（フェーズ2）：自動更新のたびに毎回すべてを取り直すのではなく、
+// まず「そもそも何か変わったか」だけを軽量に確認する。
+// team_match_games（番手ごとの状態）と、紐づくmatches（試合そのもののスコア）の
+// updated_at のうち一番新しいものを見て、前回確認時と同じなら「変化なし」と判断できる。
+async function getTeamMatchChangeSignature(teamMatchId, matchIds) {
+  const [{ data: games }, matchesRes] = await Promise.all([
+    supabase.from("team_match_games").select("id, updated_at").eq("team_match_id", teamMatchId),
+    (matchIds && matchIds.length > 0)
+      ? supabase.from("matches").select("id, updated_at").in("id", matchIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const timestamps = [
+    ...(games || []).map(g => g.updated_at),
+    ...((matchesRes && matchesRes.data) || []).map(m => m.updated_at),
+  ].filter(Boolean);
+  if (timestamps.length === 0) return null;
+  return timestamps.reduce((max, t) => (t > max ? t : max));
+}
+
 async function saveTeamMatch(tm) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
@@ -2628,6 +2647,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [serveSelectInfo, setServeSelectInfo] = useState(null); // サーブ選択モーダル用
   const intervalRef = useRef(null);
   const inactiveRef = useRef(null);
+  const lastSignatureRef = useRef(null); // ★変化検知用：前回確認時点の最新updated_at
 
   const INACTIVITY_MS = 20 * 60 * 1000; // 20分
 
@@ -2660,6 +2680,20 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     setTm(data);
     setLoading(false);
     setLastUpdated(Date.now());
+    // 今回取得した内容を基準に、次回以降の「変化なし」判定用シグネチャを更新しておく
+    lastSignatureRef.current = await getTeamMatchChangeSignature(teamMatchId, matchIds);
+  }
+
+  // ★品質改善（フェーズ2）：自動更新のたびに毎回すべて取り直すのではなく、
+  // まず軽量な問い合わせで「前回確認時から何か変わったか」だけを確認し、
+  // 変化が無ければ重い再取得（loadData／recalcTeamMatchScore）はスキップする。
+  async function checkAndMaybeReload() {
+    const matchIds = (tm?.games || []).filter(g => g.match_id).map(g => g.match_id);
+    const sig = await getTeamMatchChangeSignature(teamMatchId, matchIds);
+    if (sig !== null && lastSignatureRef.current !== null && sig === lastSignatureRef.current) {
+      return; // 変化なし：ここで終了（通信量を抑える）
+    }
+    await loadData();
   }
 
   useEffect(() => {
@@ -2680,7 +2714,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         clearInterval(intervalRef.current);
         return;
       }
-      await loadData();
+      await checkAndMaybeReload();
+      setLastUpdated(Date.now());
     }, 10000);
     return () => clearInterval(intervalRef.current);
   }, [liveActive, lastUpdated, teamMatchId, tm?.status]);
