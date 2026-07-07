@@ -2176,6 +2176,7 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
   const [gameTab, setGameTab] = useState(0);
   const [reviewTab, setReviewTab] = useState("points"); // "points" | "analysis"
   const [saving, setSaving] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(false); // ★動画ファイルを選んでから再生準備が整うまでの読み込み中フラグ
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
   const prevMatchIdRef = useRef(matchId); // ★他のタブに移動して戻ってきた際、同じ試合であれば選択状態を維持するため
@@ -2225,6 +2226,7 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
   function handlePickFile(file) {
     if (!file) return;
     if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl);
+    setVideoLoading(true); // ★ここから再生準備が整うまで「読み込み中」の表示を出す
     setPickedFile(file);
     setActiveVideoRow(null); // ★別の動画に差し替えた場合、前の動画のDB行を誤って使わないようにリセット
     setAnchor(null);
@@ -2236,6 +2238,7 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
 
   // 動画のメタデータ（長さ）が読めたタイミングで、必要ならDBに新規登録する
   async function onVideoMetaLoaded() {
+    setVideoLoading(false); // ★読み込み完了
     const dur = Math.round(videoRef.current?.duration || 0);
     if (!activeVideoRow && pickedFile) {
       // ★同じ試合に「同じファイル名・ほぼ同じ長さ」の動画がすでに登録されていれば、
@@ -2310,7 +2313,7 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
                 <select
                   value={matchId ?? ""}
                   onChange={e => setMatchId(e.target.value || null)}
-                  style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontWeight: 600, color: C.text, background: C.white }}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "11px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontWeight: 600, color: C.text, background: C.white }}
                 >
                   <option value="">試合を選んでください</option>
                   {matches.map(m => {
@@ -2346,7 +2349,7 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
 
               {!videoObjectUrl && (
                 <>
-                  <label style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", padding: 16, borderRadius: 12, border: `1.5px dashed ${C.accent}`, background: C.accentL, color: "#00874f", fontSize: 14, fontWeight: 700, textAlign: "center", cursor: "pointer" }}>
+                  <label style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", boxSizing: "border-box", padding: 16, borderRadius: 12, border: `1.5px dashed ${C.accent}`, background: C.accentL, color: "#00874f", fontSize: 14, fontWeight: 700, textAlign: "center", cursor: "pointer" }}>
                     <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }}
                       onChange={e => handlePickFile(e.target.files[0])} />
                     <div style={{ fontSize: 28, marginBottom: 6 }}>🎬</div>
@@ -2368,12 +2371,19 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
                   <video ref={videoRef} src={videoObjectUrl} controls style={{ width: "100%", borderRadius: 12, background: "#000" }}
                     onLoadedMetadata={onVideoMetaLoaded}
                     onTimeUpdate={() => setCurTime(videoRef.current?.currentTime ?? 0)} />
+                  {videoLoading && (
+                    <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#fff3e0", border: `1px solid ${C.orange}`, fontSize: 12.5, color: "#c2410c", fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", border: "2px solid #c2410c", borderTopColor: "transparent", animation: "vr-spin 0.8s linear infinite" }} />
+                      動画を読み込んでいます…（大きいファイルは時間がかかることがあります）
+                      <style>{"@keyframes vr-spin{to{transform:rotate(360deg);}}"}</style>
+                    </div>
+                  )}
                   <div style={{ marginTop: 8, padding: 12, borderRadius: 10, background: C.gray, border: `1px solid ${C.border}`, fontSize: 12 }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: C.text, display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
                       ✓ {pickedFile?.name}
                     </div>
                     <div style={{ display: "flex", gap: 14, color: C.textSec, fontSize: 11.5 }}>
-                      <span>{fmtTime(videoRef.current?.duration)}</span>
+                      <span>{videoLoading ? "読み込み中…" : fmtTime(videoRef.current?.duration)}</span>
                       <span>{pickedFile ? fmtSize(pickedFile.size) : ""}</span>
                     </div>
                     <div style={{ marginTop: 8, fontSize: 11.5, color: C.accent, fontWeight: 700, cursor: "pointer" }}
@@ -2391,11 +2401,11 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
 
                   {firstPoint && firstPoint.scored_at && (
                     <button
-                      disabled={saving}
+                      disabled={saving || videoLoading}
                       onClick={handleSync}
-                      style={{ width: "100%", marginTop: 10, padding: 12, borderRadius: 10, border: "none", fontSize: 13, fontWeight: 800, background: saving ? C.border : C.navy, color: "#fff", cursor: saving ? "default" : "pointer" }}
+                      style={{ width: "100%", boxSizing: "border-box", marginTop: 10, padding: 12, borderRadius: 10, border: "none", fontSize: 13, fontWeight: 800, background: (saving || videoLoading) ? C.border : C.navy, color: "#fff", cursor: (saving || videoLoading) ? "default" : "pointer" }}
                     >
-                      {saving ? "保存中…" : "この位置を1点目として同期する"}
+                      {saving ? "保存中…" : videoLoading ? "動画を読み込み中…" : "この位置を1点目として同期する"}
                     </button>
                   )}
 
@@ -2423,7 +2433,7 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
           <button
             disabled={!anchor || !videoObjectUrl}
             onClick={goReview}
-            style={{ width: "100%", marginTop: 16, padding: 14, borderRadius: 12, border: "none", fontSize: 15, fontWeight: 800, background: (anchor && videoObjectUrl) ? C.accent : C.border, color: (anchor && videoObjectUrl) ? "#fff" : C.textSec, cursor: (anchor && videoObjectUrl) ? "pointer" : "default" }}
+            style={{ width: "100%", boxSizing: "border-box", marginTop: 16, padding: 14, borderRadius: 12, border: "none", fontSize: 15, fontWeight: 800, background: (anchor && videoObjectUrl) ? C.accent : C.border, color: (anchor && videoObjectUrl) ? "#fff" : C.textSec, cursor: (anchor && videoObjectUrl) ? "pointer" : "default" }}
           >
             レビュー開始
           </button>
