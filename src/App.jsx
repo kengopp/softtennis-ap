@@ -1686,8 +1686,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     </div>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                       <div style={{ flex:1 }}>
-                        <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec }}>{aClub} </span>}{aNames}</div>
-                        <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec }}>{bClub} </span>}{bNames}</div>
+                        <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
+                        <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
                       </div>
                       {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                     </div>
@@ -1957,8 +1957,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>{fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}</div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec }}>{aClub} </span>}{aNames}</div>
-                    <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec }}>{bClub} </span>}{bNames}</div>
+                    <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
+                    <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
                   </div>
                   {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                 </div>
@@ -2166,36 +2166,42 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
 // ・画面1：動画を選ぶ／同期する（試合ごとに一度でよい。次回以降は同じファイルを選べば自動復元）
 // ・画面2：動画とポイント一覧を見る（普段使う画面）
 // ============================================================
-function VideoReviewScreen({ onNavigate }) {
+function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pickedFile, setPickedFile, videoObjectUrl, setVideoObjectUrl }) {
   const [matches, setMatches] = useState(null);
-  const [matchId, setMatchId] = useState(null);
   const [match, setMatch] = useState(null); // getMatch()の詳細（ポイント含む）
   const [matchVideos, setMatchVideos] = useState([]);
   const [activeVideoRow, setActiveVideoRow] = useState(null); // DB上のmatch_videos行（選択中）
   const [anchor, setAnchor] = useState(null); // DB上のvideo_sync_anchors行
-  const [step, setStep] = useState("setup"); // "setup" | "review"
-  const [videoObjectUrl, setVideoObjectUrl] = useState(null);
-  const [pickedFile, setPickedFile] = useState(null);
   const [curTime, setCurTime] = useState(0);
   const [gameTab, setGameTab] = useState(0);
   const [reviewTab, setReviewTab] = useState("points"); // "points" | "analysis"
   const [saving, setSaving] = useState(false);
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
+  const prevMatchIdRef = useRef(matchId); // ★他のタブに移動して戻ってきた際、同じ試合であれば選択状態を維持するため
 
   useEffect(() => { getMatches().then(setMatches); }, []);
 
   useEffect(() => {
-    if (!matchId) { setMatch(null); setMatchVideos([]); setActiveVideoRow(null); setAnchor(null); setStep("setup"); return; }
+    if (!matchId) { setMatch(null); setMatchVideos([]); setActiveVideoRow(null); setAnchor(null); prevMatchIdRef.current = null; return; }
+    const isNewSelection = prevMatchIdRef.current !== matchId;
+    prevMatchIdRef.current = matchId;
     (async () => {
       const [m, vids] = await Promise.all([getMatch(matchId), getMatchVideos(matchId)]);
       setMatch(m);
       setMatchVideos(vids);
-      setActiveVideoRow(vids[0] ?? null);
-      setAnchor(null);
-      setStep("setup");
-      setPickedFile(null);
-      setVideoObjectUrl(null);
+      if (isNewSelection) {
+        // ★本当に別の試合を選んだ場合だけ、動画の選択状態をリセットする
+        setStep("setup");
+        setPickedFile(null);
+        setVideoObjectUrl(null);
+        setActiveVideoRow(null);
+      } else if (pickedFile) {
+        // ★動画タブを離れてから戻ってきた場合：すでに選んでいたファイルに一致するDB行を復元する
+        setActiveVideoRow(vids.find(v => v.file_name === pickedFile.name) ?? null);
+      } else {
+        setActiveVideoRow(vids[0] ?? null);
+      }
     })();
   }, [matchId]);
 
@@ -2225,11 +2231,8 @@ function VideoReviewScreen({ onNavigate }) {
     const url = URL.createObjectURL(file);
     setVideoObjectUrl(url);
   }
-
-  // ★動画URLはコンポーネントが消える時・別の動画に差し替える時に解放してメモリを節約する
-  useEffect(() => {
-    return () => { if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl); };
-  }, [videoObjectUrl]);
+  // ★動画URL（videoObjectUrl）は、動画タブを離れて戻ってくる間も再生を維持したいため、
+  //   コンポーネントのアンマウント時には解放しない（解放は上のhandlePickFileで差し替え時にのみ行う）
 
   // 動画のメタデータ（長さ）が読めたタイミングで、必要ならDBに新規登録する
   async function onVideoMetaLoaded() {
@@ -2310,11 +2313,15 @@ function VideoReviewScreen({ onNavigate }) {
                   style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontWeight: 600, color: C.text, background: C.white }}
                 >
                   <option value="">試合を選んでください</option>
-                  {matches.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {(m.match_date ?? "").slice(5)} {m.tournament_name || m.venue || "練習試合"}（{m.match_score_a}-{m.match_score_b}）
-                    </option>
-                  ))}
+                  {matches.map(m => {
+                    const aNames = (m.players ?? []).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/");
+                    const bNames = (m.players ?? []).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/");
+                    return (
+                      <option key={m.id} value={m.id}>
+                        {(m.match_date ?? "").slice(5)} {aNames} vs {bNames}（{m.match_score_a}-{m.match_score_b}）
+                      </option>
+                    );
+                  })}
                 </select>
               )}
             </div>
@@ -3974,18 +3981,26 @@ function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
   }
 
   return (
-    <select
-      style={{ ...S.inp, background:"transparent" }}
-      value={visibleSchools.some(s=>s.name===value) ? value : ""}
-      onChange={e=>{
-        if (e.target.value === "__custom__") { setCustomMode(true); }
-        else onChange(e.target.value);
-      }}
-    >
-      <option value="">選択してください</option>
-      {visibleSchools.map(s => <option key={s.name} value={s.name}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
-      <option value="__custom__">＋ 新しい学校名を入力</option>
-    </select>
+    <div>
+      <select
+        style={{ ...S.inp, background:"transparent" }}
+        value={visibleSchools.some(s=>s.name===value) ? value : ""}
+        onChange={e=>{
+          if (e.target.value === "__custom__") { setCustomMode(true); }
+          else onChange(e.target.value);
+        }}
+      >
+        <option value="">選択してください</option>
+        {visibleSchools.map(s => <option key={s.name} value={s.name}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
+        <option value="__custom__">＋ 新しい学校名を入力</option>
+      </select>
+      {value && (
+        <button style={{ background:"none",border:"none",color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",marginTop:4,padding:0 }}
+          onMouseDown={e=>e.preventDefault()}
+          onClick={()=>setCustomMode(true)}
+        >✎ 「{value}A」のように自由に文字を足す</button>
+      )}
+    </div>
   );
 }
 
@@ -7073,6 +7088,12 @@ export default function App() {
   const [screen,       setScreen]       = useState("home");
   const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
   const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
+
+  // ★動画レビュー画面の状態はここ（App本体）に持たせ、他のタブに移動して戻っても消えないようにする
+  const [vrMatchId, setVrMatchId] = useState(null);
+  const [vrStep, setVrStep] = useState("setup");
+  const [vrPickedFile, setVrPickedFile] = useState(null);
+  const [vrVideoObjectUrl, setVrVideoObjectUrl] = useState(null);
   const [listFilter,   setListFilter]   = useState("all"); // 試合一覧フィルター
   const [toast, setToast] = useState(null); // トースト通知
   const [matchId,      setMatchId]      = useState(null);
@@ -7362,7 +7383,12 @@ export default function App() {
     );
   }
   if (screen==="video") {
-    return <VideoReviewScreen onNavigate={goNav} />;
+    return <VideoReviewScreen onNavigate={goNav}
+      matchId={vrMatchId} setMatchId={setVrMatchId}
+      step={vrStep} setStep={setVrStep}
+      pickedFile={vrPickedFile} setPickedFile={setVrPickedFile}
+      videoObjectUrl={vrVideoObjectUrl} setVideoObjectUrl={setVrVideoObjectUrl}
+    />;
   }
   if (screen==="master") {
     return (
