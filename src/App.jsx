@@ -1947,6 +1947,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
           const aNames = aPlayers.map(p=>p.player_name).join("/");
           const bNames = bPlayers.map(p=>p.player_name).join("/");
+          const aClub = aPlayers[0]?.club_name || "";
+          const bClub = bPlayers[0]?.club_name || "";
           const borderColor = m.status==="active" ? C.orange : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
@@ -1955,8 +1957,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>{fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}</div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aNames}</div>
-                    <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bNames}</div>
+                    <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec }}>{aClub} </span>}{aNames}</div>
+                    <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec }}>{bClub} </span>}{bNames}</div>
                   </div>
                   {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                 </div>
