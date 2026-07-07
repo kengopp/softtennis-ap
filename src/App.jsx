@@ -329,10 +329,12 @@ async function saveMatch(match) {
     if (pErr) throw pErr;
   }
 
-  // ゲーム・ポイント・フォルトも同様に、入れ直す（子テーブルから順に削除）
-  await supabase.from("points").delete().eq("match_id", match.id);
-  await supabase.from("faults").delete().eq("match_id", match.id);
-  await supabase.from("games").delete().eq("match_id", match.id);
+  // ゲーム・ポイント・フォルト：
+  // ★以前は「全部削除→全部挿入」の順で処理していたが、連続でスコア登録が走ると
+  // 　保存の合間に「ポイントはあるがその親のゲーム行がまだ存在しない」瞬間ができてしまい、
+  // 　外部キー制約違反（points_game_id_fkey）でエラーになることがあった。
+  // 　そのため、先に現在の内容をすべて保存（upsert）し、その後で
+  // 　クライアント側に無くなった（削除された）行だけを掃除する順番に変更。
   for (const g of (match.games ?? [])) {
     const gameRow = {
       id: g.id, match_id: match.id, game_number: g.game_number, server_team: g.server_team,
@@ -362,6 +364,23 @@ async function saveMatch(match) {
       if (fErr) throw fErr;
     }
   }
+
+  // クライアント側に存在しなくなった行（1点前に戻す、修正で削除、等）だけを後から掃除する
+  const currentGameIds = (match.games ?? []).map(g => g.id);
+  const currentPointIds = (match.games ?? []).flatMap(g => (g.points ?? []).map(p => p.id));
+  const currentFaultIds = (match.games ?? []).flatMap(g => (g.faults ?? []).map(f => f.id));
+
+  const { data: existingPoints } = await supabase.from("points").select("id").eq("match_id", match.id);
+  const stalePointIds = (existingPoints ?? []).map(r => r.id).filter(id => !currentPointIds.includes(id));
+  if (stalePointIds.length) await supabase.from("points").delete().in("id", stalePointIds);
+
+  const { data: existingFaults } = await supabase.from("faults").select("id").eq("match_id", match.id);
+  const staleFaultIds = (existingFaults ?? []).map(r => r.id).filter(id => !currentFaultIds.includes(id));
+  if (staleFaultIds.length) await supabase.from("faults").delete().in("id", staleFaultIds);
+
+  const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", match.id);
+  const staleGameIds = (existingGames ?? []).map(r => r.id).filter(id => !currentGameIds.includes(id));
+  if (staleGameIds.length) await supabase.from("games").delete().in("id", staleGameIds);
 }
 
 async function deleteMatch(id) {
