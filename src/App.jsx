@@ -294,6 +294,7 @@ function rowToMatchFull(m, players, games, points, faults) {
         scoring_team: pt.scoring_team, player_name: pt.player_name,
         play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, result_type: pt.result_type ?? null,
         is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
+        scored_at: pt.scored_at ?? null, // ★動画同期用：得点を記録した時刻
       })),
     })),
   };
@@ -350,6 +351,7 @@ async function saveMatch(match) {
         shot_type: toShotType(pt.play_type, pt.result_type),
         play_type: pt.play_type || null, side_type: pt.side_type || null, result_type: pt.result_type || null,
         is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
+        scored_at: pt.scored_at || null, // ★動画同期用：得点を記録した時刻
       }));
       const { error: ptErr } = await supabase.from("points").upsert(pointRows);
       if (ptErr) throw ptErr;
@@ -4248,6 +4250,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       is_winner:isWin,
       fault_count:fault, // ★このポイントの前に何回フォルトがあったか（0=1stイン、1=2ndイン、2=ダブルフォルト）
       score_a_after:newA, score_b_after:newB,
+      scored_at:new Date().toISOString(), // ★動画同期用：得点をタップした瞬間の時刻
     };
     const updG={...cg,points:[...cg.points,pt],score_a:newA,score_b:newB};
     const gWin=cg.is_final?checkFinalWinner(newA,newB):checkNormalWinner(newA,newB);
