@@ -2216,10 +2216,18 @@ function VideoReviewScreen({ onNavigate }) {
 
   function handlePickFile(file) {
     if (!file) return;
+    if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl);
     setPickedFile(file);
+    setActiveVideoRow(null); // ★別の動画に差し替えた場合、前の動画のDB行を誤って使わないようにリセット
+    setAnchor(null);
     const url = URL.createObjectURL(file);
     setVideoObjectUrl(url);
   }
+
+  // ★動画URLはコンポーネントが消える時・別の動画に差し替える時に解放してメモリを節約する
+  useEffect(() => {
+    return () => { if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl); };
+  }, [videoObjectUrl]);
 
   // 動画のメタデータ（長さ）が読めたタイミングで、必要ならDBに新規登録する
   async function onVideoMetaLoaded() {
@@ -2241,7 +2249,8 @@ function VideoReviewScreen({ onNavigate }) {
   const firstPoint = match?.games?.[0]?.points?.[0] ?? null;
 
   async function handleSync() {
-    if (!activeVideoRow || !firstPoint) return;
+    if (!activeVideoRow) { alert("動画の登録が完了していないため同期できません。もう一度動画を選び直してください。"); return; }
+    if (!firstPoint) return;
     const videoSec = videoRef.current?.currentTime ?? 0;
     setSaving(true);
     try {
@@ -2313,6 +2322,13 @@ function VideoReviewScreen({ onNavigate }) {
                 </div>
               )}
 
+              {firstPoint && !firstPoint.scored_at && (
+                <div style={{ fontSize: 12, color: C.textSec, background: C.gray, borderRadius: 8, padding: 10, marginBottom: 10, lineHeight: 1.6 }}>
+                  この試合は動画連携前の記録のため、ポイントの時刻がありません。<br/>
+                  新しく記録した試合から動画ジャンプができます。
+                </div>
+              )}
+
               {!videoObjectUrl && (
                 <>
                   <label style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", padding: 16, borderRadius: 12, border: `1.5px dashed ${C.accent}`, background: C.accentL, color: "#00874f", fontSize: 14, fontWeight: 700, textAlign: "center", cursor: "pointer" }}>
@@ -2358,7 +2374,7 @@ function VideoReviewScreen({ onNavigate }) {
                     <b style={{ color: C.text, fontVariantNumeric: "tabular-nums" }}>{fmtTime(curTime)}</b>
                   </div>
 
-                  {firstPoint && (
+                  {firstPoint && firstPoint.scored_at && (
                     <button
                       disabled={saving}
                       onClick={handleSync}
@@ -2390,15 +2406,17 @@ function VideoReviewScreen({ onNavigate }) {
           )}
 
           <button
-            disabled={!anchor}
+            disabled={!anchor || !videoObjectUrl}
             onClick={goReview}
-            style={{ width: "100%", marginTop: 16, padding: 14, borderRadius: 12, border: "none", fontSize: 15, fontWeight: 800, background: anchor ? C.accent : C.border, color: anchor ? "#fff" : C.textSec, cursor: anchor ? "pointer" : "default" }}
+            style={{ width: "100%", marginTop: 16, padding: 14, borderRadius: 12, border: "none", fontSize: 15, fontWeight: 800, background: (anchor && videoObjectUrl) ? C.accent : C.border, color: (anchor && videoObjectUrl) ? "#fff" : C.textSec, cursor: (anchor && videoObjectUrl) ? "pointer" : "default" }}
           >
             レビュー開始
           </button>
-          {!anchor && (
+          {(!anchor || !videoObjectUrl) && (
             <div style={{ textAlign: "center", fontSize: 11, color: C.textSec, marginTop: 6 }}>
-              {matchId ? "動画を選んで同期するとレビューを開始できます" : "まず試合を選んでください"}
+              {!matchId ? "まず試合を選んでください"
+                : !videoObjectUrl ? "動画ファイルを選んでください"
+                : "動画を同期するとレビューを開始できます"}
             </div>
           )}
         </div>
