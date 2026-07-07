@@ -709,18 +709,26 @@ async function getTeamMatch(id) {
 // team_match_games（番手ごとの状態）と、紐づくmatches（試合そのもののスコア）の
 // updated_at のうち一番新しいものを見て、前回確認時と同じなら「変化なし」と判断できる。
 async function getTeamMatchChangeSignature(teamMatchId, matchIds) {
-  const [{ data: games }, matchesRes] = await Promise.all([
-    supabase.from("team_match_games").select("id, updated_at").eq("team_match_id", teamMatchId),
+  const [{ data: games, error: gamesErr }, matchesRes] = await Promise.all([
+    supabase.from("team_match_games").select("id, match_id, status, updated_at").eq("team_match_id", teamMatchId),
     (matchIds && matchIds.length > 0)
-      ? supabase.from("matches").select("id, updated_at").in("id", matchIds)
-      : Promise.resolve({ data: [] }),
+      ? supabase.from("matches").select("id, match_score_a, match_score_b, status, updated_at").in("id", matchIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
-  const timestamps = [
-    ...(games || []).map(g => g.updated_at),
-    ...((matchesRes && matchesRes.data) || []).map(m => m.updated_at),
-  ].filter(Boolean);
-  if (timestamps.length === 0) return null;
-  return timestamps.reduce((max, t) => (t > max ? t : max));
+  if (gamesErr) console.error(gamesErr);
+  if (matchesRes?.error) console.error(matchesRes.error);
+
+  // updated_atだけに依存すると、DBトリガー未設定・同一秒更新・一部テーブル未更新の環境で
+  // 変更を取り逃がす可能性があるため、スコア・状態も含めた軽量シグネチャにする。
+  const gamePart = (games || [])
+    .map(g => `${g.id}:${g.match_id || ""}:${g.status || ""}:${g.updated_at || ""}`)
+    .sort()
+    .join("|");
+  const matchPart = ((matchesRes && matchesRes.data) || [])
+    .map(m => `${m.id}:${m.match_score_a ?? 0}:${m.match_score_b ?? 0}:${m.status || ""}:${m.updated_at || ""}`)
+    .sort()
+    .join("|");
+  return `${gamePart}#${matchPart}`;
 }
 
 async function saveTeamMatch(tm) {
@@ -776,61 +784,75 @@ async function updateTeamMatchGame(id, updates) {
 
 // 団体戦の勝敗スコアを再集計してDBを更新
 async function recalcTeamMatchScore(teamMatchId) {
-  const { data: games } = await supabase.from("team_match_games").select("*").eq("team_match_id", teamMatchId);
-  if (!games) return;
+  const { data: games, error: gamesErr } = await supabase
+    .from("team_match_games")
+    .select("id, match_id, status")
+    .eq("team_match_id", teamMatchId);
+  if (gamesErr) { console.error(gamesErr); return null; }
+  if (!games) return null;
+
   const matchIds = games.filter(g => g.match_id).map(g => g.match_id);
-  if (matchIds.length === 0) return;
-  const { data: matches } = await supabase.from("matches").select("id,match_score_a,match_score_b,status").in("id", matchIds);
-  if (!matches) return;
+  if (matchIds.length === 0) return null;
+
+  const [{ data: matches, error: matchesErr }, { data: tm, error: tmErr }] = await Promise.all([
+    supabase.from("matches").select("id,match_score_a,match_score_b,status").in("id", matchIds),
+    supabase.from("team_matches").select("format,my_score,opponent_score,status").eq("id", teamMatchId).single(),
+  ]);
+  if (matchesErr) { console.error(matchesErr); return null; }
+  if (tmErr) { console.error(tmErr); return null; }
+  if (!matches || !tm) return null;
 
   const matchMap = {};
   matches.forEach(m => { matchMap[m.id] = m; });
 
-  // team_match_gamesのstatusをmatch.statusと同期させる
-  for (const g of games) {
-    if (!g.match_id) continue;
+  // team_match_gamesのstatusをmatch.statusと同期させる。
+  // ただし毎回無条件に更新せず、変更が必要な番手だけ更新する。
+  const syncTargets = games.filter(g => {
+    if (!g.match_id) return false;
     const m = matchMap[g.match_id];
-    if (!m) continue;
-    if (m.status === "finished" && g.status !== "finished") {
-      await supabase.from("team_match_games").update({ status:"finished", recorder_id:null, recorder_name:null }).eq("id", g.id);
-      g.status = "finished"; // ローカルも更新
-    }
-  }
+    return m?.status === "finished" && g.status !== "finished";
+  });
+  await Promise.all(syncTargets.map(g =>
+    supabase.from("team_match_games")
+      .update({ status:"finished", recorder_id:null, recorder_name:null })
+      .eq("id", g.id)
+  ));
+  syncTargets.forEach(g => { g.status = "finished"; });
 
   let myScore = 0, oppScore = 0;
   for (const g of games) {
     if (!g.match_id) continue;
     const m = matchMap[g.match_id];
-    // match.statusがfinishedなら集計（team_match_games.statusに依存しない）
     if (!m || m.status !== "finished") continue;
     if (m.match_score_a > m.match_score_b) myScore++;
     else if (m.match_score_b > m.match_score_a) oppScore++;
   }
 
-  const { data: tm } = await supabase.from("team_matches").select("format").eq("id", teamMatchId).single();
-  const winTarget = tm?.format === "best2" ? 2 : 3;
-  const totalGames = tm?.format === "best2" ? 3 : 3;
-
-  // 勝敗決定：どちらかが必要勝利数に達した場合のみfinished
+  const winTarget = tm.format === "best2" ? 2 : 3;
+  const totalGames = 3;
   const winDecided = myScore >= winTarget || oppScore >= winTarget;
 
-  // 全試合終了：match_idが設定されている全番手が終了済み
   const registeredGames = games.filter(g => g.match_id);
   const allRegisteredDone = registeredGames.length > 0 && registeredGames.every(g => {
     const m = matchMap[g.match_id];
     return m?.status === "finished" || g.status === "suspended";
   });
-  // 全番手登録済みかつ全試合終了の場合のみfinished（未登録番手があれば進行中）
   const allSlotsFilled = games.length >= totalGames;
   const allDone = allSlotsFilled && allRegisteredDone;
 
   const newStatus = winDecided || allDone ? "finished" : "active";
+  const changed = tm.my_score !== myScore || tm.opponent_score !== oppScore || tm.status !== newStatus;
 
-  await supabase.from("team_matches").update({
-    my_score: myScore,
-    opponent_score: oppScore,
-    status: newStatus,
-  }).eq("id", teamMatchId);
+  if (changed) {
+    const { error: updateErr } = await supabase.from("team_matches").update({
+      my_score: myScore,
+      opponent_score: oppScore,
+      status: newStatus,
+    }).eq("id", teamMatchId);
+    if (updateErr) { console.error(updateErr); return null; }
+  }
+
+  return { my_score: myScore, opponent_score: oppScore, status: newStatus, changed };
 }
 
 // ============================================================
@@ -2669,7 +2691,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [tm, setTm] = useState(null);
   const [loading, setLoading] = useState(true);
   const [liveActive, setLiveActive] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState(Date.now());
   const [myUserId, setMyUserId] = useState(null);
   const [myUserName, setMyUserName] = useState("");
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
@@ -2677,14 +2698,17 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [serveSelectInfo, setServeSelectInfo] = useState(null); // サーブ選択モーダル用
   const intervalRef = useRef(null);
   const inactiveRef = useRef(null);
-  const lastSignatureRef = useRef(null); // ★変化検知用：前回確認時点の最新updated_at
+  const lastSignatureRef = useRef(null); // ★変化検知用：前回確認時点の軽量シグネチャ
+  const lastChangeAtRef = useRef(Date.now()); // ★実際にデータ変化を検知した時刻（無変化チェックでは更新しない）
+  const pollingRef = useRef(false); // ★ポーリングの多重実行防止
 
   const INACTIVITY_MS = 20 * 60 * 1000; // 20分
 
-  async function loadData() {
-    // スコア再集計・データ取得・学校マスターを並列で取得
-    const [, data, schools] = await Promise.all([
-      recalcTeamMatchScore(teamMatchId),
+  async function loadData({ markAsChanged = true } = {}) {
+    // 先に必要な場合だけ団体戦スコアを再集計し、その後で画面表示用データを取得する。
+    // 並列実行にすると、再集計前の古いスコアを表示してしまうことがあるため順序を固定する。
+    await recalcTeamMatchScore(teamMatchId);
+    const [data, schools] = await Promise.all([
       getTeamMatch(teamMatchId),
       getSchools(),
     ]);
@@ -2709,6 +2733,9 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     }
     setTm(data);
     setLoading(false);
+    if (markAsChanged) {
+      lastChangeAtRef.current = Date.now();
+    }
     setLastUpdated(Date.now());
     // 今回取得した内容を基準に、次回以降の「変化なし」判定用シグネチャを更新しておく
     lastSignatureRef.current = await getTeamMatchChangeSignature(teamMatchId, matchIds);
@@ -2718,12 +2745,21 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   // まず軽量な問い合わせで「前回確認時から何か変わったか」だけを確認し、
   // 変化が無ければ重い再取得（loadData／recalcTeamMatchScore）はスキップする。
   async function checkAndMaybeReload() {
-    const matchIds = (tm?.games || []).filter(g => g.match_id).map(g => g.match_id);
-    const sig = await getTeamMatchChangeSignature(teamMatchId, matchIds);
-    if (sig !== null && lastSignatureRef.current !== null && sig === lastSignatureRef.current) {
-      return; // 変化なし：ここで終了（通信量を抑える）
+    if (pollingRef.current) return false;
+    pollingRef.current = true;
+    try {
+      const matchIds = (tm?.games || []).filter(g => g.match_id).map(g => g.match_id);
+      const sig = await getTeamMatchChangeSignature(teamMatchId, matchIds);
+      if (sig !== null && lastSignatureRef.current !== null && sig === lastSignatureRef.current) {
+        // 変化なし：重い再取得はしない。lastChangeAtRefも更新しないため、
+        // 20分間スコア変化がなければ自動更新を停止できる。
+        return false;
+      }
+      await loadData({ markAsChanged: true });
+      return true;
+    } finally {
+      pollingRef.current = false;
     }
-    await loadData();
   }
 
   useEffect(() => {
@@ -2739,16 +2775,15 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     if (!liveActive || tm?.status !== "active") return;
     intervalRef.current = setInterval(async () => {
       const now = Date.now();
-      if (now - lastUpdated > INACTIVITY_MS) {
+      if (now - lastChangeAtRef.current > INACTIVITY_MS) {
         setLiveActive(false);
         clearInterval(intervalRef.current);
         return;
       }
       await checkAndMaybeReload();
-      setLastUpdated(Date.now());
     }, 10000);
     return () => clearInterval(intervalRef.current);
-  }, [liveActive, lastUpdated, teamMatchId, tm?.status]);
+  }, [liveActive, teamMatchId, tm?.status]);
 
   if (loading || !tm) {
     return <div style={S.page}><div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div></div>;
@@ -2801,12 +2836,12 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         {tm.status === "active" && (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 14px", background:"#fff3cd", borderRadius:10, marginBottom:12, border:"1px solid #ffd699" }}>
             {liveActive ? (
-              <span style={{ fontSize:11,color:"#7a5800",fontWeight:700 }}>🔴 LIVE 自動更新中（10秒ごと）</span>
+              <span style={{ fontSize:11,color:"#7a5800",fontWeight:700 }}>🔴 LIVE 差分確認中（変更時のみ再取得）</span>
             ) : (
               <span style={{ fontSize:11,color:"#7a5800",fontWeight:700 }}>⏸ 更新停止中（20分間動きなし）</span>
             )}
             <div style={{ display:"flex", gap:6 }}>
-              <button style={{ fontSize:11,padding:"4px 8px",background:C.navy,color:C.white,border:"none",borderRadius:6,cursor:"pointer" }} onClick={()=>{ loadData(); }}>今すぐ更新</button>
+              <button style={{ fontSize:11,padding:"4px 8px",background:C.navy,color:C.white,border:"none",borderRadius:6,cursor:"pointer" }} onClick={()=>{ loadData({ markAsChanged:true }); }}>今すぐ更新</button>
               {!liveActive && <button style={{ fontSize:11,padding:"4px 8px",background:C.accent,color:C.white,border:"none",borderRadius:6,cursor:"pointer" }} onClick={()=>{ setLiveActive(true); setLastUpdated(Date.now()); }}>再開する</button>}
             </div>
           </div>
