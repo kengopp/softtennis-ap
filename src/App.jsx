@@ -2232,8 +2232,14 @@ function VideoReviewScreen({ onNavigate }) {
   // 動画のメタデータ（長さ）が読めたタイミングで、必要ならDBに新規登録する
   async function onVideoMetaLoaded() {
     const dur = Math.round(videoRef.current?.duration || 0);
-    // 同じ試合にまだ動画が1件も登録されていない場合は、ここで新規登録する
     if (!activeVideoRow && pickedFile) {
+      // ★同じ試合に「同じファイル名・ほぼ同じ長さ」の動画がすでに登録されていれば、
+      //   新規行を作らずそれを再利用する（同じ動画を選び直すたびに行が増えるのを防ぐ）
+      const existing = matchVideos.find(v =>
+        v.file_name === pickedFile.name && Math.abs((v.duration_sec ?? 0) - dur) <= 2
+      );
+      if (existing) { setActiveVideoRow(existing); return; }
+
       const row = {
         id: uid(), match_id: matchId, video_source_type: "local",
         video_reference: pickedFile.name, file_name: pickedFile.name, duration_sec: dur,
