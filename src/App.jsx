@@ -2409,22 +2409,24 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
                     </button>
                   )}
 
-                  <div style={{ marginTop: 10, fontSize: 12, padding: "10px 12px", borderRadius: 10, display: "flex", alignItems: anchor ? "flex-start" : "center", flexDirection: anchor ? "column" : "row", gap: anchor ? 2 : 8, background: anchor ? C.accentL : C.gray, color: anchor ? "#00874f" : C.textSec, fontWeight: anchor ? 700 : 400 }}>
-                    {anchor ? (
-                      <>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, flexShrink: 0 }}/>
-                          同期完了
-                        </div>
-                        <div style={{ display: "flex", gap: 14, fontWeight: 600, fontSize: 11, marginTop: 2 }}>
-                          <span>動画 {fmtTime(anchor.video_sec)}</span>
-                          <span>ポイント {anchor.game_no}G {firstPoint.score_a_after}-{firstPoint.score_b_after}</span>
-                        </div>
-                      </>
-                    ) : (
-                      "1点目が入った瞬間で一時停止して、上のボタンを押してください"
-                    )}
-                  </div>
+                  {firstPoint && firstPoint.scored_at && (
+                    <div style={{ marginTop: 10, fontSize: 12, padding: "10px 12px", borderRadius: 10, display: "flex", alignItems: anchor ? "flex-start" : "center", flexDirection: anchor ? "column" : "row", gap: anchor ? 2 : 8, background: anchor ? C.accentL : C.gray, color: anchor ? "#00874f" : C.textSec, fontWeight: anchor ? 700 : 400 }}>
+                      {anchor ? (
+                        <>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, flexShrink: 0 }}/>
+                            同期完了
+                          </div>
+                          <div style={{ display: "flex", gap: 14, fontWeight: 600, fontSize: 11, marginTop: 2 }}>
+                            <span>動画 {fmtTime(anchor.video_sec)}</span>
+                            <span>ポイント {anchor.game_no}G {firstPoint.score_a_after}-{firstPoint.score_b_after}</span>
+                          </div>
+                        </>
+                      ) : (
+                        "1点目が入った瞬間で一時停止して、上のボタンを押してください"
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </div>
