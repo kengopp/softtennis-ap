@@ -1770,8 +1770,9 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch }) {
-  const [seg, setSeg] = useState("team"); // team | individual
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange }) {
+  const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
+  const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [matches, setMatches] = useState([]);
   const [teamMatches, setTeamMatches] = useState([]);
   const [schoolMap, setSchoolMap] = useState({});
@@ -6625,6 +6626,7 @@ export default function App() {
   // 大会関連
   const [tournamentContext, setTournamentContext] = useState(null); // 大会詳細画面から試合作成に入った際の大会情報 {id,name,start_date,end_date}
   const [creatingFromTournament, setCreatingFromTournament] = useState(false); // 大会の＋ボタンから試合作成に入ったかどうか
+  const [tournamentSeg, setTournamentSeg] = useState("team"); // 大会詳細画面のタブ（team/individual）を試合詳細から戻った時も維持する
 
   // 大会に紐づく試合を新規作成する際のデフォルト試合日
   // 今日が大会期間内ならその日を、期間外なら大会の初日を使う
@@ -6972,14 +6974,16 @@ export default function App() {
     return (
       <TournamentDetail
         tournament={tournamentContext}
+        initialSeg={tournamentSeg}
+        onSegChange={setTournamentSeg}
         onBack={()=>{ setTournamentContext(null); setListMatchMode("tournament"); setScreen("list"); }}
         onSaved={updated=>{ setTournamentContext(updated); setTick(t=>t+1); }}
-        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("tournamentDetail"); setScreen("record"); }}
-        onOpenTeamMatch={id=>{ setTeamMatchId(id); setScreen("teamMatchDetail"); }}
-        onNewIndividual={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
-        onNewTeam={()=>{ setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
-        onCopyMatch={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
-        onCopyTeamMatch={id=>{ setTeamMatchCopyId(id); setTeamMatchEditId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
+        onOpenMatch={id=>{ setTournamentSeg("individual"); setMatchId(id); setPrevScreen("tournamentDetail"); setScreen("record"); }}
+        onOpenTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchId(id); setScreen("teamMatchDetail"); }}
+        onNewIndividual={()=>{ setTournamentSeg("individual"); setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
+        onNewTeam={()=>{ setTournamentSeg("team"); setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
+        onCopyMatch={id=>{ setTournamentSeg("individual"); setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
+        onCopyTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchCopyId(id); setTeamMatchEditId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
       />
     );
   }
