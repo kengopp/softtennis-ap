@@ -1802,7 +1802,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   return (
     <div style={S.page}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
-        <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, padding:"4px 10px", cursor:"pointer" }} onClick={onBack}>←</button>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>📅 {fmtDateRange(tournament.start_date, tournament.end_date)}</div>
@@ -3484,9 +3484,12 @@ function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
   const [customMode, setCustomMode] = useState(!!value && !schools.some(s => s.name === value));
 
   useEffect(() => {
-    // 候補一覧が後から読み込まれた場合、まだ何も入力していなければ一覧モードに切り替える
-    if (!value && schools.length>0 && customMode) setCustomMode(false);
-  }, [schools]);
+    // 候補一覧が後から読み込まれた場合の自動復帰:
+    // ①未入力なら一覧モードへ　②既存の学校名と一致していれば一覧モードへ（コピー・編集時にありがちなケース）
+    if (!customMode) return;
+    if (!value && schools.length>0) { setCustomMode(false); return; }
+    if (value && schools.some(s => s.name === value)) { setCustomMode(false); }
+  }, [schools, value]);
 
   const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
 
@@ -3495,7 +3498,10 @@ function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
       <div>
         <input style={S.inp} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} />
         {schools.length>0 && (
-          <button style={{ background:"none",border:"none",color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",marginTop:4,padding:0 }} onClick={()=>setCustomMode(false)}>← 一覧から選ぶ</button>
+          <button style={{ background:"none",border:"none",color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",marginTop:4,padding:0 }}
+            onMouseDown={e=>e.preventDefault()}
+            onClick={()=>setCustomMode(false)}
+          >← 一覧から選ぶ</button>
         )}
       </div>
     );
