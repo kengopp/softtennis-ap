@@ -2782,6 +2782,22 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       : p.team_name === value.schoolName || (value.schoolName === mySchoolName && p.is_own_team !== false)
   );
 
+  // ★選手名は他画面（選手マスター・試合記録など）との互換性のため、内部的には
+  //   「姓 名」の1つの文字列（value.player1 / value.player2）のまま保持する。
+  //   入力欄だけ姓・名の2つに分け、変更のたびに結合して保存する
+  //   （将来、選手マスターを姓・名で取り込む場合にも合わせやすい形）。
+  const splitName = (full) => {
+    const s = (full || "").trim();
+    if (!s) return { sei: "", mei: "" };
+    const i = s.search(/[ 　]/); // 半角・全角スペースどちらにも対応
+    if (i === -1) return { sei: s, mei: "" };
+    return { sei: s.slice(0, i), mei: s.slice(i + 1).trim() };
+  };
+  const joinName = (sei, mei) => [sei.trim(), mei.trim()].filter(Boolean).join(" ");
+
+  const p1 = splitName(value.player1);
+  const p2 = splitName(value.player2);
+
   return (
     <div style={{ border: "1px solid " + (value.isWithdrawn ? C.red : C.border), background: value.isWithdrawn ? C.redL : C.white, borderRadius: 11, padding: 12, marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -2800,7 +2816,10 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
 
       <div style={{ marginTop: 10 }}>
         <label style={{ fontSize: 11, color: C.textSec }}>選手1</label>
-        <input style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginTop: 4 }} placeholder="選手名" value={value.player1} onChange={e => set({ player1: e.target.value })} />
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p1.sei} onChange={e => set({ player1: joinName(e.target.value, p1.mei) })} />
+          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p1.mei} onChange={e => set({ player1: joinName(p1.sei, e.target.value) })} />
+        </div>
         {filteredRoster.length > 0 && (
           <div style={{ marginTop: 6 }}>
             {filteredRoster.map(p => (
@@ -2812,7 +2831,10 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
 
       <div style={{ marginTop: 10 }}>
         <label style={{ fontSize: 11, color: C.textSec }}>選手2（ペア）</label>
-        <input style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginTop: 4 }} placeholder="選手名" value={value.player2} onChange={e => set({ player2: e.target.value })} />
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p2.sei} onChange={e => set({ player2: joinName(e.target.value, p2.mei) })} />
+          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p2.mei} onChange={e => set({ player2: joinName(p2.sei, e.target.value) })} />
+        </div>
         {filteredRoster.length > 0 && (
           <div style={{ marginTop: 6 }}>
             {filteredRoster.map(p => (
@@ -2845,8 +2867,27 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     };
   };
 
-  const [sideA, setSideA] = useState(() => initSide(drawMatch.sideA, true));
-  const [sideB, setSideB] = useState(() => initSide(drawMatch.sideB, false));
+  // ★入力途中のデータが消えないよう、この枠の下書きをlocalStorageに自動保存し、
+  //   再度この画面を開いたとき（他のアプリで漢字を調べて戻ってきた場合など）に復元する。
+  //   保存が完了したら下書きは削除する。
+  const draftKey = `draw_entry_draft_${drawMatch.id}`;
+  const loadDraft = () => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  };
+  const draft = loadDraft();
+
+  const [sideA, setSideA] = useState(() => draft?.sideA ?? initSide(drawMatch.sideA, true));
+  const [sideB, setSideB] = useState(() => draft?.sideB ?? initSide(drawMatch.sideB, false));
+
+  useEffect(() => {
+    try { localStorage.setItem(draftKey, JSON.stringify({ sideA, sideB })); } catch (e) {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sideA, sideB]);
+
+  const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch (e) {} };
 
   useEffect(() => {
     getPlayerRoster().then(setRoster);
@@ -2870,6 +2911,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       });
       if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
       if (!drawMatch.side_b_entry_id) await setDrawMatchSide(drawMatch.id, "B", entryB.id);
+      clearDraft();
       await onSaved();
       onClose();
     } catch (e) {
@@ -2918,6 +2960,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       if (winnerEntry && winnerEntry.player1_name) {
         await createWalkoverMatch({ ...drawMatch, sideA: entryA, sideB: entryB }, tournament.name, roundLabel, winnerSide);
       }
+      clearDraft();
       await onSaved();
       onClose();
     } catch (e) {
