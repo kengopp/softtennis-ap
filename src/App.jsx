@@ -961,6 +961,17 @@ async function getDrawBlockLabels(tournamentId, category) {
   return Array.from(set).sort();
 }
 
+// 大会・種別に紐づくドローの合計試合数（大会詳細画面で「ドローが設定済み」を示すため）
+async function getDrawSummary(tournamentId, category) {
+  const { count, error } = await supabase
+    .from("draw_matches")
+    .select("id", { count: "exact", head: true })
+    .eq("tournament_id", tournamentId)
+    .eq("category", category);
+  if (error) { console.error(error); return 0; }
+  return count ?? 0;
+}
+
 // 回戦ごとの試合数（desiredCounts配列。index0=1回戦）を元に draw_matches を差分更新する。
 // ・増える分 → 空枠(未定)を追加するだけ
 // ・減る分   → 対戦情報が入っていない枠から削除。足りない場合はそのラウンドをスキップし、
@@ -978,8 +989,14 @@ async function saveDrawRounds(tournamentId, category, blockLabel, desiredCounts)
   const toDeleteIds = [];
   const skippedRounds = [];
 
-  desiredCounts.forEach((desired, i) => {
-    const roundNo = i + 1;
+  // 既存データにあるラウンド番号と、これから欲しいラウンド番号(1..desiredCounts.length)の両方を対象にする。
+  // これにより「回戦数を減らした」ことで生まれる末尾ラウンド（desiredCountsの範囲外）も
+  // ちゃんと削除対象として扱われる（desired=0として処理）。
+  const allRoundNos = new Set(Object.keys(byRound).map(Number));
+  for (let i = 0; i < desiredCounts.length; i++) allRoundNos.add(i + 1);
+
+  Array.from(allRoundNos).sort((a, b) => a - b).forEach(roundNo => {
+    const desired = roundNo <= desiredCounts.length ? desiredCounts[roundNo - 1] : 0;
     const rows = (byRound[roundNo] || []).slice().sort((a, b) => a.slot_no - b.slot_no);
     const current = rows.length;
 
@@ -1015,6 +1032,21 @@ async function saveDrawRounds(tournamentId, category, blockLabel, desiredCounts)
     if (error) throw error;
   }
   return { skippedRounds };
+}
+
+// ブロック分けを確定したときに、旧「すべて（ブロックなし）」のドローが残っていれば片付ける。
+// 対戦情報が入っていない枠のみ安全に削除し、入っている枠が残っていれば削除せずに件数を返す
+// （呼び出し元はその件数をユーザーに伝え、勝手にはデータを消さない）。
+async function clearUnblockedDraw(tournamentId, category) {
+  const rows = await getDrawMatches(tournamentId, category, null);
+  if (rows.length === 0) return { cleared: true, remaining: 0 };
+  const emptyRows = rows.filter(r => !r.side_a_entry_id && !r.side_b_entry_id);
+  const remaining = rows.length - emptyRows.length;
+  if (emptyRows.length) {
+    const { error } = await supabase.from("draw_matches").delete().in("id", emptyRows.map(r => r.id));
+    if (error) throw error;
+  }
+  return { cleared: remaining === 0, remaining };
 }
 
 // ============================================================
@@ -1952,6 +1984,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [showEditModal, setShowEditModal] = useState(false);
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null);
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
+  const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -1967,7 +2000,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       setTeamMatches(tList.filter(tm => tm.tournament_name === tournament.name));
       setLoading(false);
     });
-  }, [tournament.name]);
+    Promise.all([getDrawSummary(tournament.id, "team"), getDrawSummary(tournament.id, "individual")]).then(([teamCount, indivCount]) => {
+      setDrawSummary({ team: teamCount, individual: indivCount });
+    });
+  }, [tournament.name, tournament.id]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -1996,6 +2032,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
       <div style={{ padding:"10px 14px", paddingBottom:90 }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
+
+        {!loading && drawSummary[seg] > 0 && (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:C.accentL, border:"1px solid "+C.accent, borderRadius:10, padding:"10px 14px", marginBottom:12 }}>
+            <span style={{ fontSize:12.5, color:C.navy, fontWeight:700 }}>🗂️ ドローが設定されています（全{drawSummary[seg]}試合）</span>
+            <button style={{ background:"none", border:"none", color:C.navy, fontSize:12, fontWeight:700, textDecoration:"underline", cursor:"pointer", whiteSpace:"nowrap" }} onClick={()=>onOpenDrawSetup && onOpenDrawSetup(seg)}>設定を開く</button>
+          </div>
+        )}
 
         {!loading && seg==="team" && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
         {!loading && seg==="team" && teamMatches.map(tm => {
@@ -2130,81 +2173,110 @@ function chipStyle(active) {
 
 function DrawSetup({ tournament, category, onBack }) {
   const [catMode, setCatMode] = useState(category || "individual");
-  const [blockLabels, setBlockLabels] = useState([]); // ['A','B',...]
-  const [currentScope, setCurrentScope] = useState(null); // null = すべて
-  const [roundCount, setRoundCount] = useState(4);
-  const [matchCounts, setMatchCounts] = useState([8, 4, 2, 1]);
-  const [roundCountInput, setRoundCountInputRaw] = useState("4");
+  const [blockLabels, setBlockLabels] = useState([]); // ['A','B',...]（DB上に既にあるもの＋今回分けたもの）
+  const [currentScope, setCurrentScope] = useState("ALL"); // "ALL"(ブロックなし) | "A" | "B" ...
+  const [loadedScopes, setLoadedScopes] = useState({}); // { ALL:true, A:true, ... } 一度読み込んだスコープ（編集中の内容を保持するため再読込しない）
+  const [scopeMatchCounts, setScopeMatchCounts] = useState({ ALL: ["8", "4", "2", "1"] }); // scope -> string[]
+  const [scopeRoundInput, setScopeRoundInput] = useState({ ALL: "4" }); // scope -> "4" など
   const [roundCountError, setRoundCountError] = useState(false);
   const [blockCountInput, setBlockCountInput] = useState("");
   const [blockCountError, setBlockCountError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [skippedInfo, setSkippedInfo] = useState(null);
+  const [skippedInfo, setSkippedInfo] = useState(null); // { [scope]: [{round,desired,current,emptyAvailable}] }
+
+  const matchCounts = scopeMatchCounts[currentScope] || [];
+  const roundCountInput = scopeRoundInput[currentScope] || "";
 
   const defaultMatchesForCount = (n) => {
     const arr = [];
     for (let i = 0; i < n; i++) arr.push(Math.pow(2, n - 1 - i));
     return arr;
   };
+  const toNum = (s, fallback = 1) => {
+    const n = parseInt(s, 10);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  const toDbLabel = (scope) => (scope === "ALL" ? null : scope);
 
-  const loadScope = useCallback(async (cat, scope) => {
-    setLoading(true);
-    const rows = await getDrawMatches(tournament.id, cat, scope);
+  const fetchScopeData = useCallback(async (cat, scope) => {
+    const rows = await getDrawMatches(tournament.id, cat, toDbLabel(scope));
     if (rows.length === 0) {
-      setRoundCount(4);
-      setRoundCountInputRaw("4");
-      setMatchCounts(defaultMatchesForCount(4));
-    } else {
-      const maxRound = Math.max(...rows.map(r => r.round_no));
-      const counts = [];
-      for (let i = 1; i <= maxRound; i++) counts.push(rows.filter(r => r.round_no === i).length);
-      setRoundCount(maxRound);
-      setRoundCountInputRaw(String(maxRound));
-      setMatchCounts(counts);
+      return { roundInput: "4", matchCounts: defaultMatchesForCount(4).map(String) };
     }
-    setSkippedInfo(null);
-    setLoading(false);
+    const maxRound = Math.max(...rows.map(r => r.round_no));
+    const counts = [];
+    for (let i = 1; i <= maxRound; i++) counts.push(rows.filter(r => r.round_no === i).length);
+    return { roundInput: String(maxRound), matchCounts: counts.map(String) };
   }, [tournament.id]);
 
+  // 種別（団体戦/個人戦）を切り替えたら全部リセットして「すべて」から読み込み直す
   useEffect(() => {
     let alive = true;
     (async () => {
+      setLoading(true);
       const labels = await getDrawBlockLabels(tournament.id, catMode);
       if (!alive) return;
+      const allData = await fetchScopeData(catMode, "ALL");
+      if (!alive) return;
       setBlockLabels(labels);
-      setCurrentScope(null);
-      await loadScope(catMode, null);
+      setCurrentScope("ALL");
+      setLoadedScopes({ ALL: true });
+      setScopeMatchCounts({ ALL: allData.matchCounts });
+      setScopeRoundInput({ ALL: allData.roundInput });
+      setSkippedInfo(null);
+      setLoading(false);
     })();
     return () => { alive = false; };
-  }, [catMode, tournament.id, loadScope]);
+  }, [catMode, tournament.id, fetchScopeData]);
 
+  // スコープ切替：すでに読み込み済み（＝今回のセッションで編集中）のスコープはDBから読み直さない。
+  // これにより、Aブロックを編集してBブロックを見てまたAに戻っても、Aの入力内容は消えない。
   const switchScope = async (scope) => {
     setCurrentScope(scope);
-    await loadScope(catMode, scope);
+    if (loadedScopes[scope]) return;
+    setLoading(true);
+    const data = await fetchScopeData(catMode, scope);
+    setScopeMatchCounts(prev => ({ ...prev, [scope]: data.matchCounts }));
+    setScopeRoundInput(prev => ({ ...prev, [scope]: data.roundInput }));
+    setLoadedScopes(prev => ({ ...prev, [scope]: true }));
+    setLoading(false);
   };
 
+  // 回戦数を変更しても、既存ラウンドの手入力値は消さない。増えた分だけ末尾に追加、減った分だけ末尾を削る。
   const onRoundCountChange = (v) => {
-    setRoundCountInputRaw(v);
+    setScopeRoundInput(prev => ({ ...prev, [currentScope]: v }));
     if (v === "" || !/^[0-9]+$/.test(v) || parseInt(v, 10) < 1) {
       setRoundCountError(true);
       return;
     }
     setRoundCountError(false);
     const n = parseInt(v, 10);
-    setRoundCount(n);
-    setMatchCounts(defaultMatchesForCount(n));
-  };
-
-  const onMatchCountChange = (idx, v) => {
-    if (v === "" || !/^[0-9]+$/.test(v)) return;
-    setMatchCounts(prev => {
-      const next = [...prev];
-      next[idx] = Math.max(1, parseInt(v, 10));
-      return next;
+    setScopeMatchCounts(prev => {
+      const cur = prev[currentScope] || [];
+      let next;
+      if (n === cur.length) next = cur;
+      else if (n < cur.length) next = cur.slice(0, n);
+      else {
+        const defaults = defaultMatchesForCount(n).map(String);
+        next = [...cur];
+        for (let i = cur.length; i < n; i++) next.push(defaults[i]);
+      }
+      return { ...prev, [currentScope]: next };
     });
   };
 
+  // 各回戦の試合数入力（この行・このスコープだけを更新。他には一切触れない）
+  const onMatchCountChange = (idx, v) => {
+    if (v !== "" && !/^[0-9]+$/.test(v)) return;
+    setScopeMatchCounts(prev => {
+      const cur = [...(prev[currentScope] || [])];
+      cur[idx] = v;
+      return { ...prev, [currentScope]: cur };
+    });
+  };
+
+  // 「すべて」の内容をブロック数で均等割りし、まだ無いブロックだけ新規に用意する
   const applyBlockSplit = () => {
     if (blockCountInput === "" || !/^[0-9]+$/.test(blockCountInput) || parseInt(blockCountInput, 10) < 1) {
       setBlockCountError(true);
@@ -2213,22 +2285,86 @@ function DrawSetup({ tournament, category, onBack }) {
     setBlockCountError(false);
     const n = parseInt(blockCountInput, 10);
     const letters = ["A", "B", "C", "D", "E", "F", "G", "H"].slice(0, n);
-    const half = matchCounts.map(v => Math.max(1, Math.floor(v / n)));
-    setBlockLabels(letters);
+    const allCounts = scopeMatchCounts.ALL || [];
+    const allRoundInput = scopeRoundInput.ALL || "4";
+
+    setScopeMatchCounts(prev => {
+      const next = { ...prev };
+      letters.forEach(l => {
+        if (!loadedScopes[l]) next[l] = allCounts.map(v => String(Math.max(1, Math.floor(toNum(v) / n))));
+      });
+      return next;
+    });
+    setScopeRoundInput(prev => {
+      const next = { ...prev };
+      letters.forEach(l => { if (!loadedScopes[l]) next[l] = allRoundInput; });
+      return next;
+    });
+    setLoadedScopes(prev => {
+      const next = { ...prev };
+      letters.forEach(l => { next[l] = true; });
+      return next;
+    });
+    setBlockLabels(prev => Array.from(new Set([...prev, ...letters])).sort());
     setCurrentScope(letters[0]);
-    setRoundCount(half.length);
-    setMatchCounts(half);
   };
 
+  // 「この内容でドローを作成」：ブロックが1つでもあれば全ブロックをまとめて保存する。
+  // ブロック分けが確定した場合は、旧「すべて（ブロックなし）」のドローが残っていれば片付ける。
   const handleCreate = async () => {
     setSaving(true);
     try {
-      const { skippedRounds } = await saveDrawRounds(tournament.id, catMode, currentScope, matchCounts);
-      await loadScope(catMode, currentScope);
-      if (skippedRounds.length) {
-        setSkippedInfo(skippedRounds);
+      const scopesToSave = blockLabels.length > 0 ? blockLabels : ["ALL"];
+
+      // 画面上でまだ開いていない（＝読み込んでいない）ブロックがあれば、保存前に必ずDBから読み込む。
+      // ここを飛ばすと、未読み込みブロックが「試合数0」として扱われ、削除対象になってしまう。
+      const countsByScope = {};
+      for (const scope of scopesToSave) {
+        if (loadedScopes[scope] && scopeMatchCounts[scope]) {
+          countsByScope[scope] = scopeMatchCounts[scope];
+        } else {
+          const data = await fetchScopeData(catMode, scope);
+          countsByScope[scope] = data.matchCounts;
+        }
+      }
+
+      const skippedByScope = {};
+      let total = 0;
+
+      for (const scope of scopesToSave) {
+        const counts = (countsByScope[scope] || []).map(v => toNum(v, 1));
+        const { skippedRounds } = await saveDrawRounds(tournament.id, catMode, toDbLabel(scope), counts);
+        if (skippedRounds.length) skippedByScope[scope] = skippedRounds;
+        total += counts.reduce((a, b) => a + b, 0);
+      }
+
+      let unblockedRemaining = 0;
+      if (blockLabels.length > 0) {
+        const { remaining } = await clearUnblockedDraw(tournament.id, catMode);
+        unblockedRemaining = remaining;
+      }
+
+      // 保存後の状態を読み直す
+      const labels = await getDrawBlockLabels(tournament.id, catMode);
+      const scopeToShow = labels.length > 0 ? labels[0] : "ALL";
+      const data = await fetchScopeData(catMode, scopeToShow);
+      setBlockLabels(labels);
+      setCurrentScope(scopeToShow);
+      setScopeMatchCounts({ [scopeToShow]: data.matchCounts });
+      setScopeRoundInput({ [scopeToShow]: data.roundInput });
+      setLoadedScopes({ [scopeToShow]: true });
+
+      if (Object.keys(skippedByScope).length) {
+        setSkippedInfo(skippedByScope);
       } else {
-        onBack();
+        let msg = `ドローを作成しました（全${total}試合`;
+        if (blockLabels.length > 0) msg += `・${blockLabels.length}ブロック`;
+        msg += "）";
+        if (unblockedRemaining > 0) {
+          msg += `\n※「すべて（ブロックなし）」側に対戦情報が入った枠が${unblockedRemaining}件残っているため、そちらは削除していません。`;
+        }
+        alert(msg);
+        if (unblockedRemaining === 0) onBack();
       }
     } catch (e) {
       alert("保存エラー: " + (e.message || e));
@@ -2248,13 +2384,13 @@ function DrawSetup({ tournament, category, onBack }) {
       </div>
 
       <div style={{ display: "flex", background: "#f0f2f6", padding: 3, margin: "14px 14px 0", borderRadius: 10 }}>
-        {[["individual", "🎾 個人戦"], ["team", "🏆 団体戦"]].map(([v, l]) => (
+        {[["team", "🏆 団体戦"], ["individual", "🎾 個人戦"]].map(([v, l]) => (
           <button key={v} style={{ flex: 1, padding: 9, border: "none", cursor: "pointer", borderRadius: 8, fontSize: 13, fontWeight: 700, background: catMode === v ? C.white : "transparent", color: catMode === v ? C.navy : C.textSec, boxShadow: catMode === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none" }} onClick={() => setCatMode(v)}>{l}</button>
         ))}
       </div>
 
       <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "10px 14px 4px" }}>
-        <button style={chipStyle(currentScope === null)} onClick={() => switchScope(null)}>すべて</button>
+        <button style={chipStyle(currentScope === "ALL")} onClick={() => switchScope("ALL")}>すべて</button>
         {blockLabels.map(l => (
           <button key={l} style={chipStyle(currentScope === l)} onClick={() => switchScope(l)}>{l}ブロック</button>
         ))}
@@ -2264,6 +2400,11 @@ function DrawSetup({ tournament, category, onBack }) {
         <div style={{ textAlign: "center", color: C.textSec, marginTop: 60 }}>読み込み中...</div>
       ) : (
         <div style={{ padding: "6px 14px 100px" }}>
+          {blockLabels.length > 0 && (
+            <div style={{ fontSize: 11, color: C.textSec, padding: "0 2px 10px" }}>
+              「この内容でドローを作成」を押すと、{blockLabels.join("・")}ブロックの内容がまとめて保存されます。
+            </div>
+          )}
           <div style={{ ...S.card, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottom: "1px solid " + C.border }}>
               <div>
@@ -2281,13 +2422,13 @@ function DrawSetup({ tournament, category, onBack }) {
 
             <div style={{ padding: "12px 14px", background: C.accentL }}>
               <div style={{ fontSize: 11, color: C.navy, fontWeight: 700, marginBottom: 8 }}>
-                各回戦の試合数（{currentScope ? currentScope + "ブロック" : "すべて"}・数字を直接入力）
+                各回戦の試合数（{currentScope === "ALL" ? "すべて" : currentScope + "ブロック"}・数字を直接入力）
               </div>
               {matchCounts.map((val, idx) => (
-                <div key={currentScope + "-" + idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+                <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
                   <span style={{ fontSize: 12.5 }}>{idx + 1}回戦</span>
                   <input
-                    type="text" inputMode="numeric" defaultValue={val}
+                    type="text" inputMode="numeric" value={val}
                     onChange={e => onMatchCountChange(idx, e.target.value)}
                     style={{ width: 74, border: "1px solid " + C.border, borderRadius: 8, padding: "7px 9px", fontSize: 13.5, fontWeight: 700, textAlign: "right" }}
                   />
@@ -2299,36 +2440,47 @@ function DrawSetup({ tournament, category, onBack }) {
             </div>
           </div>
 
-          <div style={{ ...S.card, marginBottom: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottom: "1px solid " + C.border }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 700 }}>ブロックに分けますか？</div>
-                <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>分けるブロック数を入れると、「すべて」の試合数を均等に割り振ります</div>
+          {currentScope === "ALL" && blockLabels.length === 0 && (
+            <div style={{ ...S.card, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottom: "1px solid " + C.border }}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>ブロックに分けますか？</div>
+                  <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>分けるブロック数を入れると、「すべて」の試合数を均等に割り振ります</div>
+                </div>
+                <input
+                  type="text" inputMode="numeric" placeholder="例:4" className="block-count-input"
+                  value={blockCountInput}
+                  onChange={e => setBlockCountInput(e.target.value)}
+                  style={{ width: 70, border: "1px solid " + (blockCountError ? C.red : C.border), borderRadius: 9, padding: "9px 10px", fontSize: 15, fontWeight: 800, textAlign: "right" }}
+                />
+                <style>{`.block-count-input::placeholder{ color:#b7bfcc; font-weight:400; opacity:1; }`}</style>
               </div>
-              <input
-                type="text" inputMode="numeric" placeholder="例:4"
-                value={blockCountInput}
-                onChange={e => setBlockCountInput(e.target.value)}
-                style={{ width: 70, border: "1px solid " + (blockCountError ? C.red : C.border), borderRadius: 9, padding: "9px 10px", fontSize: 15, fontWeight: 800, textAlign: "right" }}
-              />
+              {blockCountError && <div style={{ color: C.red, fontSize: 11.5, fontWeight: 700, padding: "0 14px 10px" }}>半角数字（1以上）を入力してください</div>}
+              <div style={{ padding: "0 14px 14px" }}>
+                <button style={{ background: "none", border: "none", color: C.navy, fontSize: 12, fontWeight: 700, textDecoration: "underline", cursor: "pointer" }} onClick={applyBlockSplit}>この数でブロックに分ける ▸</button>
+              </div>
+              <div style={{ fontSize: 11, color: C.textSec, padding: "0 14px 14px" }}>
+                分けた後は上のチップで「すべて」「Aブロック」…を切り替えながら、各回戦の試合数を確認・修正できます。「この内容でドローを作成」を押すと全ブロックがまとめて保存されます。
+              </div>
             </div>
-            {blockCountError && <div style={{ color: C.red, fontSize: 11.5, fontWeight: 700, padding: "0 14px 10px" }}>半角数字（1以上）を入力してください</div>}
-            <div style={{ padding: "0 14px 14px" }}>
-              <button style={{ background: "none", border: "none", color: C.navy, fontSize: 12, fontWeight: 700, textDecoration: "underline", cursor: "pointer" }} onClick={applyBlockSplit}>この数でブロックに分ける ▸</button>
+          )}
+
+          {currentScope === "ALL" && blockLabels.length > 0 && (
+            <div style={{ ...S.card, marginBottom: 14, padding: 14 }}>
+              <div style={{ fontSize: 12, color: C.textSec }}>
+                すでに{blockLabels.join("・")}ブロックに分かれています。既存ブロックの内容を上書きしないよう、ここからの再分割はできません。各ブロックの試合数は、上のチップで切り替えて個別に修正してください。
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: C.textSec, padding: "0 14px 14px" }}>
-              分けた後は上のチップで「すべて」「Aブロック」…を切り替えながら、各回戦の試合数を確認・修正できます。
-            </div>
-          </div>
+          )}
 
           {skippedInfo && (
             <div style={{ ...S.card, marginBottom: 14, background: C.redL, border: "1px solid " + C.red, padding: 14 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: C.red, marginBottom: 6 }}>一部のラウンドは試合数を減らせませんでした</div>
-              {skippedInfo.map((s, i) => (
-                <div key={i} style={{ fontSize: 11.5, color: C.text, marginBottom: 2 }}>
-                  第{s.round}回戦：{s.current}試合→{s.desired}試合にしたいが、対戦情報が入っていない枠が{s.emptyAvailable}件しかありません。対戦情報が入っている試合を減らすには、その試合を開いて個別に削除してください。
+              {Object.entries(skippedInfo).map(([scope, rounds]) => rounds.map((s, i) => (
+                <div key={scope + "-" + i} style={{ fontSize: 11.5, color: C.text, marginBottom: 2 }}>
+                  {scope === "ALL" ? "すべて" : scope + "ブロック"}・第{s.round}回戦：{s.current}試合→{s.desired}試合にしたいが、対戦情報が入っていない枠が{s.emptyAvailable}件しかありません。対戦情報が入っている試合を減らすには、その試合を開いて個別に削除してください。
                 </div>
-              ))}
+              )))}
             </div>
           )}
 
