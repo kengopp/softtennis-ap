@@ -1049,6 +1049,89 @@ async function clearUnblockedDraw(tournamentId, category) {
   return { cleared: remaining === 0, remaining };
 }
 
+// draw_matches に、それぞれの側（サイドA/B）のエントリー情報（学校名・選手名）を付けて取得する
+// （大会詳細のトーナメント表表示用）
+async function getDrawMatchesWithEntries(tournamentId, category, blockLabel) {
+  const matches = await getDrawMatches(tournamentId, category, blockLabel);
+  if (matches.length === 0) return [];
+  const entryIds = Array.from(new Set(matches.flatMap(m => [m.side_a_entry_id, m.side_b_entry_id]).filter(Boolean)));
+  let entryMap = {};
+  if (entryIds.length) {
+    const { data, error } = await supabase.from("draw_entries").select("*").in("id", entryIds);
+    if (error) console.error(error);
+    (data ?? []).forEach(e => { entryMap[e.id] = e; });
+  }
+  return matches.map(m => ({
+    ...m,
+    sideA: m.side_a_entry_id ? entryMap[m.side_a_entry_id] : null,
+    sideB: m.side_b_entry_id ? entryMap[m.side_b_entry_id] : null,
+  }));
+}
+
+// draw_entries の作成・更新（対戦情報入力シートから呼ばれる）
+async function saveDrawEntry(entry) {
+  const row = {
+    id: entry.id,
+    tournament_id: entry.tournament_id,
+    category: entry.category,
+    block_label: entry.block_label || null,
+    entry_no: entry.entry_no || null,
+    is_own_team: !!entry.is_own_team,
+    school_name: entry.school_name || null,
+    school_name_secondary: entry.school_name_secondary || null,
+    player1_name: entry.player1_name || null,
+    player2_name: entry.player2_name || null,
+    is_withdrawn: !!entry.is_withdrawn,
+  };
+  const { error } = await supabase.from("draw_entries").upsert(row);
+  if (error) throw error;
+  return row;
+}
+
+// draw_matches の指定サイドに、作成済みのエントリーを紐づける
+async function setDrawMatchSide(drawMatchId, side, entryId) {
+  const col = side === "A" ? "side_a_entry_id" : "side_b_entry_id";
+  const { error } = await supabase.from("draw_matches").update({ [col]: entryId, updated_at: new Date().toISOString() }).eq("id", drawMatchId);
+  if (error) throw error;
+}
+
+// ドローの枠（両サイドとも埋まっている状態）から、実際にスコアを付けられる試合(matches)を作成し、
+// draw_matches.match_id に紐づける。作成後は通常の試合一覧にも表示されるようになる。
+async function createMatchFromDrawSlot(drawMatch, tournamentName, roundLabel) {
+  const matchId = uid();
+  const players = [];
+  const addSide = (entry, team) => {
+    if (!entry) return;
+    if (entry.player1_name) players.push({ id: uid(), team, player_name: entry.player1_name, club_name: entry.school_name || "", position: "", order_num: 1 });
+    if (entry.player2_name) players.push({ id: uid(), team, player_name: entry.player2_name, club_name: entry.school_name || "", position: "", order_num: 2 });
+  };
+  addSide(drawMatch.sideA, "A");
+  addSide(drawMatch.sideB, "B");
+
+  const match = {
+    id: matchId,
+    match_date: new Date().toISOString().slice(0, 10),
+    venue: "",
+    tournament_name: tournamentName,
+    round: roundLabel,
+    match_type: "tournament",
+    game_format: 7,
+    is_doubles: true,
+    first_server: null,
+    status: "scheduled",
+    match_score_a: 0,
+    match_score_b: 0,
+    memo: "",
+    court_number: "",
+    is_younger: true,
+    players,
+  };
+  await saveMatch(match);
+  const { error } = await supabase.from("draw_matches").update({ match_id: matchId, updated_at: new Date().toISOString() }).eq("id", drawMatch.id);
+  if (error) throw error;
+  return matchId;
+}
+
 // ============================================================
 // ゲームロジック
 // ============================================================
@@ -2034,9 +2117,16 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
 
         {!loading && drawSummary[seg] > 0 && (
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:C.accentL, border:"1px solid "+C.accent, borderRadius:10, padding:"10px 14px", marginBottom:12 }}>
-            <span style={{ fontSize:12.5, color:C.navy, fontWeight:700 }}>🗂️ ドローが設定されています（全{drawSummary[seg]}試合）</span>
-            <button style={{ background:"none", border:"none", color:C.navy, fontSize:12, fontWeight:700, textDecoration:"underline", cursor:"pointer", whiteSpace:"nowrap" }} onClick={()=>onOpenDrawSetup && onOpenDrawSetup(seg)}>設定を開く</button>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:6 }}>
+              <button style={{ background:"none", border:"none", color:C.navy, fontSize:11.5, fontWeight:700, textDecoration:"underline", cursor:"pointer" }} onClick={()=>onOpenDrawSetup && onOpenDrawSetup(seg)}>ドロー設定を開く</button>
+            </div>
+            <DrawBracket
+              tournament={tournament}
+              category={seg}
+              mySchoolName={mySchoolName}
+              onOpenMatch={(id)=>{ if (seg==="individual") onOpenMatch(id); else onOpenTeamMatch(id); }}
+            />
           </div>
         )}
 
@@ -2177,6 +2267,7 @@ function DrawSetup({ tournament, category, onBack }) {
   const [currentScope, setCurrentScope] = useState("ALL"); // "ALL"(ブロックなし) | "A" | "B" ...
   const [loadedScopes, setLoadedScopes] = useState({}); // { ALL:true, A:true, ... } 一度読み込んだスコープ（編集中の内容を保持するため再読込しない）
   const [scopeMatchCounts, setScopeMatchCounts] = useState({ ALL: ["8", "4", "2", "1"] }); // scope -> string[]
+  const [scopeDirty, setScopeDirty] = useState({ ALL: [false, false, false, false] }); // scope -> bool[]（true=ユーザーが直接手入力した回戦。回戦数変更時も保護する）
   const [scopeRoundInput, setScopeRoundInput] = useState({ ALL: "4" }); // scope -> "4" など
   const [roundCountError, setRoundCountError] = useState(false);
   const [blockCountInput, setBlockCountInput] = useState("");
@@ -2223,6 +2314,7 @@ function DrawSetup({ tournament, category, onBack }) {
       setCurrentScope("ALL");
       setLoadedScopes({ ALL: true });
       setScopeMatchCounts({ ALL: allData.matchCounts });
+      setScopeDirty({ ALL: allData.matchCounts.map(() => false) });
       setScopeRoundInput({ ALL: allData.roundInput });
       setSkippedInfo(null);
       setLoading(false);
@@ -2238,12 +2330,15 @@ function DrawSetup({ tournament, category, onBack }) {
     setLoading(true);
     const data = await fetchScopeData(catMode, scope);
     setScopeMatchCounts(prev => ({ ...prev, [scope]: data.matchCounts }));
+    setScopeDirty(prev => ({ ...prev, [scope]: data.matchCounts.map(() => false) }));
     setScopeRoundInput(prev => ({ ...prev, [scope]: data.roundInput }));
     setLoadedScopes(prev => ({ ...prev, [scope]: true }));
     setLoading(false);
   };
 
-  // 回戦数を変更しても、既存ラウンドの手入力値は消さない。増えた分だけ末尾に追加、減った分だけ末尾を削る。
+  // 回戦数を変更したら、ユーザーが直接手入力した回戦（dirty）だけは値を保持し、
+  // それ以外は「決勝=1、その前=2、以降は手前ほど倍」の正しい進行になるよう毎回計算し直す。
+  // （手入力していない値をそのまま残すと、回戦数を変えたときに矛盾した試合数になってしまうため）
   const onRoundCountChange = (v) => {
     setScopeRoundInput(prev => ({ ...prev, [currentScope]: v }));
     if (v === "" || !/^[0-9]+$/.test(v) || parseInt(v, 10) < 1) {
@@ -2252,26 +2347,36 @@ function DrawSetup({ tournament, category, onBack }) {
     }
     setRoundCountError(false);
     const n = parseInt(v, 10);
+    const freshDefaults = defaultMatchesForCount(n).map(String);
     setScopeMatchCounts(prev => {
       const cur = prev[currentScope] || [];
-      let next;
-      if (n === cur.length) next = cur;
-      else if (n < cur.length) next = cur.slice(0, n);
-      else {
-        const defaults = defaultMatchesForCount(n).map(String);
-        next = [...cur];
-        for (let i = cur.length; i < n; i++) next.push(defaults[i]);
+      const curDirty = scopeDirty[currentScope] || [];
+      const next = [];
+      for (let i = 0; i < n; i++) {
+        next.push(i < cur.length && curDirty[i] ? cur[i] : freshDefaults[i]);
       }
+      return { ...prev, [currentScope]: next };
+    });
+    setScopeDirty(prev => {
+      const curDirty = prev[currentScope] || [];
+      const next = [];
+      for (let i = 0; i < n; i++) next.push(i < curDirty.length ? curDirty[i] : false);
       return { ...prev, [currentScope]: next };
     });
   };
 
-  // 各回戦の試合数入力（この行・このスコープだけを更新。他には一切触れない）
+  // 各回戦の試合数入力（この行・このスコープだけを更新。他には一切触れない。
+  // 手入力した回戦は dirty としてマークし、以後の回戦数変更で自動上書きされないようにする）
   const onMatchCountChange = (idx, v) => {
     if (v !== "" && !/^[0-9]+$/.test(v)) return;
     setScopeMatchCounts(prev => {
       const cur = [...(prev[currentScope] || [])];
       cur[idx] = v;
+      return { ...prev, [currentScope]: cur };
+    });
+    setScopeDirty(prev => {
+      const cur = [...(prev[currentScope] || [])];
+      cur[idx] = true;
       return { ...prev, [currentScope]: cur };
     });
   };
@@ -2292,6 +2397,13 @@ function DrawSetup({ tournament, category, onBack }) {
       const next = { ...prev };
       letters.forEach(l => {
         if (!loadedScopes[l]) next[l] = allCounts.map(v => String(Math.max(1, Math.floor(toNum(v) / n))));
+      });
+      return next;
+    });
+    setScopeDirty(prev => {
+      const next = { ...prev };
+      letters.forEach(l => {
+        if (!loadedScopes[l]) next[l] = allCounts.map(() => false);
       });
       return next;
     });
@@ -2351,6 +2463,7 @@ function DrawSetup({ tournament, category, onBack }) {
       setBlockLabels(labels);
       setCurrentScope(scopeToShow);
       setScopeMatchCounts({ [scopeToShow]: data.matchCounts });
+      setScopeDirty({ [scopeToShow]: data.matchCounts.map(() => false) });
       setScopeRoundInput({ [scopeToShow]: data.roundInput });
       setLoadedScopes({ [scopeToShow]: true });
 
@@ -2493,6 +2606,269 @@ function DrawSetup({ tournament, category, onBack }) {
             作成すると「未定 vs 未定・予定」の空枠が各回戦に設定した試合数ぶん自動生成されます。棄権・不戦勝は、枠をタップして開く対戦情報入力画面から個別に設定できます。
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 対戦情報入力シート（ドローの空枠をタップして開く）
+// ============================================================
+function DrawSideEditor({ label, side, value, onChange, roster, mySchoolName }) {
+  const [search, setSearch] = useState("");
+  const filteredRoster = search.trim()
+    ? roster.filter(p => p.player_name.includes(search.trim()))
+    : roster;
+
+  const set = (patch) => onChange({ ...value, ...patch });
+
+  return (
+    <div style={{ border: "1px solid " + (value.isWithdrawn ? C.red : C.border), background: value.isWithdrawn ? C.redL : C.white, borderRadius: 11, padding: 12, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <b style={{ fontSize: 12.5 }}>{label}</b>
+        <button
+          style={{ fontSize: 11, fontWeight: 700, padding: "5px 10px", borderRadius: 99, border: "1px solid " + (value.isWithdrawn ? C.red : C.border), background: value.isWithdrawn ? C.red : C.white, color: value.isWithdrawn ? C.white : C.textSec, cursor: "pointer" }}
+          onClick={() => set({ isWithdrawn: !value.isWithdrawn })}
+        >棄権にする</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        {[["own", "自チーム"], ["other", "他チーム"]].map(([v, l]) => (
+          <button key={v}
+            style={{ flex: 1, padding: 7, borderRadius: 8, border: "1px solid " + (value.type === v ? C.navy : C.border), background: value.type === v ? C.navy : C.white, color: value.type === v ? C.white : C.textSec, fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+            onClick={() => set({ type: v, schoolName: v === "own" ? mySchoolName : "" })}
+          >{l}</button>
+        ))}
+      </div>
+
+      {value.type === "own" ? (
+        <>
+          <div style={{ background: C.accentL, borderRadius: 8, padding: "8px 10px", fontWeight: 700, fontSize: 13.5, color: C.navy, marginBottom: 8 }}>{mySchoolName || "自チーム"}</div>
+          <div style={{ marginBottom: 8 }}>
+            <input placeholder="選手を検索" value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "7px 9px", fontSize: 12, marginBottom: 6 }} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 110, overflowY: "auto" }}>
+              {filteredRoster.map(p => (
+                <button key={p.id}
+                  style={{ padding: "6px 11px", borderRadius: 99, border: "1px solid " + (value.player1 === p.player_name ? C.navy : C.border), background: value.player1 === p.player_name ? C.navy : C.white, color: value.player1 === p.player_name ? C.white : C.text, fontSize: 11, cursor: "pointer" }}
+                  onClick={() => set({ player1: p.player_name })}
+                >{p.player_name}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: C.textSec, marginTop: 4 }}>選手1：{value.player1 || "未選択"}</div>
+          </div>
+          <div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 110, overflowY: "auto" }}>
+              {filteredRoster.map(p => (
+                <button key={p.id}
+                  style={{ padding: "6px 11px", borderRadius: 99, border: "1px solid " + (value.player2 === p.player_name ? C.navy : C.border), background: value.player2 === p.player_name ? C.navy : C.white, color: value.player2 === p.player_name ? C.white : C.text, fontSize: 11, cursor: "pointer" }}
+                  onClick={() => set({ player2: p.player_name })}
+                >{p.player_name}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: C.textSec, marginTop: 4 }}>選手2（ペア）：{value.player2 || "未選択"}</div>
+          </div>
+        </>
+      ) : (
+        <>
+          <input placeholder="学校名" value={value.schoolName} onChange={e => set({ schoolName: e.target.value })} style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 8 }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input placeholder="選手1" value={value.player1} onChange={e => set({ player1: e.target.value })} style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }} />
+            <input placeholder="選手2（ペア）" value={value.player2} onChange={e => set({ player2: e.target.value })} style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabel, matchLabel, mySchoolName, onClose, onSaved }) {
+  const [roster, setRoster] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const emptySide = (own) => ({ type: own ? "own" : "other", schoolName: own ? (mySchoolName || "") : "", player1: "", player2: "", isWithdrawn: false });
+
+  const initSide = (entry, own) => {
+    if (!entry) return emptySide(own);
+    return {
+      type: entry.is_own_team ? "own" : "other",
+      schoolName: entry.school_name || "",
+      player1: entry.player1_name || "",
+      player2: entry.player2_name || "",
+      isWithdrawn: !!entry.is_withdrawn,
+    };
+  };
+
+  const [sideA, setSideA] = useState(() => initSide(drawMatch.sideA, true));
+  const [sideB, setSideB] = useState(() => initSide(drawMatch.sideB, false));
+
+  useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const entryA = await saveDrawEntry({
+        id: drawMatch.side_a_entry_id || uid(),
+        tournament_id: tournament.id, category, block_label: blockLabel,
+        is_own_team: sideA.type === "own", school_name: sideA.schoolName,
+        player1_name: sideA.player1, player2_name: sideA.player2, is_withdrawn: sideA.isWithdrawn,
+      });
+      const entryB = await saveDrawEntry({
+        id: drawMatch.side_b_entry_id || uid(),
+        tournament_id: tournament.id, category, block_label: blockLabel,
+        is_own_team: sideB.type === "own", school_name: sideB.schoolName,
+        player1_name: sideB.player1, player2_name: sideB.player2, is_withdrawn: sideB.isWithdrawn,
+      });
+      if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
+      if (!drawMatch.side_b_entry_id) await setDrawMatchSide(drawMatch.id, "B", entryB.id);
+      await onSaved();
+      onClose();
+    } catch (e) {
+      alert("保存エラー: " + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 2 }}>{matchLabel}の対戦情報を入力</div>
+        <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>選手を登録するとこの枠でスコア入力が開始できます</div>
+        <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} roster={roster} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} roster={roster} mySchoolName={mySchoolName} />
+        <button
+          style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: saving ? 0.7 : 1 }}
+          disabled={saving} onClick={handleSave}
+        >{saving ? "保存中..." : "対戦を登録する"}</button>
+        <button style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={onClose}>閉じる</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================
+// トーナメント表（ドローの実データ表示）
+// ============================================================
+function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
+  const [blockLabels, setBlockLabels] = useState([]);
+  const [selectedBlock, setSelectedBlock] = useState(null); // null = ブロックなし("すべて"扱い)
+  const [drawMatches, setDrawMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingSlot, setEditingSlot] = useState(null); // タップ中のdrawMatch
+  const [startingId, setStartingId] = useState(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const labels = await getDrawBlockLabels(tournament.id, category);
+    setBlockLabels(labels);
+    const scope = labels.length > 0 ? (selectedBlock && labels.includes(selectedBlock) ? selectedBlock : labels[0]) : null;
+    setSelectedBlock(scope);
+    const rows = await getDrawMatchesWithEntries(tournament.id, category, scope);
+    setDrawMatches(rows);
+    setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tournament.id, category]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const switchBlock = async (label) => {
+    setSelectedBlock(label);
+    setLoading(true);
+    const rows = await getDrawMatchesWithEntries(tournament.id, category, label);
+    setDrawMatches(rows);
+    setLoading(false);
+  };
+
+  const rounds = {};
+  drawMatches.forEach(m => { (rounds[m.round_no] = rounds[m.round_no] || []).push(m); });
+  const roundNos = Object.keys(rounds).map(Number).sort((a, b) => a - b);
+
+  const entryLabel = (entry) => {
+    if (!entry) return "未定";
+    const names = [entry.player1_name, entry.player2_name].filter(Boolean).join("・") || (entry.school_name || "未定");
+    return names;
+  };
+
+  const startMatch = async (dm) => {
+    setStartingId(dm.id);
+    try {
+      const roundLabel = `${dm.round_no}回戦`;
+      const matchId = await createMatchFromDrawSlot(dm, tournament.name, roundLabel);
+      await reload();
+      onOpenMatch(matchId);
+    } catch (e) {
+      alert("試合作成エラー: " + (e.message || e));
+    } finally {
+      setStartingId(null);
+    }
+  };
+
+  if (loading) return <div style={{ textAlign: "center", color: C.textSec, marginTop: 30 }}>ドローを読み込み中...</div>;
+  if (drawMatches.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {blockLabels.length > 0 && (
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 10 }}>
+          {blockLabels.map(l => (
+            <button key={l} style={chipStyle(selectedBlock === l)} onClick={() => switchBlock(l)}>{l}ブロック</button>
+          ))}
+        </div>
+      )}
+      <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+        <div style={{ display: "flex", gap: 10, minWidth: roundNos.length * 190 }}>
+          {roundNos.map(rn => (
+            <div key={rn} style={{ width: 180, flex: "none" }}>
+              <div style={{ textAlign: "center", fontWeight: 800, fontSize: 11.5, color: C.navy, background: C.accentL, borderRadius: 7, padding: "4px 0", marginBottom: 10 }}>{rn}回戦</div>
+              {rounds[rn].sort((a, b) => a.slot_no - b.slot_no).map((dm, idx) => {
+                const filled = dm.sideA && dm.sideB;
+                const empty = !dm.sideA && !dm.sideB;
+                return (
+                  <div key={dm.id} style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 9, color: C.textSec, textAlign: "center", marginBottom: 3 }}>第{idx + 1}試合</div>
+                    <div
+                      style={{ background: C.white, borderRadius: 10, border: "1px solid " + (dm.match_id ? C.accent : C.border), overflow: "hidden", cursor: "pointer" }}
+                      onClick={() => {
+                        if (dm.match_id) { onOpenMatch(dm.match_id); return; }
+                        if (filled) {
+                          if (category !== "individual") {
+                            alert("団体戦の試合作成は、まだこの画面から自動ではできません。「＋」から通常の団体戦試合登録をしてください。");
+                            return;
+                          }
+                          startMatch(dm);
+                          return;
+                        }
+                        setEditingSlot(dm);
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px 0" }}>
+                        <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: dm.match_id ? C.accent : filled ? C.orange : C.white, color: dm.match_id || filled ? C.white : C.textSec, border: dm.match_id || filled ? "none" : "1px solid " + C.border }}>
+                          {dm.match_id ? "試合あり" : filled ? (startingId === dm.id ? "作成中..." : (category === "individual" ? "試合開始" : "対戦カード確定")) : "予定"}
+                        </span>
+                      </div>
+                      <div style={{ padding: "7px 9px", borderBottom: "1px solid " + C.border, fontSize: 11.5, fontWeight: dm.sideA ? 700 : 400, color: empty ? C.textSec : C.text }}>{entryLabel(dm.sideA)}</div>
+                      <div style={{ padding: "7px 9px", fontSize: 11.5, fontWeight: dm.sideB ? 700 : 400, color: empty ? C.textSec : C.text }}>{entryLabel(dm.sideB)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まると「試合開始」でスコア入力に進めます。</div>
+
+      {editingSlot && (
+        <DrawEntrySheet
+          drawMatch={editingSlot}
+          tournament={tournament}
+          category={category}
+          blockLabel={selectedBlock}
+          roundLabel={`${editingSlot.round_no}回戦`}
+          matchLabel={`第${editingSlot.round_no}回戦`}
+          mySchoolName={mySchoolName}
+          onClose={() => setEditingSlot(null)}
+          onSaved={reload}
+        />
       )}
     </div>
   );
