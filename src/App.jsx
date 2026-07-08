@@ -4662,7 +4662,7 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOn
 // ============================================================
 // 統計画面（複数試合をまたいだ分析）
 // ============================================================
-function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
+function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) {
   const [allMatches, setAllMatches] = useState([]);
   const [roster, setRoster] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -4670,6 +4670,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
   const [teamSubTab, setTeamSubTab] = useState("overall"); // overall | pairs
   const [period, setPeriod] = useState("all"); // all | month1
   const [sort, setSort] = useState("desc"); // desc | asc
+  const [showBreakdown, setShowBreakdown] = useState(false); // 総合成績カードの内訳一覧
 
   useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
@@ -4735,8 +4736,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
             </div>
             {teamSubTab==="overall" ? (
               <>
-                <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>総合成績</div>
+                <div style={{ ...S.card, padding:16, marginBottom:16, cursor:"pointer" }} onClick={()=>setShowBreakdown(true)}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:C.navy }}>総合成績</div>
+                    <div style={{ fontSize:10,color:C.textSec }}>タップして試合一覧を見る ›</div>
+                  </div>
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
                     <div>
                       <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.total}</div>
@@ -4800,6 +4804,47 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent }) {
         )}
       </div>
       <NavBar active="stats" onNavigate={onNavigate}/>
+
+      {showBreakdown && (
+        <Modal onClose={()=>setShowBreakdown(false)}>
+          <div style={{ maxHeight:"75vh", overflowY:"auto" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:2 }}>
+              <div style={{ fontSize:15, fontWeight:800 }}>総合成績の内訳</div>
+              <button
+                style={{ border:"none", background:"none", fontSize:20, color:C.textSec, cursor:"pointer", lineHeight:1, padding:0, marginLeft:8 }}
+                onClick={()=>setShowBreakdown(false)}
+                aria-label="閉じる"
+              >×</button>
+            </div>
+            <div style={{ fontSize:11.5, color:C.textSec, marginBottom:14 }}>
+              {teamRecord.total}試合（{teamRecord.wins}勝{teamRecord.losses}敗）・タップすると試合詳細を開きます
+            </div>
+            {finished.slice().sort((a,b)=> sort==="desc" ? new Date(b.match_date)-new Date(a.match_date) : new Date(a.match_date)-new Date(b.match_date)).map(m=>{
+              const aWin = m.match_score_a > m.match_score_b;
+              const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
+              const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
+              const aNames = aPlayers.map(p=>p.player_name).join("/");
+              const bNames = bPlayers.map(p=>p.player_name).join("/");
+              const bClub = bPlayers[0]?.club_name || "";
+              return (
+                <div
+                  key={m.id}
+                  style={{ border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8, cursor:"pointer" }}
+                  onClick={()=>{ setShowBreakdown(false); onOpenMatch && onOpenMatch(m.id); }}
+                >
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                    <span style={{ fontSize:10.5, color:C.textSec }}>{fmtDate(m.match_date)}{m.tournament_name ? ` · ${m.tournament_name}` : ""}</span>
+                    <span style={{ fontSize:16, fontWeight:900, color:aWin?C.teamA:C.teamB }}>{m.match_score_a}-{m.match_score_b}</span>
+                  </div>
+                  <div style={{ fontSize:12.5, fontWeight: aWin?700:400, color: aWin?C.teamA:C.text }}>{aNames}</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>vs {bClub && `${bClub} `}{bNames}</div>
+                </div>
+              );
+            })}
+            {finished.length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>この期間の試合記録がありません</div>}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -8642,6 +8687,7 @@ export default function App() {
         onNavigate={goNav}
         onOpenPlayer={name=>{ setStatsPlayerName(name); setPlayerStatsFrom("stats"); setScreen("playerStats"); }}
         onOpenOpponent={name=>{ setStatsOpponentName(name); setScreen("opponentStats"); }}
+        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("stats"); setScreen("record"); }}
       />
     );
   }
@@ -8689,7 +8735,7 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={async ()=>{ setScreen(prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : "list"); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1); }}
+        onBack={async ()=>{ setScreen(prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : "list"); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1); }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
