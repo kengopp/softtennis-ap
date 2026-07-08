@@ -1078,10 +1078,19 @@ async function getDrawMatchesWithEntries(tournamentId, category, blockLabel) {
     if (error) console.error(error);
     (data ?? []).forEach(e => { entryMap[e.id] = e; });
   }
+  // ドロー画面のカードにスコア・進行状況を表示するため、紐づく試合の最小限の情報も取得する
+  const matchIds = Array.from(new Set(matches.map(m => m.match_id).filter(Boolean)));
+  let matchInfoMap = {};
+  if (matchIds.length) {
+    const { data, error } = await supabase.from("matches").select("id, status, match_score_a, match_score_b, memo").in("id", matchIds);
+    if (error) console.error(error);
+    (data ?? []).forEach(mi => { matchInfoMap[mi.id] = mi; });
+  }
   return matches.map(m => ({
     ...m,
     sideA: m.side_a_entry_id ? entryMap[m.side_a_entry_id] : null,
     sideB: m.side_b_entry_id ? entryMap[m.side_b_entry_id] : null,
+    matchInfo: m.match_id ? (matchInfoMap[m.match_id] || null) : null,
   }));
 }
 
@@ -1192,9 +1201,74 @@ async function createMatchFromDrawSlot(drawMatch, tournamentName, roundLabel) {
   return matchId;
 }
 
-// ============================================================
-// ゲームロジック
-// ============================================================
+// 棄権による不戦勝処理：片方のサイドが棄権になったタイミングで、
+// 実際のスコア入力を待たずに「終了扱い（不戦勝）」の試合を作成し、draw_matches.match_id に紐づける。
+// winnerSide: 勝ち上がる側（棄権していない側）"A" | "B"
+// 二重作成防止の考え方は createMatchFromDrawSlot と同様（先に最新状態を確認し、更新は match_id が null のときだけ行う）
+async function createWalkoverMatch(drawMatch, tournamentName, roundLabel, winnerSide) {
+  const { data: latest, error: fetchErr } = await supabase
+    .from("draw_matches")
+    .select("id, match_id")
+    .eq("id", drawMatch.id)
+    .single();
+  if (fetchErr) throw fetchErr;
+  if (latest?.match_id) return latest.match_id; // 既に試合が作成済みならそれを使い回す
+
+  const matchId = uid();
+  const players = [];
+  const addSide = (entry, team) => {
+    if (!entry) return;
+    if (entry.player1_name) players.push({ id: uid(), team, player_name: entry.player1_name, club_name: entry.school_name || "", position: "", order_num: 1 });
+    if (entry.player2_name) players.push({ id: uid(), team, player_name: entry.player2_name, club_name: entry.school_name || "", position: "", order_num: 2 });
+  };
+  addSide(drawMatch.sideA, "A");
+  addSide(drawMatch.sideB, "B");
+
+  const gameFormat = 7;
+  const winGames = calcWinGames(gameFormat);
+  const match = {
+    id: matchId,
+    match_date: new Date().toISOString().slice(0, 10),
+    venue: "",
+    tournament_name: tournamentName,
+    round: roundLabel,
+    match_type: "tournament",
+    game_format: gameFormat,
+    is_doubles: true,
+    first_server: null,
+    status: "finished",
+    match_score_a: winnerSide === "A" ? winGames : 0,
+    match_score_b: winnerSide === "B" ? winGames : 0,
+    memo: "不戦勝（相手棄権）",
+    court_number: "",
+    is_younger: true,
+    players,
+  };
+  await saveMatch(match);
+
+  const { data: updatedRows, error: updateErr } = await supabase
+    .from("draw_matches")
+    .update({ match_id: matchId, updated_at: new Date().toISOString() })
+    .eq("id", drawMatch.id)
+    .is("match_id", null)
+    .select("id, match_id");
+
+  if (updateErr) {
+    await deleteMatch(matchId).catch(() => {});
+    throw updateErr;
+  }
+  if (!updatedRows || updatedRows.length === 0) {
+    await deleteMatch(matchId).catch(() => {});
+    const { data: current, error: recheckErr } = await supabase
+      .from("draw_matches")
+      .select("match_id")
+      .eq("id", drawMatch.id)
+      .single();
+    if (recheckErr) throw recheckErr;
+    return current?.match_id ?? null;
+  }
+  return matchId;
+}
 const calcWinGames = (fmt) => Math.ceil(fmt / 2);
 const isFinalGame  = (fmt, sA, sB) => { const w = calcWinGames(fmt); return sA === w-1 && sB === w-1; };
 const gameServer   = (first, num)  => num % 2 === 1 ? first : (first === "A" ? "B" : "A");
@@ -2696,7 +2770,7 @@ function DrawSetup({ tournament, category, onBack }) {
 // ============================================================
 // 対戦情報入力シート（ドローの空枠をタップして開く）
 // ============================================================
-function DrawSideEditor({ label, value, onChange, roster, schools, mySchoolName }) {
+function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, schools, mySchoolName }) {
   const [pref, setPref] = useState("");
   const set = (patch) => onChange({ ...value, ...patch });
 
@@ -2714,7 +2788,7 @@ function DrawSideEditor({ label, value, onChange, roster, schools, mySchoolName 
         <b style={{ fontSize: 12.5 }}>{label}</b>
         <button
           style={{ fontSize: 11, fontWeight: 700, padding: "5px 10px", borderRadius: 99, border: "1px solid " + (value.isWithdrawn ? C.red : C.border), background: value.isWithdrawn ? C.red : C.white, color: value.isWithdrawn ? C.white : C.textSec, cursor: "pointer" }}
-          onClick={() => set({ isWithdrawn: !value.isWithdrawn })}
+          onClick={() => onWithdrawToggle ? onWithdrawToggle(!value.isWithdrawn) : set({ isWithdrawn: !value.isWithdrawn })}
         >棄権にする</button>
       </div>
 
@@ -2805,13 +2879,61 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     }
   };
 
+  // ★棄権ボタンが押されたときの処理
+  //   ・棄権を解除する場合（trueにする前段階）はローカルの状態を戻すだけ
+  //   ・棄権にする場合は確認ダイアログを出し、「はい」なら即座に保存＋相手の不戦勝で試合を終了扱いにする
+  const handleWithdrawToggle = async (side, newVal) => {
+    if (!newVal) {
+      if (side === "A") setSideA(v => ({ ...v, isWithdrawn: false }));
+      else setSideB(v => ({ ...v, isWithdrawn: false }));
+      return;
+    }
+    if (!window.confirm("この対戦を棄権として扱いますか？\n「はい」にすると、相手の不戦勝としてこの試合が終了扱いになります。")) return;
+
+    const nextSideA = side === "A" ? { ...sideA, isWithdrawn: true } : sideA;
+    const nextSideB = side === "B" ? { ...sideB, isWithdrawn: true } : sideB;
+    setSideA(nextSideA);
+    setSideB(nextSideB);
+
+    setSaving(true);
+    try {
+      const entryA = await saveDrawEntry({
+        id: drawMatch.side_a_entry_id || uid(),
+        tournament_id: tournament.id, category, block_label: blockLabel,
+        is_own_team: nextSideA.schoolName === mySchoolName, school_name: nextSideA.schoolName,
+        player1_name: nextSideA.player1, player2_name: nextSideA.player2, is_withdrawn: nextSideA.isWithdrawn,
+      });
+      const entryB = await saveDrawEntry({
+        id: drawMatch.side_b_entry_id || uid(),
+        tournament_id: tournament.id, category, block_label: blockLabel,
+        is_own_team: nextSideB.schoolName === mySchoolName, school_name: nextSideB.schoolName,
+        player1_name: nextSideB.player1, player2_name: nextSideB.player2, is_withdrawn: nextSideB.isWithdrawn,
+      });
+      if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
+      if (!drawMatch.side_b_entry_id) await setDrawMatchSide(drawMatch.id, "B", entryB.id);
+
+      // 棄権していない側（勝ち上がる側）に選手名が入っていれば、不戦勝で試合を終了扱いにする
+      const winnerSide = side === "A" ? "B" : "A";
+      const winnerEntry = winnerSide === "A" ? entryA : entryB;
+      if (winnerEntry && winnerEntry.player1_name) {
+        await createWalkoverMatch({ ...drawMatch, sideA: entryA, sideB: entryB }, tournament.name, roundLabel, winnerSide);
+      }
+      await onSaved();
+      onClose();
+    } catch (e) {
+      alert("保存エラー: " + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Modal onClose={onClose}>
       <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
         <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 2 }}>{matchLabel}の対戦情報を入力</div>
         <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>選手を登録するとこの枠でスコア入力が開始できます</div>
-        <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} roster={roster} schools={schools} mySchoolName={mySchoolName} />
-        <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} roster={roster} schools={schools} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} onWithdrawToggle={(v) => handleWithdrawToggle("A", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} onWithdrawToggle={(v) => handleWithdrawToggle("B", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
         <button
           style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: saving ? 0.7 : 1 }}
           disabled={saving} onClick={handleSave}
@@ -2832,6 +2954,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
   const [loading, setLoading] = useState(true);
   const [editingSlot, setEditingSlot] = useState(null); // タップ中のdrawMatch
   const [startingId, setStartingId] = useState(null);
+  const [advancingId, setAdvancingId] = useState(null);
   const [adjustingRound, setAdjustingRound] = useState(null);
 
   const reload = useCallback(async () => {
@@ -2883,6 +3006,32 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
       alert("試合作成エラー: " + (e.message || e));
     } finally {
       setStartingId(null);
+    }
+  };
+
+  // 勝者を次ラウンドの枠へ進出させる（手動ボタン操作）。
+  // draw_matches には「次の枠」への参照が保存されていないため、
+  // 標準的なトーナメント表の並び（回戦ごとにちょうど半分になる）を前提に、
+  // 現在の枠 slot_no=s → 次ラウンドの slot_no=Math.ceil(s/2)、
+  // sが奇数ならサイドA・偶数ならサイドBに入る、という計算で求める。
+  const getAdvanceTarget = (dm) => {
+    const targetRoundNo = dm.round_no + 1;
+    const targetSlotNo = Math.ceil(dm.slot_no / 2);
+    const targetSide = dm.slot_no % 2 === 1 ? "A" : "B";
+    const targetDm = (rounds[targetRoundNo] || []).find(x => x.slot_no === targetSlotNo) || null;
+    return { targetDm, targetSide };
+  };
+
+  const advanceWinner = async (dm, targetDm, targetSide, winnerEntry) => {
+    if (!winnerEntry || advancingId) return;
+    setAdvancingId(dm.id);
+    try {
+      await setDrawMatchSide(targetDm.id, targetSide, winnerEntry.id);
+      await reload();
+    } catch (e) {
+      alert("進出処理エラー: " + (e.message || e));
+    } finally {
+      setAdvancingId(null);
     }
   };
 
@@ -2941,13 +3090,49 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
               </div>
               {rounds[rn].sort((a, b) => a.slot_no - b.slot_no).map((dm, idx) => {
                 const filled = isPlayableEntry(dm.sideA) && isPlayableEntry(dm.sideB);
-                const empty = !dm.sideA && !dm.sideB;
                 const hasWithdrawn = (dm.sideA && dm.sideA.is_withdrawn) || (dm.sideB && dm.sideB.is_withdrawn);
+                const mi = dm.matchInfo;
+                const isWalkover = !!(mi && mi.memo && mi.memo.includes("不戦勝"));
+                const winnerSide = mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
+                const borderColor = !dm.match_id ? C.border : (mi && mi.status === "active" ? C.orange : C.accent);
+
+                let advanceTarget = null, advanceWinnerEntry = null, alreadyAdvanced = false;
+                if (winnerSide) {
+                  advanceWinnerEntry = winnerSide === "A" ? dm.sideA : dm.sideB;
+                  const { targetDm, targetSide } = getAdvanceTarget(dm);
+                  if (targetDm) {
+                    const targetCurrent = targetSide === "A" ? targetDm.sideA : targetDm.sideB;
+                    alreadyAdvanced = !!(targetCurrent && advanceWinnerEntry && targetCurrent.id === advanceWinnerEntry.id);
+                    advanceTarget = { targetDm, targetSide };
+                  }
+                }
+
+                const sideRow = (side) => {
+                  const entry = side === "A" ? dm.sideA : dm.sideB;
+                  const isWinner = winnerSide === side;
+                  const isLoser = winnerSide && winnerSide !== side;
+                  const nameColor = !entry ? C.textSec : isWinner ? C.teamA : isLoser ? C.textSec : C.text;
+                  const scoreVal = !mi ? null
+                    : mi.status === "active" ? (side === "A" ? mi.match_score_a : mi.match_score_b)
+                    : mi.status === "finished" ? (isWalkover ? (isWinner ? "R" : "-") : (side === "A" ? mi.match_score_a : mi.match_score_b))
+                    : null;
+                  const scoreColor = mi && mi.status === "active" ? C.orange : isWinner ? C.teamA : C.textSec;
+                  return (
+                    <div style={{ padding: "7px 9px", borderBottom: side === "A" ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: entry ? (isLoser ? 400 : 700) : 400, color: nameColor }}>{entryLabel(entry)}</div>
+                        {entry && entry.school_name && <div style={{ fontSize: 9.5, color: C.textSec, marginTop: 1 }}>{entry.school_name}</div>}
+                      </div>
+                      {scoreVal !== null && <div style={{ fontSize: 15, fontWeight: 900, color: scoreColor, minWidth: 18, textAlign: "right" }}>{scoreVal}</div>}
+                    </div>
+                  );
+                };
+
                 return (
                   <div key={dm.id} style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 9, color: C.textSec, textAlign: "center", marginBottom: 3 }}>第{idx + 1}試合</div>
                     <div
-                      style={{ background: C.white, borderRadius: 10, border: "1px solid " + (dm.match_id ? C.accent : C.border), overflow: "hidden", cursor: "pointer" }}
+                      style={{ background: C.white, borderRadius: 10, border: "1px solid " + borderColor, overflow: "hidden", cursor: "pointer" }}
                       onClick={() => {
                         if (startingId) return; // ★作成処理中は他の操作を無視（連打・他枠タップ対策）
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
@@ -2962,13 +3147,33 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                         setEditingSlot(dm);
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px 0" }}>
-                        <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: dm.match_id ? C.accent : filled ? C.orange : C.white, color: dm.match_id || filled ? C.white : C.textSec, border: dm.match_id || filled ? "none" : "1px solid " + C.border }}>
-                          {dm.match_id ? "試合あり" : filled ? (startingId === dm.id ? "作成中..." : (category === "individual" ? "試合開始" : "対戦カード確定")) : (hasWithdrawn ? "棄権あり" : "予定")}
-                        </span>
-                      </div>
-                      <div style={{ padding: "7px 9px", borderBottom: "1px solid " + C.border, fontSize: 11.5, fontWeight: dm.sideA ? 700 : 400, color: empty ? C.textSec : C.text }}>{entryLabel(dm.sideA)}</div>
-                      <div style={{ padding: "7px 9px", fontSize: 11.5, fontWeight: dm.sideB ? 700 : 400, color: empty ? C.textSec : C.text }}>{entryLabel(dm.sideB)}</div>
+                      {!dm.match_id && (
+                        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px 0" }}>
+                          <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: startingId === dm.id ? C.orange : hasWithdrawn ? C.redL : C.white, color: startingId === dm.id ? C.white : hasWithdrawn ? C.red : C.textSec, border: startingId === dm.id ? "none" : "1px solid " + (hasWithdrawn ? C.red : C.border) }}>
+                            {startingId === dm.id ? "作成中..." : hasWithdrawn ? "棄権" : "予定"}
+                          </span>
+                        </div>
+                      )}
+                      {sideRow("A")}
+                      {sideRow("B")}
+                      {mi && (
+                        <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : C.textSec, fontWeight: mi.status === "active" ? 700 : 400 }}>
+                          {mi.status === "active" ? "🔴 進行中" : mi.status === "scheduled" ? "開始前" : isWalkover ? "不戦勝で終了" : "試合終了"}
+                        </div>
+                      )}
+                      {winnerSide && advanceTarget && !alreadyAdvanced && (
+                        <button
+                          style={{ display: "block", width: "100%", border: "none", background: C.navy, color: C.white, fontSize: 11, fontWeight: 700, padding: "8px 0", cursor: "pointer" }}
+                          disabled={advancingId === dm.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            advanceWinner(dm, advanceTarget.targetDm, advanceTarget.targetSide, advanceWinnerEntry);
+                          }}
+                        >{advancingId === dm.id ? "処理中..." : "🏆 勝者を次の試合へ進出"}</button>
+                      )}
+                      {winnerSide && alreadyAdvanced && (
+                        <div style={{ textAlign: "center", fontSize: 10, color: C.textSec, padding: "6px 0", background: C.gray }}>✓ 次の試合へ進出済み</div>
+                      )}
                     </div>
                   </div>
                 );
@@ -2977,7 +3182,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
           ))}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まると「試合開始」でスコア入力に進めます。</div>
+      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合が始まります。</div>
 
       {editingSlot && (
         <DrawEntrySheet
