@@ -937,6 +937,87 @@ async function deleteTournament(id) {
 }
 
 // ============================================================
+// ドロー機能（draw_matches / draw_entries）
+// ============================================================
+
+// 指定した大会・種別・ブロックの draw_matches を全件取得（回戦→並び順）
+async function getDrawMatches(tournamentId, category, blockLabel) {
+  let q = supabase.from("draw_matches").select("*").eq("tournament_id", tournamentId).eq("category", category);
+  q = blockLabel ? q.eq("block_label", blockLabel) : q.is("block_label", null);
+  const { data, error } = await q.order("round_no", { ascending: true }).order("slot_no", { ascending: true });
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+
+// その大会・種別で使われているブロックラベル一覧（ブロック分けの有無を判定するため）
+async function getDrawBlockLabels(tournamentId, category) {
+  const { data, error } = await supabase
+    .from("draw_matches")
+    .select("block_label")
+    .eq("tournament_id", tournamentId)
+    .eq("category", category);
+  if (error) { console.error(error); return []; }
+  const set = new Set((data ?? []).map(r => r.block_label).filter(Boolean));
+  return Array.from(set).sort();
+}
+
+// 回戦ごとの試合数（desiredCounts配列。index0=1回戦）を元に draw_matches を差分更新する。
+// ・増える分 → 空枠(未定)を追加するだけ
+// ・減る分   → 対戦情報が入っていない枠から削除。足りない場合はそのラウンドをスキップし、
+//              呼び出し元に「skippedRounds」として伝える（対戦情報が入っている枠を消すには
+//              別途「削除する試合を選ぶ」操作が必要なため、ここでは自動で消さない）
+async function saveDrawRounds(tournamentId, category, blockLabel, desiredCounts) {
+  const existing = await getDrawMatches(tournamentId, category, blockLabel);
+  const byRound = {};
+  existing.forEach(row => {
+    if (!byRound[row.round_no]) byRound[row.round_no] = [];
+    byRound[row.round_no].push(row);
+  });
+
+  const toInsert = [];
+  const toDeleteIds = [];
+  const skippedRounds = [];
+
+  desiredCounts.forEach((desired, i) => {
+    const roundNo = i + 1;
+    const rows = (byRound[roundNo] || []).slice().sort((a, b) => a.slot_no - b.slot_no);
+    const current = rows.length;
+
+    if (desired > current) {
+      let nextSlot = rows.length ? Math.max(...rows.map(r => r.slot_no)) + 1 : 1;
+      for (let k = 0; k < desired - current; k++) {
+        toInsert.push({
+          id: uid(),
+          tournament_id: tournamentId,
+          category,
+          block_label: blockLabel || null,
+          round_no: roundNo,
+          slot_no: nextSlot++,
+        });
+      }
+    } else if (desired < current) {
+      const emptyRows = rows.filter(r => !r.side_a_entry_id && !r.side_b_entry_id);
+      const needToRemove = current - desired;
+      if (emptyRows.length >= needToRemove) {
+        emptyRows.sort((a, b) => b.slot_no - a.slot_no).slice(0, needToRemove).forEach(r => toDeleteIds.push(r.id));
+      } else {
+        skippedRounds.push({ round: roundNo, desired, current, emptyAvailable: emptyRows.length });
+      }
+    }
+  });
+
+  if (toInsert.length) {
+    const { error } = await supabase.from("draw_matches").insert(toInsert);
+    if (error) throw error;
+  }
+  if (toDeleteIds.length) {
+    const { error } = await supabase.from("draw_matches").delete().in("id", toDeleteIds);
+    if (error) throw error;
+  }
+  return { skippedRounds };
+}
+
+// ============================================================
 // ゲームロジック
 // ============================================================
 const calcWinGames = (fmt) => Math.ceil(fmt / 2);
@@ -1860,7 +1941,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange }) {
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [matches, setMatches] = useState([]);
@@ -1901,10 +1982,16 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:12, padding:"6px 10px", cursor:"pointer", whiteSpace:"nowrap" }} onClick={()=>setShowEditModal(true)}>✏️ 編集</button>
       </div>
 
-      <div style={{ display:"flex", background:"#f0f2f6", padding:3, margin:"10px 14px 0", borderRadius:10 }}>
-        {[["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:seg===v?C.white:"transparent", color:seg===v?C.navy:C.textSec, boxShadow:seg===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setSeg(v)}>{l}</button>
-        ))}
+      <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 14px 0" }}>
+        <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, flex:1 }}>
+          {[["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
+            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:seg===v?C.white:"transparent", color:seg===v?C.navy:C.textSec, boxShadow:seg===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setSeg(v)}>{l}</button>
+          ))}
+        </div>
+        <button
+          style={{ background:"none", border:"none", color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", textDecoration:"underline" }}
+          onClick={()=>onOpenDrawSetup && onOpenDrawSetup(seg)}
+        >🗂️ ドロー設定</button>
       </div>
 
       <div style={{ padding:"10px 14px", paddingBottom:90 }}>
@@ -2025,6 +2112,235 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             </div>
           </div>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ドロー作成画面（回戦数・試合数の入力 → draw_matches を差分作成）
+// ============================================================
+function chipStyle(active) {
+  return {
+    flex: "none", padding: "7px 16px", borderRadius: 999, border: "1px solid " + (active ? C.navy : C.border),
+    background: active ? C.navy : C.white, color: active ? C.white : C.textSec,
+    fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer",
+  };
+}
+
+function DrawSetup({ tournament, category, onBack }) {
+  const [catMode, setCatMode] = useState(category || "individual");
+  const [blockLabels, setBlockLabels] = useState([]); // ['A','B',...]
+  const [currentScope, setCurrentScope] = useState(null); // null = すべて
+  const [roundCount, setRoundCount] = useState(4);
+  const [matchCounts, setMatchCounts] = useState([8, 4, 2, 1]);
+  const [roundCountInput, setRoundCountInputRaw] = useState("4");
+  const [roundCountError, setRoundCountError] = useState(false);
+  const [blockCountInput, setBlockCountInput] = useState("");
+  const [blockCountError, setBlockCountError] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [skippedInfo, setSkippedInfo] = useState(null);
+
+  const defaultMatchesForCount = (n) => {
+    const arr = [];
+    for (let i = 0; i < n; i++) arr.push(Math.pow(2, n - 1 - i));
+    return arr;
+  };
+
+  const loadScope = useCallback(async (cat, scope) => {
+    setLoading(true);
+    const rows = await getDrawMatches(tournament.id, cat, scope);
+    if (rows.length === 0) {
+      setRoundCount(4);
+      setRoundCountInputRaw("4");
+      setMatchCounts(defaultMatchesForCount(4));
+    } else {
+      const maxRound = Math.max(...rows.map(r => r.round_no));
+      const counts = [];
+      for (let i = 1; i <= maxRound; i++) counts.push(rows.filter(r => r.round_no === i).length);
+      setRoundCount(maxRound);
+      setRoundCountInputRaw(String(maxRound));
+      setMatchCounts(counts);
+    }
+    setSkippedInfo(null);
+    setLoading(false);
+  }, [tournament.id]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const labels = await getDrawBlockLabels(tournament.id, catMode);
+      if (!alive) return;
+      setBlockLabels(labels);
+      setCurrentScope(null);
+      await loadScope(catMode, null);
+    })();
+    return () => { alive = false; };
+  }, [catMode, tournament.id, loadScope]);
+
+  const switchScope = async (scope) => {
+    setCurrentScope(scope);
+    await loadScope(catMode, scope);
+  };
+
+  const onRoundCountChange = (v) => {
+    setRoundCountInputRaw(v);
+    if (v === "" || !/^[0-9]+$/.test(v) || parseInt(v, 10) < 1) {
+      setRoundCountError(true);
+      return;
+    }
+    setRoundCountError(false);
+    const n = parseInt(v, 10);
+    setRoundCount(n);
+    setMatchCounts(defaultMatchesForCount(n));
+  };
+
+  const onMatchCountChange = (idx, v) => {
+    if (v === "" || !/^[0-9]+$/.test(v)) return;
+    setMatchCounts(prev => {
+      const next = [...prev];
+      next[idx] = Math.max(1, parseInt(v, 10));
+      return next;
+    });
+  };
+
+  const applyBlockSplit = () => {
+    if (blockCountInput === "" || !/^[0-9]+$/.test(blockCountInput) || parseInt(blockCountInput, 10) < 1) {
+      setBlockCountError(true);
+      return;
+    }
+    setBlockCountError(false);
+    const n = parseInt(blockCountInput, 10);
+    const letters = ["A", "B", "C", "D", "E", "F", "G", "H"].slice(0, n);
+    const half = matchCounts.map(v => Math.max(1, Math.floor(v / n)));
+    setBlockLabels(letters);
+    setCurrentScope(letters[0]);
+    setRoundCount(half.length);
+    setMatchCounts(half);
+  };
+
+  const handleCreate = async () => {
+    setSaving(true);
+    try {
+      const { skippedRounds } = await saveDrawRounds(tournament.id, catMode, currentScope, matchCounts);
+      await loadScope(catMode, currentScope);
+      if (skippedRounds.length) {
+        setSkippedInfo(skippedRounds);
+      } else {
+        onBack();
+      }
+    } catch (e) {
+      alert("保存エラー: " + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display: "flex", alignItems: "center", gap: 10 }}>
+        <button style={{ background: "none", border: "none", color: C.white, fontSize: 20, cursor: "pointer" }} onClick={onBack}>←</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: C.white }}>ドロー作成・{catMode === "team" ? "団体戦" : "個人戦"}</div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tournament.name}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", background: "#f0f2f6", padding: 3, margin: "14px 14px 0", borderRadius: 10 }}>
+        {[["individual", "🎾 個人戦"], ["team", "🏆 団体戦"]].map(([v, l]) => (
+          <button key={v} style={{ flex: 1, padding: 9, border: "none", cursor: "pointer", borderRadius: 8, fontSize: 13, fontWeight: 700, background: catMode === v ? C.white : "transparent", color: catMode === v ? C.navy : C.textSec, boxShadow: catMode === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none" }} onClick={() => setCatMode(v)}>{l}</button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "10px 14px 4px" }}>
+        <button style={chipStyle(currentScope === null)} onClick={() => switchScope(null)}>すべて</button>
+        {blockLabels.map(l => (
+          <button key={l} style={chipStyle(currentScope === l)} onClick={() => switchScope(l)}>{l}ブロック</button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", color: C.textSec, marginTop: 60 }}>読み込み中...</div>
+      ) : (
+        <div style={{ padding: "6px 14px 100px" }}>
+          <div style={{ ...S.card, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottom: "1px solid " + C.border }}>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 700 }}>何回戦までありますか？</div>
+                <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>例：決勝まで含めて6回戦</div>
+              </div>
+              <input
+                type="text" inputMode="numeric"
+                value={roundCountInput}
+                onChange={e => onRoundCountChange(e.target.value)}
+                style={{ width: 70, border: "1px solid " + (roundCountError ? C.red : C.border), borderRadius: 9, padding: "9px 10px", fontSize: 15, fontWeight: 800, textAlign: "right" }}
+              />
+            </div>
+            {roundCountError && <div style={{ color: C.red, fontSize: 11.5, fontWeight: 700, padding: "0 14px 10px" }}>半角数字のみ入力してください</div>}
+
+            <div style={{ padding: "12px 14px", background: C.accentL }}>
+              <div style={{ fontSize: 11, color: C.navy, fontWeight: 700, marginBottom: 8 }}>
+                各回戦の試合数（{currentScope ? currentScope + "ブロック" : "すべて"}・数字を直接入力）
+              </div>
+              {matchCounts.map((val, idx) => (
+                <div key={currentScope + "-" + idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+                  <span style={{ fontSize: 12.5 }}>{idx + 1}回戦</span>
+                  <input
+                    type="text" inputMode="numeric" defaultValue={val}
+                    onChange={e => onMatchCountChange(idx, e.target.value)}
+                    style={{ width: 74, border: "1px solid " + C.border, borderRadius: 8, padding: "7px 9px", fontSize: 13.5, fontWeight: 700, textAlign: "right" }}
+                  />
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: C.textSec, paddingTop: 6 }}>
+                各回戦の試合数はすべて手入力です。シードや不戦勝がある場合もここで調整してください。
+              </div>
+            </div>
+          </div>
+
+          <div style={{ ...S.card, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottom: "1px solid " + C.border }}>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 700 }}>ブロックに分けますか？</div>
+                <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>分けるブロック数を入れると、「すべて」の試合数を均等に割り振ります</div>
+              </div>
+              <input
+                type="text" inputMode="numeric" placeholder="例:4"
+                value={blockCountInput}
+                onChange={e => setBlockCountInput(e.target.value)}
+                style={{ width: 70, border: "1px solid " + (blockCountError ? C.red : C.border), borderRadius: 9, padding: "9px 10px", fontSize: 15, fontWeight: 800, textAlign: "right" }}
+              />
+            </div>
+            {blockCountError && <div style={{ color: C.red, fontSize: 11.5, fontWeight: 700, padding: "0 14px 10px" }}>半角数字（1以上）を入力してください</div>}
+            <div style={{ padding: "0 14px 14px" }}>
+              <button style={{ background: "none", border: "none", color: C.navy, fontSize: 12, fontWeight: 700, textDecoration: "underline", cursor: "pointer" }} onClick={applyBlockSplit}>この数でブロックに分ける ▸</button>
+            </div>
+            <div style={{ fontSize: 11, color: C.textSec, padding: "0 14px 14px" }}>
+              分けた後は上のチップで「すべて」「Aブロック」…を切り替えながら、各回戦の試合数を確認・修正できます。
+            </div>
+          </div>
+
+          {skippedInfo && (
+            <div style={{ ...S.card, marginBottom: 14, background: C.redL, border: "1px solid " + C.red, padding: 14 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.red, marginBottom: 6 }}>一部のラウンドは試合数を減らせませんでした</div>
+              {skippedInfo.map((s, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: C.text, marginBottom: 2 }}>
+                  第{s.round}回戦：{s.current}試合→{s.desired}試合にしたいが、対戦情報が入っていない枠が{s.emptyAvailable}件しかありません。対戦情報が入っている試合を減らすには、その試合を開いて個別に削除してください。
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.7 : 1 }}
+            disabled={saving}
+            onClick={handleCreate}
+          >{saving ? "作成中..." : "この内容でドローを作成"}</button>
+          <div style={{ fontSize: 11, color: C.textSec, textAlign: "center", marginTop: 10 }}>
+            作成すると「未定 vs 未定・予定」の空枠が各回戦に設定した試合数ぶん自動生成されます。棄権・不戦勝は、枠をタップして開く対戦情報入力画面から個別に設定できます。
+          </div>
+        </div>
       )}
     </div>
   );
@@ -7492,6 +7808,16 @@ export default function App() {
         onNewTeam={()=>{ setTournamentSeg("team"); setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
         onCopyMatch={id=>{ setTournamentSeg("individual"); setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
         onCopyTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchCopyId(id); setTeamMatchEditId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
+        onOpenDrawSetup={(seg)=>{ setTournamentSeg(seg); setScreen("drawSetup"); }}
+      />
+    );
+  }
+  if (screen==="drawSetup" && tournamentContext) {
+    return (
+      <DrawSetup
+        tournament={tournamentContext}
+        category={tournamentSeg}
+        onBack={()=>setScreen("tournamentDetail")}
       />
     );
   }
