@@ -2930,7 +2930,14 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   return (
     <Modal onClose={onClose}>
       <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 2 }}>{matchLabel}の対戦情報を入力</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>{matchLabel}の対戦情報を入力</div>
+          <button
+            style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8 }}
+            onClick={onClose}
+            aria-label="閉じる"
+          >×</button>
+        </div>
         <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>選手を登録するとこの枠でスコア入力が開始できます</div>
         <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} onWithdrawToggle={(v) => handleWithdrawToggle("A", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
         <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} onWithdrawToggle={(v) => handleWithdrawToggle("B", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
@@ -2955,6 +2962,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
   const [editingSlot, setEditingSlot] = useState(null); // タップ中のdrawMatch
   const [startingId, setStartingId] = useState(null);
   const [advancingId, setAdvancingId] = useState(null);
+  const [advancingFrom, setAdvancingFrom] = useState(null); // 進出先を選択中のdrawMatch（終了した試合）
   const [adjustingRound, setAdjustingRound] = useState(null);
 
   const reload = useCallback(async () => {
@@ -3009,25 +3017,28 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
     }
   };
 
-  // 勝者を次ラウンドの枠へ進出させる（手動ボタン操作）。
-  // draw_matches には「次の枠」への参照が保存されていないため、
-  // 標準的なトーナメント表の並び（回戦ごとにちょうど半分になる）を前提に、
-  // 現在の枠 slot_no=s → 次ラウンドの slot_no=Math.ceil(s/2)、
-  // sが奇数ならサイドA・偶数ならサイドBに入る、という計算で求める。
-  const getAdvanceTarget = (dm) => {
-    const targetRoundNo = dm.round_no + 1;
-    const targetSlotNo = Math.ceil(dm.slot_no / 2);
-    const targetSide = dm.slot_no % 2 === 1 ? "A" : "B";
-    const targetDm = (rounds[targetRoundNo] || []).find(x => x.slot_no === targetSlotNo) || null;
-    return { targetDm, targetSide };
+  // 終了した試合の勝者エントリーを求める
+  const getWinnerEntry = (dm) => {
+    const mi = dm.matchInfo;
+    if (!mi || mi.status !== "finished") return null;
+    return mi.match_score_a > mi.match_score_b ? dm.sideA : dm.sideB;
   };
 
-  const advanceWinner = async (dm, targetDm, targetSide, winnerEntry) => {
+  // 勝者が既に次ラウンドのどこかの枠に入っているか（同じentry idで検索）
+  const isAlreadyAdvanced = (dm, winnerEntry) => {
+    if (!winnerEntry) return false;
+    const nextRound = rounds[dm.round_no + 1] || [];
+    return nextRound.some(x => (x.sideA && x.sideA.id === winnerEntry.id) || (x.sideB && x.sideB.id === winnerEntry.id));
+  };
+
+  // 選ばれた枠・サイドに勝者を進出させる
+  const advanceWinner = async (targetSlotId, targetSide, winnerEntry) => {
     if (!winnerEntry || advancingId) return;
-    setAdvancingId(dm.id);
+    setAdvancingId(targetSlotId);
     try {
-      await setDrawMatchSide(targetDm.id, targetSide, winnerEntry.id);
+      await setDrawMatchSide(targetSlotId, targetSide, winnerEntry.id);
       await reload();
+      setAdvancingFrom(null);
     } catch (e) {
       alert("進出処理エラー: " + (e.message || e));
     } finally {
@@ -3095,17 +3106,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                 const isWalkover = !!(mi && mi.memo && mi.memo.includes("不戦勝"));
                 const winnerSide = mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
                 const borderColor = !dm.match_id ? C.border : (mi && mi.status === "active" ? C.orange : C.accent);
-
-                let advanceTarget = null, advanceWinnerEntry = null, alreadyAdvanced = false;
-                if (winnerSide) {
-                  advanceWinnerEntry = winnerSide === "A" ? dm.sideA : dm.sideB;
-                  const { targetDm, targetSide } = getAdvanceTarget(dm);
-                  if (targetDm) {
-                    const targetCurrent = targetSide === "A" ? targetDm.sideA : targetDm.sideB;
-                    alreadyAdvanced = !!(targetCurrent && advanceWinnerEntry && targetCurrent.id === advanceWinnerEntry.id);
-                    advanceTarget = { targetDm, targetSide };
-                  }
-                }
+                const winnerEntry = winnerSide ? (winnerSide === "A" ? dm.sideA : dm.sideB) : null;
+                const alreadyAdvanced = winnerSide ? isAlreadyAdvanced(dm, winnerEntry) : false;
 
                 const sideRow = (side) => {
                   const entry = side === "A" ? dm.sideA : dm.sideB;
@@ -3120,8 +3122,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                   return (
                     <div style={{ padding: "7px 9px", borderBottom: side === "A" ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
-                        <div style={{ fontWeight: entry ? (isLoser ? 400 : 700) : 400, color: nameColor }}>{entryLabel(entry)}</div>
-                        {entry && entry.school_name && <div style={{ fontSize: 9.5, color: C.textSec, marginTop: 1 }}>{entry.school_name}</div>}
+                        <div style={{ fontWeight: 400, color: nameColor }}>{entryLabel(entry)}</div>
+                        {entry && entry.school_name && <div style={{ fontSize: 11, color: C.textSec, marginTop: 1 }}>{entry.school_name}</div>}
                       </div>
                       {scoreVal !== null && <div style={{ fontSize: 15, fontWeight: 900, color: scoreColor, minWidth: 18, textAlign: "right" }}>{scoreVal}</div>}
                     </div>
@@ -3161,15 +3163,14 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                           {mi.status === "active" ? "🔴 進行中" : mi.status === "scheduled" ? "開始前" : isWalkover ? "不戦勝で終了" : "試合終了"}
                         </div>
                       )}
-                      {winnerSide && advanceTarget && !alreadyAdvanced && (
+                      {winnerSide && !alreadyAdvanced && (
                         <button
                           style={{ display: "block", width: "100%", border: "none", background: C.navy, color: C.white, fontSize: 11, fontWeight: 700, padding: "8px 0", cursor: "pointer" }}
-                          disabled={advancingId === dm.id}
                           onClick={(e) => {
                             e.stopPropagation();
-                            advanceWinner(dm, advanceTarget.targetDm, advanceTarget.targetSide, advanceWinnerEntry);
+                            setAdvancingFrom(dm);
                           }}
-                        >{advancingId === dm.id ? "処理中..." : "🏆 勝者を次の試合へ進出"}</button>
+                        >🏆 勝者を次の試合へ進出</button>
                       )}
                       {winnerSide && alreadyAdvanced && (
                         <div style={{ textAlign: "center", fontSize: 10, color: C.textSec, padding: "6px 0", background: C.gray }}>✓ 次の試合へ進出済み</div>
@@ -3197,6 +3198,51 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
           onSaved={reload}
         />
       )}
+
+      {advancingFrom && (() => {
+        const winnerEntry = getWinnerEntry(advancingFrom);
+        const nextSlots = (rounds[advancingFrom.round_no + 1] || []).slice().sort((a, b) => a.slot_no - b.slot_no);
+        return (
+          <Modal onClose={() => setAdvancingFrom(null)}>
+            <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>どの試合に進出させますか？</div>
+                <button
+                  style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8 }}
+                  onClick={() => setAdvancingFrom(null)}
+                  aria-label="閉じる"
+                >×</button>
+              </div>
+              <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>
+                「{entryLabel(winnerEntry)}」を進出させる枠を選んでください
+              </div>
+              {nextSlots.length === 0 && (
+                <div style={{ fontSize: 12.5, color: C.textSec, textAlign: "center", padding: "20px 0" }}>次の回戦がまだ作られていません。</div>
+              )}
+              {nextSlots.map(slot => (
+                <div key={slot.id} style={{ border: "1px solid " + C.border, borderRadius: 10, marginBottom: 10, overflow: "hidden" }}>
+                  <div style={{ fontSize: 10, color: C.textSec, textAlign: "center", padding: "4px 0", background: C.gray }}>第{slot.slot_no}試合</div>
+                  {["A", "B"].map(side => {
+                    const cur = side === "A" ? slot.sideA : slot.sideB;
+                    return (
+                      <div key={side} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 10px", borderTop: side === "B" ? "1px solid " + C.border : "none" }}>
+                        <span style={{ fontSize: 12.5, color: cur ? C.text : C.textSec }}>{cur ? entryLabel(cur) : "未定"}</span>
+                        {!cur && (
+                          <button
+                            style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 99, border: "none", background: C.accent, color: C.white, cursor: "pointer", opacity: advancingId === slot.id ? 0.7 : 1 }}
+                            disabled={advancingId === slot.id}
+                            onClick={() => advanceWinner(slot.id, side, winnerEntry)}
+                          >{advancingId === slot.id ? "処理中..." : "ここに入れる"}</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
