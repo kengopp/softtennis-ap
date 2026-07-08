@@ -1114,7 +1114,24 @@ async function setDrawMatchSide(drawMatchId, side, entryId) {
 
 // ドローの枠（両サイドとも埋まっている状態）から、実際にスコアを付けられる試合(matches)を作成し、
 // draw_matches.match_id に紐づける。作成後は通常の試合一覧にも表示されるようになる。
+//
+// ★二重作成防止：連打・通信遅延・複数端末からの同時操作で同じ枠から
+//   複数のmatchesが作られないよう、以下の手順を踏む。
+//   1) 呼び出し直後に最新のmatch_idをDBから再取得し、既にあればそれを返す
+//   2) 新規作成後の更新は match_id が null のときだけ（.is("match_id", null)）
+//   3) 更新が0件（＝他で先に作成済み）だった場合は、今回作った孤立試合を削除して
+//      既存の方のmatch_idを返す
+//   4) 更新自体がエラーだった場合も、孤立試合を削除してからエラーを投げる
 async function createMatchFromDrawSlot(drawMatch, tournamentName, roundLabel) {
+  // 1) 最新状態を確認（画面上の情報が古い可能性があるため）
+  const { data: latest, error: fetchErr } = await supabase
+    .from("draw_matches")
+    .select("id, match_id")
+    .eq("id", drawMatch.id)
+    .single();
+  if (fetchErr) throw fetchErr;
+  if (latest?.match_id) return latest.match_id; // 既に作成済みならそれを使い回す
+
   const matchId = uid();
   const players = [];
   const addSide = (entry, team) => {
@@ -1144,8 +1161,34 @@ async function createMatchFromDrawSlot(drawMatch, tournamentName, roundLabel) {
     players,
   };
   await saveMatch(match);
-  const { error } = await supabase.from("draw_matches").update({ match_id: matchId, updated_at: new Date().toISOString() }).eq("id", drawMatch.id);
-  if (error) throw error;
+
+  // 2) match_id が null のときだけ更新する（他の端末が先に作成していたら0件になる）
+  const { data: updatedRows, error: updateErr } = await supabase
+    .from("draw_matches")
+    .update({ match_id: matchId, updated_at: new Date().toISOString() })
+    .eq("id", drawMatch.id)
+    .is("match_id", null)
+    .select("id, match_id");
+
+  if (updateErr) {
+    // 更新に失敗した場合、作成済みの試合が孤立してしまうため削除しておく
+    await deleteMatch(matchId).catch(() => {});
+    throw updateErr;
+  }
+
+  if (!updatedRows || updatedRows.length === 0) {
+    // 3) 競合発生：既に別の操作でmatch_idがセットされていた
+    //    今回作った孤立試合を削除し、既存の方のmatch_idを返す
+    await deleteMatch(matchId).catch(() => {});
+    const { data: current, error: recheckErr } = await supabase
+      .from("draw_matches")
+      .select("match_id")
+      .eq("id", drawMatch.id)
+      .single();
+    if (recheckErr) throw recheckErr;
+    return current?.match_id ?? null;
+  }
+
   return matchId;
 }
 
@@ -2823,7 +2866,13 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
     return names;
   };
 
+  // ★試合開始可能なエントリーかどうかの判定
+  //   ・棄権(is_withdrawn)は対象外
+  //   ・選手名(player1_name)が空/空白のみのエントリーも対象外
+  const isPlayableEntry = (e) => !!(e && !e.is_withdrawn && e.player1_name?.trim());
+
   const startMatch = async (dm) => {
+    if (startingId) return; // ★連打防止：作成処理中は他の枠のタップも受け付けない
     setStartingId(dm.id);
     try {
       const roundLabel = `${dm.round_no}回戦`;
@@ -2891,14 +2940,16 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                 >＋</button>
               </div>
               {rounds[rn].sort((a, b) => a.slot_no - b.slot_no).map((dm, idx) => {
-                const filled = dm.sideA && dm.sideB;
+                const filled = isPlayableEntry(dm.sideA) && isPlayableEntry(dm.sideB);
                 const empty = !dm.sideA && !dm.sideB;
+                const hasWithdrawn = (dm.sideA && dm.sideA.is_withdrawn) || (dm.sideB && dm.sideB.is_withdrawn);
                 return (
                   <div key={dm.id} style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 9, color: C.textSec, textAlign: "center", marginBottom: 3 }}>第{idx + 1}試合</div>
                     <div
                       style={{ background: C.white, borderRadius: 10, border: "1px solid " + (dm.match_id ? C.accent : C.border), overflow: "hidden", cursor: "pointer" }}
                       onClick={() => {
+                        if (startingId) return; // ★作成処理中は他の操作を無視（連打・他枠タップ対策）
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
                         if (filled) {
                           if (category !== "individual") {
@@ -2913,7 +2964,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                     >
                       <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px 0" }}>
                         <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: dm.match_id ? C.accent : filled ? C.orange : C.white, color: dm.match_id || filled ? C.white : C.textSec, border: dm.match_id || filled ? "none" : "1px solid " + C.border }}>
-                          {dm.match_id ? "試合あり" : filled ? (startingId === dm.id ? "作成中..." : (category === "individual" ? "試合開始" : "対戦カード確定")) : "予定"}
+                          {dm.match_id ? "試合あり" : filled ? (startingId === dm.id ? "作成中..." : (category === "individual" ? "試合開始" : "対戦カード確定")) : (hasWithdrawn ? "棄権あり" : "予定")}
                         </span>
                       </div>
                       <div style={{ padding: "7px 9px", borderBottom: "1px solid " + C.border, fontSize: 11.5, fontWeight: dm.sideA ? 700 : 400, color: empty ? C.textSec : C.text }}>{entryLabel(dm.sideA)}</div>
