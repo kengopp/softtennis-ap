@@ -2118,9 +2118,6 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
         {!loading && drawSummary[seg] > 0 && (
           <div style={{ marginBottom: 12 }}>
-            <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:6 }}>
-              <button style={{ background:"none", border:"none", color:C.navy, fontSize:11.5, fontWeight:700, textDecoration:"underline", cursor:"pointer" }} onClick={()=>onOpenDrawSetup && onOpenDrawSetup(seg)}>ドロー設定を開く</button>
-            </div>
             <DrawBracket
               tournament={tournament}
               category={seg}
@@ -2614,11 +2611,15 @@ function DrawSetup({ tournament, category, onBack }) {
 // ============================================================
 // 対戦情報入力シート（ドローの空枠をタップして開く）
 // ============================================================
-function DrawSideEditor({ label, side, value, onChange, roster, mySchoolName }) {
+function DrawSideEditor({ label, side, value, onChange, roster, schools, mySchoolName }) {
   const [search, setSearch] = useState("");
+  const [schoolSearch, setSchoolSearch] = useState("");
   const filteredRoster = search.trim()
     ? roster.filter(p => p.player_name.includes(search.trim()))
     : roster;
+  const filteredSchools = schoolSearch.trim()
+    ? schools.filter(s => s.name.includes(schoolSearch.trim()))
+    : schools;
 
   const set = (patch) => onChange({ ...value, ...patch });
 
@@ -2670,7 +2671,22 @@ function DrawSideEditor({ label, side, value, onChange, roster, mySchoolName }) 
         </>
       ) : (
         <>
-          <input placeholder="学校名" value={value.schoolName} onChange={e => set({ schoolName: e.target.value })} style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 8 }} />
+          <input
+            placeholder="学校名で検索 または直接入力"
+            value={value.schoolName}
+            onChange={e => { set({ schoolName: e.target.value }); setSchoolSearch(e.target.value); }}
+            style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 6 }}
+          />
+          {filteredSchools.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 90, overflowY: "auto", marginBottom: 8 }}>
+              {filteredSchools.slice(0, 30).map(s => (
+                <button key={s.id}
+                  style={{ padding: "5px 10px", borderRadius: 99, border: "1px solid " + (value.schoolName === s.name ? C.navy : C.border), background: value.schoolName === s.name ? C.navy : C.white, color: value.schoolName === s.name ? C.white : C.text, fontSize: 10.5, cursor: "pointer" }}
+                  onClick={() => { set({ schoolName: s.name }); setSchoolSearch(s.name); }}
+                >{s.name}</button>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <input placeholder="選手1" value={value.player1} onChange={e => set({ player1: e.target.value })} style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }} />
             <input placeholder="選手2（ペア）" value={value.player2} onChange={e => set({ player2: e.target.value })} style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }} />
@@ -2683,6 +2699,7 @@ function DrawSideEditor({ label, side, value, onChange, roster, mySchoolName }) 
 
 function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabel, matchLabel, mySchoolName, onClose, onSaved }) {
   const [roster, setRoster] = useState([]);
+  const [schools, setSchools] = useState([]);
   const [saving, setSaving] = useState(false);
   const emptySide = (own) => ({ type: own ? "own" : "other", schoolName: own ? (mySchoolName || "") : "", player1: "", player2: "", isWithdrawn: false });
 
@@ -2700,7 +2717,10 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   const [sideA, setSideA] = useState(() => initSide(drawMatch.sideA, true));
   const [sideB, setSideB] = useState(() => initSide(drawMatch.sideB, false));
 
-  useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+  useEffect(() => {
+    getPlayerRoster().then(setRoster);
+    getSchools().then(setSchools);
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -2733,8 +2753,8 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
         <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 2 }}>{matchLabel}の対戦情報を入力</div>
         <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>選手を登録するとこの枠でスコア入力が開始できます</div>
-        <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} roster={roster} mySchoolName={mySchoolName} />
-        <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} roster={roster} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} roster={roster} schools={schools} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} roster={roster} schools={schools} mySchoolName={mySchoolName} />
         <button
           style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: saving ? 0.7 : 1 }}
           disabled={saving} onClick={handleSave}
@@ -2755,6 +2775,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
   const [loading, setLoading] = useState(true);
   const [editingSlot, setEditingSlot] = useState(null); // タップ中のdrawMatch
   const [startingId, setStartingId] = useState(null);
+  const [adjustingRound, setAdjustingRound] = useState(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -2802,6 +2823,28 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
     }
   };
 
+  // この画面から直接、回戦ごとの試合数を1試合ずつ増減する
+  const adjustRoundCount = async (roundNo, delta) => {
+    const maxRound = Math.max(...roundNos);
+    const desiredCounts = [];
+    for (let i = 1; i <= maxRound; i++) {
+      desiredCounts.push(i === roundNo ? Math.max(1, (rounds[i] || []).length + delta) : (rounds[i] || []).length);
+    }
+    setAdjustingRound(roundNo);
+    try {
+      const { skippedRounds } = await saveDrawRounds(tournament.id, category, selectedBlock, desiredCounts);
+      if (skippedRounds.length) {
+        const s = skippedRounds[0];
+        alert(`第${s.round}回戦は、対戦情報が入っていない枠が${s.emptyAvailable}件しかないため、これ以上減らせません。対戦情報が入っている試合を減らすには、その試合を個別に削除してください。`);
+      }
+      await reload();
+    } catch (e) {
+      alert("更新エラー: " + (e.message || e));
+    } finally {
+      setAdjustingRound(null);
+    }
+  };
+
   if (loading) return <div style={{ textAlign: "center", color: C.textSec, marginTop: 30 }}>ドローを読み込み中...</div>;
   if (drawMatches.length === 0) return null;
 
@@ -2818,7 +2861,21 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
         <div style={{ display: "flex", gap: 10, minWidth: roundNos.length * 190 }}>
           {roundNos.map(rn => (
             <div key={rn} style={{ width: 180, flex: "none" }}>
-              <div style={{ textAlign: "center", fontWeight: 800, fontSize: 11.5, color: C.navy, background: C.accentL, borderRadius: 7, padding: "4px 0", marginBottom: 10 }}>{rn}回戦</div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 10 }}>
+                <button
+                  style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
+                  disabled={adjustingRound === rn}
+                  onClick={() => adjustRoundCount(rn, -1)}
+                >－</button>
+                <div style={{ flex: 1, textAlign: "center", fontWeight: 800, fontSize: 11.5, color: C.navy, background: C.accentL, borderRadius: 7, padding: "4px 0" }}>
+                  {rn}回戦（{rounds[rn].length}試合）
+                </div>
+                <button
+                  style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
+                  disabled={adjustingRound === rn}
+                  onClick={() => adjustRoundCount(rn, 1)}
+                >＋</button>
+              </div>
               {rounds[rn].sort((a, b) => a.slot_no - b.slot_no).map((dm, idx) => {
                 const filled = dm.sideA && dm.sideB;
                 const empty = !dm.sideA && !dm.sideB;
