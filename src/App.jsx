@@ -2653,17 +2653,17 @@ function DrawSetup({ tournament, category, onBack }) {
 // ============================================================
 // 対戦情報入力シート（ドローの空枠をタップして開く）
 // ============================================================
-function DrawSideEditor({ label, side, value, onChange, roster, schools, mySchoolName }) {
-  const [search, setSearch] = useState("");
-  const [schoolSearch, setSchoolSearch] = useState("");
-  const filteredRoster = search.trim()
-    ? roster.filter(p => p.player_name.includes(search.trim()))
-    : roster;
-  const filteredSchools = schoolSearch.trim()
-    ? schools.filter(s => s.name.includes(schoolSearch.trim()))
-    : schools;
-
+function DrawSideEditor({ label, value, onChange, roster, schools, mySchoolName }) {
+  const [pref, setPref] = useState("");
   const set = (patch) => onChange({ ...value, ...patch });
+
+  // 新規試合登録画面と同じ絞り込み方：入力中の学校名(team_name)に一致する選手だけをチップ表示。
+  // 自チームの学校名が入っている場合は is_own_team のメンバーも合わせて表示する。
+  const filteredRoster = roster.filter(p =>
+    !value.schoolName
+      ? false
+      : p.team_name === value.schoolName || (value.schoolName === mySchoolName && p.is_own_team !== false)
+  );
 
   return (
     <div style={{ border: "1px solid " + (value.isWithdrawn ? C.red : C.border), background: value.isWithdrawn ? C.redL : C.white, borderRadius: 11, padding: 12, marginBottom: 12 }}>
@@ -2675,65 +2675,38 @@ function DrawSideEditor({ label, side, value, onChange, roster, schools, mySchoo
         >棄権にする</button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-        {[["own", "自チーム"], ["other", "他チーム"]].map(([v, l]) => (
-          <button key={v}
-            style={{ flex: 1, padding: 7, borderRadius: 8, border: "1px solid " + (value.type === v ? C.navy : C.border), background: value.type === v ? C.navy : C.white, color: value.type === v ? C.white : C.textSec, fontWeight: 700, fontSize: 12, cursor: "pointer" }}
-            onClick={() => set({ type: v, schoolName: v === "own" ? mySchoolName : "" })}
-          >{l}</button>
-        ))}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <label style={{ fontSize: 11, color: C.textSec }}>チーム名 / 学校名</label>
+        <PrefMiniFilter value={pref} onChange={setPref} options={knownPrefsFrom(schools)} />
+      </div>
+      <SchoolField value={value.schoolName} onChange={v => set({ schoolName: v })} schools={schools} placeholder="例：東福岡" prefFilter={pref} />
+
+      <div style={{ marginTop: 10 }}>
+        <label style={{ fontSize: 11, color: C.textSec }}>選手1</label>
+        <input style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginTop: 4 }} placeholder="選手名" value={value.player1} onChange={e => set({ player1: e.target.value })} />
+        {filteredRoster.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            {filteredRoster.map(p => (
+              <span key={p.id} style={S.chip(value.player1 === p.player_name)} onClick={() => set({ player1: p.player_name })}>{p.player_name}</span>
+            ))}
+          </div>
+        )}
       </div>
 
-      {value.type === "own" ? (
-        <>
-          <div style={{ background: C.accentL, borderRadius: 8, padding: "8px 10px", fontWeight: 700, fontSize: 13.5, color: C.navy, marginBottom: 8 }}>{mySchoolName || "自チーム"}</div>
-          <div style={{ marginBottom: 8 }}>
-            <input placeholder="選手を検索" value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "7px 9px", fontSize: 12, marginBottom: 6 }} />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 110, overflowY: "auto" }}>
-              {filteredRoster.map(p => (
-                <button key={p.id}
-                  style={{ padding: "6px 11px", borderRadius: 99, border: "1px solid " + (value.player1 === p.player_name ? C.navy : C.border), background: value.player1 === p.player_name ? C.navy : C.white, color: value.player1 === p.player_name ? C.white : C.text, fontSize: 11, cursor: "pointer" }}
-                  onClick={() => set({ player1: p.player_name })}
-                >{p.player_name}</button>
-              ))}
-            </div>
-            <div style={{ fontSize: 10.5, color: C.textSec, marginTop: 4 }}>選手1：{value.player1 || "未選択"}</div>
+      <div style={{ marginTop: 10 }}>
+        <label style={{ fontSize: 11, color: C.textSec }}>選手2（ペア）</label>
+        <input style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginTop: 4 }} placeholder="選手名" value={value.player2} onChange={e => set({ player2: e.target.value })} />
+        {filteredRoster.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            {filteredRoster.map(p => (
+              <span key={p.id} style={S.chip(value.player2 === p.player_name)} onClick={() => set({ player2: p.player_name })}>{p.player_name}</span>
+            ))}
           </div>
-          <div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 110, overflowY: "auto" }}>
-              {filteredRoster.map(p => (
-                <button key={p.id}
-                  style={{ padding: "6px 11px", borderRadius: 99, border: "1px solid " + (value.player2 === p.player_name ? C.navy : C.border), background: value.player2 === p.player_name ? C.navy : C.white, color: value.player2 === p.player_name ? C.white : C.text, fontSize: 11, cursor: "pointer" }}
-                  onClick={() => set({ player2: p.player_name })}
-                >{p.player_name}</button>
-              ))}
-            </div>
-            <div style={{ fontSize: 10.5, color: C.textSec, marginTop: 4 }}>選手2（ペア）：{value.player2 || "未選択"}</div>
-          </div>
-        </>
-      ) : (
-        <>
-          <input
-            placeholder="学校名で検索 または直接入力"
-            value={value.schoolName}
-            onChange={e => { set({ schoolName: e.target.value }); setSchoolSearch(e.target.value); }}
-            style={{ width: "100%", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 6 }}
-          />
-          {filteredSchools.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 90, overflowY: "auto", marginBottom: 8 }}>
-              {filteredSchools.slice(0, 30).map(s => (
-                <button key={s.id}
-                  style={{ padding: "5px 10px", borderRadius: 99, border: "1px solid " + (value.schoolName === s.name ? C.navy : C.border), background: value.schoolName === s.name ? C.navy : C.white, color: value.schoolName === s.name ? C.white : C.text, fontSize: 10.5, cursor: "pointer" }}
-                  onClick={() => { set({ schoolName: s.name }); setSchoolSearch(s.name); }}
-                >{s.name}</button>
-              ))}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8 }}>
-            <input placeholder="選手1" value={value.player1} onChange={e => set({ player1: e.target.value })} style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }} />
-            <input placeholder="選手2（ペア）" value={value.player2} onChange={e => set({ player2: e.target.value })} style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 12.5 }} />
-          </div>
-        </>
+        )}
+      </div>
+
+      {value.schoolName && filteredRoster.length === 0 && (
+        <div style={{ fontSize: 10.5, color: C.textSec, marginTop: 8 }}>マスター画面の「👥 選手マスター」でこの学校の選手を登録しておくと、ここで選んで入力できます。</div>
       )}
     </div>
   );
@@ -2743,12 +2716,11 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   const [roster, setRoster] = useState([]);
   const [schools, setSchools] = useState([]);
   const [saving, setSaving] = useState(false);
-  const emptySide = (own) => ({ type: own ? "own" : "other", schoolName: own ? (mySchoolName || "") : "", player1: "", player2: "", isWithdrawn: false });
+  const emptySide = (own) => ({ schoolName: own ? (mySchoolName || "") : "", player1: "", player2: "", isWithdrawn: false });
 
   const initSide = (entry, own) => {
     if (!entry) return emptySide(own);
     return {
-      type: entry.is_own_team ? "own" : "other",
       schoolName: entry.school_name || "",
       player1: entry.player1_name || "",
       player2: entry.player2_name || "",
@@ -2770,13 +2742,13 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       const entryA = await saveDrawEntry({
         id: drawMatch.side_a_entry_id || uid(),
         tournament_id: tournament.id, category, block_label: blockLabel,
-        is_own_team: sideA.type === "own", school_name: sideA.schoolName,
+        is_own_team: sideA.schoolName === mySchoolName, school_name: sideA.schoolName,
         player1_name: sideA.player1, player2_name: sideA.player2, is_withdrawn: sideA.isWithdrawn,
       });
       const entryB = await saveDrawEntry({
         id: drawMatch.side_b_entry_id || uid(),
         tournament_id: tournament.id, category, block_label: blockLabel,
-        is_own_team: sideB.type === "own", school_name: sideB.schoolName,
+        is_own_team: sideB.schoolName === mySchoolName, school_name: sideB.schoolName,
         player1_name: sideB.player1, player2_name: sideB.player2, is_withdrawn: sideB.isWithdrawn,
       });
       if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
