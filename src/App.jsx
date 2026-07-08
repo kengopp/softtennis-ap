@@ -1049,6 +1049,23 @@ async function clearUnblockedDraw(tournamentId, category) {
   return { cleared: remaining === 0, remaining };
 }
 
+// 既存のブロック分け（A/B/C/D…）をすべて片付けて、「すべて」から改めてブロック分けをやり直せるようにする。
+// 対戦情報が入っていない枠のみ安全に削除し、入っている枠が残っていれば削除せずに件数を返す。
+async function clearAllBlocksDraw(tournamentId, category) {
+  const labels = await getDrawBlockLabels(tournamentId, category);
+  let remaining = 0;
+  for (const label of labels) {
+    const rows = await getDrawMatches(tournamentId, category, label);
+    const emptyRows = rows.filter(r => !r.side_a_entry_id && !r.side_b_entry_id);
+    remaining += rows.length - emptyRows.length;
+    if (emptyRows.length) {
+      const { error } = await supabase.from("draw_matches").delete().in("id", emptyRows.map(r => r.id));
+      if (error) throw error;
+    }
+  }
+  return { cleared: remaining === 0, remaining };
+}
+
 // draw_matches に、それぞれの側（サイドA/B）のエントリー情報（学校名・選手名）を付けて取得する
 // （大会詳細のトーナメント表表示用）
 async function getDrawMatchesWithEntries(tournamentId, category, blockLabel) {
@@ -2418,6 +2435,30 @@ function DrawSetup({ tournament, category, onBack }) {
     setCurrentScope(letters[0]);
   };
 
+  // 既存のブロック分けをすべて片付けて「すべて」からやり直す
+  const resetBlocks = async () => {
+    if (!window.confirm("既存のブロック分けをリセットして、「すべて」からやり直しますか？（対戦情報が入っている試合があるブロックは削除されません）")) return;
+    setLoading(true);
+    try {
+      const { remaining } = await clearAllBlocksDraw(tournament.id, catMode);
+      if (remaining > 0) {
+        alert(`対戦情報が入っている試合が${remaining}件残っているため、そのブロックは消せませんでした。空いている枠だけリセットしました。`);
+      }
+      const labels = await getDrawBlockLabels(tournament.id, catMode);
+      const allData = await fetchScopeData(catMode, "ALL");
+      setBlockLabels(labels);
+      setCurrentScope("ALL");
+      setLoadedScopes({ ALL: true });
+      setScopeMatchCounts({ ALL: allData.matchCounts });
+      setScopeDirty({ ALL: allData.matchCounts.map(() => false) });
+      setScopeRoundInput({ ALL: allData.roundInput });
+    } catch (e) {
+      alert("リセットエラー: " + (e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 「この内容でドローを作成」：ブロックが1つでもあれば全ブロックをまとめて保存する。
   // ブロック分けが確定した場合は、旧「すべて（ブロックなし）」のドローが残っていれば片付ける。
   const handleCreate = async () => {
@@ -2577,9 +2618,10 @@ function DrawSetup({ tournament, category, onBack }) {
 
           {currentScope === "ALL" && blockLabels.length > 0 && (
             <div style={{ ...S.card, marginBottom: 14, padding: 14 }}>
-              <div style={{ fontSize: 12, color: C.textSec }}>
+              <div style={{ fontSize: 12, color: C.textSec, marginBottom: 10 }}>
                 すでに{blockLabels.join("・")}ブロックに分かれています。既存ブロックの内容を上書きしないよう、ここからの再分割はできません。各ブロックの試合数は、上のチップで切り替えて個別に修正してください。
               </div>
+              <button style={{ background: "none", border: "none", color: C.red, fontSize: 12, fontWeight: 700, textDecoration: "underline", cursor: "pointer" }} onClick={resetBlocks}>ブロックをリセットしてやり直す ▸</button>
             </div>
           )}
 
