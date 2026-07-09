@@ -2954,8 +2954,18 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     : false;
   if (draft && !useDraft) clearDraft();
 
-  const [sideA, setSideA] = useState(() => (useDraft ? draft.sideA : initSide(drawMatch.sideA, prefillSchoolA)));
-  const [sideB, setSideB] = useState(() => (useDraft ? draft.sideB : initSide(drawMatch.sideB, prefillSchoolB)));
+  // ★古い形式の下書き（entryNoなどの項目がまだ無かった頃のもの）を復元しても
+  //   壊れないよう、欠けている項目はデフォルト値で補完する
+  const normalizeSide = (v) => ({
+    schoolName: v?.schoolName || "",
+    player1: v?.player1 || "",
+    player2: v?.player2 || "",
+    isWithdrawn: !!v?.isWithdrawn,
+    entryNo: v?.entryNo != null ? String(v.entryNo) : "",
+  });
+
+  const [sideA, setSideA] = useState(() => (useDraft ? normalizeSide(draft.sideA) : initSide(drawMatch.sideA, prefillSchoolA)));
+  const [sideB, setSideB] = useState(() => (useDraft ? normalizeSide(draft.sideB) : initSide(drawMatch.sideB, prefillSchoolB)));
 
   useEffect(() => {
     try { localStorage.setItem(draftKey, JSON.stringify({ sideA, sideB })); } catch (e) {}
@@ -2968,8 +2978,8 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   }, []);
 
   // ★表示（上側/下側）はentry_noの若い順にする。内部的なサイドA/Bはそのまま。
-  const aNo = sideA.entryNo.trim() !== "" ? Number(sideA.entryNo) : null;
-  const bNo = sideB.entryNo.trim() !== "" ? Number(sideB.entryNo) : null;
+  const aNo = (sideA.entryNo || "").trim() !== "" ? Number(sideA.entryNo) : null;
+  const bNo = (sideB.entryNo || "").trim() !== "" ? Number(sideB.entryNo) : null;
   const swapDisplay = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
   const topKey = swapDisplay ? "B" : "A";
   const bottomKey = swapDisplay ? "A" : "B";
@@ -2981,7 +2991,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     tournament_id: tournament.id, category, block_label: blockLabel,
     is_own_team: val.schoolName === mySchoolName, school_name: val.schoolName,
     player1_name: val.player1, player2_name: val.player2, is_withdrawn: val.isWithdrawn,
-    entry_no: val.entryNo ? val.entryNo.trim() : null,
+    entry_no: val.entryNo ? String(val.entryNo).trim() : null,
   });
 
   const handleSave = async () => {
@@ -3002,14 +3012,14 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 
       // entry_noの重複チェック（同じ大会・同じブロック内で、他のエントリーと重複していないか）
       const excludeIds = [drawMatch.side_a_entry_id, drawMatch.side_b_entry_id].filter(Boolean);
-      if (!aTaken && sideA.entryNo.trim()) {
+      if (!aTaken && (sideA.entryNo || "").trim()) {
         if (await checkDuplicateEntryNo(tournament.id, blockLabel, sideA.entryNo.trim(), excludeIds)) {
           alert(`エントリー番号「${sideA.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
           setSaving(false);
           return;
         }
       }
-      if (!bTaken && sideB.entryNo.trim()) {
+      if (!bTaken && (sideB.entryNo || "").trim()) {
         if (await checkDuplicateEntryNo(tournament.id, blockLabel, sideB.entryNo.trim(), excludeIds)) {
           alert(`エントリー番号「${sideB.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
           setSaving(false);
