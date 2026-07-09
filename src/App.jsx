@@ -1700,7 +1700,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   // 個人戦の振り分け
   const isUpcomingMatch = (m) => {
-    if (m.status === "active" || m.status === "scheduled") return true;
+    if (m.status === "active" || m.status === "scheduled" || m.status === "waiting") return true;
     return false;
   };
   // 団体戦の振り分け（match_dateがnullでもactive/scheduledは予定・進行中）
@@ -2054,7 +2054,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const bNames = bPlayers.map(p=>p.player_name).join("/");
               const aClub = aPlayers[0]?.club_name || "";
               const bClub = bPlayers[0]?.club_name || "";
-              const borderColor = m.status==="active" ? C.orange : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
+              const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
               const isMyMatch = m.created_by === myId;
               return (
                 <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
@@ -2064,6 +2064,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(m.match_date)}{m.tournament_name ? ` · ${m.tournament_name}` : ""}</span>
                       <div style={{ display:"flex", gap:4 }}>
                         {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10 }}>🔴 進行中</span>}
+                        {m.status==="waiting" && <span style={{ fontSize:10, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"1px 8px", borderRadius:10 }}>⏳ 待機中</span>}
                         {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10 }}>📅 予定</span>}
                         <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"1px 6px", borderRadius:6 }}>{m.game_format}G</span>
                       </div>
@@ -2073,7 +2074,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
                         <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
                       </div>
-                      {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
+                      {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                     </div>
                   </div>
                   <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
@@ -2370,7 +2371,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const bNames = bPlayers.map(p=>p.player_name).join("/");
           const aClub = aPlayers[0]?.club_name || "";
           const bClub = bPlayers[0]?.club_name || "";
-          const borderColor = m.status==="active" ? C.orange : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
+          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
@@ -2381,7 +2382,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                     <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
                     <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
                   </div>
-                  {m.status!=="scheduled" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
+                  {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                 </div>
               </div>
               <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
@@ -3506,7 +3507,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 const mi = dm.matchInfo;
                 const isWalkover = !!(mi && mi.memo && mi.memo.includes("不戦勝"));
                 const winnerSide = mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
-                const borderColor = !dm.match_id ? C.border : (mi && mi.status === "active" ? C.orange : C.accent);
+                const borderColor = !dm.match_id ? C.border : (mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.accent);
                 const winnerEntry = winnerSide ? (winnerSide === "A" ? dm.sideA : dm.sideB) : null;
                 const alreadyAdvanced = winnerSide ? isAlreadyAdvanced(dm, winnerEntry) : false;
 
@@ -3586,8 +3587,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       {sideRow(topSide, true)}
                       {sideRow(bottomSide, false)}
                       {mi && (
-                        <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : C.textSec, fontWeight: mi.status === "active" ? 700 : 400 }}>
-                          {mi.status === "active" ? "🔴 進行中" : mi.status === "scheduled" ? "開始前" : isWalkover ? "不戦勝で終了" : "試合終了"}
+                        <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : mi.status === "waiting" ? C.purple : C.textSec, fontWeight: (mi.status === "active" || mi.status === "waiting") ? 700 : 400 }}>
+                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : mi.status === "scheduled" ? "📅 予定" : isWalkover ? "不戦勝で終了" : "試合終了"}
                         </div>
                       )}
                       {winnerSide && !alreadyAdvanced && (
@@ -6088,7 +6089,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType, court_number:courtNumber||null,
           players: updatedPlayers,
           // 予定の場合は形式設定も更新可能
-          ...(editing.status === "scheduled" ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
+          ...((editing.status === "scheduled" || editing.status === "waiting") ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
         };
         await saveMatch(updated);
         if (drawLink) {
@@ -6551,9 +6552,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       return;
     }
     startingGameRef.current = true;
-    // ★予定(scheduled)のまま作成された試合（ドロー経由など）が、採点開始後も
-    //   ずっと「開始前」表示のままにならないよう、ここで進行中(active)に切り替える
-    const statusFix = base.status === "scheduled" ? { status: "active" } : {};
+    // ★予定(scheduled)・待機中(waiting)のまま作成された試合（ドロー経由など）が、採点開始後も
+    //   ずっとその表示のままにならないよう、ここで進行中(active)に切り替える
+    const statusFix = (base.status === "scheduled" || base.status === "waiting") ? { status: "active" } : {};
     base = { ...base, ...statusFix, first_server: server };
     const num=base.games.length+1;
     const isFin=isFinalGame(base.game_format,base.match_score_a,base.match_score_b);
@@ -6882,6 +6883,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 <p style={{ fontSize:13,color:C.textSec,marginBottom:20 }}>最初のサーブは次の画面で選択します</p>
               )}
               <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>startNewGame()}>第1ゲーム開始</button>
+              {match.status==="scheduled" && (
+                <button
+                  style={{ ...S.btn(`linear-gradient(135deg,#7b1fa2,${C.purple})`), marginTop:10 }}
+                  onClick={()=>persist({ ...match, status:"waiting" })}
+                >⏳ 待機中にする</button>
+              )}
+              {match.status==="waiting" && (
+                <div style={{ marginTop:10, fontSize:12, color:C.purple, fontWeight:700, background:"#eef0fe", display:"inline-block", padding:"4px 14px", borderRadius:20 }}>⏳ 待機中</div>
+              )}
             </div>
           )}
           {!currentGame&&match.games.length>0&&match.status!=="finished"&&(
