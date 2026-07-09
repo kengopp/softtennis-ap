@@ -3200,6 +3200,33 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     try { localStorage.removeItem(editingSlotStorageKey); } catch (e) {}
   };
 
+  // ★一括登録モーダルも、他アプリ（コピー元の確認など）に移動して戻ってきたときに
+  //   閉じてしまったり入力内容が消えたりしないよう、開いている間はlocalStorageに保存する。
+  const bulkImportStorageKey = `draw_bulk_import_${tournament.id}_${category}`;
+  const saveBulkDraft = (open, text, round) => {
+    try {
+      if (open) localStorage.setItem(bulkImportStorageKey, JSON.stringify({ text, round }));
+      else localStorage.removeItem(bulkImportStorageKey);
+    } catch (e) {}
+  };
+  const openBulkImport = () => {
+    setBulkTargetRound(roundNos[0] || 1);
+    setBulkImportOpen(true);
+  };
+  const closeBulkImport = () => {
+    setBulkImportOpen(false);
+    setBulkText("");
+    saveBulkDraft(false);
+  };
+  const updateBulkText = (text) => {
+    setBulkText(text);
+    saveBulkDraft(true, text, bulkTargetRound);
+  };
+  const updateBulkTargetRound = (round) => {
+    setBulkTargetRound(round);
+    saveBulkDraft(true, bulkText, round);
+  };
+
   const reload = useCallback(async () => {
     setLoading(true);
     const labels = await getDrawBlockLabels(tournament.id, category);
@@ -3221,6 +3248,17 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         } else {
           localStorage.removeItem(editingSlotStorageKey);
         }
+      }
+    } catch (e) {}
+
+    // 一括登録モーダルが開いたままだった場合も、入力内容ごと自動で復元する
+    try {
+      const rawBulk = localStorage.getItem(bulkImportStorageKey);
+      if (rawBulk) {
+        const saved = JSON.parse(rawBulk);
+        setBulkText(saved.text || "");
+        setBulkTargetRound(saved.round || 1);
+        setBulkImportOpen(true);
       }
     } catch (e) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3394,8 +3432,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         }
       }
       alert(`登録完了：${registered}件のエントリーを登録しました。${skippedFull ? `\n既に埋まっていた枠：${skippedFull}試合分はスキップ` : ""}${skippedDup ? `\n重複するエントリー番号：${skippedDup}件はスキップ` : ""}${errors ? `\nエラー：${errors}件` : ""}`);
-      setBulkImportOpen(false);
-      setBulkText("");
+      closeBulkImport();
       await reload();
     } catch (e) {
       alert("一括登録エラー: " + (e.message || e));
@@ -3441,7 +3478,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
       <div style={{ textAlign: "right", marginBottom: 10 }}>
         <button
           style={{ border: "1px solid " + C.navy, background: C.white, color: C.navy, borderRadius: 8, fontSize: 11.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
-          onClick={() => { setBulkTargetRound(roundNos[0] || 1); setBulkImportOpen(true); }}
+          onClick={openBulkImport}
         >📋 一覧から一括登録</button>
       </div>
       <div style={{ overflowX: "auto", paddingBottom: 4 }}>
@@ -3637,13 +3674,13 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
       })()}
 
       {bulkImportOpen && (
-        <Modal onClose={() => !bulkImporting && setBulkImportOpen(false)}>
+        <Modal onClose={() => !bulkImporting && closeBulkImport()}>
           <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
               <div style={{ fontSize: 15, fontWeight: 800 }}>一覧から一括登録</div>
               <button
                 style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
-                onClick={() => !bulkImporting && setBulkImportOpen(false)}
+                onClick={() => !bulkImporting && closeBulkImport()}
                 aria-label="閉じる"
               >×</button>
             </div>
@@ -3658,7 +3695,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
             <label style={{ fontSize: 11, color: C.textSec }}>登録先の回戦</label>
             <select
               value={bulkTargetRound}
-              onChange={e => setBulkTargetRound(Number(e.target.value))}
+              onChange={e => updateBulkTargetRound(Number(e.target.value))}
               style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid " + C.border, fontSize: 13, marginTop: 4, marginBottom: 12 }}
             >
               {roundNos.map(rn => (
@@ -3668,7 +3705,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
             <textarea
               value={bulkText}
-              onChange={e => setBulkText(e.target.value)}
+              onChange={e => updateBulkText(e.target.value)}
               placeholder={"1\t福岡工業\t山田 太郎\t鈴木 次郎\n2\t久留米商業\t田中 一郎\t佐藤 健\n..."}
               style={{ width: "100%", minHeight: 180, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: 10, fontSize: 12.5, fontFamily: "monospace", marginBottom: 12 }}
             />
@@ -3681,7 +3718,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
             <button
               style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}
               disabled={bulkImporting}
-              onClick={() => setBulkImportOpen(false)}
+              onClick={closeBulkImport}
             >閉じる</button>
           </div>
         </Modal>
