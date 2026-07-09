@@ -3507,7 +3507,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 const mi = dm.matchInfo;
                 const isWalkover = !!(mi && mi.memo && mi.memo.includes("不戦勝"));
                 const winnerSide = mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
-                const borderColor = !dm.match_id ? C.border : (mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.accent);
+                const borderColor = mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.border;
                 const winnerEntry = winnerSide ? (winnerSide === "A" ? dm.sideA : dm.sideB) : null;
                 const alreadyAdvanced = winnerSide ? isAlreadyAdvanced(dm, winnerEntry) : false;
 
@@ -3577,7 +3577,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                         openEditingSlot(dm);
                       }}
                     >
-                      {!dm.match_id && (
+                      {(!mi || mi.status === "scheduled") && (
                         <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px 0" }}>
                           <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: startingId === dm.id ? C.orange : hasWithdrawn ? C.redL : C.white, color: startingId === dm.id ? C.white : hasWithdrawn ? C.red : C.textSec, border: startingId === dm.id ? "none" : "1px solid " + (hasWithdrawn ? C.red : C.border) }}>
                             {startingId === dm.id ? "作成中..." : hasWithdrawn ? "棄権" : "予定"}
@@ -3586,9 +3586,9 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       )}
                       {sideRow(topSide, true)}
                       {sideRow(bottomSide, false)}
-                      {mi && (
+                      {mi && mi.status !== "scheduled" && (
                         <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : mi.status === "waiting" ? C.purple : C.textSec, fontWeight: (mi.status === "active" || mi.status === "waiting") ? 700 : 400 }}>
-                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : mi.status === "scheduled" ? "📅 予定" : isWalkover ? "不戦勝で終了" : "試合終了"}
+                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : isWalkover ? "不戦勝で終了" : "試合終了"}
                         </div>
                       )}
                       {winnerSide && !alreadyAdvanced && (
