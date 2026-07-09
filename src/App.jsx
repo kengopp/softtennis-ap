@@ -2940,19 +2940,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   // ★入力途中のデータが消えないよう、この枠の下書きをlocalStorageに自動保存する。
   //   ただし「最新の登録内容」より下書きの方が古い可能性があるため、無条件には復元せず必ず確認する。
   const draftKey = `draw_entry_draft_${drawMatch.id}`;
-  const loadDraft = () => {
-    try {
-      const raw = localStorage.getItem(draftKey);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
-  };
   const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch (e) {} };
-
-  const draft = loadDraft();
-  const useDraft = draft
-    ? window.confirm("前回入力途中のデータが見つかりました。復元しますか？\n「OK」で復元、「キャンセル」で現在登録されている内容を表示します。")
-    : false;
-  if (draft && !useDraft) clearDraft();
 
   // ★古い形式の下書き（entryNoなどの項目がまだ無かった頃のもの）を復元しても
   //   壊れないよう、欠けている項目はデフォルト値で補完する
@@ -2964,8 +2952,28 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     entryNo: v?.entryNo != null ? String(v.entryNo) : "",
   });
 
-  const [sideA, setSideA] = useState(() => (useDraft ? normalizeSide(draft.sideA) : initSide(drawMatch.sideA, prefillSchoolA)));
-  const [sideB, setSideB] = useState(() => (useDraft ? normalizeSide(draft.sideB) : initSide(drawMatch.sideB, prefillSchoolB)));
+  // ★下書きの確認(window.confirm)と読み込みは、マウント時（画面を開いた瞬間）に
+  //   1回だけ行う。以前はコンポーネント本体に直接書かれていたため、入力するたびの
+  //   再レンダリングで毎回confirmが再実行されてしまっていた（重大な不具合だったため修正）。
+  const [initialSides] = useState(() => {
+    let raw = null;
+    try { raw = localStorage.getItem(draftKey); } catch (e) {}
+    const draft = raw ? JSON.parse(raw) : null;
+    let useDraft = false;
+    if (draft) {
+      useDraft = window.confirm("前回入力途中のデータが見つかりました。復元しますか？\n「OK」で復元、「キャンセル」で現在登録されている内容を表示します。");
+      // 復元する・しないに関わらず、確認済みの下書きはここで必ず消す
+      // （消さないと次の入力のたびに同じ確認が繰り返されてしまう）
+      try { localStorage.removeItem(draftKey); } catch (e) {}
+    }
+    return {
+      sideA: useDraft ? normalizeSide(draft.sideA) : initSide(drawMatch.sideA, prefillSchoolA),
+      sideB: useDraft ? normalizeSide(draft.sideB) : initSide(drawMatch.sideB, prefillSchoolB),
+    };
+  });
+
+  const [sideA, setSideA] = useState(initialSides.sideA);
+  const [sideB, setSideB] = useState(initialSides.sideB);
 
   // ★サーバーに登録済みの内容と比較するための「元の状態」（プリフィルを含む）
   const originalSideARef = useRef(initSide(drawMatch.sideA, prefillSchoolA));
