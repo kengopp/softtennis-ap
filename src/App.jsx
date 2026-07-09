@@ -2967,8 +2967,23 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   const [sideA, setSideA] = useState(() => (useDraft ? normalizeSide(draft.sideA) : initSide(drawMatch.sideA, prefillSchoolA)));
   const [sideB, setSideB] = useState(() => (useDraft ? normalizeSide(draft.sideB) : initSide(drawMatch.sideB, prefillSchoolB)));
 
+  // ★サーバーに登録済みの内容と比較するための「元の状態」（プリフィルを含む）
+  const originalSideARef = useRef(initSide(drawMatch.sideA, prefillSchoolA));
+  const originalSideBRef = useRef(initSide(drawMatch.sideB, prefillSchoolB));
+
   useEffect(() => {
-    try { localStorage.setItem(draftKey, JSON.stringify({ sideA, sideB })); } catch (e) {}
+    // ★登録済みの内容と何も変わっていなければ、下書きは保存しない
+    //   （毎回「復元しますか？」と聞かれてしまう問題を防ぐ）
+    const unchanged =
+      JSON.stringify(sideA) === JSON.stringify(originalSideARef.current) &&
+      JSON.stringify(sideB) === JSON.stringify(originalSideBRef.current);
+    try {
+      if (unchanged) {
+        localStorage.removeItem(draftKey);
+      } else {
+        localStorage.setItem(draftKey, JSON.stringify({ sideA, sideB }));
+      }
+    } catch (e) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sideA, sideB]);
 
