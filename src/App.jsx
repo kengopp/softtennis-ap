@@ -2727,12 +2727,14 @@ function DrawSetup({ tournament, category, onBack }) {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "10px 14px 4px" }}>
-        <button style={chipStyle(currentScope === "ALL")} onClick={() => switchScope("ALL")}>すべて</button>
-        {blockLabels.map(l => (
-          <button key={l} style={chipStyle(currentScope === l)} onClick={() => switchScope(l)}>{l}ブロック</button>
-        ))}
-      </div>
+      {blockLabels.length > 0 && (
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "10px 14px 4px" }}>
+          <button style={chipStyle(currentScope === "ALL")} onClick={() => switchScope("ALL")}>すべて</button>
+          {blockLabels.map(l => (
+            <button key={l} style={chipStyle(currentScope === l)} onClick={() => switchScope(l)}>{l}ブロック</button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ textAlign: "center", color: C.textSec, marginTop: 60 }}>読み込み中...</div>
