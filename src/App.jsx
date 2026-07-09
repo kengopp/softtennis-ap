@@ -3181,6 +3181,10 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   const longPressTimerRef = useRef(null);
   const longPressFiredRef = useRef(false);
   const [adjustingRound, setAdjustingRound] = useState(null);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false); // 一括登録モーダル
+  const [bulkText, setBulkText] = useState("");
+  const [bulkTargetRound, setBulkTargetRound] = useState(1);
+  const [bulkImporting, setBulkImporting] = useState(false);
 
   // ★対戦情報入力シートを開いている最中に他アプリへ移動して戻ってきても、
   //   画面が閉じてしまわないよう、「どの枠を編集中か」をlocalStorageにも覚えておく。
@@ -3324,6 +3328,82 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     }
   };
 
+  // ★一括登録：1行1エントリーのテキストを解析し、上から順に2件ずつペアにして
+  //   選んだ回戦の枠へ登録する（エントリー1・2→第1試合、3・4→第2試合…という並び）。
+  //   既に対戦情報が入っている枠・重複するエントリー番号はスキップし、結果をまとめて報告する。
+  const parseBulkLines = (text) => {
+    return text.split("\n").map(l => l.trim()).filter(Boolean).map(line => {
+      const cols = line.includes("\t") ? line.split("\t") : line.split(/,|　| {2,}/);
+      const [entryNo, school, player1, player2] = cols.map(c => (c || "").trim());
+      return { entryNo, school: school || "", player1: player1 || "", player2: player2 || "" };
+    });
+  };
+
+  const handleBulkImport = async () => {
+    const entries = parseBulkLines(bulkText);
+    if (entries.length === 0) { alert("入力内容がありません。"); return; }
+    const targetSlots = (rounds[bulkTargetRound] || []).slice().sort((a, b) => a.slot_no - b.slot_no);
+    if (targetSlots.length === 0) { alert(`${bulkTargetRound}回戦の枠が見つかりません。`); return; }
+    if (entries.length > targetSlots.length * 2) {
+      if (!window.confirm(`入力されたエントリー数(${entries.length}件)が、${bulkTargetRound}回戦の枠数(${targetSlots.length}試合＝${targetSlots.length * 2}エントリー分)より多いです。入りきらない分は無視されますが、続けますか？`)) return;
+    }
+
+    setBulkImporting(true);
+    let registered = 0, skippedFull = 0, skippedDup = 0, errors = 0;
+    try {
+      for (let i = 0; i < targetSlots.length; i++) {
+        const slot = targetSlots[i];
+        const eA = entries[i * 2];
+        const eB = entries[i * 2 + 1];
+        if (!eA && !eB) break; // もう対応するエントリーがない
+
+        const fresh = await getDrawMatchRaw(slot.id);
+        const aTaken = !!fresh.side_a_entry_id;
+        const bTaken = !!fresh.side_b_entry_id;
+        if (aTaken && bTaken) { skippedFull++; continue; }
+
+        try {
+          if (eA && !aTaken) {
+            if (eA.entryNo && await checkDuplicateEntryNo(tournament.id, selectedBlock, eA.entryNo, [])) { skippedDup++; }
+            else {
+              const entryA = await saveDrawEntry({
+                id: uid(), tournament_id: tournament.id, category, block_label: selectedBlock,
+                is_own_team: eA.school === mySchoolName, school_name: eA.school,
+                player1_name: eA.player1, player2_name: eA.player2, is_withdrawn: false,
+                entry_no: eA.entryNo || null,
+              });
+              await setDrawMatchSideSafe(slot.id, "A", entryA.id);
+              registered++;
+            }
+          }
+          if (eB && !bTaken) {
+            if (eB.entryNo && await checkDuplicateEntryNo(tournament.id, selectedBlock, eB.entryNo, [])) { skippedDup++; }
+            else {
+              const entryB = await saveDrawEntry({
+                id: uid(), tournament_id: tournament.id, category, block_label: selectedBlock,
+                is_own_team: eB.school === mySchoolName, school_name: eB.school,
+                player1_name: eB.player1, player2_name: eB.player2, is_withdrawn: false,
+                entry_no: eB.entryNo || null,
+              });
+              await setDrawMatchSideSafe(slot.id, "B", entryB.id);
+              registered++;
+            }
+          }
+        } catch (e) {
+          errors++;
+        }
+      }
+      alert(`登録完了：${registered}件のエントリーを登録しました。${skippedFull ? `\n既に埋まっていた枠：${skippedFull}試合分はスキップ` : ""}${skippedDup ? `\n重複するエントリー番号：${skippedDup}件はスキップ` : ""}${errors ? `\nエラー：${errors}件` : ""}`);
+      setBulkImportOpen(false);
+      setBulkText("");
+      await reload();
+    } catch (e) {
+      alert("一括登録エラー: " + (e.message || e));
+    } finally {
+      setBulkImporting(false);
+    }
+  };
+
   // この画面から直接、回戦ごとの試合数を1試合ずつ増減する
   const adjustRoundCount = async (roundNo, delta) => {
     const maxRound = Math.max(...roundNos);
@@ -3358,6 +3438,12 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           ))}
         </div>
       )}
+      <div style={{ textAlign: "right", marginBottom: 10 }}>
+        <button
+          style={{ border: "1px solid " + C.navy, background: C.white, color: C.navy, borderRadius: 8, fontSize: 11.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
+          onClick={() => { setBulkTargetRound(roundNos[0] || 1); setBulkImportOpen(true); }}
+        >📋 一覧から一括登録</button>
+      </div>
       <div style={{ overflowX: "auto", paddingBottom: 4 }}>
         <div style={{ display: "flex", gap: 10, minWidth: roundNos.length * 190 }}>
           {roundNos.map(rn => (
@@ -3549,6 +3635,57 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           </Modal>
         );
       })()}
+
+      {bulkImportOpen && (
+        <Modal onClose={() => !bulkImporting && setBulkImportOpen(false)}>
+          <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>一覧から一括登録</div>
+              <button
+                style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
+                onClick={() => !bulkImporting && setBulkImportOpen(false)}
+                aria-label="閉じる"
+              >×</button>
+            </div>
+            <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 10 }}>
+              1行に1エントリー、「エントリー番号 [タブ] 学校名 [タブ] 選手1 [タブ] 選手2」の順で貼り付けてください。上から2件ずつペアにして、選んだ回戦の第1試合・第2試合…へ自動で登録されます。
+            </div>
+            <div style={{ fontSize: 11, color: C.textSec, background: C.gray, borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontFamily: "monospace" }}>
+              1　福岡工業　山田 太郎　鈴木 次郎<br/>
+              2　久留米商業　田中 一郎　佐藤 健
+            </div>
+
+            <label style={{ fontSize: 11, color: C.textSec }}>登録先の回戦</label>
+            <select
+              value={bulkTargetRound}
+              onChange={e => setBulkTargetRound(Number(e.target.value))}
+              style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid " + C.border, fontSize: 13, marginTop: 4, marginBottom: 12 }}
+            >
+              {roundNos.map(rn => (
+                <option key={rn} value={rn}>{rn}回戦（{rounds[rn].length}試合＝{rounds[rn].length * 2}エントリー分）</option>
+              ))}
+            </select>
+
+            <textarea
+              value={bulkText}
+              onChange={e => setBulkText(e.target.value)}
+              placeholder={"1\t福岡工業\t山田 太郎\t鈴木 次郎\n2\t久留米商業\t田中 一郎\t佐藤 健\n..."}
+              style={{ width: "100%", minHeight: 180, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: 10, fontSize: 12.5, fontFamily: "monospace", marginBottom: 12 }}
+            />
+
+            <button
+              style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: bulkImporting ? 0.7 : 1 }}
+              disabled={bulkImporting}
+              onClick={handleBulkImport}
+            >{bulkImporting ? "登録中..." : "この内容で登録する"}</button>
+            <button
+              style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+              disabled={bulkImporting}
+              onClick={() => setBulkImportOpen(false)}
+            >閉じる</button>
+          </div>
+        </Modal>
+      )}
 
       {longPressMatch && (
         <Modal onClose={() => setLongPressMatch(null)}>
