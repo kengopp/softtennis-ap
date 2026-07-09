@@ -1771,7 +1771,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
 
   async function handleDelete(id) {
+    const link = await getDrawMatchByMatchId(id).catch(()=>null);
     await deleteMatch(id);
+    if (link) await clearDrawMatchLink(link.id).catch(()=>{});
     setConfirmDelete(null);
     reload();
   }
@@ -2412,7 +2414,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>削除すると元に戻せません。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(null)}>キャンセル</button>
-              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ await deleteMatch(confirmDeleteMatch); setConfirmDeleteMatch(null); reload(); }}>削除する</button>
+              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ const link = await getDrawMatchByMatchId(confirmDeleteMatch); await deleteMatch(confirmDeleteMatch); if (link) await clearDrawMatchLink(link.id); setConfirmDeleteMatch(null); reload(); }}>削除する</button>
             </div>
           </div>
         </Modal>
@@ -9082,7 +9084,18 @@ export default function App() {
         lockTournament={creatingFromTournament && !!tournamentContext}
         tournamentStartDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
         tournamentEndDate={creatingFromTournament && tournamentContext ? tournamentContext.end_date : undefined}
-        onScheduled={()=>{ setInitMatchType(null); setCreatingFromTournament(false); setListFilter("scheduled"); setScreen("list"); setTimeout(()=>setListFilter("all"), 100); }}
+        onScheduled={()=>{
+          setInitMatchType(null);
+          const fromTournament = creatingFromTournament && tournamentContext;
+          setCreatingFromTournament(false);
+          if (fromTournament) {
+            setScreen("tournamentDetail");
+          } else {
+            setListFilter("scheduled");
+            setScreen("list");
+            setTimeout(()=>setListFilter("all"), 100);
+          }
+        }}
         onSave={id=>{
           setCopySourceId(null);
           setInitMatchType(null);
