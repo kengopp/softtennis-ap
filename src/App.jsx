@@ -2917,17 +2917,17 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
   );
 }
 
-function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabel, matchLabel, mySchoolName, onClose, onSaved }) {
+function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabel, matchLabel, mySchoolName, onClose, onSaved, prefillSchoolA, prefillSchoolB }) {
   const [roster, setRoster] = useState([]);
   const [schools, setSchools] = useState([]);
   const [saving, setSaving] = useState(false);
 
   // ★「自チーム/相手チーム」という区別は入力時にはなくし、上側/下側という中立な2枠として扱う。
   //   内部的には従来どおりサイドA/サイドBとして保存する（スコア判定・色分けは変更しない）。
-  const emptySide = () => ({ schoolName: "", player1: "", player2: "", isWithdrawn: false, entryNo: "" });
+  const emptySide = (prefillSchool) => ({ schoolName: prefillSchool || "", player1: "", player2: "", isWithdrawn: false, entryNo: "" });
 
-  const initSide = (entry) => {
-    if (!entry) return emptySide();
+  const initSide = (entry, prefillSchool) => {
+    if (!entry) return emptySide(prefillSchool);
     return {
       schoolName: entry.school_name || "",
       player1: entry.player1_name || "",
@@ -2954,8 +2954,8 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     : false;
   if (draft && !useDraft) clearDraft();
 
-  const [sideA, setSideA] = useState(() => (useDraft ? draft.sideA : initSide(drawMatch.sideA)));
-  const [sideB, setSideB] = useState(() => (useDraft ? draft.sideB : initSide(drawMatch.sideB)));
+  const [sideA, setSideA] = useState(() => (useDraft ? draft.sideA : initSide(drawMatch.sideA, prefillSchoolA)));
+  const [sideB, setSideB] = useState(() => (useDraft ? draft.sideB : initSide(drawMatch.sideB, prefillSchoolB)));
 
   useEffect(() => {
     try { localStorage.setItem(draftKey, JSON.stringify({ sideA, sideB })); } catch (e) {}
@@ -3106,6 +3106,11 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
           >×</button>
         </div>
         <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>紙のドロー表を見ながら、上から順にそのまま入力できます。エントリー番号を両方入れると、若い番号が自動的に上に表示されます。</div>
+        {(prefillSchoolA || prefillSchoolB) && (
+          <div style={{ fontSize: 11, color: C.navy, background: C.accentL, borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>
+            📋 他の枠から学校名をコピーしました。選手名とエントリー番号を入力してください。
+          </div>
+        )}
         {drawMatch.match_id && (
           <div style={{ fontSize: 11, color: C.orange, background: "#fff3e0", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>
             ⚠️ この枠はすでに試合が作成されています。ここでの変更はドロー表の表示に反映されますが、作成済みの試合記録（選手名など）は自動では更新されません。試合記録自体を直すには「編集」からその試合を開いて修正してください。
@@ -3136,6 +3141,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   const [advancingId, setAdvancingId] = useState(null);
   const [advancingFrom, setAdvancingFrom] = useState(null); // 進出先を選択中のdrawMatch（終了した試合）
   const [longPressMatch, setLongPressMatch] = useState(null); // 長押しでアクションシートを開いた対象
+  const [copySourceMatch, setCopySourceMatch] = useState(null); // 対戦情報をコピーする元
+  const [copyPrefill, setCopyPrefill] = useState(null); // 編集シートに渡す学校名のプリフィル { schoolA, schoolB }
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null); // 削除確認中のmatch_id
   const [deletingMatch, setDeletingMatch] = useState(false);
   const longPressTimerRef = useRef(null);
@@ -3152,6 +3159,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   };
   const closeEditingSlot = () => {
     setEditingSlotRaw(null);
+    setCopyPrefill(null);
     try { localStorage.removeItem(editingSlotStorageKey); } catch (e) {}
   };
 
@@ -3459,6 +3467,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           mySchoolName={mySchoolName}
           onClose={closeEditingSlot}
           onSaved={reload}
+          prefillSchoolA={copyPrefill?.schoolA}
+          prefillSchoolB={copyPrefill?.schoolB}
         />
       )}
 
@@ -3520,12 +3530,10 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>
             {entryLabel(longPressMatch.sideA)} vs {entryLabel(longPressMatch.sideB)}
           </div>
-          {onCopyMatch && (
-            <button
-              style={{ width: "100%", padding: 13, background: C.gray, color: C.navy, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}
-              onClick={() => { const id = longPressMatch.match_id; setLongPressMatch(null); onCopyMatch(id); }}
-            >📋 コピーして新規作成</button>
-          )}
+          <button
+            style={{ width: "100%", padding: 13, background: C.gray, color: C.navy, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}
+            onClick={() => { setCopySourceMatch(longPressMatch); setLongPressMatch(null); }}
+          >📋 学校名を別の枠にコピー</button>
           <button
             style={{ width: "100%", padding: 13, background: C.redL, color: C.red, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}
             onClick={() => setConfirmDeleteMatch(longPressMatch)}
@@ -3533,6 +3541,43 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           <button style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => setLongPressMatch(null)}>閉じる</button>
         </Modal>
       )}
+
+      {copySourceMatch && (() => {
+        const emptySlots = Object.keys(rounds).flatMap(rn =>
+          rounds[rn].filter(x => !x.sideA && !x.sideB).map(x => ({ ...x, round_no: Number(rn) }))
+        ).sort((a, b) => a.round_no - b.round_no || a.slot_no - b.slot_no);
+        return (
+          <Modal onClose={() => setCopySourceMatch(null)}>
+            <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>コピー先の枠を選んでください</div>
+                <button
+                  style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
+                  onClick={() => setCopySourceMatch(null)}
+                  aria-label="閉じる"
+                >×</button>
+              </div>
+              <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>
+                「{entryLabel(copySourceMatch.sideA)}({copySourceMatch.sideA?.school_name})」vs「{entryLabel(copySourceMatch.sideB)}({copySourceMatch.sideB?.school_name})」の学校名を、選んだ枠にコピーします。選手名とエントリー番号は空欄になるので、そのあと入力してください。
+              </div>
+              {emptySlots.length === 0 && (
+                <div style={{ fontSize: 12.5, color: C.textSec, textAlign: "center", padding: "20px 0" }}>空いている枠がありません。</div>
+              )}
+              {emptySlots.map(slot => (
+                <button
+                  key={slot.id}
+                  style={{ display: "block", width: "100%", textAlign: "left", border: "1px solid " + C.border, borderRadius: 10, marginBottom: 10, padding: "10px 12px", background: C.white, cursor: "pointer", fontSize: 12.5, color: C.text }}
+                  onClick={() => {
+                    setCopyPrefill({ schoolA: copySourceMatch.sideA?.school_name || "", schoolB: copySourceMatch.sideB?.school_name || "" });
+                    openEditingSlot(slot);
+                    setCopySourceMatch(null);
+                  }}
+                >{slot.round_no}回戦 第{slot.slot_no}試合</button>
+              ))}
+            </div>
+          </Modal>
+        );
+      })()}
 
       {confirmDeleteMatch && (
         <Modal onClose={() => setConfirmDeleteMatch(null)}>
@@ -6248,6 +6293,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
   const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
   const [undoConfirm, setUndoConfirm] = useState(false); // 1点前に戻す確認ダイアログ
+  const [resetConfirm, setResetConfirm] = useState(false); // スコアリセット確認ダイアログ
 
   // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
   const saveQueueRef = useRef(Promise.resolve());
@@ -6608,6 +6654,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       {/* 記録タブ */}
       {tab==="record"&&!viewOnly&&(
         <div style={{ padding:"10px 12px 20px" }}>
+          {match.games.length>0 && (
+            <div style={{ textAlign:"right", marginBottom:8 }}>
+              <button
+                style={{ border:"1px solid "+C.red, background:C.redL, borderRadius:8, fontSize:11, color:C.red, cursor:"pointer", padding:"5px 10px", fontWeight:700 }}
+                onClick={()=>setResetConfirm(true)}
+              >🗑️ スコアをやり直す（削除）</button>
+            </div>
+          )}
           {match.games.length===0&&match.status!=="finished"&&(
             <div style={{ textAlign:"center",padding:"40px 0" }}>
               <div style={{ fontSize:36,marginBottom:12 }}>🎾</div>
@@ -7030,6 +7084,26 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setUndoConfirm(false)}>キャンセル</button>
               <button style={{ padding:11, background:C.navy, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>{ setUndoConfirm(false); undo(); }}>はい</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {resetConfirm && (
+        <Modal onClose={()=>setResetConfirm(false)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>⚠️</div>
+            <h3 style={{ fontSize:16, fontWeight:800, marginBottom:8, color:C.red }}>本当にスコアをリセットしますか？</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:20 }}>記録したゲーム・ポイントがすべて削除され、未開始（0-0）の状態に戻ります。<b>この操作は元に戻せません。</b><br/>選手名・学校名・大会情報は残ります。</p>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setResetConfirm(false)}>キャンセル</button>
+              <button
+                style={{ padding:11, background:C.red, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }}
+                onClick={()=>{
+                  setResetConfirm(false);
+                  persist({ ...match, games:[], match_score_a:0, match_score_b:0, status:"scheduled", first_server:null });
+                }}
+              >リセットする</button>
             </div>
           </div>
         </Modal>
