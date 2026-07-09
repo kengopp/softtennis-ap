@@ -6344,7 +6344,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       return;
     }
     startingGameRef.current = true;
-    base = { ...base, first_server: server };
+    // ★予定(scheduled)のまま作成された試合（ドロー経由など）が、採点開始後も
+    //   ずっと「開始前」表示のままにならないよう、ここで進行中(active)に切り替える
+    const statusFix = base.status === "scheduled" ? { status: "active" } : {};
+    base = { ...base, ...statusFix, first_server: server };
     const num=base.games.length+1;
     const isFin=isFinalGame(base.game_format,base.match_score_a,base.match_score_b);
     const srv=gameServer(base.first_server||server,num);
