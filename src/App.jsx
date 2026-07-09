@@ -2950,7 +2950,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 
   const draft = loadDraft();
   const useDraft = draft
-    ? window.confirm("前回入力途中のデータが見つかりました。復元しますか？\n「いいえ」を選ぶと現在登録されている内容を表示します。")
+    ? window.confirm("前回入力途中のデータが見つかりました。復元しますか？\n「OK」で復元、「キャンセル」で現在登録されている内容を表示します。")
     : false;
   if (draft && !useDraft) clearDraft();
 
@@ -3052,7 +3052,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       else setSideB(v => ({ ...v, isWithdrawn: false }));
       return;
     }
-    if (!window.confirm("この対戦を棄権として扱いますか？\n「はい」にすると、相手の不戦勝としてこの試合が終了扱いになります。")) return;
+    if (!window.confirm("この対戦を棄権として扱いますか？\n「OK」にすると、相手の不戦勝としてこの試合が終了扱いになります。")) return;
 
     const nextSideA = side === "A" ? { ...sideA, isWithdrawn: true } : sideA;
     const nextSideB = side === "B" ? { ...sideB, isWithdrawn: true } : sideB;
@@ -3094,14 +3094,16 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     }
   };
 
+  const handleClose = () => { clearDraft(); onClose(); };
+
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={handleClose}>
       <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{matchLabel}の対戦情報を入力</div>
           <button
             style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="閉じる"
           >×</button>
         </div>
@@ -3122,7 +3124,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
           style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: saving ? 0.7 : 1 }}
           disabled={saving} onClick={handleSave}
         >{saving ? "保存中..." : "対戦を登録する"}</button>
-        <button style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={onClose}>閉じる</button>
+        <button style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={handleClose}>閉じる</button>
       </div>
     </Modal>
   );
