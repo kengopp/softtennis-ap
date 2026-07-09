@@ -2994,6 +2994,11 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
           >×</button>
         </div>
         <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>選手を登録するとこの枠でスコア入力が開始できます</div>
+        {drawMatch.match_id && (
+          <div style={{ fontSize: 11, color: C.orange, background: "#fff3e0", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>
+            ⚠️ この枠はすでに試合が作成されています。ここでの変更はドロー表の表示に反映されますが、作成済みの試合記録（選手名など）は自動では更新されません。試合記録自体を直すには「編集」からその試合を開いて修正してください。
+          </div>
+        )}
         <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} onWithdrawToggle={(v) => handleWithdrawToggle("A", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
         <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} onWithdrawToggle={(v) => handleWithdrawToggle("B", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
         <button
@@ -3217,7 +3222,15 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
 
                 return (
                   <div key={dm.id} style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 9, color: C.textSec, textAlign: "center", marginBottom: 3 }}>第{idx + 1}試合</div>
+                    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      <span style={{ fontSize: 9, color: C.textSec }}>第{idx + 1}試合</span>
+                      {(dm.sideA || dm.sideB) && (
+                        <button
+                          style={{ border: "none", background: "none", fontSize: 9.5, color: C.textSec, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                          onClick={(e) => { e.stopPropagation(); openEditingSlot(dm); }}
+                        >✏️ 対戦情報を編集</button>
+                      )}
+                    </div>
                     <div
                       style={{ background: C.white, borderRadius: 10, border: "1px solid " + borderColor, overflow: "hidden", cursor: "pointer" }}
                       onClick={() => {
