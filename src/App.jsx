@@ -2817,8 +2817,8 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       <div style={{ marginTop: 10 }}>
         <label style={{ fontSize: 11, color: C.textSec }}>選手1</label>
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p1.sei} onChange={e => set({ player1: joinName(e.target.value, p1.mei) })} />
-          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p1.mei} onChange={e => set({ player1: joinName(p1.sei, e.target.value) })} />
+          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p1.sei} onChange={e => set({ player1: joinName(e.target.value, p1.mei) })} />
+          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p1.mei} onChange={e => set({ player1: joinName(p1.sei, e.target.value) })} />
         </div>
         {filteredRoster.length > 0 && (
           <div style={{ marginTop: 6 }}>
@@ -2832,8 +2832,8 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       <div style={{ marginTop: 10 }}>
         <label style={{ fontSize: 11, color: C.textSec }}>選手2（ペア）</label>
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p2.sei} onChange={e => set({ player2: joinName(e.target.value, p2.mei) })} />
-          <input style={{ flex: 1, border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p2.mei} onChange={e => set({ player2: joinName(p2.sei, e.target.value) })} />
+          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p2.sei} onChange={e => set({ player2: joinName(e.target.value, p2.mei) })} />
+          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p2.mei} onChange={e => set({ player2: joinName(p2.sei, e.target.value) })} />
         </div>
         {filteredRoster.length > 0 && (
           <div style={{ marginTop: 6 }}>
@@ -2976,7 +2976,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{matchLabel}の対戦情報を入力</div>
           <button
-            style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8 }}
+            style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
             onClick={onClose}
             aria-label="閉じる"
           >×</button>
@@ -3251,7 +3251,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>どの試合に進出させますか？</div>
                 <button
-                  style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8 }}
+                  style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
                   onClick={() => setAdvancingFrom(null)}
                   aria-label="閉じる"
                 >×</button>
@@ -4713,12 +4713,24 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [teamSubTab, setTeamSubTab] = useState("overall"); // overall | pairs
   const [period, setPeriod] = useState("all"); // all | month1
   const [sort, setSort] = useState("desc"); // desc | asc
+  const [tournamentFilter, setTournamentFilter] = useState("all"); // all | 大会名
   const [showBreakdown, setShowBreakdown] = useState(false); // 総合成績カードの内訳一覧
 
   useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
 
-  const periodMatches = period==="month1" ? withinLastDays(allMatches, 30) : allMatches;
+  // 大会名の選択肢（登録されている試合から重複なく抽出。日付が新しい大会を上にする）
+  const tournamentOptions = Array.from(
+    new Map(
+      allMatches
+        .filter(m => m.tournament_name)
+        .sort((a,b) => new Date(b.match_date) - new Date(a.match_date))
+        .map(m => [m.tournament_name, m.tournament_name])
+    ).values()
+  );
+
+  const periodMatches = (period==="month1" ? withinLastDays(allMatches, 30) : allMatches)
+    .filter(m => tournamentFilter==="all" || m.tournament_name === tournamentFilter);
   const finished = periodMatches.filter(m=>m.status==="finished");
   const teamRecord = recordOf(finished, m=>m.match_score_a>m.match_score_b);
 
@@ -4763,6 +4775,20 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
           <button key={v} style={{ ...S.togBtn(tab===v,C.navy),flex:1,fontSize:12,padding:"8px 4px" }} onClick={()=>setTab(v)}>{l}</button>
         ))}
       </div>
+      {tournamentOptions.length > 0 && (
+        <div style={{ padding:"10px 14px 0" }}>
+          <select
+            value={tournamentFilter}
+            onChange={e=>setTournamentFilter(e.target.value)}
+            style={{ width:"100%", padding:"9px 10px", borderRadius:8, border:"1px solid "+C.border, fontSize:12.5, color:C.text, background:C.white }}
+          >
+            <option value="all">🏆 すべての大会・練習試合</option>
+            {tournamentOptions.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div style={{ padding:14, paddingBottom:90 }}>
         {loading ? (
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
@@ -4854,7 +4880,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:2 }}>
               <div style={{ fontSize:15, fontWeight:800 }}>総合成績の内訳</div>
               <button
-                style={{ border:"none", background:"none", fontSize:20, color:C.textSec, cursor:"pointer", lineHeight:1, padding:0, marginLeft:8 }}
+                style={{ border:"none", background:"none", fontSize:20, color:C.textSec, cursor:"pointer", lineHeight:1, padding:0, marginLeft:8, marginRight:10, flex:"none" }}
                 onClick={()=>setShowBreakdown(false)}
                 aria-label="閉じる"
               >×</button>
