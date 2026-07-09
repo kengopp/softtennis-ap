@@ -1148,7 +1148,14 @@ async function setDrawMatchSideSafe(drawMatchId, side, entryId) {
   return { ok: false, currentEntryId: current[col] };
 }
 
-// 保存直前に呼び出し、side_a_entry_id / side_b_entry_id の最新状態だけを軽量に取得する
+// 試合を削除したときに、紐づいているドロー枠のmatch_idもクリアして
+// 枠を再び「予定」（対戦情報を編集・試合作成可能）の状態に戻す
+async function clearDrawMatchLink(drawMatchId) {
+  const { error } = await supabase.from("draw_matches").update({ match_id: null, updated_at: new Date().toISOString() }).eq("id", drawMatchId);
+  if (error) throw error;
+}
+
+
 async function getDrawMatchRaw(id) {
   const { data, error } = await supabase.from("draw_matches").select("id, side_a_entry_id, side_b_entry_id").eq("id", id).single();
   if (error) throw error;
@@ -2302,6 +2309,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               category={seg}
               mySchoolName={mySchoolName}
               onOpenMatch={(id)=>{ if (seg==="individual") onOpenMatch(id); else onOpenTeamMatch(id); }}
+              onCopyMatch={seg==="individual" ? onCopyMatch : undefined}
             />
           </div>
         )}
@@ -3116,7 +3124,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 // ============================================================
 // トーナメント表（ドローの実データ表示）
 // ============================================================
-function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
+function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMatch }) {
   const [blockLabels, setBlockLabels] = useState([]);
   const [selectedBlock, setSelectedBlock] = useState(null); // null = ブロックなし("すべて"扱い)
   const [drawMatches, setDrawMatches] = useState([]);
@@ -3125,6 +3133,11 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
   const [startingId, setStartingId] = useState(null);
   const [advancingId, setAdvancingId] = useState(null);
   const [advancingFrom, setAdvancingFrom] = useState(null); // 進出先を選択中のdrawMatch（終了した試合）
+  const [longPressMatch, setLongPressMatch] = useState(null); // 長押しでアクションシートを開いた対象
+  const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null); // 削除確認中のmatch_id
+  const [deletingMatch, setDeletingMatch] = useState(false);
+  const longPressTimerRef = useRef(null);
+  const longPressFiredRef = useRef(false);
   const [adjustingRound, setAdjustingRound] = useState(null);
 
   // ★対戦情報入力シートを開いている最中に他アプリへ移動して戻ってきても、
@@ -3238,6 +3251,36 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
     }
   };
 
+  // ★長押しで「コピーして新規作成」「削除」を選べるアクションシートを開く（作成済みの試合のみ対象）
+  const startLongPress = (dm) => {
+    if (!dm.match_id) return;
+    cancelLongPress();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressFiredRef.current = true;
+      if (navigator.vibrate) navigator.vibrate(15);
+      setLongPressMatch(dm);
+    }, 550);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+  };
+
+  const handleDeleteMatch = async (matchId, drawMatchId) => {
+    setDeletingMatch(true);
+    try {
+      await deleteMatch(matchId);
+      if (drawMatchId) await clearDrawMatchLink(drawMatchId);
+      setConfirmDeleteMatch(null);
+      setLongPressMatch(null);
+      await reload();
+    } catch (e) {
+      alert("削除エラー: " + (e.message || e));
+    } finally {
+      setDeletingMatch(false);
+    }
+  };
+
   // この画面から直接、回戦ごとの試合数を1試合ずつ増減する
   const adjustRoundCount = async (roundNo, delta) => {
     const maxRound = Math.max(...roundNos);
@@ -3346,7 +3389,14 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                     </div>
                     <div
                       style={{ background: C.white, borderRadius: 10, border: "1px solid " + borderColor, overflow: "hidden", cursor: "pointer" }}
+                      onTouchStart={() => startLongPress(dm)}
+                      onTouchEnd={cancelLongPress}
+                      onTouchMove={cancelLongPress}
+                      onMouseDown={() => startLongPress(dm)}
+                      onMouseUp={cancelLongPress}
+                      onMouseLeave={cancelLongPress}
                       onClick={() => {
+                        if (longPressFiredRef.current) { longPressFiredRef.current = false; return; } // ★長押しでシートを開いた場合は通常タップを無視
                         if (startingId) return; // ★作成処理中は他の操作を無視（連打対策）
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
                         if (filled) {
@@ -3394,7 +3444,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
           ))}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合画面が開きます（実際のスコア入力は「第1ゲーム開始」を押すまで始まりません）。</div>
+      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合画面が開きます（実際のスコア入力は「第1ゲーム開始」を押すまで始まりません）。作成済みの試合は長押しでコピー・削除ができます。</div>
 
       {editingSlot && (
         <DrawEntrySheet
@@ -3454,6 +3504,52 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
           </Modal>
         );
       })()}
+
+      {longPressMatch && (
+        <Modal onClose={() => setLongPressMatch(null)}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>この試合を操作</div>
+            <button
+              style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
+              onClick={() => setLongPressMatch(null)}
+              aria-label="閉じる"
+            >×</button>
+          </div>
+          <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>
+            {entryLabel(longPressMatch.sideA)} vs {entryLabel(longPressMatch.sideB)}
+          </div>
+          {onCopyMatch && (
+            <button
+              style={{ width: "100%", padding: 13, background: C.gray, color: C.navy, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}
+              onClick={() => { const id = longPressMatch.match_id; setLongPressMatch(null); onCopyMatch(id); }}
+            >📋 コピーして新規作成</button>
+          )}
+          <button
+            style={{ width: "100%", padding: 13, background: C.redL, color: C.red, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}
+            onClick={() => setConfirmDeleteMatch(longPressMatch)}
+          >🗑 この試合を削除</button>
+          <button style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => setLongPressMatch(null)}>閉じる</button>
+        </Modal>
+      )}
+
+      {confirmDeleteMatch && (
+        <Modal onClose={() => setConfirmDeleteMatch(null)}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>🗑</div>
+            <h3 style={{ fontSize: 16, fontWeight: 800, margin: "8px 0 4px" }}>この試合を削除しますか？</h3>
+            <p style={{ fontSize: 12, color: C.textSec, marginBottom: 16 }}>
+              {entryLabel(confirmDeleteMatch.sideA)} vs {entryLabel(confirmDeleteMatch.sideB)}<br/>
+              スコアの記録も含めて削除され、元に戻せません。枠は再び「予定」の状態に戻ります。
+            </p>
+            <button
+              style={{ width: "100%", padding: 13, background: C.red, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: deletingMatch ? 0.7 : 1 }}
+              disabled={deletingMatch}
+              onClick={() => handleDeleteMatch(confirmDeleteMatch.match_id, confirmDeleteMatch.id)}
+            >{deletingMatch ? "削除中..." : "削除する"}</button>
+            <button style={{ width: "100%", padding: 13, background: C.gray, color: C.text, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => setConfirmDeleteMatch(null)}>キャンセル</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -6191,18 +6287,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
   function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
 
+  const startingGameRef = useRef(false); // ★第1ゲーム開始の二重呼び出し防止（duplicate keyエラー対策）
   function startNewGame(base=match, overrideServer=null){
+    if (startingGameRef.current) return; // 連打・多重タップは無視
     const server = overrideServer || base.first_server;
     if (!server) {
       setServeSelectModal(true);
       return;
     }
+    startingGameRef.current = true;
     base = { ...base, first_server: server };
     const num=base.games.length+1;
     const isFin=isFinalGame(base.game_format,base.match_score_a,base.match_score_b);
     const srv=gameServer(base.first_server||server,num);
     const g={id:uid(),match_id:base.id,game_number:num,server_team:srv,is_final:isFin,score_a:0,score_b:0,winner_team:null,points:[],faults:[]};
     persist({...base,games:[...base.games,g]});
+    setTimeout(()=>{ startingGameRef.current = false; }, 800); // 保存が実行された後にロック解除
   }
 
   function addPoint(team){
