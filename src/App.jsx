@@ -2256,6 +2256,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null);
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
+  const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -2305,19 +2306,33 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
 
         {!loading && drawSummary[seg] > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <DrawBracket
-              tournament={tournament}
-              category={seg}
-              mySchoolName={mySchoolName}
-              onOpenMatch={(id)=>{ if (seg==="individual") onOpenMatch(id); else onOpenTeamMatch(id); }}
-              onCopyMatch={seg==="individual" ? onCopyMatch : undefined}
-            />
-          </div>
+          <>
+            <div style={{ display:"flex", background:C.white, borderRadius:10, border:"1px solid "+C.border, overflow:"hidden", marginBottom:12 }}>
+              <button
+                style={{ flex:1, padding:"10px 0", border:"none", background: drawViewMode==="draw" ? C.accentL : "none", color: drawViewMode==="draw" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
+                onClick={()=>setDrawViewMode("draw")}
+              >🗂 ドロー表</button>
+              <button
+                style={{ flex:1, padding:"10px 0", border:"none", background: drawViewMode==="list" ? C.accentL : "none", color: drawViewMode==="list" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
+                onClick={()=>setDrawViewMode("list")}
+              >📋 試合一覧</button>
+            </div>
+            {drawViewMode==="draw" && (
+              <div style={{ marginBottom: 12 }}>
+                <DrawBracket
+                  tournament={tournament}
+                  category={seg}
+                  mySchoolName={mySchoolName}
+                  onOpenMatch={(id)=>{ if (seg==="individual") onOpenMatch(id); else onOpenTeamMatch(id); }}
+                  onCopyMatch={seg==="individual" ? onCopyMatch : undefined}
+                />
+              </div>
+            )}
+          </>
         )}
 
-        {!loading && seg==="team" && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
-        {!loading && seg==="team" && teamMatches.map(tm => {
+        {!loading && seg==="team" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
+        {!loading && seg==="team" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.map(tm => {
           const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
@@ -2345,8 +2360,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           );
         })}
 
-        {!loading && seg==="individual" && matches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
-        {!loading && seg==="individual" && matches.map(m => {
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && matches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && matches.map(m => {
           const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
           const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
           const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
