@@ -1114,11 +1114,56 @@ async function saveDrawEntry(entry) {
   return row;
 }
 
-// draw_matches の指定サイドに、作成済みのエントリーを紐づける
-async function setDrawMatchSide(drawMatchId, side, entryId) {
-  const col = side === "A" ? "side_a_entry_id" : "side_b_entry_id";
-  const { error } = await supabase.from("draw_matches").update({ [col]: entryId, updated_at: new Date().toISOString() }).eq("id", drawMatchId);
+// この試合(matches.id)がドローの枠から作られたものかどうかを逆引きする。
+// 「✏️ 編集」画面でエントリー番号をあわせて編集できるようにするために使う。
+async function getDrawMatchByMatchId(matchId) {
+  const { data, error } = await supabase.from("draw_matches").select("id, side_a_entry_id, side_b_entry_id").eq("match_id", matchId).maybeSingle();
+  if (error) { console.error(error); return null; }
+  return data;
+}
+
+// エントリー番号だけをピンポイントで更新する（他の項目は変更しない）
+async function updateDrawEntryNo(entryId, entryNo) {
+  if (!entryId) return;
+  const { error } = await supabase.from("draw_entries").update({ entry_no: entryNo || null }).eq("id", entryId);
   if (error) throw error;
+}
+
+// draw_matches の指定サイドに、作成済みのエントリーを紐づける
+// ★複数人が同時に同じ枠へ入力しても上書きしないための安全版。
+//   対象の列（side_a_entry_id / side_b_entry_id）がまだ空のときだけ更新する。
+//   既に別の人が埋めていた場合は上書きせず、現在入っている値を返す。
+async function setDrawMatchSideSafe(drawMatchId, side, entryId) {
+  const col = side === "A" ? "side_a_entry_id" : "side_b_entry_id";
+  const { data, error } = await supabase
+    .from("draw_matches")
+    .update({ [col]: entryId, updated_at: new Date().toISOString() })
+    .eq("id", drawMatchId)
+    .is(col, null)
+    .select(`id, ${col}`);
+  if (error) throw error;
+  if (data && data.length > 0) return { ok: true };
+  const { data: current, error: fetchErr } = await supabase.from("draw_matches").select(col).eq("id", drawMatchId).single();
+  if (fetchErr) throw fetchErr;
+  return { ok: false, currentEntryId: current[col] };
+}
+
+// 保存直前に呼び出し、side_a_entry_id / side_b_entry_id の最新状態だけを軽量に取得する
+async function getDrawMatchRaw(id) {
+  const { data, error } = await supabase.from("draw_matches").select("id, side_a_entry_id, side_b_entry_id").eq("id", id).single();
+  if (error) throw error;
+  return data;
+}
+
+// 同じ大会・同じブロック内で、指定したentry_noが既に別のエントリーで使われていないか確認する
+// （excludeEntryIdsに含まれるエントリー自身との重複は無視する＝自分自身の更新はOK）
+async function checkDuplicateEntryNo(tournamentId, blockLabel, entryNo, excludeEntryIds) {
+  if (!entryNo) return false;
+  let query = supabase.from("draw_entries").select("id").eq("tournament_id", tournamentId).eq("entry_no", entryNo);
+  query = blockLabel ? query.eq("block_label", blockLabel) : query.is("block_label", null);
+  const { data, error } = await query;
+  if (error) { console.error(error); return false; }
+  return (data || []).some(row => !(excludeEntryIds || []).includes(row.id));
 }
 
 // ドローの枠（両サイドとも埋まっている状態）から、実際にスコアを付けられる試合(matches)を作成し、
@@ -2866,10 +2911,13 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   const [roster, setRoster] = useState([]);
   const [schools, setSchools] = useState([]);
   const [saving, setSaving] = useState(false);
-  const emptySide = (own) => ({ schoolName: own ? (mySchoolName || "") : "", player1: "", player2: "", isWithdrawn: false, entryNo: "" });
 
-  const initSide = (entry, own) => {
-    if (!entry) return emptySide(own);
+  // ★「自チーム/相手チーム」という区別は入力時にはなくし、上側/下側という中立な2枠として扱う。
+  //   内部的には従来どおりサイドA/サイドBとして保存する（スコア判定・色分けは変更しない）。
+  const emptySide = () => ({ schoolName: "", player1: "", player2: "", isWithdrawn: false, entryNo: "" });
+
+  const initSide = (entry) => {
+    if (!entry) return emptySide();
     return {
       schoolName: entry.school_name || "",
       player1: entry.player1_name || "",
@@ -2879,9 +2927,8 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     };
   };
 
-  // ★入力途中のデータが消えないよう、この枠の下書きをlocalStorageに自動保存し、
-  //   再度この画面を開いたとき（他のアプリで漢字を調べて戻ってきた場合など）に復元する。
-  //   保存が完了したら下書きは削除する。
+  // ★入力途中のデータが消えないよう、この枠の下書きをlocalStorageに自動保存する。
+  //   ただし「最新の登録内容」より下書きの方が古い可能性があるため、無条件には復元せず必ず確認する。
   const draftKey = `draw_entry_draft_${drawMatch.id}`;
   const loadDraft = () => {
     try {
@@ -2889,40 +2936,92 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
   };
-  const draft = loadDraft();
+  const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch (e) {} };
 
-  const [sideA, setSideA] = useState(() => draft?.sideA ?? initSide(drawMatch.sideA, true));
-  const [sideB, setSideB] = useState(() => draft?.sideB ?? initSide(drawMatch.sideB, false));
+  const draft = loadDraft();
+  const useDraft = draft
+    ? window.confirm("前回入力途中のデータが見つかりました。復元しますか？\n「いいえ」を選ぶと現在登録されている内容を表示します。")
+    : false;
+  if (draft && !useDraft) clearDraft();
+
+  const [sideA, setSideA] = useState(() => (useDraft ? draft.sideA : initSide(drawMatch.sideA)));
+  const [sideB, setSideB] = useState(() => (useDraft ? draft.sideB : initSide(drawMatch.sideB)));
 
   useEffect(() => {
     try { localStorage.setItem(draftKey, JSON.stringify({ sideA, sideB })); } catch (e) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sideA, sideB]);
 
-  const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch (e) {} };
-
   useEffect(() => {
     getPlayerRoster().then(setRoster);
     getSchools().then(setSchools);
   }, []);
 
+  // ★表示（上側/下側）はentry_noの若い順にする。内部的なサイドA/Bはそのまま。
+  const aNo = sideA.entryNo.trim() !== "" ? Number(sideA.entryNo) : null;
+  const bNo = sideB.entryNo.trim() !== "" ? Number(sideB.entryNo) : null;
+  const swapDisplay = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
+  const topKey = swapDisplay ? "B" : "A";
+  const bottomKey = swapDisplay ? "A" : "B";
+  const valueOf = (key) => (key === "A" ? sideA : sideB);
+  const setterOf = (key) => (key === "A" ? setSideA : setSideB);
+
+  const buildEntryRow = (side, val) => ({
+    id: (side === "A" ? drawMatch.side_a_entry_id : drawMatch.side_b_entry_id) || uid(),
+    tournament_id: tournament.id, category, block_label: blockLabel,
+    is_own_team: val.schoolName === mySchoolName, school_name: val.schoolName,
+    player1_name: val.player1, player2_name: val.player2, is_withdrawn: val.isWithdrawn,
+    entry_no: val.entryNo ? val.entryNo.trim() : null,
+  });
+
   const handleSave = async () => {
     setSaving(true);
     try {
-      const entryA = await saveDrawEntry({
-        id: drawMatch.side_a_entry_id || uid(),
-        tournament_id: tournament.id, category, block_label: blockLabel,
-        is_own_team: sideA.schoolName === mySchoolName, school_name: sideA.schoolName,
-        player1_name: sideA.player1, player2_name: sideA.player2, is_withdrawn: sideA.isWithdrawn, entry_no: sideA.entryNo ? sideA.entryNo.trim() : null,
-      });
-      const entryB = await saveDrawEntry({
-        id: drawMatch.side_b_entry_id || uid(),
-        tournament_id: tournament.id, category, block_label: blockLabel,
-        is_own_team: sideB.schoolName === mySchoolName, school_name: sideB.schoolName,
-        player1_name: sideB.player1, player2_name: sideB.player2, is_withdrawn: sideB.isWithdrawn, entry_no: sideB.entryNo ? sideB.entryNo.trim() : null,
-      });
-      if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
-      if (!drawMatch.side_b_entry_id) await setDrawMatchSide(drawMatch.id, "B", entryB.id);
+      // ★保存直前に必ず最新のdraw_matchesを取得し、他の人が既に登録していないか確認する
+      const fresh = await getDrawMatchRaw(drawMatch.id);
+      const aTaken = !!fresh.side_a_entry_id;
+      const bTaken = !!fresh.side_b_entry_id;
+
+      if (aTaken && bTaken) {
+        alert("この試合枠は既に登録されています。最新の内容を表示します。");
+        clearDraft();
+        onClose();
+        await onSaved();
+        return;
+      }
+
+      // entry_noの重複チェック（同じ大会・同じブロック内で、他のエントリーと重複していないか）
+      const excludeIds = [drawMatch.side_a_entry_id, drawMatch.side_b_entry_id].filter(Boolean);
+      if (!aTaken && sideA.entryNo.trim()) {
+        if (await checkDuplicateEntryNo(tournament.id, blockLabel, sideA.entryNo.trim(), excludeIds)) {
+          alert(`エントリー番号「${sideA.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
+          setSaving(false);
+          return;
+        }
+      }
+      if (!bTaken && sideB.entryNo.trim()) {
+        if (await checkDuplicateEntryNo(tournament.id, blockLabel, sideB.entryNo.trim(), excludeIds)) {
+          alert(`エントリー番号「${sideB.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
+          setSaving(false);
+          return;
+        }
+      }
+
+      // 空いている側だけ保存する（既に埋まっている側は上書きしない）
+      let skippedSide = null;
+      if (!aTaken) {
+        const entryA = await saveDrawEntry(buildEntryRow("A", sideA));
+        await setDrawMatchSideSafe(drawMatch.id, "A", entryA.id);
+      } else { skippedSide = "上側"; }
+      if (!bTaken) {
+        const entryB = await saveDrawEntry(buildEntryRow("B", sideB));
+        await setDrawMatchSideSafe(drawMatch.id, "B", entryB.id);
+      } else { skippedSide = skippedSide ? "両側" : "下側"; }
+
+      if (skippedSide) {
+        alert(`${skippedSide}は既に他の方が登録済みだったため、そちらは上書きせずもう一方だけ保存しました。`);
+      }
+
       clearDraft();
       onClose();
       await onSaved();
@@ -2936,6 +3035,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   // ★棄権ボタンが押されたときの処理
   //   ・棄権を解除する場合（trueにする前段階）はローカルの状態を戻すだけ
   //   ・棄権にする場合は確認ダイアログを出し、「はい」なら即座に保存＋相手の不戦勝で試合を終了扱いにする
+  //   ・保存直前に最新状態を確認し、既に埋まっている側は上書きしない
   const handleWithdrawToggle = async (side, newVal) => {
     if (!newVal) {
       if (side === "A") setSideA(v => ({ ...v, isWithdrawn: false }));
@@ -2951,26 +3051,28 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 
     setSaving(true);
     try {
-      const entryA = await saveDrawEntry({
-        id: drawMatch.side_a_entry_id || uid(),
-        tournament_id: tournament.id, category, block_label: blockLabel,
-        is_own_team: nextSideA.schoolName === mySchoolName, school_name: nextSideA.schoolName,
-        player1_name: nextSideA.player1, player2_name: nextSideA.player2, is_withdrawn: nextSideA.isWithdrawn, entry_no: nextSideA.entryNo ? nextSideA.entryNo.trim() : null,
-      });
-      const entryB = await saveDrawEntry({
-        id: drawMatch.side_b_entry_id || uid(),
-        tournament_id: tournament.id, category, block_label: blockLabel,
-        is_own_team: nextSideB.schoolName === mySchoolName, school_name: nextSideB.schoolName,
-        player1_name: nextSideB.player1, player2_name: nextSideB.player2, is_withdrawn: nextSideB.isWithdrawn, entry_no: nextSideB.entryNo ? nextSideB.entryNo.trim() : null,
-      });
-      if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
-      if (!drawMatch.side_b_entry_id) await setDrawMatchSide(drawMatch.id, "B", entryB.id);
+      const fresh = await getDrawMatchRaw(drawMatch.id);
+      const aTaken = !!fresh.side_a_entry_id;
+      const bTaken = !!fresh.side_b_entry_id;
 
-      // 棄権していない側（勝ち上がる側）に選手名が入っていれば、不戦勝で試合を終了扱いにする
+      if (aTaken && bTaken) {
+        alert("この試合枠は既に登録されています。最新の内容を表示します。");
+        clearDraft();
+        onClose();
+        await onSaved();
+        return;
+      }
+
+      let entryA = null, entryB = null;
+      if (!aTaken) { entryA = await saveDrawEntry(buildEntryRow("A", nextSideA)); await setDrawMatchSideSafe(drawMatch.id, "A", entryA.id); }
+      if (!bTaken) { entryB = await saveDrawEntry(buildEntryRow("B", nextSideB)); await setDrawMatchSideSafe(drawMatch.id, "B", entryB.id); }
+
+      // 棄権していない側（勝ち上がる側）に選手名が1人でも入っていれば、不戦勝で試合を終了扱いにする
+      // （選手2しか入力されていないケースにも対応）
       const winnerSide = side === "A" ? "B" : "A";
-      const winnerEntry = winnerSide === "A" ? entryA : entryB;
-      if (winnerEntry && winnerEntry.player1_name) {
-        await createWalkoverMatch({ ...drawMatch, sideA: entryA, sideB: entryB }, tournament.name, roundLabel, winnerSide);
+      const winnerEntry = winnerSide === "A" ? (entryA || drawMatch.sideA) : (entryB || drawMatch.sideB);
+      if (winnerEntry && (winnerEntry.player1_name || winnerEntry.player2_name)) {
+        await createWalkoverMatch({ ...drawMatch, sideA: entryA || drawMatch.sideA, sideB: entryB || drawMatch.sideB }, tournament.name, roundLabel, winnerSide);
       }
       clearDraft();
       onClose();
@@ -2993,14 +3095,14 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
             aria-label="閉じる"
           >×</button>
         </div>
-        <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>選手を登録するとこの枠でスコア入力が開始できます</div>
+        <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 14 }}>紙のドロー表を見ながら、上から順にそのまま入力できます。エントリー番号を両方入れると、若い番号が自動的に上に表示されます。</div>
         {drawMatch.match_id && (
           <div style={{ fontSize: 11, color: C.orange, background: "#fff3e0", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>
             ⚠️ この枠はすでに試合が作成されています。ここでの変更はドロー表の表示に反映されますが、作成済みの試合記録（選手名など）は自動では更新されません。試合記録自体を直すには「編集」からその試合を開いて修正してください。
           </div>
         )}
-        <DrawSideEditor label="サイドA" value={sideA} onChange={setSideA} onWithdrawToggle={(v) => handleWithdrawToggle("A", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
-        <DrawSideEditor label="サイドB" value={sideB} onChange={setSideB} onWithdrawToggle={(v) => handleWithdrawToggle("B", v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="上側" value={valueOf(topKey)} onChange={setterOf(topKey)} onWithdrawToggle={(v) => handleWithdrawToggle(topKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="下側" value={valueOf(bottomKey)} onChange={setterOf(bottomKey)} onWithdrawToggle={(v) => handleWithdrawToggle(bottomKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
         <button
           style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: saving ? 0.7 : 1 }}
           disabled={saving} onClick={handleSave}
@@ -3123,7 +3225,10 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
     if (!winnerEntry || advancingId) return;
     setAdvancingId(targetSlotId);
     try {
-      await setDrawMatchSide(targetSlotId, targetSide, winnerEntry.id);
+      const result = await setDrawMatchSideSafe(targetSlotId, targetSide, winnerEntry.id);
+      if (!result.ok) {
+        alert("この枠には、既に別の対戦相手が登録されていました。上書きは行いませんでした。最新の状態を確認してください。");
+      }
       await reload();
       setAdvancingFrom(null);
     } catch (e) {
@@ -3196,7 +3301,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                 const winnerEntry = winnerSide ? (winnerSide === "A" ? dm.sideA : dm.sideB) : null;
                 const alreadyAdvanced = winnerSide ? isAlreadyAdvanced(dm, winnerEntry) : false;
 
-                const sideRow = (side) => {
+                const sideRow = (side, isFirstRow) => {
                   const entry = side === "A" ? dm.sideA : dm.sideB;
                   const isWinner = winnerSide === side;
                   const isLoser = winnerSide && winnerSide !== side;
@@ -3207,7 +3312,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                     : null;
                   const scoreColor = mi && mi.status === "active" ? C.orange : isWinner ? C.teamA : C.textSec;
                   return (
-                    <div style={{ padding: "7px 9px", borderBottom: side === "A" ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ padding: "7px 9px", borderBottom: isFirstRow ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <div style={{ fontWeight: 400, color: nameColor }}>
                           {entry && entry.entry_no && <span style={{ color: C.textSec, marginRight: 4 }}>No.{entry.entry_no}</span>}
@@ -3220,11 +3325,19 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                   );
                 };
 
+                // ★エントリー番号が両サイドに入っている場合、公式の組み合わせ表と同じように
+                //   番号が若い方を上に表示する（試合データ上のサイドA/Bやスコアの色分けには影響しない、表示順のみ）
+                const aNo = dm.sideA?.entry_no != null && dm.sideA?.entry_no !== "" ? Number(dm.sideA.entry_no) : null;
+                const bNo = dm.sideB?.entry_no != null && dm.sideB?.entry_no !== "" ? Number(dm.sideB.entry_no) : null;
+                const swapOrder = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
+                const topSide = swapOrder ? "B" : "A";
+                const bottomSide = swapOrder ? "A" : "B";
+
                 return (
                   <div key={dm.id} style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginBottom: 3 }}>
                       <span style={{ fontSize: 9, color: C.textSec }}>第{idx + 1}試合</span>
-                      {(dm.sideA || dm.sideB) && (
+                      {(dm.sideA || dm.sideB) && !dm.match_id && (
                         <button
                           style={{ border: "none", background: "none", fontSize: 9.5, color: C.textSec, cursor: "pointer", padding: 0, textDecoration: "underline" }}
                           onClick={(e) => { e.stopPropagation(); openEditingSlot(dm); }}
@@ -3254,8 +3367,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                           </span>
                         </div>
                       )}
-                      {sideRow("A")}
-                      {sideRow("B")}
+                      {sideRow(topSide, true)}
+                      {sideRow(bottomSide, false)}
                       {mi && (
                         <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : C.textSec, fontWeight: mi.status === "active" ? 700 : 400 }}>
                           {mi.status === "active" ? "🔴 進行中" : mi.status === "scheduled" ? "開始前" : isWalkover ? "不戦勝で終了" : "試合終了"}
@@ -5523,6 +5636,27 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [venues, setVenues] = useState([]);
   useEffect(() => { getKnownVenues().then(setVenues); }, []);
 
+  // ★この試合がドローの枠から作られたものであれば、エントリー番号もここで一緒に編集できるようにする
+  const [drawLink, setDrawLink] = useState(null); // { id, side_a_entry_id, side_b_entry_id }
+  const [aEntryNo, setAEntryNo] = useState("");
+  const [bEntryNo, setBEntryNo] = useState("");
+  useEffect(() => {
+    if (!editing?.id) return;
+    getDrawMatchByMatchId(editing.id).then(async (link) => {
+      if (!link) return;
+      setDrawLink(link);
+      const ids = [link.side_a_entry_id, link.side_b_entry_id].filter(Boolean);
+      if (ids.length) {
+        const { data } = await supabase.from("draw_entries").select("id, entry_no").in("id", ids);
+        (data || []).forEach(row => {
+          if (row.id === link.side_a_entry_id) setAEntryNo(row.entry_no != null ? String(row.entry_no) : "");
+          if (row.id === link.side_b_entry_id) setBEntryNo(row.entry_no != null ? String(row.entry_no) : "");
+        });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing?.id]);
+
   // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
   const [aClubPref, setAClubPref] = useState("");
   const [bClubPref, setBClubPref] = useState("");
@@ -5607,6 +5741,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           ...(editing.status === "scheduled" ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
         };
         await saveMatch(updated);
+        if (drawLink) {
+          await Promise.all([
+            updateDrawEntryNo(drawLink.side_a_entry_id, aEntryNo.trim()),
+            updateDrawEntryNo(drawLink.side_b_entry_id, bEntryNo.trim()),
+          ]);
+        }
         onSave(editing.id);
         return;
       }
@@ -5744,6 +5884,11 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         )}
 
         <FormSec title="自チーム (A)">
+          {drawLink && (
+            <FormRow label="エントリー番号">
+              <input style={S.inp} placeholder="例：12" inputMode="numeric" value={aEntryNo} onChange={e => setAEntryNo(e.target.value)}/>
+            </FormRow>
+          )}
           <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={aClubPref} onChange={setAClubPref} options={knownPrefsFrom(schools)} />}>
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{aClub || "（自チーム）"}</div>
@@ -5776,6 +5921,11 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         </FormSec>
 
         <FormSec title="相手チーム (B)">
+          {drawLink && (
+            <FormRow label="エントリー番号">
+              <input style={S.inp} placeholder="例：13" inputMode="numeric" value={bEntryNo} onChange={e => setBEntryNo(e.target.value)}/>
+            </FormRow>
+          )}
           <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{bClub || prefillOpponent || "（相手チーム）"}</div>
