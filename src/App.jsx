@@ -2809,6 +2809,17 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <label style={{ fontSize: 11, color: C.textSec }}>エントリー番号</label>
+      </div>
+      <input
+        style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 10 }}
+        placeholder="例：12"
+        value={value.entryNo}
+        onChange={e => set({ entryNo: e.target.value })}
+        inputMode="numeric"
+      />
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
         <label style={{ fontSize: 11, color: C.textSec }}>チーム名 / 学校名</label>
         <PrefMiniFilter value={pref} onChange={setPref} options={knownPrefsFrom(schools)} />
       </div>
@@ -2855,7 +2866,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
   const [roster, setRoster] = useState([]);
   const [schools, setSchools] = useState([]);
   const [saving, setSaving] = useState(false);
-  const emptySide = (own) => ({ schoolName: own ? (mySchoolName || "") : "", player1: "", player2: "", isWithdrawn: false });
+  const emptySide = (own) => ({ schoolName: own ? (mySchoolName || "") : "", player1: "", player2: "", isWithdrawn: false, entryNo: "" });
 
   const initSide = (entry, own) => {
     if (!entry) return emptySide(own);
@@ -2864,6 +2875,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       player1: entry.player1_name || "",
       player2: entry.player2_name || "",
       isWithdrawn: !!entry.is_withdrawn,
+      entryNo: entry.entry_no != null ? String(entry.entry_no) : "",
     };
   };
 
@@ -2901,19 +2913,19 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
         id: drawMatch.side_a_entry_id || uid(),
         tournament_id: tournament.id, category, block_label: blockLabel,
         is_own_team: sideA.schoolName === mySchoolName, school_name: sideA.schoolName,
-        player1_name: sideA.player1, player2_name: sideA.player2, is_withdrawn: sideA.isWithdrawn,
+        player1_name: sideA.player1, player2_name: sideA.player2, is_withdrawn: sideA.isWithdrawn, entry_no: sideA.entryNo ? sideA.entryNo.trim() : null,
       });
       const entryB = await saveDrawEntry({
         id: drawMatch.side_b_entry_id || uid(),
         tournament_id: tournament.id, category, block_label: blockLabel,
         is_own_team: sideB.schoolName === mySchoolName, school_name: sideB.schoolName,
-        player1_name: sideB.player1, player2_name: sideB.player2, is_withdrawn: sideB.isWithdrawn,
+        player1_name: sideB.player1, player2_name: sideB.player2, is_withdrawn: sideB.isWithdrawn, entry_no: sideB.entryNo ? sideB.entryNo.trim() : null,
       });
       if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
       if (!drawMatch.side_b_entry_id) await setDrawMatchSide(drawMatch.id, "B", entryB.id);
       clearDraft();
-      await onSaved();
       onClose();
+      await onSaved();
     } catch (e) {
       alert("保存エラー: " + (e.message || e));
     } finally {
@@ -2943,13 +2955,13 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
         id: drawMatch.side_a_entry_id || uid(),
         tournament_id: tournament.id, category, block_label: blockLabel,
         is_own_team: nextSideA.schoolName === mySchoolName, school_name: nextSideA.schoolName,
-        player1_name: nextSideA.player1, player2_name: nextSideA.player2, is_withdrawn: nextSideA.isWithdrawn,
+        player1_name: nextSideA.player1, player2_name: nextSideA.player2, is_withdrawn: nextSideA.isWithdrawn, entry_no: nextSideA.entryNo ? nextSideA.entryNo.trim() : null,
       });
       const entryB = await saveDrawEntry({
         id: drawMatch.side_b_entry_id || uid(),
         tournament_id: tournament.id, category, block_label: blockLabel,
         is_own_team: nextSideB.schoolName === mySchoolName, school_name: nextSideB.schoolName,
-        player1_name: nextSideB.player1, player2_name: nextSideB.player2, is_withdrawn: nextSideB.isWithdrawn,
+        player1_name: nextSideB.player1, player2_name: nextSideB.player2, is_withdrawn: nextSideB.isWithdrawn, entry_no: nextSideB.entryNo ? nextSideB.entryNo.trim() : null,
       });
       if (!drawMatch.side_a_entry_id) await setDrawMatchSide(drawMatch.id, "A", entryA.id);
       if (!drawMatch.side_b_entry_id) await setDrawMatchSide(drawMatch.id, "B", entryB.id);
@@ -2961,8 +2973,8 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
         await createWalkoverMatch({ ...drawMatch, sideA: entryA, sideB: entryB }, tournament.name, roundLabel, winnerSide);
       }
       clearDraft();
-      await onSaved();
       onClose();
+      await onSaved();
     } catch (e) {
       alert("保存エラー: " + (e.message || e));
     } finally {
@@ -3002,11 +3014,24 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
   const [selectedBlock, setSelectedBlock] = useState(null); // null = ブロックなし("すべて"扱い)
   const [drawMatches, setDrawMatches] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [editingSlot, setEditingSlot] = useState(null); // タップ中のdrawMatch
+  const [editingSlot, setEditingSlotRaw] = useState(null); // タップ中のdrawMatch
   const [startingId, setStartingId] = useState(null);
   const [advancingId, setAdvancingId] = useState(null);
   const [advancingFrom, setAdvancingFrom] = useState(null); // 進出先を選択中のdrawMatch（終了した試合）
   const [adjustingRound, setAdjustingRound] = useState(null);
+
+  // ★対戦情報入力シートを開いている最中に他アプリへ移動して戻ってきても、
+  //   画面が閉じてしまわないよう、「どの枠を編集中か」をlocalStorageにも覚えておく。
+  //   （入力内容そのものはDrawEntrySheet側のdraftKeyで既に保存されている）
+  const editingSlotStorageKey = `draw_editing_slot_${tournament.id}_${category}`;
+  const openEditingSlot = (dm) => {
+    setEditingSlotRaw(dm);
+    try { localStorage.setItem(editingSlotStorageKey, dm.id); } catch (e) {}
+  };
+  const closeEditingSlot = () => {
+    setEditingSlotRaw(null);
+    try { localStorage.removeItem(editingSlotStorageKey); } catch (e) {}
+  };
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -3017,6 +3042,20 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
     const rows = await getDrawMatchesWithEntries(tournament.id, category, scope);
     setDrawMatches(rows);
     setLoading(false);
+
+    // 編集中だった枠が記録されていれば、対戦情報入力シートを自動で復元する
+    // （既に試合が作成済みになっている場合は復元しない＝入力の必要がなくなったため）
+    try {
+      const savedId = localStorage.getItem(editingSlotStorageKey);
+      if (savedId) {
+        const found = rows.find(r => r.id === savedId);
+        if (found && !found.match_id) {
+          setEditingSlotRaw(found);
+        } else {
+          localStorage.removeItem(editingSlotStorageKey);
+        }
+      }
+    } catch (e) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tournament.id, category]);
 
@@ -3165,7 +3204,10 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                   return (
                     <div style={{ padding: "7px 9px", borderBottom: side === "A" ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
-                        <div style={{ fontWeight: 400, color: nameColor }}>{entryLabel(entry)}</div>
+                        <div style={{ fontWeight: 400, color: nameColor }}>
+                          {entry && entry.entry_no && <span style={{ color: C.textSec, marginRight: 4 }}>No.{entry.entry_no}</span>}
+                          {entryLabel(entry)}
+                        </div>
                         {entry && entry.school_name && <div style={{ fontSize: 11, color: C.textSec, marginTop: 1 }}>{entry.school_name}</div>}
                       </div>
                       {scoreVal !== null && <div style={{ fontSize: 15, fontWeight: 900, color: scoreColor, minWidth: 18, textAlign: "right" }}>{scoreVal}</div>}
@@ -3189,7 +3231,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                           startMatch(dm);
                           return;
                         }
-                        setEditingSlot(dm);
+                        openEditingSlot(dm);
                       }}
                     >
                       {!dm.match_id && (
@@ -3237,7 +3279,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
           roundLabel={`${editingSlot.round_no}回戦`}
           matchLabel={`第${editingSlot.round_no}回戦`}
           mySchoolName={mySchoolName}
-          onClose={() => setEditingSlot(null)}
+          onClose={closeEditingSlot}
           onSaved={reload}
         />
       )}
