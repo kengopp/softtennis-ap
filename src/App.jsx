@@ -2992,12 +2992,18 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     getSchools().then(setSchools);
   }, []);
 
-  // ★表示（上側/下側）はentry_noの若い順にする。内部的なサイドA/Bはそのまま。
-  const aNo = (sideA.entryNo || "").trim() !== "" ? Number(sideA.entryNo) : null;
-  const bNo = (sideB.entryNo || "").trim() !== "" ? Number(sideB.entryNo) : null;
-  const swapDisplay = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
-  const topKey = swapDisplay ? "B" : "A";
-  const bottomKey = swapDisplay ? "A" : "B";
+  // ★表示（上側/下側）は、この画面を開いた時点のentry_noの若い順で1回だけ決める。
+  //   入力中の値が変わるたびに再計算すると、タイプ中に上側/下側の中身が入れ替わって
+  //   見えてしまう（実際のデータは壊れていないが、非常に紛らわしい）ため、固定にする。
+  const [topKey] = useState(() => {
+    const a0 = originalSideARef.current;
+    const b0 = originalSideBRef.current;
+    const aNo0 = (a0.entryNo || "").trim() !== "" ? Number(a0.entryNo) : null;
+    const bNo0 = (b0.entryNo || "").trim() !== "" ? Number(b0.entryNo) : null;
+    const swap0 = aNo0 != null && bNo0 != null && !Number.isNaN(aNo0) && !Number.isNaN(bNo0) && aNo0 > bNo0;
+    return swap0 ? "B" : "A";
+  });
+  const bottomKey = topKey === "A" ? "B" : "A";
   const valueOf = (key) => (key === "A" ? sideA : sideB);
   const setterOf = (key) => (key === "A" ? setSideA : setSideB);
 
