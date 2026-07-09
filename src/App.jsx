@@ -2778,31 +2778,6 @@ function DrawSetup({ tournament, category, onBack }) {
             </div>
           </div>
 
-          {currentScope === "ALL" && blockLabels.length === 0 && (
-            <div style={{ ...S.card, marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottom: "1px solid " + C.border }}>
-                <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700 }}>ブロックに分けますか？</div>
-                  <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>分けるブロック数を入れると、「すべて」の試合数を均等に割り振ります</div>
-                </div>
-                <input
-                  type="text" inputMode="numeric" placeholder="例:4" className="block-count-input"
-                  value={blockCountInput}
-                  onChange={e => setBlockCountInput(e.target.value)}
-                  style={{ width: 70, border: "1px solid " + (blockCountError ? C.red : C.border), borderRadius: 9, padding: "9px 10px", fontSize: 15, fontWeight: 800, textAlign: "right" }}
-                />
-                <style>{`.block-count-input::placeholder{ color:#b7bfcc; font-weight:400; opacity:1; }`}</style>
-              </div>
-              {blockCountError && <div style={{ color: C.red, fontSize: 11.5, fontWeight: 700, padding: "0 14px 10px" }}>半角数字（1以上）を入力してください</div>}
-              <div style={{ padding: "0 14px 14px" }}>
-                <button style={{ background: "none", border: "none", color: C.navy, fontSize: 12, fontWeight: 700, textDecoration: "underline", cursor: "pointer" }} onClick={applyBlockSplit}>この数でブロックに分ける ▸</button>
-              </div>
-              <div style={{ fontSize: 11, color: C.textSec, padding: "0 14px 14px" }}>
-                分けた後は上のチップで「すべて」「Aブロック」…を切り替えながら、各回戦の試合数を確認・修正できます。「この内容でドローを作成」を押すと全ブロックがまとめて保存されます。
-              </div>
-            </div>
-          )}
-
           {currentScope === "ALL" && blockLabels.length > 0 && (
             <div style={{ ...S.card, marginBottom: 14, padding: 14 }}>
               <div style={{ fontSize: 12, color: C.textSec, marginBottom: 10 }}>
