@@ -3347,7 +3347,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
                     <div
                       style={{ background: C.white, borderRadius: 10, border: "1px solid " + borderColor, overflow: "hidden", cursor: "pointer" }}
                       onClick={() => {
-                        if (startingId) return; // ★作成処理中は他の操作を無視（連打・他枠タップ対策）
+                        if (startingId) return; // ★作成処理中は他の操作を無視（連打対策）
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
                         if (filled) {
                           if (category !== "individual") {
@@ -3394,7 +3394,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch }) {
           ))}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合が始まります。</div>
+      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合画面が開きます（実際のスコア入力は「第1ゲーム開始」を押すまで始まりません）。</div>
 
       {editingSlot && (
         <DrawEntrySheet
@@ -6395,12 +6395,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       {/* スコアボードヘッダー */}
       <div style={{ background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, padding:"10px 14px" }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer", opacity:navigatingBack?0.5:1 }} disabled={navigatingBack} onClick={handleBack}>{navigatingBack?"…":"←"}</button>
-          <div style={{ textAlign:"center" }}>
-            {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700 }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
+          <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer", opacity:navigatingBack?0.5:1, flex:"none" }} disabled={navigatingBack} onClick={handleBack}>{navigatingBack?"…":"←"}</button>
+          <div style={{ textAlign:"center", flex:1, minWidth:0, padding:"0 6px" }}>
+            {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700,overflowWrap:"break-word" }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
             <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""}{match.court_number?` · ${match.court_number}`:""} · {match.game_format}Gマッチ</div>
           </div>
-          <div style={{ display:"flex", gap:6 }}>
+          <div style={{ display:"flex", gap:6, flex:"none" }}>
             {match.status==="active" && (
               <button
                 style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
@@ -6510,7 +6510,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
             <div style={{ textAlign:"center",padding:"40px 0" }}>
               <div style={{ fontSize:36,marginBottom:12 }}>🎾</div>
               <p style={{ color:C.textSec,marginBottom:8 }}>第1ゲームを開始してください</p>
-              <p style={{ fontSize:13,color:match.first_server==="A"?C.teamA:C.teamB,fontWeight:700,marginBottom:20 }}>最初のサーブ: {match.first_server==="A"?teamALabel:teamBLabel}</p>
+              {match.first_server ? (
+                <p style={{ fontSize:13,color:match.first_server==="A"?C.teamA:C.teamB,fontWeight:700,marginBottom:20 }}>最初のサーブ: {match.first_server==="A"?teamALabel:teamBLabel}</p>
+              ) : (
+                <p style={{ fontSize:13,color:C.textSec,marginBottom:20 }}>最初のサーブは次の画面で選択します</p>
+              )}
               <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>startNewGame()}>第1ゲーム開始</button>
             </div>
           )}
