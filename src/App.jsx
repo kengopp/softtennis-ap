@@ -6107,9 +6107,15 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   function handleSaveWithServeSelect() {
     if (isYounger === null || isYounger === undefined) { alert("若番／遅番を選択してください"); return; }
     if (editing) { handleSave(null); return; } // 編集時はサーブ選択不要
-    // 自チームと相手のラベルを作成
-    const aLabel = [aP1.trim(), isDoubles ? aP2.trim() : ""].filter(Boolean).join("/") || "自チーム";
-    const bLabel = [bP1.trim(), isDoubles ? bP2.trim() : ""].filter(Boolean).join("/") || "相手チーム";
+    // ★自チームが「相手チーム(B)」欄に入力されていても、保存時にチームAへ入れ替えるのに合わせて、
+    //   このサーブ選択画面でも自チームが必ず緑（A）側に表示されるようにする
+    const swap = ownSchoolName && bClub.trim() === ownSchoolName && aClub.trim() !== ownSchoolName;
+    const aLabel = (swap
+      ? [bP1.trim(), isDoubles ? bP2.trim() : ""]
+      : [aP1.trim(), isDoubles ? aP2.trim() : ""]).filter(Boolean).join("/") || "自チーム";
+    const bLabel = (swap
+      ? [aP1.trim(), isDoubles ? aP2.trim() : ""]
+      : [bP1.trim(), isDoubles ? bP2.trim() : ""]).filter(Boolean).join("/") || "相手チーム";
     setServeSelectForSave({ aLabel, bLabel });
   }
 
@@ -6148,7 +6154,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const swap = ownSchoolName && bClub.trim() === ownSchoolName && aClub.trim() !== ownSchoolName;
       const fAClub = swap ? bClub : aClub, fAP1 = swap ? bP1 : aP1, fAP2 = swap ? bP2 : aP2;
       const fBClub = swap ? aClub : bClub, fBP1 = swap ? aP1 : bP1, fBP2 = swap ? aP2 : bP2;
-      const fServer = swap ? (selectedServer === "A" ? "B" : selectedServer === "B" ? "A" : selectedServer) : selectedServer;
+      const fServer = selectedServer;
       const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
       const players = [
         { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
@@ -9468,7 +9474,9 @@ export default function App() {
           setInitMatchType(null);
           setEditTargetId(null);
           setMatchId(id);
-          setPrevScreen(creatingFromTournament && tournamentContext ? "tournamentDetail" : "record");
+          const fromTournament = creatingFromTournament && tournamentContext;
+          if (!fromTournament) setListMatchMode("individual"); // ★個人戦タブに戻れるようにする
+          setPrevScreen(fromTournament ? "tournamentDetail" : "list");
           setCreatingFromTournament(false);
           setScreen("record");
         }}
