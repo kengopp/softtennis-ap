@@ -2060,13 +2060,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
                   <div style={{ height:4, background:borderColor }}/>
                   <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-                      <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(m.match_date)}{m.tournament_name ? ` · ${m.tournament_name}` : ""}</span>
-                      <div style={{ display:"flex", gap:4 }}>
-                        {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10 }}>🔴 進行中</span>}
-                        {m.status==="waiting" && <span style={{ fontSize:10, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"1px 8px", borderRadius:10 }}>⏳ 待機中</span>}
-                        {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10 }}>📅 予定</span>}
-                        <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"1px 6px", borderRadius:6 }}>{m.game_format}G</span>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4, gap:8 }}>
+                      <span style={{ fontSize:11, color:C.textSec, flex:1, minWidth:0 }}>{fmtDate(m.match_date)}{m.tournament_name ? ` · ${m.tournament_name}` : ""}</span>
+                      <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                        {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>🔴 進行中</span>}
+                        {m.status==="waiting" && <span style={{ fontSize:10, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏳ 待機中</span>}
+                        {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>予定</span>}
+                        <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"1px 6px", borderRadius:6, whiteSpace:"nowrap" }}>{m.game_format}G</span>
                       </div>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
