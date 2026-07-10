@@ -9018,6 +9018,29 @@ function AuthScreen({ onAuthed }) {
 }
 
 export default function App() {
+  // ★連打時にブラウザの「ダブルタップズーム」や「テキスト選択（Google検索バー）」が
+  //   誤発動してボタンが反応しなくなる不具合対策。フォーム入力欄以外は選択不可にし、
+  //   タップの二重解釈を防ぐ（touch-action:manipulation）。
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = `
+      html, body, #root {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      input, textarea {
+        -webkit-user-select: text;
+        user-select: text;
+        touch-action: auto;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => { document.head.removeChild(style); };
+  }, []);
+
   // ログイン状態の確認
   const [authChecked, setAuthChecked] = useState(false);
   const [user,        setUser]        = useState(null);
