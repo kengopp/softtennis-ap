@@ -2103,7 +2103,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             })}
           </div>
           {/* 個人戦FAB */}
-          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,194,122,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>
+          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>
         </>
       )}
 
@@ -6150,6 +6150,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     }
   }
 
+  // ★自チーム(A)の選手候補チップ：選択中の「チーム名/学校名」(aClub)と一致する選手のみ表示する。
+  //   aClubを東福岡から別のチームに変えたら候補もそのチームの選手に切り替わるようにする。
+  const ownRosterForA = roster.filter(p => aClub ? p.team_name === aClub : p.is_own_team !== false);
+
   return (
     <div style={S.page}>
       <div style={S.hdr}>
@@ -6266,9 +6270,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
             <input style={S.inp} placeholder="選手名" value={aP1} onChange={e => setAP1(e.target.value)}/>
-            {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).length>0 && (
+            {ownRosterForA.length>0 && (
               <div style={{ marginTop:6 }}>
-                {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).map(p=>(
+                {ownRosterForA.map(p=>(
                   <span key={p.id} style={S.chip(aP1===p.player_name)} onClick={()=>setAP1(p.player_name)}>{p.player_name}</span>
                 ))}
               </div>
@@ -6277,9 +6281,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           {isDoubles && (
             <FormRow label="選手2（ペア）">
               <input style={S.inp} placeholder="選手名" value={aP2} onChange={e => setAP2(e.target.value)}/>
-              {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).length>0 && (
+              {ownRosterForA.length>0 && (
                 <div style={{ marginTop:6 }}>
-                  {roster.filter(p => !aClub || p.team_name === aClub || (!isTeamMatchGame && p.is_own_team !== false)).map(p=>(
+                  {ownRosterForA.map(p=>(
                     <span key={p.id} style={S.chip(aP2===p.player_name)} onClick={()=>setAP2(p.player_name)}>{p.player_name}</span>
                   ))}
                 </div>
