@@ -6046,6 +6046,24 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     })();
   }, []);
 
+  // ★本当の自チーム名（プロフィール上の所属校）を別途保持しておく。
+  //   「自チーム(A)」「相手チーム(B)」どちらの欄に自チーム名を入れても、
+  //   保存時に自チームが必ずチームA（緑）になるようにするための判定に使う。
+  const [ownSchoolName, setOwnSchoolName] = useState("");
+  useEffect(() => {
+    (async () => {
+      const allSchools = await getSchools();
+      if (isTeamMatchGame && teamMatchMySchoolId) {
+        const mine = allSchools.find(s => s.id === teamMatchMySchoolId);
+        if (mine) { setOwnSchoolName(mine.name); return; }
+      }
+      const profile = await getMyProfile();
+      if (!profile?.school_id) return;
+      const mine = allSchools.find(s => s.id === profile.school_id);
+      if (mine) setOwnSchoolName(mine.name);
+    })();
+  }, []);
+
   // 自チーム選手の入力チェック
   const canSchedule = aP1.trim() && (!isDoubles || aP2.trim()) && isYounger !== null;
 
@@ -6057,16 +6075,21 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     setSaving(true);
     try {
       const mid = scheduledId || uid();
+      // ★自チームが誤って「相手チーム(B)」欄に入力されていた場合、保存時に必ずチームA（緑）になるよう入れ替える
+      const swap = ownSchoolName && bClub.trim() === ownSchoolName && aClub.trim() !== ownSchoolName;
+      const fAClub = swap ? bClub : aClub, fAP1 = swap ? bP1 : aP1, fAP2 = swap ? bP2 : aP2;
+      const fBClub = swap ? aClub : bClub, fBP1 = swap ? aP1 : bP1, fBP2 = swap ? aP2 : bP2;
+      const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
       const players = [
-        { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
-        ...(isDoubles && aP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:null, order_num:2 }] : []),
-        ...(bP1.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP1.trim(), club_name:bClub.trim(), position:null, order_num:1 }] : []),
-        ...(isDoubles && bP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP2.trim(), club_name:bClub.trim(), position:null, order_num:2 }] : []),
+        { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
+        ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2 }] : []),
+        ...(fBP1.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:fBP1.trim(), club_name:fBClub.trim(), position:null, order_num:1 }] : []),
+        ...(isDoubles && fBP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:fBP2.trim(), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
       ];
       const match = {
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
-        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer,
+        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fFirstServer,
         status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
       };
       await saveMatch(match);
@@ -6121,25 +6144,31 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 
       // 新規作成 or コピー作成
       const mid = uid();
+      // ★自チームが誤って「相手チーム(B)」欄に入力されていた場合、保存時に必ずチームA（緑）になるよう入れ替える
+      const swap = ownSchoolName && bClub.trim() === ownSchoolName && aClub.trim() !== ownSchoolName;
+      const fAClub = swap ? bClub : aClub, fAP1 = swap ? bP1 : aP1, fAP2 = swap ? bP2 : aP2;
+      const fBClub = swap ? aClub : bClub, fBP1 = swap ? aP1 : bP1, fBP2 = swap ? aP2 : bP2;
+      const fServer = swap ? (selectedServer === "A" ? "B" : selectedServer === "B" ? "A" : selectedServer) : selectedServer;
+      const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
       const players = [
-        { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
-        ...(isDoubles && aP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:null, order_num:2 }] : []),
-        { id:uid(), match_id:mid, team:"B", player_name:bP1.trim(), club_name:bClub.trim(), position:null, order_num:1 },
-        ...(isDoubles && bP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP2.trim(), club_name:bClub.trim(), position:null, order_num:2 }] : []),
+        { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
+        ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2 }] : []),
+        { id:uid(), match_id:mid, team:"B", player_name:fBP1.trim(), club_name:fBClub.trim(), position:null, order_num:1 },
+        ...(isDoubles && fBP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:fBP2.trim(), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
       ];
       const match = {
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
-        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:selectedServer || firstServer || "A",
+        match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fServer || fFirstServer || "A",
         status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
       };
       await saveMatch(match);
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
       const autoRegisterTasks = [
-        autoRegisterPlayerToRoster(aP1.trim(), aClub.trim(), true),
-        ...(isDoubles && aP2.trim() ? [autoRegisterPlayerToRoster(aP2.trim(), aClub.trim(), true)] : []),
-        autoRegisterPlayerToRoster(bP1.trim(), bClub.trim(), false),
-        ...(isDoubles && bP2.trim() ? [autoRegisterPlayerToRoster(bP2.trim(), bClub.trim(), false)] : []),
+        autoRegisterPlayerToRoster(fAP1.trim(), fAClub.trim(), true),
+        ...(isDoubles && fAP2.trim() ? [autoRegisterPlayerToRoster(fAP2.trim(), fAClub.trim(), true)] : []),
+        autoRegisterPlayerToRoster(fBP1.trim(), fBClub.trim(), false),
+        ...(isDoubles && fBP2.trim() ? [autoRegisterPlayerToRoster(fBP2.trim(), fBClub.trim(), false)] : []),
       ];
       await Promise.all(autoRegisterTasks);
       onSave(mid);
