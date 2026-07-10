@@ -5829,55 +5829,37 @@ function VenueField({ value, onChange, venues, placeholder }) {
   );
 }
 
-// ★学校名の誤入力防止用：候補から選ぶ（プルダウン）か、新しい名前を自由入力するか切り替えられる部品
+// ★学校名の誤入力防止用：入力しながら候補が絞り込まれるサジェスト式の入力欄
 // schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
 // prefFilter: 親から渡される都道府県絞り込み値（任意）
 function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
-  const [customMode, setCustomMode] = useState(!!value && !schools.some(s => s.name === value));
-
-  useEffect(() => {
-    // 候補一覧が後から読み込まれた場合の自動復帰:
-    // ①未入力なら一覧モードへ　②既存の学校名と一致していれば一覧モードへ（コピー・編集時にありがちなケース）
-    if (!customMode) return;
-    if (!value && schools.length>0) { setCustomMode(false); return; }
-    if (value && schools.some(s => s.name === value)) { setCustomMode(false); }
-  }, [schools, value]);
-
+  const [open, setOpen] = useState(false);
+  const safeValue = value || "";
   const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
-
-  if (customMode) {
-    return (
-      <div>
-        <input style={S.inp} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} />
-        {schools.length>0 && (
-          <button style={{ background:"none",border:"none",color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",marginTop:4,padding:0 }}
-            onMouseDown={e=>e.preventDefault()}
-            onClick={()=>setCustomMode(false)}
-          >← 一覧から選ぶ</button>
-        )}
-      </div>
-    );
-  }
+  const q = safeValue.trim();
+  const filtered = q ? visibleSchools.filter(s => s.name.includes(q)) : visibleSchools;
 
   return (
-    <div>
-      <select
-        style={{ ...S.inp, background:"transparent" }}
-        value={visibleSchools.some(s=>s.name===value) ? value : ""}
-        onChange={e=>{
-          if (e.target.value === "__custom__") { setCustomMode(true); }
-          else onChange(e.target.value);
-        }}
-      >
-        <option value="">選択してください</option>
-        {visibleSchools.map(s => <option key={s.name} value={s.name}>{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</option>)}
-        <option value="__custom__">＋ 新しい学校名を入力</option>
-      </select>
+    <div style={{ position:"relative" }}>
+      <input
+        style={S.inp}
+        placeholder={placeholder}
+        value={safeValue}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:200, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", maxHeight:220, overflowY:"auto" }}>
+          {filtered.slice(0, 50).map(s => (
+            <div key={s.name} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
+              onMouseDown={e => { e.preventDefault(); onChange(s.name); setOpen(false); }}
+            >{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</div>
+          ))}
+        </div>
+      )}
       {value && (
-        <button style={{ background:"none",border:"none",color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",marginTop:4,padding:0 }}
-          onMouseDown={e=>e.preventDefault()}
-          onClick={()=>setCustomMode(true)}
-        >✎ 「{value}A」のように自由に文字を足す</button>
+        <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>✎ 「{value}A」のように自由に文字を足すこともできます</div>
       )}
     </div>
   );
