@@ -5459,15 +5459,19 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [sort, setSort] = useState("desc"); // desc | asc
   const [tournamentFilter, setTournamentFilter] = useState("all"); // all | 大会名
   const [showBreakdown, setShowBreakdown] = useState(false); // 総合成績カードの内訳一覧
+  const [deletedTournamentNames, setDeletedTournamentNames] = useState([]); // ゴミ箱に入っている大会名（絞り込み選択肢から除外用）
 
   useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+  // ★ゴミ箱に入っている大会名を取得。試合データ自体は削除しないが、
+  //   絞り込みプルダウンには削除済みの大会名を出さないようにするため。
+  useEffect(() => { getDeletedTournaments().then(list => setDeletedTournamentNames(list.map(t => t.name))); }, []);
 
-  // 大会名の選択肢（登録されている試合から重複なく抽出。日付が新しい大会を上にする）
+  // 大会名の選択肢（登録されている試合から重複なく抽出。日付が新しい大会を上にする。削除済みの大会名は除外）
   const tournamentOptions = Array.from(
     new Map(
       allMatches
-        .filter(m => m.tournament_name)
+        .filter(m => m.tournament_name && !deletedTournamentNames.includes(m.tournament_name))
         .sort((a,b) => new Date(b.match_date) - new Date(a.match_date))
         .map(m => [m.tournament_name, m.tournament_name])
     ).values()
