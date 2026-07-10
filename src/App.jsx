@@ -6924,9 +6924,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
           {match.games.length>0 && (
             <div style={{ textAlign:"right", marginBottom:8 }}>
               <button
-                style={{ border:"1px solid "+C.red, background:C.redL, borderRadius:8, fontSize:11, color:C.red, cursor:"pointer", padding:"5px 10px", fontWeight:700 }}
+                style={{ border:"1px solid "+C.border, background:C.gray, borderRadius:8, fontSize:11, color:C.textSec, cursor:"pointer", padding:"5px 10px", fontWeight:700 }}
                 onClick={()=>setResetConfirm(true)}
-              >🗑️ スコアをやり直す（削除）</button>
+              >🗑️ スコア全削除</button>
             </div>
           )}
           {match.games.length===0&&match.status!=="finished"&&(
