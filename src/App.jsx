@@ -8375,7 +8375,10 @@ function PlayerRosterScreen({ onBack }) {
     const fullName = [newLastName.trim(), newFirstName.trim()].filter(Boolean).join(" ");
     if (!fullName) return;
     try {
-      await savePlayer({ player_name: fullName, position: newPosition || null, dominant_hand: newDominantHand || null, is_own_team: tab==="own", team_name: tab==="own" ? mySchoolName : newTeamName });
+      const finalTeamName = tab==="own" ? mySchoolName : newTeamName;
+      // ★「他チーム」で自チームと同じ学校名を入力した場合は自動的に自チーム扱いにする
+      const isOwn = tab==="own" || (!!mySchoolName && finalTeamName.trim() === mySchoolName.trim());
+      await savePlayer({ player_name: fullName, position: newPosition || null, dominant_hand: newDominantHand || null, is_own_team: isOwn, team_name: finalTeamName });
       setNewLastName(""); setNewFirstName(""); setNewPosition(""); setNewTeamName(""); setNewDominantHand("");
       reload();
     } catch (e) { setErrorMsg("追加に失敗しました: " + (e.message || JSON.stringify(e))); }
@@ -8385,7 +8388,10 @@ function PlayerRosterScreen({ onBack }) {
     const fullName = [editLastName.trim(), editFirstName.trim()].filter(Boolean).join(" ");
     if (!fullName) return;
     try {
-      await savePlayer({ id, player_name: fullName, position: editPosition || null, dominant_hand: editDominantHand || null, is_own_team: tab==="own", team_name: tab==="own" ? mySchoolName : editTeamName });
+      const finalTeamName = tab==="own" ? mySchoolName : editTeamName;
+      // ★「他チーム」の選手を編集して自チームと同じ学校名にした場合は、自動的に自チームへ移動する
+      const isOwn = tab==="own" || (!!mySchoolName && finalTeamName.trim() === mySchoolName.trim());
+      await savePlayer({ id, player_name: fullName, position: editPosition || null, dominant_hand: editDominantHand || null, is_own_team: isOwn, team_name: finalTeamName });
       setEditingId(null); reload();
     } catch (e) { setErrorMsg("更新に失敗しました: " + (e.message || JSON.stringify(e))); }
   }
