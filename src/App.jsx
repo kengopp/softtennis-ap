@@ -8388,9 +8388,9 @@ function PlayerRosterScreen({ onBack }) {
     const fullName = [editLastName.trim(), editFirstName.trim()].filter(Boolean).join(" ");
     if (!fullName) return;
     try {
-      const finalTeamName = tab==="own" ? mySchoolName : editTeamName;
-      // ★「他チーム」の選手を編集して自チームと同じ学校名にした場合は、自動的に自チームへ移動する
-      const isOwn = tab==="own" || (!!mySchoolName && finalTeamName.trim() === mySchoolName.trim());
+      const finalTeamName = editTeamName;
+      // ★学校名が自チームと同じかどうかで自チーム／他チームを判定する（タブではなく実際の学校名で判定）
+      const isOwn = !!mySchoolName && finalTeamName.trim() === mySchoolName.trim();
       await savePlayer({ id, player_name: fullName, position: editPosition || null, dominant_hand: editDominantHand || null, is_own_team: isOwn, team_name: finalTeamName });
       setEditingId(null); reload();
     } catch (e) { setErrorMsg("更新に失敗しました: " + (e.message || JSON.stringify(e))); }
@@ -8479,7 +8479,16 @@ function PlayerRosterScreen({ onBack }) {
                   <input style={{ ...S.inp, flex:1 }} placeholder="姓" value={editLastName} onChange={e=>setEditLastName(e.target.value)} />
                   <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={editFirstName} onChange={e=>setEditFirstName(e.target.value)} />
                 </div>
-                <div style={{ ...S.inp, background:C.gray, color:C.textSec, marginBottom:8, display:"flex", alignItems:"center" }}>{mySchoolName || "（プロフィールから自動入力）"}</div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                  <div style={{ fontSize:11, color:C.textSec }}>学校名・チーム名</div>
+                  <PrefMiniFilter value={schoolPrefFilter} onChange={setSchoolPrefFilter} options={availablePrefs} />
+                </div>
+                <div style={{ marginBottom:8 }}>
+                  <SchoolField value={editTeamName} onChange={setEditTeamName} schools={schools} prefFilter={schoolPrefFilter} placeholder="学校名を入力"/>
+                </div>
+                {editTeamName.trim() !== mySchoolName.trim() && editTeamName.trim() !== "" && (
+                  <div style={{ fontSize:11, color:C.orange, marginBottom:8 }}>⚠️ 自チーム（{mySchoolName}）と異なる学校名です。保存すると「他チーム」に移動します。</div>
+                )}
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>ポジション</div>
                 <div style={{ marginBottom:8 }}><PositionButtons value={editPosition} onChange={setEditPosition} /></div>
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>利き手</div>
