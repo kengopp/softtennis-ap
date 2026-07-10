@@ -6981,8 +6981,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                       <span style={{ color:C.textSec,margin:"0 8px" }}>-</span>
                       <span style={{ color:g.winner_team===rightTeam?(isYounger?"#f97316":"#2ecc71"):C.textSec }}>{rightScore(g)}</span>
                     </span>
-                    <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===leftTeam?"🏆":""}</span>
-                    <span style={{ width:74,textAlign:"center",fontSize:14 }}>{g.winner_team===rightTeam?"🏆":""}</span>
+                    <span style={{ width:74,textAlign:"center" }}>{g.winner_team===leftTeam?<span style={{ display:"inline-block",width:13,height:13,borderRadius:"50%",background:"#d4e157",border:"1px solid #aeb92a" }}/>:""}</span>
+                    <span style={{ width:74,textAlign:"center" }}>{g.winner_team===rightTeam?<span style={{ display:"inline-block",width:13,height:13,borderRadius:"50%",background:"#d4e157",border:"1px solid #aeb92a" }}/>:""}</span>
                   </div>
                 ))}
                 <div style={{ display:"flex",alignItems:"center",padding:"12px 14px",background:C.accentL }}>
