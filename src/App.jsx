@@ -191,6 +191,7 @@ async function getMatches() {
   const { data, error } = await supabase
     .from("matches")
     .select("*")
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) { console.error(error); return []; }
   if (data.length === 0) return [];
@@ -385,7 +386,27 @@ async function saveMatch(match) {
   if (staleGameIds.length) await supabase.from("games").delete().in("id", staleGameIds);
 }
 
+// ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする
 async function deleteMatch(id) {
+  const { error } = await supabase.from("matches").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+
+// ゴミ箱に入っている（個人戦の）試合一覧を取得（軽量：明細は含めない）
+async function getDeletedMatches() {
+  const { data, error } = await supabase
+    .from("matches")
+    .select("id, match_date, tournament_name, match_score_a, match_score_b, deleted_at")
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+async function restoreMatch(id) {
+  const { error } = await supabase.from("matches").update({ deleted_at: null }).eq("id", id);
+  if (error) throw error;
+}
+async function permanentlyDeleteMatch(id) {
   const { error } = await supabase.from("matches").delete().eq("id", id);
   if (error) throw error;
 }
@@ -724,6 +745,7 @@ async function getTeamMatches() {
   const { data, error } = await supabase
     .from("team_matches")
     .select("*")
+    .is("deleted_at", null)
     .order("match_date", { ascending: false });
   if (error) { console.error(error); return []; }
   if (!data || data.length === 0) return [];
@@ -805,7 +827,26 @@ async function saveTeamMatch(tm) {
   return row;
 }
 
+// ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする
 async function deleteTeamMatch(id) {
+  const { error } = await supabase.from("team_matches").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+
+async function getDeletedTeamMatches() {
+  const { data, error } = await supabase
+    .from("team_matches")
+    .select("id, match_date, tournament_name, opponent_name, my_score, opponent_score, deleted_at")
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+async function restoreTeamMatch(id) {
+  const { error } = await supabase.from("team_matches").update({ deleted_at: null }).eq("id", id);
+  if (error) throw error;
+}
+async function permanentlyDeleteTeamMatch(id) {
   const { error } = await supabase.from("team_matches").delete().eq("id", id);
   if (error) throw error;
 }
@@ -959,6 +1000,21 @@ async function restoreTournament(id) {
 async function permanentlyDeleteTournament(id) {
   const { error } = await supabase.from("tournaments").delete().eq("id", id);
   if (error) throw error;
+}
+
+// ★ゴミ箱は24時間で自動的に空にする。バックグラウンド処理は無いため、
+// トップ画面の読み込みやゴミ箱を開いたタイミングで、期限切れのものを完全削除する。
+async function purgeExpiredTrash() {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    await Promise.all([
+      supabase.from("tournaments").delete().not("deleted_at", "is", null).lt("deleted_at", cutoff),
+      supabase.from("matches").delete().not("deleted_at", "is", null).lt("deleted_at", cutoff),
+      supabase.from("team_matches").delete().not("deleted_at", "is", null).lt("deleted_at", cutoff),
+    ]);
+  } catch (e) {
+    console.error("ゴミ箱の自動削除に失敗:", e);
+  }
 }
 
 // ============================================================
@@ -1694,12 +1750,16 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
   const [confirmDeleteTournament, setConfirmDeleteTournament] = useState(null);
   const [showTrash, setShowTrash] = useState(false);
+  const [trashTab, setTrashTab] = useState("tournament"); // tournament | team | individual
   const [deletedTournaments, setDeletedTournaments] = useState([]);
+  const [deletedTeamMatches, setDeletedTeamMatches] = useState([]);
+  const [deletedMatches, setDeletedMatches] = useState([]);
   const [trashLoading, setTrashLoading] = useState(false);
-  const [confirmPurgeId, setConfirmPurgeId] = useState(null);
+  const [confirmPurge, setConfirmPurge] = useState(null); // { kind, id }
 
   const reload = useCallback(() => {
     setLoading(true);
+    purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除
     Promise.all([getMatches(), getTeamMatches(), getSchools(), getTournaments()]).then(async ([list, tList, schools, tnList]) => {
       // 学校IDから名前へのマップを作成
       const smap = {};
@@ -1862,8 +1922,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   function openTrash() {
     setShowTrash(true);
+    setTrashTab(timeTab === "team" ? "team" : timeTab === "individual" ? "individual" : "tournament");
     setTrashLoading(true);
-    getDeletedTournaments().then(list => { setDeletedTournaments(list); setTrashLoading(false); });
+    Promise.all([getDeletedTournaments(), getDeletedTeamMatches(), getDeletedMatches()]).then(([tn, tm, mt]) => {
+      setDeletedTournaments(tn); setDeletedTeamMatches(tm); setDeletedMatches(mt);
+      setTrashLoading(false);
+    });
   }
   async function handleRestoreTournament(id) {
     await restoreTournament(id);
@@ -1873,7 +1937,27 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   async function handlePurgeTournament(id) {
     await permanentlyDeleteTournament(id);
     setDeletedTournaments(list => list.filter(t => t.id !== id));
-    setConfirmPurgeId(null);
+    setConfirmPurge(null);
+  }
+  async function handleRestoreTeamMatch(id) {
+    await restoreTeamMatch(id);
+    setDeletedTeamMatches(list => list.filter(t => t.id !== id));
+    reload();
+  }
+  async function handlePurgeTeamMatch(id) {
+    await permanentlyDeleteTeamMatch(id);
+    setDeletedTeamMatches(list => list.filter(t => t.id !== id));
+    setConfirmPurge(null);
+  }
+  async function handleRestoreMatch(id) {
+    await restoreMatch(id);
+    setDeletedMatches(list => list.filter(t => t.id !== id));
+    reload();
+  }
+  async function handlePurgeMatch(id) {
+    await permanentlyDeleteMatch(id);
+    setDeletedMatches(list => list.filter(t => t.id !== id));
+    setConfirmPurge(null);
   }
 
   return (
@@ -1893,10 +1977,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {toast && <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast}</div>}
 
       {/* 上段：大会 / 団体戦 / 個人戦 タブ */}
-      <div style={{ display:"flex", background:"#f0f2f6", padding:3, margin:"10px 14px 0", borderRadius:10 }}>
-        {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); }}>{l}</button>
-        ))}
+      <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 14px 0" }}>
+        <div style={{ flex:1, display:"flex", background:"#f0f2f6", padding:3, borderRadius:10 }}>
+          {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
+            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); }}>{l}</button>
+          ))}
+        </div>
+        <button onClick={openTrash} style={{ background:"none", border:"none", color:C.textSec, fontSize:11, fontWeight:700, cursor:"pointer", padding:"6px 2px", whiteSpace:"nowrap" }}>🗑 ゴミ箱</button>
       </div>
 
       {/* 共通絞り込みUI（大会タブでは非表示） */}
@@ -2046,10 +2133,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 大会タブ */}
       {timeTab === "tournament" && (
         <>
-          <div style={{ display:"flex", justifyContent:"flex-end", margin:"10px 14px 0" }}>
-            <button onClick={openTrash} style={{ background:"none", border:"none", color:C.textSec, fontSize:11, fontWeight:700, cursor:"pointer", padding:"4px 2px" }}>🗑 ゴミ箱</button>
-          </div>
-          <div style={{ position:"relative", margin:"2px 14px 8px" }}>
+          <div style={{ position:"relative", margin:"10px 14px 8px" }}>
             <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
               <span style={{ fontSize:14, color:C.textSec }}>🔍</span>
               <input
@@ -2224,7 +2308,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
             <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この試合を削除しますか？</h3>
-            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>削除すると元に戻せません。スコア・スタッツデータもすべて削除されます。</p>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>ゴミ箱に移動します。24時間以内であれば元に戻せます。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDelete(null)}>キャンセル</button>
               <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>handleDelete(confirmDelete)}>削除する</button>
@@ -2237,7 +2321,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
             <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この団体戦を削除しますか？</h3>
-            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>削除すると元に戻せません。</p>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>ゴミ箱に移動します。24時間以内であれば元に戻せます。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteTeam(null)}>キャンセル</button>
               <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ await deleteTeamMatch(confirmDeleteTeam); setConfirmDeleteTeam(null); reload(); }}>削除する</button>
@@ -2270,33 +2354,75 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {showTrash && (
         <Modal onClose={()=>setShowTrash(false)}>
           <div>
-            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:4 }}>🗑 大会のゴミ箱</h3>
-            <p style={{ fontSize:11,color:C.textSec,marginBottom:14 }}>削除した大会をここから元に戻せます。</p>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:4 }}>🗑 ゴミ箱</h3>
+            <p style={{ fontSize:11,color:C.textSec,marginBottom:10 }}>削除してから24時間以内であれば元に戻せます。24時間を過ぎると自動的に完全に削除されます。</p>
+            <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, marginBottom:12 }}>
+              {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
+                <button key={v} style={{ flex:1, padding:8, border:"none", cursor:"pointer", borderRadius:8, fontSize:12, fontWeight:700, background:trashTab===v?C.white:"transparent", color:trashTab===v?C.navy:C.textSec, boxShadow:trashTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTrashTab(v)}>{l}</button>
+              ))}
+            </div>
+
             {trashLoading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
-            {!trashLoading && deletedTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>ゴミ箱は空です</div>}
-            {!trashLoading && deletedTournaments.map(t => (
-              <div key={t.id} style={{ border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
-                <div style={{ fontSize:13, fontWeight:700, marginBottom:2 }}>{t.name}</div>
-                <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>{t.start_date}{t.end_date && t.end_date!==t.start_date ? `〜${t.end_date}` : ""}</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-                  <button style={{ padding:"9px", background:C.accent, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>handleRestoreTournament(t.id)}>↩️ 元に戻す</button>
-                  <button style={{ padding:"9px", background:"#f0f0f0", color:C.red, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmPurgeId(t.id)}>完全に削除</button>
+
+            {!trashLoading && trashTab==="tournament" && (
+              deletedTournaments.length===0 ? <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>ゴミ箱は空です</div> :
+              deletedTournaments.map(t => (
+                <div key={t.id} style={{ border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+                  <div style={{ fontSize:13, fontWeight:700, marginBottom:2 }}>{t.name}</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>{t.start_date}{t.end_date && t.end_date!==t.start_date ? `〜${t.end_date}` : ""}</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                    <button style={{ padding:"9px", background:C.accent, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>handleRestoreTournament(t.id)}>↩️ 元に戻す</button>
+                    <button style={{ padding:"9px", background:"#f0f0f0", color:C.red, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmPurge({ kind:"tournament", id:t.id })}>完全に削除</button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
+
+            {!trashLoading && trashTab==="team" && (
+              deletedTeamMatches.length===0 ? <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>ゴミ箱は空です</div> :
+              deletedTeamMatches.map(t => (
+                <div key={t.id} style={{ border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+                  <div style={{ fontSize:13, fontWeight:700, marginBottom:2 }}>{t.opponent_name ? `vs ${t.opponent_name}` : "（対戦相手未設定）"}</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>{fmtDate(t.match_date)}{t.tournament_name ? ` ・ ${t.tournament_name}` : ""}</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                    <button style={{ padding:"9px", background:C.accent, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>handleRestoreTeamMatch(t.id)}>↩️ 元に戻す</button>
+                    <button style={{ padding:"9px", background:"#f0f0f0", color:C.red, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmPurge({ kind:"team", id:t.id })}>完全に削除</button>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {!trashLoading && trashTab==="individual" && (
+              deletedMatches.length===0 ? <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>ゴミ箱は空です</div> :
+              deletedMatches.map(t => (
+                <div key={t.id} style={{ border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+                  <div style={{ fontSize:13, fontWeight:700, marginBottom:2 }}>{t.match_score_a}-{t.match_score_b}{t.tournament_name ? `　${t.tournament_name}` : ""}</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>{fmtDate(t.match_date)}</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                    <button style={{ padding:"9px", background:C.accent, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>handleRestoreMatch(t.id)}>↩️ 元に戻す</button>
+                    <button style={{ padding:"9px", background:"#f0f0f0", color:C.red, border:"none", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmPurge({ kind:"individual", id:t.id })}>完全に削除</button>
+                  </div>
+                </div>
+              ))
+            )}
+
             <button style={{ padding:"11px", background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer", width:"100%", marginTop:6 }} onClick={()=>setShowTrash(false)}>閉じる</button>
           </div>
         </Modal>
       )}
-      {confirmPurgeId && (
-        <Modal onClose={()=>setConfirmPurgeId(null)}>
+      {confirmPurge && (
+        <Modal onClose={()=>setConfirmPurge(null)}>
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
             <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>完全に削除しますか？</h3>
             <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>この操作は元に戻せません。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmPurgeId(null)}>キャンセル</button>
-              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>handlePurgeTournament(confirmPurgeId)}>完全に削除する</button>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmPurge(null)}>キャンセル</button>
+              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>{
+                if (confirmPurge.kind==="tournament") handlePurgeTournament(confirmPurge.id);
+                else if (confirmPurge.kind==="team") handlePurgeTeamMatch(confirmPurge.id);
+                else handlePurgeMatch(confirmPurge.id);
+              }}>完全に削除する</button>
             </div>
           </div>
         </Modal>
@@ -2526,7 +2652,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
             <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この試合を削除しますか？</h3>
-            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>削除すると元に戻せません。</p>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>ゴミ箱に移動します。24時間以内であれば元に戻せます。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(null)}>キャンセル</button>
               <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ const link = await getDrawMatchByMatchId(confirmDeleteMatch); await deleteMatch(confirmDeleteMatch); if (link) await clearDrawMatchLink(link.id); setConfirmDeleteMatch(null); reload(); }}>削除する</button>
@@ -2539,7 +2665,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
             <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この団体戦を削除しますか？</h3>
-            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>削除すると元に戻せません。</p>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>ゴミ箱に移動します。24時間以内であれば元に戻せます。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(null)}>キャンセル</button>
               <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ await deleteTeamMatch(confirmDeleteTeamMatch); setConfirmDeleteTeamMatch(null); reload(); }}>削除する</button>
@@ -3893,7 +4019,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
             <h3 style={{ fontSize: 16, fontWeight: 800, margin: "8px 0 4px" }}>この試合を削除しますか？</h3>
             <p style={{ fontSize: 12, color: C.textSec, marginBottom: 16 }}>
               {entryLabel(confirmDeleteMatch.sideA)} vs {entryLabel(confirmDeleteMatch.sideB)}<br/>
-              スコアの記録も含めて削除され、元に戻せません。枠は再び「予定」の状態に戻ります。
+              試合はゴミ箱に移動し、24時間以内であれば元に戻せます。枠は再び「予定」の状態に戻ります。
             </p>
             <button
               style={{ width: "100%", padding: 13, background: C.red, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: deletingMatch ? 0.7 : 1 }}
