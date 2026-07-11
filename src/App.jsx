@@ -3808,8 +3808,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 const hasWithdrawn = (dm.sideA && dm.sideA.is_withdrawn) || (dm.sideB && dm.sideB.is_withdrawn);
                 const mi = dm.matchInfo;
                 const isWalkover = !!(mi && mi.memo && mi.memo.includes("不戦勝"));
-                // ★団体戦の「結果だけ記録」も、通常の試合終了と同じように勝者・進出扱いにする
-                const hasSimpleResult = category === "team" && !!dm.simple_result_winner;
+                // ★「結果だけ記録」は団体戦・個人戦どちらでも使えるようにする
+                const hasSimpleResult = !!dm.simple_result_winner;
                 const winnerSide = hasSimpleResult ? dm.simple_result_winner
                   : mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
                 const borderColor = mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.border;
@@ -3873,11 +3873,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                         if (startingId) return; // ★作成処理中は他の操作を無視（連打対策）
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
                         if (filled) {
-                          if (category !== "individual") {
-                            openSimpleResultModal(dm);
-                            return;
-                          }
-                          startMatch(dm);
+                          openSimpleResultModal(dm);
                           return;
                         }
                         openEditingSlot(dm);
@@ -3914,11 +3910,16 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       {winnerSide && alreadyAdvanced && (
                         <div style={{ textAlign: "center", fontSize: 10, color: C.textSec, padding: "6px 0", background: C.gray }}>✓ 次の試合へ進出済み</div>
                       )}
-                      {category === "team" && filled && !dm.match_id && (
+                      {filled && !dm.match_id && (
                         <button
                           style={{ display: "block", width: "100%", border: "none", borderTop: "1px solid " + C.border, background: C.gray, color: C.textSec, fontSize: 10, fontWeight: 600, padding: "6px 0", cursor: "pointer" }}
-                          onClick={(e) => { e.stopPropagation(); alert("個々の試合（1複・2複など）を作って詳しくスコアを記録したい場合は、大会画面の「＋」から通常の団体戦試合登録をしてください。"); }}
-                        >詳しい試合を作成する場合はこちら</button>
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (startingId) return;
+                            if (category === "individual") { startMatch(dm); return; }
+                            alert("個々の試合（1複・2複など）を作って詳しくスコアを記録したい場合は、大会画面の「＋」から通常の団体戦試合登録をしてください。");
+                          }}
+                        >{category === "individual" ? "1点ずつスコアを入力する場合はこちら" : "詳しい試合を作成する場合はこちら"}</button>
                       )}
                     </div>
                   </div>
@@ -3957,10 +3958,12 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
             >×</button>
           </div>
           <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 16 }}>
-            個々の試合は作らず、勝敗とスコアだけ記録します。あとから詳しい試合を作りたくなったら、「＋」から通常の団体戦試合登録ができます。
+            {category === "individual"
+              ? "1点ずつのスコアは入力せず、勝敗とスコアだけ記録します。あとから1点ずつ入力したくなったら「1点ずつスコアを入力する場合はこちら」から切り替えられます。"
+              : "個々の試合は作らず、勝敗とスコアだけ記録します。あとから詳しい試合を作りたくなったら、「＋」から通常の団体戦試合登録ができます。"}
           </div>
 
-          <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6 }}>勝ったチーム</div>
+          <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6 }}>勝った{category === "individual" ? "選手・ペア" : "チーム"}</div>
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
             {["A", "B"].map(side => {
               const entry = side === "A" ? simpleResultFor.sideA : simpleResultFor.sideB;
