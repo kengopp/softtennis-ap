@@ -3626,7 +3626,9 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         const fresh = await getDrawMatchRaw(slot.id);
         const aTaken = !!fresh.side_a_entry_id;
         const bTaken = !!fresh.side_b_entry_id;
-        if (aTaken && bTaken) { skippedFull++; continue; } // ★entriesは消費しない（ここが今回のバグの原因だった）
+        // ★片側だけ埋まっている枠（シード選手が「勝者進出待ち」で登録されている等）は、
+        //   一括登録では絶対に触らない。そういう枠は「勝者を進出させる」からのみ埋める。
+        if (aTaken || bTaken) { skippedFull++; continue; } // ★entriesは消費しない
 
         // この枠がまだ必要としている側の分だけ、entriesから順番に取り出す
         const eA = !aTaken ? entries[entryIdx++] : null;
