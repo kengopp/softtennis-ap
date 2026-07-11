@@ -1245,9 +1245,9 @@ async function getDrawMatchRaw(id) {
 
 // 同じ大会・同じブロック内で、指定したentry_noが既に別のエントリーで使われていないか確認する
 // （excludeEntryIdsに含まれるエントリー自身との重複は無視する＝自分自身の更新はOK）
-async function checkDuplicateEntryNo(tournamentId, blockLabel, entryNo, excludeEntryIds) {
+async function checkDuplicateEntryNo(tournamentId, category, blockLabel, entryNo, excludeEntryIds) {
   if (!entryNo) return false;
-  let query = supabase.from("draw_entries").select("id").eq("tournament_id", tournamentId).eq("entry_no", entryNo);
+  let query = supabase.from("draw_entries").select("id").eq("tournament_id", tournamentId).eq("category", category).eq("entry_no", entryNo);
   query = blockLabel ? query.eq("block_label", blockLabel) : query.is("block_label", null);
   const { data, error } = await query;
   if (error) { console.error(error); return false; }
@@ -3260,14 +3260,14 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       // entry_noの重複チェック（同じ大会・同じブロック内で、他のエントリーと重複していないか）
       const excludeIds = [drawMatch.side_a_entry_id, drawMatch.side_b_entry_id].filter(Boolean);
       if (!aTaken && (sideA.entryNo || "").trim()) {
-        if (await checkDuplicateEntryNo(tournament.id, blockLabel, sideA.entryNo.trim(), excludeIds)) {
+        if (await checkDuplicateEntryNo(tournament.id, category, blockLabel, sideA.entryNo.trim(), excludeIds)) {
           alert(`エントリー番号「${sideA.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
           setSaving(false);
           return;
         }
       }
       if (!bTaken && (sideB.entryNo || "").trim()) {
-        if (await checkDuplicateEntryNo(tournament.id, blockLabel, sideB.entryNo.trim(), excludeIds)) {
+        if (await checkDuplicateEntryNo(tournament.id, category, blockLabel, sideB.entryNo.trim(), excludeIds)) {
           alert(`エントリー番号「${sideB.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
           setSaving(false);
           return;
@@ -3637,7 +3637,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
         try {
           if (eA && !aTaken) {
-            if (eA.entryNo && await checkDuplicateEntryNo(tournament.id, selectedBlock, eA.entryNo, [])) { skippedDup++; }
+            if (eA.entryNo && await checkDuplicateEntryNo(tournament.id, category, selectedBlock, eA.entryNo, [])) { skippedDup++; }
             else {
               const entryA = await saveDrawEntry({
                 id: uid(), tournament_id: tournament.id, category, block_label: selectedBlock,
@@ -3650,7 +3650,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
             }
           }
           if (eB && !bTaken) {
-            if (eB.entryNo && await checkDuplicateEntryNo(tournament.id, selectedBlock, eB.entryNo, [])) { skippedDup++; }
+            if (eB.entryNo && await checkDuplicateEntryNo(tournament.id, category, selectedBlock, eB.entryNo, [])) { skippedDup++; }
             else {
               const entryB = await saveDrawEntry({
                 id: uid(), tournament_id: tournament.id, category, block_label: selectedBlock,
