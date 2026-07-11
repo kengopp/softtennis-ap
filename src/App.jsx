@@ -3594,9 +3594,12 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
   // ★一括登録：1行1エントリーのテキストを解析し、上から順に2件ずつペアにして
   //   選んだ回戦の枠へ登録する（エントリー1・2→第1試合、3・4→第2試合…という並び）。
+  //   行の内容が「-」だけの場合は「まだ相手が決まっていない（シード等）」を意味し、
+  //   その側の枠は空欄のままにする（後で「勝者を進出させる」から埋める）。
   //   既に対戦情報が入っている枠・重複するエントリー番号はスキップし、結果をまとめて報告する。
   const parseBulkLines = (text) => {
     return text.split("\n").map(l => l.trim()).filter(Boolean).map(line => {
+      if (line === "-") return null; // 相手未定（空欄）マーカー
       const cols = line.includes("\t") ? line.split("\t") : line.split(/,|　| {2,}/);
       const [entryNo, school, player1, player2] = cols.map(c => (c || "").trim());
       return { entryNo, school: school || "", player1: player1 || "", player2: player2 || "" };
