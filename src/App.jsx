@@ -3759,7 +3759,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                     <div style={{ padding: "7px 9px", borderBottom: isFirstRow ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <div style={{ fontWeight: 400, color: nameColor }}>
-                          {entry && entry.entry_no && <span style={{ color: C.textSec, marginRight: 4 }}>No.{entry.entry_no}</span>}
+                          {entry && entry.entry_no && <span style={{ color: C.textSec, marginRight: 4 }}>{entry.entry_no}</span>}
                           {entryLabel(entry)}
                         </div>
                         {entry && entry.school_name && <div style={{ fontSize: 11, color: C.textSec, marginTop: 1 }}>{entry.school_name}</div>}
