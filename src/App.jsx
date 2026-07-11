@@ -1237,6 +1237,27 @@ async function clearDrawMatchLink(drawMatchId) {
 }
 
 
+// 団体戦の「結果だけ記録」機能：個々の試合（1複・2複…）を作らず、
+// 勝ったチーム（A/B）とスコアだけをdraw_matchesに保存する。
+async function saveSimpleTeamResult(drawMatchId, winnerSide, scoreA, scoreB) {
+  const { error } = await supabase.from("draw_matches").update({
+    simple_result_winner: winnerSide,
+    simple_result_score_a: scoreA,
+    simple_result_score_b: scoreB,
+    updated_at: new Date().toISOString(),
+  }).eq("id", drawMatchId);
+  if (error) throw error;
+}
+async function clearSimpleTeamResult(drawMatchId) {
+  const { error } = await supabase.from("draw_matches").update({
+    simple_result_winner: null,
+    simple_result_score_a: null,
+    simple_result_score_b: null,
+    updated_at: new Date().toISOString(),
+  }).eq("id", drawMatchId);
+  if (error) throw error;
+}
+
 async function getDrawMatchRaw(id) {
   const { data, error } = await supabase.from("draw_matches").select("id, side_a_entry_id, side_b_entry_id").eq("id", id).single();
   if (error) throw error;
@@ -3043,7 +3064,7 @@ function DrawSetup({ tournament, category, onBack }) {
 // ============================================================
 // 対戦情報入力シート（ドローの空枠をタップして開く）
 // ============================================================
-function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, schools, mySchoolName }) {
+function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, schools, mySchoolName, category }) {
   const [pref, setPref] = useState("");
   const set = (patch) => onChange({ ...value, ...patch });
 
@@ -3098,38 +3119,42 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       </div>
       <SchoolField value={value.schoolName} onChange={v => set({ schoolName: v })} schools={schools} placeholder="例：東福岡" prefFilter={pref} />
 
-      <div style={{ marginTop: 10 }}>
-        <label style={{ fontSize: 11, color: C.textSec }}>選手1</label>
-        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p1.sei} onChange={e => set({ player1: joinName(e.target.value, p1.mei) })} />
-          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p1.mei} onChange={e => set({ player1: joinName(p1.sei, e.target.value) })} />
-        </div>
-        {filteredRoster.length > 0 && (
-          <div style={{ marginTop: 6 }}>
-            {filteredRoster.map(p => (
-              <span key={p.id} style={S.chip(value.player1 === p.player_name)} onClick={() => set({ player1: p.player_name })}>{p.player_name}</span>
-            ))}
+      {category !== "team" && (
+        <>
+          <div style={{ marginTop: 10 }}>
+            <label style={{ fontSize: 11, color: C.textSec }}>選手1</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p1.sei} onChange={e => set({ player1: joinName(e.target.value, p1.mei) })} />
+              <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p1.mei} onChange={e => set({ player1: joinName(p1.sei, e.target.value) })} />
+            </div>
+            {filteredRoster.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                {filteredRoster.map(p => (
+                  <span key={p.id} style={S.chip(value.player1 === p.player_name)} onClick={() => set({ player1: p.player_name })}>{p.player_name}</span>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      <div style={{ marginTop: 10 }}>
-        <label style={{ fontSize: 11, color: C.textSec }}>選手2（ペア）</label>
-        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p2.sei} onChange={e => set({ player2: joinName(e.target.value, p2.mei) })} />
-          <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p2.mei} onChange={e => set({ player2: joinName(p2.sei, e.target.value) })} />
-        </div>
-        {filteredRoster.length > 0 && (
-          <div style={{ marginTop: 6 }}>
-            {filteredRoster.map(p => (
-              <span key={p.id} style={S.chip(value.player2 === p.player_name)} onClick={() => set({ player2: p.player_name })}>{p.player_name}</span>
-            ))}
+          <div style={{ marginTop: 10 }}>
+            <label style={{ fontSize: 11, color: C.textSec }}>選手2（ペア）</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p2.sei} onChange={e => set({ player2: joinName(e.target.value, p2.mei) })} />
+              <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p2.mei} onChange={e => set({ player2: joinName(p2.sei, e.target.value) })} />
+            </div>
+            {filteredRoster.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                {filteredRoster.map(p => (
+                  <span key={p.id} style={S.chip(value.player2 === p.player_name)} onClick={() => set({ player2: p.player_name })}>{p.player_name}</span>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {value.schoolName && filteredRoster.length === 0 && (
-        <div style={{ fontSize: 10.5, color: C.textSec, marginTop: 8 }}>マスター画面の「👥 選手マスター」でこの学校の選手を登録しておくと、ここで選んで入力できます。</div>
+          {value.schoolName && filteredRoster.length === 0 && (
+            <div style={{ fontSize: 10.5, color: C.textSec, marginTop: 8 }}>マスター画面の「👥 選手マスター」でこの学校の選手を登録しておくと、ここで選んで入力できます。</div>
+          )}
+        </>
       )}
     </div>
   );
@@ -3375,8 +3400,8 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
             ⚠️ この枠はすでに試合が作成されています。ここでの変更はドロー表の表示に反映されますが、作成済みの試合記録（選手名など）は自動では更新されません。試合記録自体を直すには「編集」からその試合を開いて修正してください。
           </div>
         )}
-        <DrawSideEditor label="上側" value={valueOf(topKey)} onChange={setterOf(topKey)} onWithdrawToggle={(v) => handleWithdrawToggle(topKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
-        <DrawSideEditor label="下側" value={valueOf(bottomKey)} onChange={setterOf(bottomKey)} onWithdrawToggle={(v) => handleWithdrawToggle(bottomKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} />
+        <DrawSideEditor label="上側" value={valueOf(topKey)} onChange={setterOf(topKey)} onWithdrawToggle={(v) => handleWithdrawToggle(topKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} category={category} />
+        <DrawSideEditor label="下側" value={valueOf(bottomKey)} onChange={setterOf(bottomKey)} onWithdrawToggle={(v) => handleWithdrawToggle(bottomKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} category={category} />
         <button
           style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: saving ? 0.7 : 1 }}
           disabled={saving} onClick={handleSave}
@@ -3411,6 +3436,11 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   const [bulkText, setBulkText] = useState("");
   const [bulkTargetRound, setBulkTargetRound] = useState(1);
   const [bulkImporting, setBulkImporting] = useState(false);
+  const [simpleResultFor, setSimpleResultFor] = useState(null); // 「結果だけ記録」モーダルの対象drawMatch
+  const [simpleResultWinner, setSimpleResultWinner] = useState("A");
+  const [simpleResultScoreA, setSimpleResultScoreA] = useState("");
+  const [simpleResultScoreB, setSimpleResultScoreB] = useState("");
+  const [savingSimpleResult, setSavingSimpleResult] = useState(false);
 
   // ★対戦情報入力シートを開いている最中に他アプリへ移動して戻ってきても、
   //   画面が閉じてしまわないよう、「どの枠を編集中か」をlocalStorageにも覚えておく。
@@ -3424,6 +3454,44 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     setEditingSlotRaw(null);
     setCopyPrefill(null);
     try { localStorage.removeItem(editingSlotStorageKey); } catch (e) {}
+  };
+
+  // ★団体戦「結果だけ記録」モーダルの開閉・保存
+  const openSimpleResultModal = (dm) => {
+    setSimpleResultFor(dm);
+    setSimpleResultWinner(dm.simple_result_winner || "A");
+    setSimpleResultScoreA(dm.simple_result_score_a != null ? String(dm.simple_result_score_a) : "");
+    setSimpleResultScoreB(dm.simple_result_score_b != null ? String(dm.simple_result_score_b) : "");
+  };
+  const closeSimpleResultModal = () => { setSimpleResultFor(null); };
+  const handleSaveSimpleResult = async () => {
+    if (!simpleResultFor) return;
+    const scoreA = simpleResultScoreA === "" ? null : Number(simpleResultScoreA);
+    const scoreB = simpleResultScoreB === "" ? null : Number(simpleResultScoreB);
+    setSavingSimpleResult(true);
+    try {
+      await saveSimpleTeamResult(simpleResultFor.id, simpleResultWinner, scoreA, scoreB);
+      closeSimpleResultModal();
+      await reload();
+    } catch (e) {
+      alert("保存に失敗しました: " + (e.message || e));
+    } finally {
+      setSavingSimpleResult(false);
+    }
+  };
+  const handleClearSimpleResult = async () => {
+    if (!simpleResultFor) return;
+    if (!window.confirm("記録した結果を削除しますか？")) return;
+    setSavingSimpleResult(true);
+    try {
+      await clearSimpleTeamResult(simpleResultFor.id);
+      closeSimpleResultModal();
+      await reload();
+    } catch (e) {
+      alert("削除に失敗しました: " + (e.message || e));
+    } finally {
+      setSavingSimpleResult(false);
+    }
   };
 
   // ★一括登録モーダルも、他アプリ（コピー元の確認など）に移動して戻ってきたときに
@@ -3513,7 +3581,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   // ★試合開始可能なエントリーかどうかの判定
   //   ・棄権(is_withdrawn)は対象外
   //   ・選手名(player1_name)が空/空白のみのエントリーも対象外
-  const isPlayableEntry = (e) => !!(e && !e.is_withdrawn && e.player1_name?.trim());
+  const isPlayableEntry = (e) => !!(e && !e.is_withdrawn && (e.player1_name?.trim() || e.school_name?.trim()));
 
   const startMatch = async (dm) => {
     if (startingId) return; // ★連打防止：作成処理中は他の枠のタップも受け付けない
@@ -3740,7 +3808,10 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 const hasWithdrawn = (dm.sideA && dm.sideA.is_withdrawn) || (dm.sideB && dm.sideB.is_withdrawn);
                 const mi = dm.matchInfo;
                 const isWalkover = !!(mi && mi.memo && mi.memo.includes("不戦勝"));
-                const winnerSide = mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
+                // ★団体戦の「結果だけ記録」も、通常の試合終了と同じように勝者・進出扱いにする
+                const hasSimpleResult = category === "team" && !!dm.simple_result_winner;
+                const winnerSide = hasSimpleResult ? dm.simple_result_winner
+                  : mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
                 const borderColor = mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.border;
                 const winnerEntry = winnerSide ? (winnerSide === "A" ? dm.sideA : dm.sideB) : null;
                 const alreadyAdvanced = winnerSide ? isAlreadyAdvanced(dm, winnerEntry) : false;
@@ -3750,7 +3821,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                   const isWinner = winnerSide === side;
                   const isLoser = winnerSide && winnerSide !== side;
                   const nameColor = !entry ? C.textSec : isWinner ? C.teamA : isLoser ? C.textSec : C.text;
-                  const scoreVal = !mi ? null
+                  const scoreVal = hasSimpleResult ? (side === "A" ? dm.simple_result_score_a : dm.simple_result_score_b)
+                    : !mi ? null
                     : mi.status === "active" ? (side === "A" ? mi.match_score_a : mi.match_score_b)
                     : mi.status === "finished" ? (isWalkover ? (isWinner ? "R" : "-") : (side === "A" ? mi.match_score_a : mi.match_score_b))
                     : null;
@@ -3802,7 +3874,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
                         if (filled) {
                           if (category !== "individual") {
-                            alert("団体戦の試合作成は、まだこの画面から自動ではできません。「＋」から通常の団体戦試合登録をしてください。");
+                            openSimpleResultModal(dm);
                             return;
                           }
                           startMatch(dm);
@@ -3811,11 +3883,16 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                         openEditingSlot(dm);
                       }}
                     >
-                      {(!mi || mi.status === "scheduled") && (
+                      {(!mi || mi.status === "scheduled") && !hasSimpleResult && (
                         <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px 0" }}>
                           <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: startingId === dm.id ? C.orange : hasWithdrawn ? C.redL : C.white, color: startingId === dm.id ? C.white : hasWithdrawn ? C.red : C.textSec, border: startingId === dm.id ? "none" : "1px solid " + (hasWithdrawn ? C.red : C.border) }}>
                             {startingId === dm.id ? "作成中..." : hasWithdrawn ? "棄権" : "予定"}
                           </span>
+                        </div>
+                      )}
+                      {hasSimpleResult && (
+                        <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px 0" }}>
+                          <span style={{ fontSize: 8.5, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: "#f1efff", color: C.purple, border: "1px solid " + C.purple }}>簡易記録</span>
                         </div>
                       )}
                       {sideRow(topSide, true)}
@@ -3836,6 +3913,12 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       )}
                       {winnerSide && alreadyAdvanced && (
                         <div style={{ textAlign: "center", fontSize: 10, color: C.textSec, padding: "6px 0", background: C.gray }}>✓ 次の試合へ進出済み</div>
+                      )}
+                      {category === "team" && filled && !dm.match_id && (
+                        <button
+                          style={{ display: "block", width: "100%", border: "none", borderTop: "1px solid " + C.border, background: C.gray, color: C.textSec, fontSize: 10, fontWeight: 600, padding: "6px 0", cursor: "pointer" }}
+                          onClick={(e) => { e.stopPropagation(); alert("個々の試合（1複・2複など）を作って詳しくスコアを記録したい場合は、大会画面の「＋」から通常の団体戦試合登録をしてください。"); }}
+                        >詳しい試合を作成する場合はこちら</button>
                       )}
                     </div>
                   </div>
@@ -3861,6 +3944,64 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           prefillSchoolA={copyPrefill?.schoolA}
           prefillSchoolB={copyPrefill?.schoolB}
         />
+      )}
+
+      {simpleResultFor && (
+        <Modal onClose={closeSimpleResultModal}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>結果だけ記録</div>
+            <button
+              style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
+              onClick={closeSimpleResultModal}
+              aria-label="閉じる"
+            >×</button>
+          </div>
+          <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 16 }}>
+            個々の試合は作らず、勝敗とスコアだけ記録します。あとから詳しい試合を作りたくなったら、「＋」から通常の団体戦試合登録ができます。
+          </div>
+
+          <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6 }}>勝ったチーム</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            {["A", "B"].map(side => {
+              const entry = side === "A" ? simpleResultFor.sideA : simpleResultFor.sideB;
+              const selected = simpleResultWinner === side;
+              return (
+                <div
+                  key={side}
+                  onClick={() => setSimpleResultWinner(side)}
+                  style={{ flex: 1, border: "2px solid " + (selected ? C.accent : C.border), background: selected ? C.accentL : C.white, color: selected ? C.accent : C.text, borderRadius: 10, padding: "12px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                >{entryLabel(entry)}</div>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6, textAlign: "center" }}>スコア</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 20 }}>
+            <input
+              type="number" min="0" value={simpleResultScoreA} onChange={e => setSimpleResultScoreA(e.target.value)}
+              style={{ width: 64, height: 64, border: "1px solid " + C.border, borderRadius: 12, fontSize: 24, fontWeight: 800, textAlign: "center" }}
+            />
+            <span style={{ fontSize: 20, fontWeight: 800, color: C.textSec }}>－</span>
+            <input
+              type="number" min="0" value={simpleResultScoreB} onChange={e => setSimpleResultScoreB(e.target.value)}
+              style={{ width: 64, height: 64, border: "1px solid " + C.border, borderRadius: 12, fontSize: 24, fontWeight: 800, textAlign: "center" }}
+            />
+          </div>
+
+          <button
+            style={{ width: "100%", padding: 13, borderRadius: 10, background: C.accent, color: C.white, fontWeight: 800, fontSize: 14, border: "none", cursor: "pointer", opacity: savingSimpleResult ? 0.7 : 1 }}
+            disabled={savingSimpleResult}
+            onClick={handleSaveSimpleResult}
+          >{savingSimpleResult ? "保存中..." : "保存する"}</button>
+
+          {simpleResultFor.simple_result_winner && (
+            <button
+              style={{ width: "100%", padding: 10, marginTop: 8, borderRadius: 10, background: "none", color: C.red, fontWeight: 700, fontSize: 12.5, border: "1px solid " + C.red, cursor: "pointer", opacity: savingSimpleResult ? 0.7 : 1 }}
+              disabled={savingSimpleResult}
+              onClick={handleClearSimpleResult}
+            >この結果を削除する</button>
+          )}
+        </Modal>
       )}
 
       {advancingFrom && (() => {
