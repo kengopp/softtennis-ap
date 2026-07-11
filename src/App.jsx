@@ -3617,17 +3617,21 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
     setBulkImporting(true);
     let registered = 0, skippedFull = 0, skippedDup = 0, errors = 0;
+    let entryIdx = 0; // ★entriesを消費するための独立したカーソル。既に埋まっている枠をスキップしても、この位置はずれない。
     try {
       for (let i = 0; i < targetSlots.length; i++) {
-        const slot = targetSlots[i];
-        const eA = entries[i * 2];
-        const eB = entries[i * 2 + 1];
-        if (!eA && !eB) break; // もう対応するエントリーがない
+        if (entryIdx >= entries.length) break; // もう対応するエントリーがない
 
+        const slot = targetSlots[i];
         const fresh = await getDrawMatchRaw(slot.id);
         const aTaken = !!fresh.side_a_entry_id;
         const bTaken = !!fresh.side_b_entry_id;
-        if (aTaken && bTaken) { skippedFull++; continue; }
+        if (aTaken && bTaken) { skippedFull++; continue; } // ★entriesは消費しない（ここが今回のバグの原因だった）
+
+        // この枠がまだ必要としている側の分だけ、entriesから順番に取り出す
+        const eA = !aTaken ? entries[entryIdx++] : null;
+        const eB = (!bTaken && entryIdx < entries.length) ? entries[entryIdx++] : null;
+        if (!eA && !eB) continue;
 
         try {
           if (eA && !aTaken) {
