@@ -3271,10 +3271,16 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
     try {
       // ★保存直前に必ず最新のdraw_matchesを取得し、他の人が既に登録していないか確認する
       const fresh = await getDrawMatchRaw(drawMatch.id);
-      const aTaken = !!fresh.side_a_entry_id;
-      const bTaken = !!fresh.side_b_entry_id;
+      const aTakenNow = !!fresh.side_a_entry_id;
+      const bTakenNow = !!fresh.side_b_entry_id;
+      // ★編集画面を開いた時点で既に入っていた側は「編集」とみなし、保存を許可する。
+      //   開いた時点で空欄だった側だけ、他の人が同時に登録していないかを確認する。
+      const wasTakenA = !!drawMatch.side_a_entry_id;
+      const wasTakenB = !!drawMatch.side_b_entry_id;
+      const conflictA = !wasTakenA && aTakenNow;
+      const conflictB = !wasTakenB && bTakenNow;
 
-      if (aTaken && bTaken) {
+      if (conflictA && conflictB) {
         alert("この試合枠は既に登録されています。最新の内容を表示します。");
         clearDraft();
         onClose();
@@ -3284,14 +3290,14 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 
       // entry_noの重複チェック（同じ大会・同じブロック内で、他のエントリーと重複していないか）
       const excludeIds = [drawMatch.side_a_entry_id, drawMatch.side_b_entry_id].filter(Boolean);
-      if (!aTaken && (sideA.entryNo || "").trim()) {
+      if (!conflictA && (sideA.entryNo || "").trim()) {
         if (await checkDuplicateEntryNo(tournament.id, category, blockLabel, sideA.entryNo.trim(), excludeIds)) {
           alert(`エントリー番号「${sideA.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
           setSaving(false);
           return;
         }
       }
-      if (!bTaken && (sideB.entryNo || "").trim()) {
+      if (!conflictB && (sideB.entryNo || "").trim()) {
         if (await checkDuplicateEntryNo(tournament.id, category, blockLabel, sideB.entryNo.trim(), excludeIds)) {
           alert(`エントリー番号「${sideB.entryNo.trim()}」は既に他の枠で使われています。番号を確認してください。`);
           setSaving(false);
@@ -3299,15 +3305,15 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
         }
       }
 
-      // 空いている側だけ保存する（既に埋まっている側は上書きしない）
+      // 開いた時点で空欄だった側が、保存直前に他の人によって埋まっていた場合だけ上書きしない
       let skippedSide = null;
-      if (!aTaken) {
+      if (!conflictA) {
         const entryA = await saveDrawEntry(buildEntryRow("A", sideA));
-        await setDrawMatchSideSafe(drawMatch.id, "A", entryA.id);
+        await setDrawMatchSideSafe(drawMatch.id, "A", entryA.id).catch(() => {}); // ★既に同じentry_idなら何もしない（更新自体はsaveDrawEntryで完了済み）
       } else { skippedSide = "上側"; }
-      if (!bTaken) {
+      if (!conflictB) {
         const entryB = await saveDrawEntry(buildEntryRow("B", sideB));
-        await setDrawMatchSideSafe(drawMatch.id, "B", entryB.id);
+        await setDrawMatchSideSafe(drawMatch.id, "B", entryB.id).catch(() => {});
       } else { skippedSide = skippedSide ? "両側" : "下側"; }
 
       if (skippedSide) {
