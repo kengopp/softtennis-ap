@@ -3606,6 +3606,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
   // 終了した試合の勝者エントリーを求める
   const getWinnerEntry = (dm) => {
+    if (dm.simple_result_winner) return dm.simple_result_winner === "A" ? dm.sideA : dm.sideB;
     const mi = dm.matchInfo;
     if (!mi || mi.status !== "finished") return null;
     return mi.match_score_a > mi.match_score_b ? dm.sideA : dm.sideB;
