@@ -3474,9 +3474,20 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     if (!simpleResultFor) return;
     const scoreA = simpleResultScoreA === "" ? null : Number(simpleResultScoreA);
     const scoreB = simpleResultScoreB === "" ? null : Number(simpleResultScoreB);
+    if (scoreA === null || scoreB === null || Number.isNaN(scoreA) || Number.isNaN(scoreB)) {
+      alert("スコアを両方とも入力してください。");
+      return;
+    }
+    if (scoreA === scoreB) {
+      alert("スコアが同点になっています。勝敗がわかるスコアを入力してください。");
+      return;
+    }
+    // ★勝者は「選んで指定」ではなく、入力したスコアの大小から自動で決める。
+    //   手動選択だと、スコアと勝者の指定が食い違う入力ミスが起きやすいため。
+    const winner = scoreA > scoreB ? "A" : "B";
     setSavingSimpleResult(true);
     try {
-      await saveSimpleTeamResult(simpleResultFor.id, simpleResultWinner, scoreA, scoreB);
+      await saveSimpleTeamResult(simpleResultFor.id, winner, scoreA, scoreB);
       closeSimpleResultModal();
       await reload();
     } catch (e) {
@@ -3967,53 +3978,40 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           </div>
           <div style={{ fontSize: 11.5, color: C.textSec, marginBottom: 16 }}>
             {category === "individual"
-              ? "1点ずつのスコアは入力せず、勝敗とスコアだけ記録します。あとから1点ずつ入力したくなったら「1点ずつスコアを入力する場合はこちら」から切り替えられます。"
-              : "個々の試合は作らず、勝敗とスコアだけ記録します。あとから詳しい試合を作りたくなったら、「＋」から通常の団体戦試合登録ができます。"}
+              ? "1点ずつのスコアは入力せず、スコアだけ記録します。数字が大きい方が自動的に勝ちになります。あとから1点ずつ入力したくなったら「1点ずつスコアを入力する場合はこちら」から切り替えられます。"
+              : "個々の試合は作らず、スコアだけ記録します。数字が大きい方が自動的に勝ちになります。あとから詳しい試合を作りたくなったら、「＋」から通常の団体戦試合登録ができます。"}
           </div>
 
-          <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6 }}>勝った{category === "individual" ? "選手・ペア" : "チーム"}</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6, textAlign: "center" }}>スコア（数字が大きい方が自動で勝ちになります）</div>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", gap: 14, marginBottom: 20 }}>
             {(() => {
               // ★対戦カードと同じ並び順（エントリー番号が若い方を上/左）で表示する。
-              //   ここが食い違うと、カードで見た並びと逆を選んでしまう事故が起きるため。
-              const aNo = simpleResultFor.sideA?.entry_no != null && simpleResultFor.sideA?.entry_no !== "" ? Number(simpleResultFor.sideA.entry_no) : null;
-              const bNo = simpleResultFor.sideB?.entry_no != null && simpleResultFor.sideB?.entry_no !== "" ? Number(simpleResultFor.sideB.entry_no) : null;
-              const swap = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
-              return (swap ? ["B", "A"] : ["A", "B"]);
-            })().map(side => {
-              const entry = side === "A" ? simpleResultFor.sideA : simpleResultFor.sideB;
-              const selected = simpleResultWinner === side;
-              return (
-                <div
-                  key={side}
-                  onClick={() => setSimpleResultWinner(side)}
-                  style={{ flex: 1, border: "2px solid " + (selected ? C.accent : C.border), background: selected ? C.accentL : C.white, color: selected ? C.accent : C.text, borderRadius: 10, padding: "12px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
-                >{entry?.entry_no != null && entry?.entry_no !== "" ? `${entry.entry_no} ` : ""}{entryLabel(entry)}</div>
-              );
-            })}
-          </div>
-
-          <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6, textAlign: "center" }}>スコア</div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 20 }}>
-            {(() => {
               const aNo = simpleResultFor.sideA?.entry_no != null && simpleResultFor.sideA?.entry_no !== "" ? Number(simpleResultFor.sideA.entry_no) : null;
               const bNo = simpleResultFor.sideB?.entry_no != null && simpleResultFor.sideB?.entry_no !== "" ? Number(simpleResultFor.sideB.entry_no) : null;
               const swap = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
               const leftSide = swap ? "B" : "A";
               const rightSide = swap ? "A" : "B";
-              const scoreInput = (side) => (
-                <input
-                  type="number" min="0"
-                  value={side === "A" ? simpleResultScoreA : simpleResultScoreB}
-                  onChange={e => side === "A" ? setSimpleResultScoreA(e.target.value) : setSimpleResultScoreB(e.target.value)}
-                  style={{ width: 64, height: 64, border: "1px solid " + C.border, borderRadius: 12, fontSize: 24, fontWeight: 800, textAlign: "center" }}
-                />
-              );
+              const scoreBlock = (side) => {
+                const entry = side === "A" ? simpleResultFor.sideA : simpleResultFor.sideB;
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flex: 1 }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, color: C.text, textAlign: "center" }}>
+                      {entry?.entry_no != null && entry?.entry_no !== "" ? `${entry.entry_no} ` : ""}{entryLabel(entry)}
+                    </div>
+                    <input
+                      type="number" min="0"
+                      value={side === "A" ? simpleResultScoreA : simpleResultScoreB}
+                      onChange={e => side === "A" ? setSimpleResultScoreA(e.target.value) : setSimpleResultScoreB(e.target.value)}
+                      style={{ width: 64, height: 64, border: "1px solid " + C.border, borderRadius: 12, fontSize: 24, fontWeight: 800, textAlign: "center" }}
+                    />
+                  </div>
+                );
+              };
               return (
                 <>
-                  {scoreInput(leftSide)}
-                  <span style={{ fontSize: 20, fontWeight: 800, color: C.textSec }}>－</span>
-                  {scoreInput(rightSide)}
+                  {scoreBlock(leftSide)}
+                  <span style={{ fontSize: 20, fontWeight: 800, color: C.textSec, marginTop: 34 }}>－</span>
+                  {scoreBlock(rightSide)}
                 </>
               );
             })()}
