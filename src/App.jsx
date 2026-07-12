@@ -4119,6 +4119,10 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           </div>
           <button
             style={{ width: "100%", padding: 13, background: C.gray, color: C.navy, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}
+            onClick={() => { openEditingSlot(longPressMatch); setLongPressMatch(null); }}
+          >✏️ 対戦情報を編集</button>
+          <button
+            style={{ width: "100%", padding: 13, background: C.gray, color: C.navy, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8 }}
             onClick={() => { setCopySourceMatch(longPressMatch); setLongPressMatch(null); }}
           >📋 学校名を別の枠にコピー</button>
           <button
