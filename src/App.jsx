@@ -3819,24 +3819,25 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 const sideRow = (side, isFirstRow) => {
                   const entry = side === "A" ? dm.sideA : dm.sideB;
                   const isWinner = winnerSide === side;
-                  const isLoser = winnerSide && winnerSide !== side;
-                  const nameColor = !entry ? C.textSec : isWinner ? C.teamA : isLoser ? C.textSec : C.text;
+                  // ★色は「勝敗」ではなく「自チーム／相手」を表す（自チームのエントリーのみ緑）。
+                  //   勝敗は色ではなく太字＋🏆で示す。
+                  const nameColor = !entry ? C.textSec : entry.is_own_team ? C.teamA : C.text;
                   const scoreVal = hasSimpleResult ? (side === "A" ? dm.simple_result_score_a : dm.simple_result_score_b)
                     : !mi ? null
                     : mi.status === "active" ? (side === "A" ? mi.match_score_a : mi.match_score_b)
                     : mi.status === "finished" ? (isWalkover ? (isWinner ? "R" : "-") : (side === "A" ? mi.match_score_a : mi.match_score_b))
                     : null;
-                  const scoreColor = mi && mi.status === "active" ? C.orange : isWinner ? C.teamA : C.textSec;
+                  const scoreColor = mi && mi.status === "active" ? C.orange : nameColor;
                   return (
                     <div style={{ padding: "7px 9px", borderBottom: isFirstRow ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
-                        <div style={{ fontWeight: 400, color: nameColor }}>
+                        <div style={{ fontWeight: isWinner ? 800 : 400, color: nameColor }}>
                           {entry && entry.entry_no && <span style={{ color: C.textSec, marginRight: 4 }}>{entry.entry_no}</span>}
-                          {entryLabel(entry)}
+                          {entryLabel(entry)}{isWinner && " 🏆"}
                         </div>
                         {entry && entry.school_name && <div style={{ fontSize: 11, color: C.textSec, marginTop: 1 }}>{entry.school_name}</div>}
                       </div>
-                      {scoreVal !== null && <div style={{ fontSize: 15, fontWeight: 900, color: scoreColor, minWidth: 18, textAlign: "right" }}>{scoreVal}</div>}
+                      {scoreVal !== null && <div style={{ fontSize: 15, fontWeight: isWinner ? 900 : 700, color: scoreColor, minWidth: 18, textAlign: "right" }}>{scoreVal}</div>}
                     </div>
                   );
                 };
