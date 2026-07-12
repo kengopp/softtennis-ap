@@ -3972,7 +3972,14 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
           <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6 }}>勝った{category === "individual" ? "選手・ペア" : "チーム"}</div>
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            {["A", "B"].map(side => {
+            {(() => {
+              // ★対戦カードと同じ並び順（エントリー番号が若い方を上/左）で表示する。
+              //   ここが食い違うと、カードで見た並びと逆を選んでしまう事故が起きるため。
+              const aNo = simpleResultFor.sideA?.entry_no != null && simpleResultFor.sideA?.entry_no !== "" ? Number(simpleResultFor.sideA.entry_no) : null;
+              const bNo = simpleResultFor.sideB?.entry_no != null && simpleResultFor.sideB?.entry_no !== "" ? Number(simpleResultFor.sideB.entry_no) : null;
+              const swap = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
+              return (swap ? ["B", "A"] : ["A", "B"]);
+            })().map(side => {
               const entry = side === "A" ? simpleResultFor.sideA : simpleResultFor.sideB;
               const selected = simpleResultWinner === side;
               return (
@@ -3980,22 +3987,35 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                   key={side}
                   onClick={() => setSimpleResultWinner(side)}
                   style={{ flex: 1, border: "2px solid " + (selected ? C.accent : C.border), background: selected ? C.accentL : C.white, color: selected ? C.accent : C.text, borderRadius: 10, padding: "12px 8px", textAlign: "center", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
-                >{entryLabel(entry)}</div>
+                >{entry?.entry_no != null && entry?.entry_no !== "" ? `${entry.entry_no} ` : ""}{entryLabel(entry)}</div>
               );
             })}
           </div>
 
           <div style={{ fontSize: 11, color: C.textSec, fontWeight: 700, marginBottom: 6, textAlign: "center" }}>スコア</div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginBottom: 20 }}>
-            <input
-              type="number" min="0" value={simpleResultScoreA} onChange={e => setSimpleResultScoreA(e.target.value)}
-              style={{ width: 64, height: 64, border: "1px solid " + C.border, borderRadius: 12, fontSize: 24, fontWeight: 800, textAlign: "center" }}
-            />
-            <span style={{ fontSize: 20, fontWeight: 800, color: C.textSec }}>－</span>
-            <input
-              type="number" min="0" value={simpleResultScoreB} onChange={e => setSimpleResultScoreB(e.target.value)}
-              style={{ width: 64, height: 64, border: "1px solid " + C.border, borderRadius: 12, fontSize: 24, fontWeight: 800, textAlign: "center" }}
-            />
+            {(() => {
+              const aNo = simpleResultFor.sideA?.entry_no != null && simpleResultFor.sideA?.entry_no !== "" ? Number(simpleResultFor.sideA.entry_no) : null;
+              const bNo = simpleResultFor.sideB?.entry_no != null && simpleResultFor.sideB?.entry_no !== "" ? Number(simpleResultFor.sideB.entry_no) : null;
+              const swap = aNo != null && bNo != null && !Number.isNaN(aNo) && !Number.isNaN(bNo) && aNo > bNo;
+              const leftSide = swap ? "B" : "A";
+              const rightSide = swap ? "A" : "B";
+              const scoreInput = (side) => (
+                <input
+                  type="number" min="0"
+                  value={side === "A" ? simpleResultScoreA : simpleResultScoreB}
+                  onChange={e => side === "A" ? setSimpleResultScoreA(e.target.value) : setSimpleResultScoreB(e.target.value)}
+                  style={{ width: 64, height: 64, border: "1px solid " + C.border, borderRadius: 12, fontSize: 24, fontWeight: 800, textAlign: "center" }}
+                />
+              );
+              return (
+                <>
+                  {scoreInput(leftSide)}
+                  <span style={{ fontSize: 20, fontWeight: 800, color: C.textSec }}>－</span>
+                  {scoreInput(rightSide)}
+                </>
+              );
+            })()}
           </div>
 
           <button
