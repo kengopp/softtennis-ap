@@ -4004,7 +4004,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                           {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : isWalkover ? "不戦勝で終了" : "試合終了"}
                         </div>
                       )}
-                      {winnerSide && !alreadyAdvanced && (
+                      {winnerSide && !alreadyAdvanced && !!rounds[rn + 1] && (
                         <button
                           style={{ display: "block", width: "100%", border: "none", background: C.navy, color: C.white, fontSize: 11, fontWeight: 700, padding: "8px 0", cursor: "pointer" }}
                           onClick={(e) => {
@@ -4015,6 +4015,9 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       )}
                       {winnerSide && alreadyAdvanced && (
                         <div style={{ textAlign: "center", fontSize: 10, color: C.textSec, padding: "6px 0", background: C.gray }}>✓ 次の試合へ進出済み</div>
+                      )}
+                      {winnerSide && !alreadyAdvanced && !rounds[rn + 1] && (
+                        <div style={{ textAlign: "center", fontSize: 10.5, color: C.navy, fontWeight: 700, padding: "6px 0", background: C.accentL }}>🏁 大会終了（{entryLabel(winnerEntry)} 優勝）</div>
                       )}
                       {filled && !dm.match_id && (
                         <button
