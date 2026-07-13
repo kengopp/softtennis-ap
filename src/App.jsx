@@ -1335,9 +1335,13 @@ async function createMatchFromDrawSlot(drawMatch, tournamentName, roundLabel) {
   await saveMatch(match);
 
   // 2) match_id が null のときだけ更新する（他の端末が先に作成していたら0件になる）
+  //    ★あわせて「結果だけ記録」の内容が残っていたら消す（実際の試合＝正としてスコアを付け直すため）
   const { data: updatedRows, error: updateErr } = await supabase
     .from("draw_matches")
-    .update({ match_id: matchId, updated_at: new Date().toISOString() })
+    .update({
+      match_id: matchId, updated_at: new Date().toISOString(),
+      simple_result_winner: null, simple_result_score_a: null, simple_result_score_b: null,
+    })
     .eq("id", drawMatch.id)
     .is("match_id", null)
     .select("id, match_id");
@@ -3064,9 +3068,29 @@ function DrawSetup({ tournament, category, onBack }) {
 // ============================================================
 // 対戦情報入力シート（ドローの空枠をタップして開く）
 // ============================================================
-function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, schools, mySchoolName, category }) {
+function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, schools, mySchoolName, category, locked }) {
   const [pref, setPref] = useState("");
   const set = (patch) => onChange({ ...value, ...patch });
+
+  // ★前の回戦の勝者情報と共有されている枠は、この画面からの編集を禁止する。
+  //   同じdraw_entries.idを複数の回戦の枠が参照しているため、ここで編集すると
+  //   元になった回戦のデータまで書き換わってしまうため（実際に起きた事故の再発防止）。
+  if (locked) {
+    return (
+      <div style={{ border: "1px solid " + C.border, background: C.gray, borderRadius: 11, padding: 12, marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{label}</div>
+        <div style={{ fontSize: 13, color: C.text, marginBottom: 4 }}>
+          {value.schoolName || "（学校名未設定）"}
+        </div>
+        <div style={{ fontSize: 13, color: C.text }}>
+          {[value.player1, value.player2].filter(Boolean).join("・") || "（選手名未設定）"}
+        </div>
+        <div style={{ fontSize: 11, color: C.textSec, marginTop: 8, lineHeight: 1.5 }}>
+          🔒 前の回戦の勝者情報と共有されているため、ここでは編集できません。修正する場合は、元になった回戦の対戦情報から編集してください。
+        </div>
+      </div>
+    );
+  }
 
   // 新規試合登録画面と同じ絞り込み方：入力中の学校名(team_name)に一致する選手だけをチップ表示。
   // 自チームの学校名が入っている場合は is_own_team のメンバーも合わせて表示する。
@@ -3160,7 +3184,7 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
   );
 }
 
-function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabel, matchLabel, mySchoolName, onClose, onSaved, prefillSchoolA, prefillSchoolB }) {
+function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabel, matchLabel, mySchoolName, onClose, onSaved, prefillSchoolA, prefillSchoolB, sideALocked, sideBLocked }) {
   const [roster, setRoster] = useState([]);
   const [schools, setSchools] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -3306,16 +3330,23 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       }
 
       // 開いた時点で空欄だった側が、保存直前に他の人によって埋まっていた場合だけ上書きしない
+      // ★前の回戦と共有されている側（sideALocked/sideBLocked）も、ここでは絶対に上書きしない
       let skippedSide = null;
-      if (!conflictA) {
+      let lockedSkipped = null;
+      if (sideALocked) { lockedSkipped = "上側"; }
+      else if (!conflictA) {
         const entryA = await saveDrawEntry(buildEntryRow("A", sideA));
         await setDrawMatchSideSafe(drawMatch.id, "A", entryA.id).catch(() => {}); // ★既に同じentry_idなら何もしない（更新自体はsaveDrawEntryで完了済み）
       } else { skippedSide = "上側"; }
-      if (!conflictB) {
+      if (sideBLocked) { lockedSkipped = lockedSkipped ? "両側" : "下側"; }
+      else if (!conflictB) {
         const entryB = await saveDrawEntry(buildEntryRow("B", sideB));
         await setDrawMatchSideSafe(drawMatch.id, "B", entryB.id).catch(() => {});
       } else { skippedSide = skippedSide ? "両側" : "下側"; }
 
+      if (lockedSkipped) {
+        alert(`${lockedSkipped}は前の回戦の勝者情報と共有されているため、この画面では変更できませんでした。修正する場合は、元になった回戦の対戦情報から編集してください。`);
+      }
       if (skippedSide) {
         alert(`${skippedSide}は既に他の方が登録済みだったため、そちらは上書きせずもう一方だけ保存しました。`);
       }
@@ -3406,8 +3437,8 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
             ⚠️ この枠はすでに試合が作成されています。ここでの変更はドロー表の表示に反映されますが、作成済みの試合記録（選手名など）は自動では更新されません。試合記録自体を直すには「編集」からその試合を開いて修正してください。
           </div>
         )}
-        <DrawSideEditor label="上側" value={valueOf(topKey)} onChange={setterOf(topKey)} onWithdrawToggle={(v) => handleWithdrawToggle(topKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} category={category} />
-        <DrawSideEditor label="下側" value={valueOf(bottomKey)} onChange={setterOf(bottomKey)} onWithdrawToggle={(v) => handleWithdrawToggle(bottomKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} category={category} />
+        <DrawSideEditor label="上側" value={valueOf(topKey)} onChange={setterOf(topKey)} onWithdrawToggle={(v) => handleWithdrawToggle(topKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} category={category} locked={topKey === "A" ? sideALocked : sideBLocked} />
+        <DrawSideEditor label="下側" value={valueOf(bottomKey)} onChange={setterOf(bottomKey)} onWithdrawToggle={(v) => handleWithdrawToggle(bottomKey, v)} roster={roster} schools={schools} mySchoolName={mySchoolName} category={category} locked={bottomKey === "A" ? sideALocked : sideBLocked} />
         <button
           style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 8, opacity: saving ? 0.7 : 1 }}
           disabled={saving} onClick={handleSave}
@@ -3462,6 +3493,33 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     try { localStorage.removeItem(editingSlotStorageKey); } catch (e) {}
   };
 
+  // ★勝者が変わった（結果を修正した）ときに、既に次の回戦へ進出させていた側だけを
+  //   新しい勝者へ差し替える。次の回戦の枠に既に結果が入っている場合は、
+  //   自動上書きせず必ず確認する。
+  const syncWinnerToNextMatch = async (dm, previousWinnerEntry, newWinnerEntry) => {
+    if (!previousWinnerEntry) return; // まだ進出させていなければ何もしない
+    const nextRound = rounds[dm.round_no + 1] || [];
+    const target = nextRound.find(x => x.side_a_entry_id === previousWinnerEntry.id || x.side_b_entry_id === previousWinnerEntry.id);
+    if (!target) return; // 次の回戦にまだ進出させていない
+    if (newWinnerEntry && target.side_a_entry_id === newWinnerEntry.id) return; // 既に新しい勝者になっている
+    if (newWinnerEntry && target.side_b_entry_id === newWinnerEntry.id) return;
+
+    const side = target.side_a_entry_id === previousWinnerEntry.id ? "A" : "B";
+    const targetProgressed = !!target.match_id || !!target.simple_result_winner;
+    if (targetProgressed) {
+      const proceed = window.confirm(
+        `進出先の${dm.round_no + 1}回戦の対戦には、既に試合結果が入っています。\n` +
+        `このまま勝者を差し替えると、その先の結果と矛盾する可能性があります。差し替えますか？`
+      );
+      if (!proceed) return;
+    }
+    const { error } = await supabase.from("draw_matches").update({
+      [side === "A" ? "side_a_entry_id" : "side_b_entry_id"]: newWinnerEntry ? newWinnerEntry.id : null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", target.id);
+    if (error) throw error;
+  };
+
   // ★団体戦「結果だけ記録」モーダルの開閉・保存
   const openSimpleResultModal = (dm) => {
     setSimpleResultFor(dm);
@@ -3471,11 +3529,22 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   };
   const closeSimpleResultModal = () => { setSimpleResultFor(null); };
   const handleSaveSimpleResult = async () => {
-    if (!simpleResultFor) return;
-    const scoreA = simpleResultScoreA === "" ? null : Number(simpleResultScoreA);
-    const scoreB = simpleResultScoreB === "" ? null : Number(simpleResultScoreB);
-    if (scoreA === null || scoreB === null || Number.isNaN(scoreA) || Number.isNaN(scoreB)) {
+    if (!simpleResultFor || savingSimpleResult) return; // ★二重押し防止
+    const scoreA = Number(simpleResultScoreA);
+    const scoreB = Number(simpleResultScoreB);
+    if (simpleResultScoreA === "" || simpleResultScoreB === "" || Number.isNaN(scoreA) || Number.isNaN(scoreB)) {
       alert("スコアを両方とも入力してください。");
+      return;
+    }
+    // ★0以上の整数のみ許可（マイナス値・小数を防ぐ）
+    if (!Number.isInteger(scoreA) || !Number.isInteger(scoreB) || scoreA < 0 || scoreB < 0) {
+      alert("スコアは0以上の整数で入力してください。");
+      return;
+    }
+    // ★競技上あり得ない大きな数値を防ぐ（団体戦＝対戦数、個人戦＝ゲーム数の現実的な上限）
+    const maxScore = category === "team" ? 15 : 20;
+    if (scoreA > maxScore || scoreB > maxScore) {
+      alert(`スコアが大きすぎます（${maxScore}以下で入力してください）。`);
       return;
     }
     if (scoreA === scoreB) {
@@ -3485,9 +3554,16 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     // ★勝者は「選んで指定」ではなく、入力したスコアの大小から自動で決める。
     //   手動選択だと、スコアと勝者の指定が食い違う入力ミスが起きやすいため。
     const winner = scoreA > scoreB ? "A" : "B";
+    // ★保存前の勝者を控えておき、保存後に「進出先の差し替え」が必要か判定する
+    const prevWinnerSide = simpleResultFor.simple_result_winner;
+    const prevWinnerEntry = prevWinnerSide ? (prevWinnerSide === "A" ? simpleResultFor.sideA : simpleResultFor.sideB) : null;
+    const newWinnerEntry = winner === "A" ? simpleResultFor.sideA : simpleResultFor.sideB;
     setSavingSimpleResult(true);
     try {
       await saveSimpleTeamResult(simpleResultFor.id, winner, scoreA, scoreB);
+      if (prevWinnerEntry && newWinnerEntry && prevWinnerEntry.id !== newWinnerEntry.id) {
+        await syncWinnerToNextMatch(simpleResultFor, prevWinnerEntry, newWinnerEntry);
+      }
       closeSimpleResultModal();
       await reload();
     } catch (e) {
@@ -3499,9 +3575,15 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   const handleClearSimpleResult = async () => {
     if (!simpleResultFor) return;
     if (!window.confirm("記録した結果を削除しますか？")) return;
+    const prevWinnerSide = simpleResultFor.simple_result_winner;
+    const prevWinnerEntry = prevWinnerSide ? (prevWinnerSide === "A" ? simpleResultFor.sideA : simpleResultFor.sideB) : null;
     setSavingSimpleResult(true);
     try {
       await clearSimpleTeamResult(simpleResultFor.id);
+      // ★削除した結果、既に次の回戦へ進出させていた選手がいれば、その枠からも外す
+      if (prevWinnerEntry) {
+        await syncWinnerToNextMatch(simpleResultFor, prevWinnerEntry, null);
+      }
       closeSimpleResultModal();
       await reload();
     } catch (e) {
@@ -3616,11 +3698,13 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   };
 
   // 終了した試合の勝者エントリーを求める
+  // ★優先順位：実際の試合（matches）が終了していればそちらを必ず優先する。
+  //   「結果だけ記録」は、実試合が作られていない枠にだけ意味を持つ簡易的な記録のため。
   const getWinnerEntry = (dm) => {
-    if (dm.simple_result_winner) return dm.simple_result_winner === "A" ? dm.sideA : dm.sideB;
     const mi = dm.matchInfo;
-    if (!mi || mi.status !== "finished") return null;
-    return mi.match_score_a > mi.match_score_b ? dm.sideA : dm.sideB;
+    if (mi && mi.status === "finished") return mi.match_score_a > mi.match_score_b ? dm.sideA : dm.sideB;
+    if (dm.simple_result_winner) return dm.simple_result_winner === "A" ? dm.sideA : dm.sideB;
+    return null;
   };
 
   // 勝者が既に次ラウンドのどこかの枠に入っているか（同じentry idで検索）
@@ -3826,10 +3910,13 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 const hasWithdrawn = (dm.sideA && dm.sideA.is_withdrawn) || (dm.sideB && dm.sideB.is_withdrawn);
                 const mi = dm.matchInfo;
                 const isWalkover = !!(mi && mi.memo && mi.memo.includes("不戦勝"));
-                // ★「結果だけ記録」は団体戦・個人戦どちらでも使えるようにする
-                const hasSimpleResult = !!dm.simple_result_winner;
-                const winnerSide = hasSimpleResult ? dm.simple_result_winner
-                  : mi && mi.status === "finished" ? (mi.match_score_a > mi.match_score_b ? "A" : "B") : null;
+                // ★優先順位：実際の試合（matches）が終了していればそちらを必ず優先する。
+                //   「結果だけ記録」は、実試合が作られていない/終了していない枠にだけ意味を持つ。
+                const realFinished = mi && mi.status === "finished";
+                const hasSimpleResult = !realFinished && !!dm.simple_result_winner;
+                const winnerSide = realFinished ? (mi.match_score_a > mi.match_score_b ? "A" : "B")
+                  : hasSimpleResult ? dm.simple_result_winner
+                  : null;
                 const borderColor = mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.border;
                 const winnerEntry = winnerSide ? (winnerSide === "A" ? dm.sideA : dm.sideB) : null;
                 const alreadyAdvanced = winnerSide ? isAlreadyAdvanced(dm, winnerEntry) : false;
@@ -3950,21 +4037,37 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
       </div>
       <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合画面が開きます（実際のスコア入力は「第1ゲーム開始」を押すまで始まりません）。作成済みの試合は長押しでコピー・削除ができます。</div>
 
-      {editingSlot && (
-        <DrawEntrySheet
-          drawMatch={editingSlot}
-          tournament={tournament}
-          category={category}
-          blockLabel={selectedBlock}
-          roundLabel={`${editingSlot.round_no}回戦`}
-          matchLabel={`第${editingSlot.round_no}回戦`}
-          mySchoolName={mySchoolName}
-          onClose={closeEditingSlot}
-          onSaved={reload}
-          prefillSchoolA={copyPrefill?.schoolA}
-          prefillSchoolB={copyPrefill?.schoolB}
-        />
-      )}
+      {editingSlot && (() => {
+        // ★このエントリーが「前の回戦の勝者として進出してきたもの（＝同じdraw_entries.idを
+        //   前の回戦の枠と共有している）」かどうかを判定する。共有されている場合、この画面から
+        //   編集すると元になった回戦のデータまで書き換わってしまうため、編集を禁止する。
+        const isSharedWithEarlierRound = (entryId) => {
+          if (!entryId) return false;
+          return roundNos.some(rn => {
+            if (rn >= editingSlot.round_no) return false;
+            return (rounds[rn] || []).some(m => m.side_a_entry_id === entryId || m.side_b_entry_id === entryId);
+          });
+        };
+        const sideALocked = isSharedWithEarlierRound(editingSlot.side_a_entry_id);
+        const sideBLocked = isSharedWithEarlierRound(editingSlot.side_b_entry_id);
+        return (
+          <DrawEntrySheet
+            drawMatch={editingSlot}
+            tournament={tournament}
+            category={category}
+            blockLabel={selectedBlock}
+            roundLabel={`${editingSlot.round_no}回戦`}
+            matchLabel={`第${editingSlot.round_no}回戦`}
+            mySchoolName={mySchoolName}
+            onClose={closeEditingSlot}
+            onSaved={reload}
+            prefillSchoolA={copyPrefill?.schoolA}
+            prefillSchoolB={copyPrefill?.schoolB}
+            sideALocked={sideALocked}
+            sideBLocked={sideBLocked}
+          />
+        );
+      })()}
 
       {simpleResultFor && (
         <Modal onClose={closeSimpleResultModal}>
@@ -9671,6 +9774,25 @@ export default function App() {
   const [creatingFromTournament, setCreatingFromTournament] = useState(false); // 大会の＋ボタンから試合作成に入ったかどうか
   const [tournamentSeg, setTournamentSeg] = useState("team"); // 大会詳細画面のタブ（team/individual）を試合詳細から戻った時も維持する
 
+  // ★大会詳細から試合を開いた後に「戻る」を押したとき、途中でアプリが再読み込みされていても
+  //   元の大会・タブに戻れるよう、tournamentContext/tournamentSegをsessionStorageにも控えておく。
+  useEffect(() => {
+    try {
+      if (tournamentContext) {
+        sessionStorage.setItem("tournamentReturnCtx", JSON.stringify({ tournamentContext, tournamentSeg }));
+      }
+    } catch (e) {}
+  }, [tournamentContext, tournamentSeg]);
+  const restoreTournamentReturnCtx = () => {
+    try {
+      const raw = sessionStorage.getItem("tournamentReturnCtx");
+      if (!raw) return false;
+      const { tournamentContext: tc, tournamentSeg: seg } = JSON.parse(raw);
+      if (tc) { setTournamentContext(tc); if (seg) setTournamentSeg(seg); return true; }
+    } catch (e) {}
+    return false;
+  };
+
   // 大会に紐づく試合を新規作成する際のデフォルト試合日
   // 今日が大会期間内ならその日を、期間外なら大会の初日を使う
   const smartTournamentDate = (t) => {
@@ -10030,7 +10152,12 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
-        onBack={async ()=>{ setScreen(prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : "list"); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1); }}
+        onBack={async ()=>{
+          const target = prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : "list";
+          // ★大会詳細に戻るはずなのに、何らかの理由でtournamentContextが失われていた場合はsessionStorageから復元を試みる
+          if (target === "tournamentDetail" && !tournamentContext) restoreTournamentReturnCtx();
+          setScreen(target); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1);
+        }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
