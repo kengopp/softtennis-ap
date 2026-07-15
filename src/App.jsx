@@ -5279,6 +5279,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
   const [format, setFormat] = useState("best2");
   const [courtNumber, setCourtNumber] = useState("");
   const [isYounger, setIsYounger] = useState(true);
+  const [showMatchInfo, setShowMatchInfo] = useState(false); // 試合情報の表示/非表示（デフォルト：非表示、個人戦フォームと統一）
   const [schools, setSchools] = useState([]); // SchoolField用（名前リスト、idなし）
   const [schoolsWithId, setSchoolsWithId] = useState([]); // id解決用
   const [venues, setVenues] = useState([]);
@@ -5395,7 +5396,18 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
         </div>
       </div>
       <div style={{ padding:14 }}>
-        <FormSec title="試合情報">
+        <div style={{ marginBottom:14 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+            <span style={{ fontSize:11,fontWeight:700,color:C.navy,letterSpacing:"0.05em" }}>試合情報</span>
+            <button
+              style={{ background:"#eef0f4", border:"none", borderRadius:20, padding:"4px 12px", fontSize:11, fontWeight:700, color:C.navy, cursor:"pointer" }}
+              onClick={() => setShowMatchInfo(v => !v)}
+            >
+              {showMatchInfo ? "非表示 ▲" : "表示 ▼"}
+            </button>
+          </div>
+          {showMatchInfo && (
+          <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,overflow:"visible" }}>
           <FormRow label="大会名">
             {lockTournament ? (
               <div style={{ ...S.inp, display:"flex", justifyContent:"space-between", alignItems:"center", fontWeight:700 }}>
@@ -5424,20 +5436,15 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           <FormRow label="場所 / 会場名">
             <VenueField value={venue} onChange={setVenue} venues={venues}/>
           </FormRow>
-          <FormRow label="何回戦">
-            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
-          </FormRow>
-          <FormRow label="コート番号（任意）">
-            <VenueField value={courtNumber} onChange={setCourtNumber} venues={pastCourtNumbers} placeholder="例：3番コート"/>
-          </FormRow>
-          <FormRow label="若番 / 遅番（必須）">
-            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
-              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
+          <FormRow label="形式">
+            <div style={{ display:"flex", gap:8 }}>
+              <button style={{ ...S.togBtn(format==="best2", C.navy), flex:1 }} onClick={()=>setFormat("best2")}>2勝先取</button>
+              <button style={{ ...S.togBtn(format==="all3", C.navy), flex:1 }} onClick={()=>setFormat("all3")}>3試合全部</button>
             </div>
           </FormRow>
-        </FormSec>
+          </div>
+          )}
+        </div>
 
         <FormSec title="チーム情報">
           <FormRow label="自チーム名">
@@ -5462,11 +5469,18 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           </FormRow>
         </FormSec>
 
-        <FormSec title="試合形式">
-          <FormRow label="形式">
-            <div style={{ display:"flex", gap:8 }}>
-              <button style={{ ...S.togBtn(format==="best2", C.navy), flex:1 }} onClick={()=>setFormat("best2")}>2勝先取</button>
-              <button style={{ ...S.togBtn(format==="all3", C.navy), flex:1 }} onClick={()=>setFormat("all3")}>3試合全部</button>
+        <FormSec title="試合詳細">
+          <FormRow label="何回戦（任意）">
+            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
+          </FormRow>
+          <FormRow label="コート番号（任意）">
+            <VenueField value={courtNumber} onChange={setCourtNumber} venues={pastCourtNumbers} placeholder="例：3番コート"/>
+          </FormRow>
+          <FormRow label="若番 / 遅番（必須）">
+            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
             </div>
           </FormRow>
         </FormSec>
