@@ -40,13 +40,14 @@ const PLAY_TYPES = [
   { key: "drop",     label: "ドロップ"  },
 ];
 
-// 結果（新規記録時の選択肢：ウィナー / エラーの2択）
+// 結果（新規記録時の選択肢：決めた / 相手ミスの2択）
 const RESULT_TYPES = [
   { key: "winner", label: "決めた",   is_winner: true  },
-  { key: "error",  label: "ミスした", is_winner: false },
+  { key: "error",  label: "相手ミス", is_winner: false },
 ];
-// ラベル・勝敗判定（過去データに残る "ace" も正しく表示できるよう選択肢とは別管理）
-const RESULT_LABELS    = { winner: "ウィナー", ace: "エース", error: "エラー" };
+// ラベル・勝敗判定（過去データに残る "ace" も正しく表示できるよう選択肢とは別管理。
+// 「エース」は保護者など初見の利用者に伝わりにくいため、表示上は「決めた」に統一する）
+const RESULT_LABELS    = { winner: "決めた", ace: "決めた", error: "相手ミス" };
 const RESULT_IS_WINNER = { winner: true,        ace: true,    error: false   };
 
 // フォア / バック
@@ -7170,6 +7171,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const [selResult, setSelResult] = useState(null);   // 結果
   const [selPlayer, setSelPlayer] = useState(null);   // 選手（表示名・記録用）
   const [selPlayerId, setSelPlayerId] = useState(null); // 選手（チップ選択状態の判定用・一意ID）
+  // ★得点入力ウィザード（①どちらに1点→②決めた/相手ミス→③誰が、の3タップ）
+  const [scoreStep, setScoreStep] = useState(1); // 1|2|3
+  const [pendingTeam, setPendingTeam] = useState(null); // ①で選んだ得点チーム
   const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
   const [editingPoint, setEditingPoint] = useState(null); // 修正中のポイント { gameId, point }
   const [addingPoint, setAddingPoint] = useState(null); // 追加位置 { gameId, atIndex }
@@ -7217,7 +7221,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
   const leftMatchScore  = isYounger ? match.match_score_a : match.match_score_b;
   const rightMatchScore = isYounger ? match.match_score_b : match.match_score_a;
 
-  function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); }
+  function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); setScoreStep(1); setPendingTeam(null); }
 
   const startingGameRef = useRef(false); // ★第1ゲーム開始の二重呼び出し防止（duplicate keyエラー対策）
   function startNewGame(base=match, overrideServer=null){
@@ -7240,20 +7244,20 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
     setTimeout(()=>{ startingGameRef.current = false; }, 800); // 保存が実行された後にロック解除
   }
 
-  function addPoint(team){
+  function addPoint(team, resultKey=selResult, playerName=selPlayer){
     if(!currentGame) return;
     const cg=currentGame;
     const newA=team==="A"?cg.score_a+1:cg.score_a;
     const newB=team==="B"?cg.score_b+1:cg.score_b;
-    const isWin = selResult ? isWinnerResult(selResult) : null;
+    const isWin = resultKey ? isWinnerResult(resultKey) : null;
     const pt={
       id:uid(),game_id:cg.id,match_id:match.id,
       point_number:nonFaultPts.length+1,
       scoring_team:team,
-      player_name:selPlayer??null,
+      player_name:playerName??null,
       play_type:selPlay??null,
       side_type:selSide??null,
-      result_type:selResult??null,
+      result_type:resultKey??null,
       is_winner:isWin,
       fault_count:fault, // ★このポイントの前に何回フォルトがあったか（0=1stイン、1=2ndイン、2=ダブルフォルト）
       score_a_after:newA, score_b_after:newB,
@@ -7270,6 +7274,26 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
       if(newMA>=winGames||newMB>=winGames){ persist(updM); setModal({type:"matchOver",winner:gWin,gameId:cg.id,sA:newMA,sB:newMB}); }
       else { persist(updM); setModal({type:"gameOver",winner:gWin,num:cg.game_number,gameId:cg.id,sA:newMA,sB:newMB}); }
     } else { persist(updM); }
+  }
+
+  // ★ウィザードのステップ操作
+  function wizardChooseTeam(team){
+    setPendingTeam(team);
+    setScoreStep(2);
+  }
+  function wizardChooseReason(resultKey){
+    setSelResult(resultKey);
+    setScoreStep(3);
+  }
+  function wizardBack(){
+    if(scoreStep===3){ setSelResult(null); setScoreStep(2); }
+    else if(scoreStep===2){ setPendingTeam(null); setScoreStep(1); }
+  }
+  function wizardChoosePlayer(name){
+    addPoint(pendingTeam, selResult, name);
+  }
+  function wizardSkipPlayer(){
+    addPoint(pendingTeam, selResult, null);
   }
 
   function handleFault(){
@@ -7728,128 +7752,113 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 </div>
               </div>
 
-              {/* ★得点ボタン（サービスのすぐ下に移動） */}
-              <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>どっちが得点？</div>
-              {fault===2&&<div style={{ fontSize:10,color:"#c0392b",textAlign:"center",marginBottom:8 }}>※ダブルフォルトのため、レシーブ側の得点ボタンを押してください</div>}
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
-                {(()=>{
-                  const leftIsServer = curServer===leftTeam;
-                  const leftDisabled = fault===2 && leftIsServer;
-                  const rightDisabled = fault===2 && !leftIsServer;
-                  return (
-                    <>
-                      {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
-                      <button disabled={leftDisabled} style={{ height:70,background:isYounger?"#2ecc71":"#f97316",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:leftDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(249,115,22,0.35)",opacity:leftDisabled?0.35:1 }} onClick={()=>{ if(!leftDisabled) addPoint(leftTeam); }}>
-                        <span style={{ fontSize:22 }}>得点</span>
-                        <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||"自チーム"}</span>
-                      </button>
-                      {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
-                      <button disabled={rightDisabled} style={{ height:70,background:isYounger?"#f97316":"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:rightDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)",opacity:rightDisabled?0.35:1 }} onClick={()=>{ if(!rightDisabled) addPoint(rightTeam); }}>
-                        <span style={{ fontSize:22 }}>得点</span>
-                        <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
-              <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:10 }} onClick={()=>setUndoConfirm(true)}>↩ 1点前に戻す</button>
+              {/* ★得点入力ウィザード（①どちらに1点→②決めた/相手ミス→③誰が、の3タップ） */}
 
-              {/* ★直前の記録（今チップで編集中の対象を明示。まだ得点がない場合はチップを無効化） */}
-              {(()=>{
-                const hasLast = nonFaultPts.length>0;
-                if(!hasLast){
-                  return (
-                    <div style={{ background:"#f5f6f8",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:C.textSec }}>
-                      得点を入れると、その点の選手やプレイ内容をここで選べるようになります
-                    </div>
-                  );
-                }
-                const lp=nonFaultPts[nonFaultPts.length-1];
-                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
-                return (
-                  <div style={{ background:"#eef7ff",border:"1px solid #b8dcff",borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#2569b3" }}>
-                    <div style={{ fontWeight:700 }}>✎ 直前の記録を編集中：{lp.scoring_team==="A"?teamALabel:teamBLabel} {lp.score_a_after}-{lp.score_b_after}</div>
-                    <div style={{ marginTop:2,color:"#5b8bc9" }}>{detailParts.length>0?detailParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
+              {/* 戻るリンク：常に同じ位置に表示し、ステップ1では隠す（②③でのみ表示） */}
+              <div style={{ minHeight:26, marginBottom:4 }}>
+                {scoreStep>1 && (
+                  <button style={{ background:"none",border:"none",color:C.textSec,fontSize:13,fontWeight:700,padding:"4px 2px",cursor:"pointer" }} onClick={wizardBack}>← 戻る</button>
+                )}
+              </div>
+
+              {scoreStep===1 && (
+                <>
+                  <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>①どちらに1点入りましたか？</div>
+                  {fault===2&&<div style={{ fontSize:10,color:"#c0392b",textAlign:"center",marginBottom:8 }}>※ダブルフォルトのため、レシーブ側の得点ボタンを押してください</div>}
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
+                    {(()=>{
+                      const leftIsServer = curServer===leftTeam;
+                      const leftDisabled = fault===2 && leftIsServer;
+                      const rightDisabled = fault===2 && !leftIsServer;
+                      return (
+                        <>
+                          {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
+                          <button disabled={leftDisabled} style={{ height:70,background:isYounger?"#2ecc71":"#f97316",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:leftDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(249,115,22,0.35)",opacity:leftDisabled?0.35:1 }} onClick={()=>{ if(!leftDisabled){ if(fault===2){ addPoint(leftTeam);} else { wizardChooseTeam(leftTeam);} } }}>
+                            <span style={{ fontSize:22,fontWeight:800 }}>+1</span>
+                            <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||"自チーム"}</span>
+                          </button>
+                          {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
+                          <button disabled={rightDisabled} style={{ height:70,background:isYounger?"#f97316":"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:rightDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)",opacity:rightDisabled?0.35:1 }} onClick={()=>{ if(!rightDisabled){ if(fault===2){ addPoint(rightTeam);} else { wizardChooseTeam(rightTeam);} } }}>
+                            <span style={{ fontSize:22,fontWeight:800 }}>+1</span>
+                            <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
+                          </button>
+                        </>
+                      );
+                    })()}
                   </div>
+                  <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:10 }} onClick={()=>setUndoConfirm(true)}>↩ 1点前に戻す</button>
+                </>
+              )}
+
+              {scoreStep===2 && (
+                <>
+                  <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>②この1点は？</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
+                    <button style={{ height:60,background:C.white,border:"2px solid #2fa360",color:"#217a49",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer" }} onClick={()=>wizardChooseReason("winner")}>決めた</button>
+                    <button style={{ height:60,background:C.white,border:"2px solid #c9506b",color:"#a63a53",borderRadius:14,fontSize:16,fontWeight:700,cursor:"pointer" }} onClick={()=>wizardChooseReason("error")}>相手ミス</button>
+                  </div>
+                </>
+              )}
+
+              {scoreStep===3 && (()=>{
+                const targetTeam = selResult==="winner" ? pendingTeam : (pendingTeam==="A"?"B":"A");
+                const stepPlayers = allPlayers.filter(p=>p.team===targetTeam);
+                return (
+                  <>
+                    <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>③{selResult==="winner"?"誰が決めた？":"誰のミス？"}</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
+                      {stepPlayers.map(p=>(
+                        <button key={p.id} style={{ minHeight:56,background:C.white,border:`2px solid ${C.border}`,color:C.text,borderRadius:14,fontSize:15,fontWeight:700,cursor:"pointer",padding:"10px 6px" }} onClick={()=>wizardChoosePlayer(p.name)}>{p.name}</button>
+                      ))}
+                    </div>
+                    <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginBottom:10 }} onClick={wizardSkipPlayer}>あとで入力（スキップ）</button>
+                  </>
                 );
               })()}
 
-              {/* ★選手 */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どの選手が（任意）</div>
-                <div>
-                  {allPlayers.map(p=>{
-                    const hasLast = nonFaultPts.length>0;
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = hasLast && lp?.player_name===p.name;
-                    return (
-                      <span key={p.id} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("player_name",p.name); }}>{p.name}</span>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* ★結果 */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どうした（任意）</div>
-                <div>
-                  {RESULT_TYPES.map(r=>{
-                    const hasLast = nonFaultPts.length>0;
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = hasLast && lp?.result_type===r.key;
-                    return (
-                      <span key={r.key} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("result_type",r.key); }}>{r.label}</span>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* ★プレイ内容 */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:8 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>どんなプレイで（任意）</div>
-                <div>
-                  {PLAY_TYPES.map(p=>{
-                    const hasLast = nonFaultPts.length>0;
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = hasLast && lp?.play_type===p.key;
-                    return (
-                      <span key={p.key} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("play_type",p.key); }}>{p.label}</span>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* ★フォア / バック */}
-              <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",marginBottom:10 }}>
-                <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック（任意）</div>
-                <div>
-                  {SIDE_TYPES.map(s=>{
-                    const hasLast = nonFaultPts.length>0;
-                    const lp=nonFaultPts[nonFaultPts.length-1];
-                    const isSel = hasLast && lp?.side_type===s.key;
-                    return (
-                      <span key={s.key} style={{ ...S.chip(isSel), opacity:hasLast?1:0.4, cursor:hasLast?"pointer":"default" }} onClick={()=>{ if(hasLast) updateLastPoint("side_type",s.key); }}>{s.label}</span>
-                    );
-                  })}
-                </div>
-              </div>
+              {/* ★直前の記録の要約（どんなプレー？の対象を明示） */}
+              {(()=>{
+                const hasLast = nonFaultPts.length>0;
+                if(!hasLast || scoreStep!==1) return null;
+                const lp=nonFaultPts[nonFaultPts.length-1];
+                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
+                return (
+                  <details style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
+                    <summary style={{ fontSize:11,color:C.textSec,fontWeight:700,cursor:"pointer" }}>＋ どんなプレー？（任意）</summary>
+                    <div style={{ marginTop:8,fontSize:10,color:"#5b8bc9" }}>対象：{detailParts.length>0?detailParts.join("・"):"（未選択）"}</div>
+                    <div style={{ marginTop:8,marginBottom:4 }}>
+                      {PLAY_TYPES.map(p=>{
+                        const isSel = lp?.play_type===p.key;
+                        return <span key={p.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("play_type",p.key)}>{p.label}</span>;
+                      })}
+                    </div>
+                    <div>
+                      {SIDE_TYPES.map(s=>{
+                        const isSel = lp?.side_type===s.key;
+                        return <span key={s.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("side_type",s.key)}>{s.label}</span>;
+                      })}
+                    </div>
+                  </details>
+                );
+              })()}
               {teamMatchId && (
                 <button style={{ width:"100%",padding:11,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setSuspendConfirm(true)}>✕ 試合を中断する</button>
               )}
 
-              {/* 直近記録 */}
+              {/* 直近記録（タップで編集・削除） */}
               {currentGame.points.length>0&&(
                 <div style={{ marginTop:12 }}>
-                  <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>直近の記録</div>
+                  <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>記録した得点（タップで編集・削除）</div>
                   {[...currentGame.points].reverse().slice(0,5).map(pt=>(
-                    <div key={pt.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:C.white,borderRadius:8,marginBottom:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}` }}>
+                    <div key={pt.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:C.white,borderRadius:8,marginBottom:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}`,cursor:"pointer" }} onClick={()=>setEditingPoint({gameId:currentGame.id,point:pt})}>
                       <span style={{ fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:20,background:pt.scoring_team==="A"?C.accentL:C.redL,color:pt.scoring_team==="A"?C.accent:C.red,whiteSpace:"nowrap" }}>
-                        {pt.scoring_team==="A"?"A 得点":"B 得点"}
+                        {pt.scoring_team==="A"?teamALabel||"A":teamBLabel||"B"}
                       </span>
                       <span style={{ fontSize:11,flex:1,color:C.text }}>
-                        {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
+                        {[pt.player_name,pt.result_type?getResultLabel(pt.result_type):null,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null].filter(Boolean).join(" · ")||"—"}
                       </span>
                       <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
+                      <span style={{ fontSize:13,color:C.textSec }}>›</span>
                     </div>
                   ))}
                 </div>
