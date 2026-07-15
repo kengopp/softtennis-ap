@@ -1568,8 +1568,120 @@ function calcAutoComment(stats, team) {
   return comments;
 }
 
-// LINE共有テキスト
-// LINE共有テキスト
+// ============================================================
+// ★試合サマリー／AI総評／改善優先順位（自チーム=A視点で集計）
+// ============================================================
+function calcMatchSummary(match) {
+  const allPts = match.games.flatMap(g => g.points);
+  const totalA = allPts.filter(p=>p.scoring_team==="A").length;
+  const totalB = allPts.filter(p=>p.scoring_team==="B").length;
+  const winA   = allPts.filter(p=>p.scoring_team==="A"&&p.is_winner===true).length;
+  const winB   = allPts.filter(p=>p.scoring_team==="B"&&p.is_winner===true).length;
+  const attackA = winA, oppMissA = totalA-winA, selfMissA = totalB-winB, oppAttackA = winB;
+  const decisionRate = (attackA+selfMissA)>0 ? Math.round(attackA/(attackA+selfMissA)*100) : null;
+
+  const stats = calcPlayerStats(match);
+  const teamAStats = stats.filter(s=>s.team==="A");
+  const scoreRanking = teamAStats.slice().sort((a,b)=>b.winners-a.winners);
+  const missRanking  = teamAStats.slice().sort((a,b)=>b.errors-a.errors);
+  const topScorer = scoreRanking[0] ?? null;
+
+  // 前衛／後衛（登録順=order_num 0番目を前衛、1番目を後衛として扱う）
+  const aPlayersSorted = match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
+  const posStats = {
+    front: { label:"前衛", name: aPlayersSorted[0]?.player_name ?? null, win:0, err:0 },
+    back:  { label:"後衛", name: aPlayersSorted[1]?.player_name ?? null, win:0, err:0 },
+  };
+  aPlayersSorted.forEach((p,idx)=>{
+    const key = idx===0 ? "front" : "back";
+    const s = teamAStats.find(x=>x.player_name===p.player_name);
+    if (s && posStats[key]) { posStats[key].win += s.winners; posStats[key].err += s.errors; }
+  });
+
+  // プレイ別成功率（チーム全体で合算。fault除く。サンプル2回未満は信頼性が低いため除外）
+  const playAgg = {};
+  teamAStats.forEach(s=>{
+    Object.entries(s.playsWin).forEach(([k,n])=>{ playAgg[k]=playAgg[k]||{win:0,err:0}; playAgg[k].win+=n; });
+    Object.entries(s.playsErr).forEach(([k,n])=>{ if(k==="fault") return; playAgg[k]=playAgg[k]||{win:0,err:0}; playAgg[k].err+=n; });
+  });
+  const playRates = Object.entries(playAgg)
+    .map(([k,v])=>({ key:k, label:getPlayLabel(k), total:v.win+v.err, win:v.win, err:v.err, rate:(v.win+v.err)>0?Math.round(v.win/(v.win+v.err)*100):0 }))
+    .filter(p=>p.total>=2);
+  const bestPlays  = playRates.slice().sort((a,b)=>b.rate-a.rate).slice(0,3);
+  const worstPlays = playRates.slice().sort((a,b)=>a.rate-b.rate).slice(0,3);
+
+  // サーブ分析（自チームのサーブのみ。fault_count: 0=1stイン/1=2ndイン/2=ダブルフォルト）
+  let serve1st=0, serve2nd=0, serveDf=0, serveTotal=0;
+  let firstServeWin=0, firstServeTotal=0, secondServeWin=0, secondServeTotal=0;
+  for (const g of match.games) {
+    for (let idx=0; idx<g.points.length; idx++) {
+      const pt = g.points[idx];
+      const serverTeam = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
+      if (serverTeam!=="A") continue;
+      serveTotal++;
+      if (pt.fault_count===0){ serve1st++; firstServeTotal++; if(pt.scoring_team==="A") firstServeWin++; }
+      else if (pt.fault_count===1){ serve2nd++; secondServeTotal++; if(pt.scoring_team==="A") secondServeWin++; }
+      else if (pt.fault_count===2){ serveDf++; }
+    }
+  }
+
+  // 試合の流れ：最大連続得点／連続失点
+  let curStreak=0, curTeam=null, maxWinStreak=0, maxLoseStreak=0;
+  allPts.forEach(p=>{
+    if (p.scoring_team===curTeam) curStreak++; else { curTeam=p.scoring_team; curStreak=1; }
+    if (curTeam==="A") maxWinStreak=Math.max(maxWinStreak,curStreak);
+    else maxLoseStreak=Math.max(maxLoseStreak,curStreak);
+  });
+
+  // 得点推移（1ゲーム目）
+  const firstGame = match.games[0];
+  const timeline = firstGame ? firstGame.points.map(p=>({
+    team:p.scoring_team, isWinner:p.is_winner, player:p.player_name, play:p.play_type,
+  })) : [];
+
+  return {
+    totalA, totalB, attackA, oppMissA, selfMissA, oppAttackA, decisionRate,
+    topScorer, scoreRanking, missRanking, posStats, bestPlays, worstPlays,
+    serve1st, serve2nd, serveDf, serveTotal, firstServeWin, firstServeTotal, secondServeWin, secondServeTotal,
+    maxWinStreak, maxLoseStreak, timeline,
+  };
+}
+
+function buildAiSummary(sum) {
+  const lines = [];
+  if (sum.totalA>0) {
+    const pct = Math.round(sum.attackA/sum.totalA*100);
+    lines.push(`攻撃による得点が${pct}%と${pct>=50?"高く、自分たちの形で試合を進められています":"、相手のミスに助けられている場面も見られます"}。`);
+  }
+  if (sum.totalB>0) {
+    const pct = Math.round(sum.oppAttackA/sum.totalB*100);
+    lines.push(`失点の${pct}%は相手の攻撃によるものでした。`);
+  }
+  if (sum.worstPlays[0]) lines.push(`${sum.worstPlays[0].label}の成功率が${sum.worstPlays[0].rate}%と低く、ここが課題です。`);
+  if (sum.bestPlays[0])  lines.push(`${sum.bestPlays[0].label}は成功率${sum.bestPlays[0].rate}%で最大の得点源です。`);
+  if (sum.secondServeTotal>0) {
+    const rate = Math.round(sum.secondServeWin/sum.secondServeTotal*100);
+    lines.push(`2ndサーブ時の得点率は${rate}%でした。`);
+  }
+  const todayPoints = [];
+  if (sum.worstPlays[0]) todayPoints.push(`${sum.worstPlays[0].label}の成功率向上`);
+  if (sum.bestPlays[0])  todayPoints.push(`${sum.bestPlays[0].label}は継続`);
+  if (sum.secondServeTotal>0 && Math.round(sum.secondServeWin/sum.secondServeTotal*100) < 50) {
+    todayPoints.push("2ndサーブ時の組み立てを見直す");
+  }
+  return { text: lines.join(""), todayPoints };
+}
+
+function buildPriorities(sum) {
+  return sum.worstPlays.map((p,i)=>({
+    stars: Math.max(5-i, 1),
+    text: `${p.label}の成功率向上`,
+    reason: `理由：${p.label}成功率${p.rate}%（${p.total}回中${p.win}回成功）`,
+    effect: i===0 ? "期待効果：＋1〜3点" : "期待効果：＋1点前後",
+  }));
+}
+
+
 function buildLineText(match) {
   var aP = match.players.filter(function(p){return p.team==="A";}).map(function(p){return p.player_name;}).join("/");
   var bP = match.players.filter(function(p){return p.team==="B";}).map(function(p){return p.player_name;}).join("/");
@@ -8041,6 +8153,211 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 // ============================================================
 // スタッツタブ（★相手チームスタッツのバグ修正）
 // ============================================================
+// ============================================================
+// ★試合サマリー／AI総評／改善優先順位／詳細分析パネル
+// ============================================================
+function MatchSummaryPanel({ match }) {
+  const sum = calcMatchSummary(match);
+  const ai = buildAiSummary(sum);
+  const priorities = buildPriorities(sum);
+  const teamALabel = match.players.find(p=>p.team==="A")?.club_name || "自チーム";
+  const teamBLabel = match.players.find(p=>p.team==="B")?.club_name || "相手チーム";
+
+  const detailBox = { background:C.white, border:`1px solid ${C.border}`, borderRadius:12, marginBottom:10, overflow:"hidden" };
+  const summaryBtn = { fontSize:12, fontWeight:700, color:C.text, padding:"12px 14px", cursor:"pointer", listStyle:"none", display:"flex", alignItems:"center", gap:6 };
+
+  function CompareRow({ label, a, b }) {
+    return (
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"7px 0", borderBottom:`1px solid ${C.border}`, fontSize:12 }}>
+        <span style={{ fontWeight:700, color:C.teamA }}>{a}</span>
+        <span style={{ color:C.textSec, fontSize:11 }}>{label}</span>
+        <span style={{ fontWeight:700, color:C.teamB }}>{b}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom:14 }}>
+      {/* ①試合サマリー */}
+      <div style={{ ...detailBox, padding:14 }}>
+        <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>📋 試合サマリー</div>
+        {sum.topScorer && (
+          <div style={{ display:"flex", alignItems:"center", gap:10, background:"#fff7e6", border:"1px solid #f0d999", borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
+            <span style={{ fontSize:20 }}>🎯</span>
+            <div>
+              <div style={{ fontSize:13, fontWeight:800 }}>最多得点：{sum.topScorer.player_name}</div>
+              <div style={{ fontSize:11, color:C.textSec }}>得点{sum.topScorer.winners}</div>
+            </div>
+          </div>
+        )}
+        <div style={{ textAlign:"center", background:C.navy, color:C.white, borderRadius:10, padding:"10px 0", marginBottom:10 }}>
+          <div style={{ fontSize:26, fontWeight:900 }}>{sum.totalA}点</div>
+          <div style={{ fontSize:10, opacity:0.75 }}>この試合の総得点</div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          {[
+            ["攻撃で決めた", sum.attackA, C.accent],
+            ["相手ミス",     sum.oppMissA, "#9fd9b8"],
+            ["自分ミス（失点）", sum.selfMissA, C.red],
+            ["相手の攻撃（失点）", sum.oppAttackA, "#f0b8c2"],
+          ].map(([l,v,c])=>(
+            <div key={l} style={{ background:C.gray, borderRadius:8, padding:"8px 4px", textAlign:"center" }}>
+              <div style={{ fontSize:18, fontWeight:800, color:c }}>{v}</div>
+              <div style={{ fontSize:10, color:C.textSec, fontWeight:700 }}>{l}</div>
+            </div>
+          ))}
+        </div>
+        {sum.decisionRate!=null && (
+          <div style={{ textAlign:"center", marginTop:10, fontSize:12, color:C.textSec }}>決定率 <b style={{ fontSize:15, color:C.text }}>{sum.decisionRate}%</b></div>
+        )}
+      </div>
+
+      {/* ②AI総評 */}
+      {ai.text && (
+        <div style={{ ...detailBox, padding:14 }}>
+          <div style={{ fontSize:13, fontWeight:800, marginBottom:8 }}>🤖 AI総評</div>
+          <div style={{ background:"linear-gradient(135deg,#eef4ff,#f7fbff)", border:"1px solid #cfe0f7", borderRadius:10, padding:12, fontSize:12, lineHeight:1.8, color:"#274566" }}>{ai.text}</div>
+          {ai.todayPoints.length>0 && (
+            <div style={{ background:C.navy, color:C.white, borderRadius:10, padding:"10px 12px", marginTop:10 }}>
+              <div style={{ fontSize:11, fontWeight:800, opacity:0.85, marginBottom:6 }}>📌 今日のポイント</div>
+              <ul style={{ margin:0, paddingLeft:18, fontSize:12, lineHeight:1.8 }}>
+                {ai.todayPoints.map((t,i)=><li key={i}>{t}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ③改善優先順位 */}
+      {priorities.length>0 && (
+        <div style={{ ...detailBox, padding:14 }}>
+          <div style={{ fontSize:13, fontWeight:800, marginBottom:8 }}>🎯 改善優先順位</div>
+          {priorities.map((p,i)=>(
+            <div key={i} style={{ padding:"9px 0", borderBottom:i<priorities.length-1?`1px solid ${C.border}`:"none" }}>
+              <div style={{ fontSize:12, color:"#e8a93c", letterSpacing:1 }}>{"★".repeat(p.stars)}{"☆".repeat(5-p.stars)}</div>
+              <div style={{ fontSize:13, fontWeight:700, marginTop:2 }}>{p.text}</div>
+              <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>{p.reason}</div>
+              <div style={{ fontSize:11, color:C.accent, fontWeight:700, marginTop:2 }}>{p.effect}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ④詳細分析（折りたたみ） */}
+      <div style={{ fontSize:11, color:C.textSec, fontWeight:700, margin:"14px 2px 6px" }}>▼ 詳細分析</div>
+
+      {(sum.posStats.front.name || sum.posStats.back.name) && (
+        <details style={detailBox}>
+          <summary style={summaryBtn}>📍 前衛・後衛分析</summary>
+          <div style={{ padding:"0 14px 14px" }}>
+            {["front","back"].map(key=>{
+              const p = sum.posStats[key];
+              if (!p.name) return null;
+              const total = p.win+p.err;
+              const rate = total>0 ? Math.round(p.win/total*100) : 0;
+              return (
+                <div key={key} style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:12, fontWeight:700, marginBottom:4 }}>{p.label}（{p.name}）</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ flex:1, height:10, background:C.gray, borderRadius:5, overflow:"hidden" }}>
+                      <div style={{ width:`${rate}%`, height:"100%", background:C.accent }}/>
+                    </div>
+                    <span style={{ fontSize:11, color:C.textSec, whiteSpace:"nowrap" }}>決定率{rate}%（決{p.win}／ミス{p.err}）</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
+
+      {(sum.bestPlays.length>0 || sum.worstPlays.length>0) && (
+        <details style={detailBox}>
+          <summary style={summaryBtn}>🏸 プレー別ランキング</summary>
+          <div style={{ padding:"0 14px 14px" }}>
+            {sum.bestPlays.length>0 && (
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:6 }}>🏆 今日の武器</div>
+                {sum.bestPlays.map((p,i)=>(
+                  <div key={p.key} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"4px 0" }}>
+                    <span>{["🥇","🥈","🥉"][i]} {p.label}</span>
+                    <span style={{ fontWeight:700, color:C.accent }}>{p.rate}%（{p.win}/{p.total}）</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {sum.worstPlays.length>0 && (
+              <div>
+                <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:6 }}>📉 改善ポイント</div>
+                {sum.worstPlays.map((p,i)=>(
+                  <div key={p.key} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"4px 0" }}>
+                    <span>{i+1}. {p.label}</span>
+                    <span style={{ fontWeight:700, color:C.red }}>{p.rate}%（{p.win}/{p.total}）</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+
+      {sum.serveTotal>0 && (
+        <details style={detailBox}>
+          <summary style={summaryBtn}>🎾 サーブ分析</summary>
+          <div style={{ padding:"0 14px 14px" }}>
+            <CompareRow label="1stイン" a={`${sum.serve1st}本`} b={`${Math.round(sum.serve1st/sum.serveTotal*100)}%`} />
+            <CompareRow label="2ndイン" a={`${sum.serve2nd}本`} b={`${Math.round(sum.serve2nd/sum.serveTotal*100)}%`} />
+            <CompareRow label="ダブルフォルト" a={`${sum.serveDf}本`} b={`${Math.round(sum.serveDf/sum.serveTotal*100)}%`} />
+            {sum.firstServeTotal>0 && (
+              <div style={{ marginTop:10, fontSize:12 }}>1stサーブ時：得点{sum.firstServeWin} 失点{sum.firstServeTotal-sum.firstServeWin}（得点率{Math.round(sum.firstServeWin/sum.firstServeTotal*100)}%）</div>
+            )}
+            {sum.secondServeTotal>0 && (
+              <div style={{ marginTop:4, fontSize:12 }}>2ndサーブ時：得点{sum.secondServeWin} 失点{sum.secondServeTotal-sum.secondServeWin}（得点率{Math.round(sum.secondServeWin/sum.secondServeTotal*100)}%）</div>
+            )}
+          </div>
+        </details>
+      )}
+
+      <details style={detailBox}>
+        <summary style={summaryBtn}>🔥 試合の流れ</summary>
+        <div style={{ padding:"0 14px 14px" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <div style={{ background:C.gray, borderRadius:8, padding:10 }}>
+              <div style={{ fontSize:10, color:C.textSec, fontWeight:700 }}>最大連続得点</div>
+              <div style={{ fontSize:16, fontWeight:800, color:C.accent }}>{sum.maxWinStreak}点</div>
+            </div>
+            <div style={{ background:C.gray, borderRadius:8, padding:10 }}>
+              <div style={{ fontSize:10, color:C.textSec, fontWeight:700 }}>最大連続失点</div>
+              <div style={{ fontSize:16, fontWeight:800, color:C.red }}>{sum.maxLoseStreak}点</div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {sum.timeline.length>0 && (
+        <details style={detailBox}>
+          <summary style={summaryBtn}>📈 得点推移（1ゲーム目）</summary>
+          <div style={{ padding:"0 14px 14px" }}>
+            {(() => {
+              const PLAY_ICONS = { serve:"🎾", receive:"🖐", volley:"🖐", smash:"⚡", stroke:"🎾", attack:"⚡", shoot:"⚡", lob:"🖐", drop:"🖐" };
+              return sum.timeline.map((p,i)=>{
+                const isWin = p.team==="A";
+                const icon = isWin ? (p.play ? (PLAY_ICONS[p.play]??"🎾") : "✅") : "❌";
+                return (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, padding:"4px 0" }}>
+                    <span style={{ width:24, height:24, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, background:isWin?"#e3f5ea":"#fbe6ea", flexShrink:0 }}>{icon}</span>
+                    <span>{p.player ? `${p.player}${p.play?`（${getPlayLabel(p.play)}）`:""}` : (isWin?"相手ミス":"相手の攻撃/自分ミス")}</span>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function StatsTab({ match, onDownloadCsv, onShareLine }) {
   const [teamFilter, setTeamFilter] = useState("A");
   const stats    = calcPlayerStats(match);
@@ -8094,6 +8411,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
 
   return (
     <div style={{ padding:14 }}>
+      <MatchSummaryPanel match={match} />
+
       {/* チーム比較 */}
       <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,padding:14,marginBottom:12 }}>
         <div style={{ display:"flex",justifyContent:"space-between",marginBottom:12 }}>
