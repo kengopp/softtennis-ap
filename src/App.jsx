@@ -9594,7 +9594,9 @@ function AdminSchoolsScreen({ onBack }) {
       setNewName(""); setNewPrefecture(""); setNewCategory(null); setNewGenderRestriction("mixed");
       reload();
     } catch (e) {
-      setErrorMsg(e.message?.includes("duplicate") ? "同じ名前・同じ区分の学校がすでに登録されています" : (e.message || "追加に失敗しました"));
+      console.error("学校追加エラー（詳細）:", e);
+      const friendly = e.message?.includes("duplicate") ? "同じ名前・同じ区分の学校がすでに登録されています" : (e.message || "追加に失敗しました");
+      setErrorMsg(friendly + " [詳細] " + (e.message||"") + " / " + (e.details||"") + " / " + (e.hint||""));
     }
   }
 
