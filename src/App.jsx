@@ -2422,7 +2422,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     </div>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                       <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
-                      <span style={{ fontSize:10, color:C.textSec }}>{tm.format === "best2" ? "2勝先取" : "3試合全部"}</span>
+                      <span style={{ fontSize:10, color:C.textSec }}>{tm.format === "best2" ? "2勝先取" : "3試合全部"} ・ {tm.is_younger===false ? "遅番" : tm.is_younger===true ? "若番" : "若番/遅番未設定"}</span>
                     </div>
                   </div>
                   <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
@@ -2733,6 +2733,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1 }}>{oppLabel || "相手"}</span>
                 </div>
                 <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
+                <span style={{ fontSize:10, color:C.textSec, marginLeft:8 }}>{tm.is_younger===false ? "遅番" : tm.is_younger===true ? "若番" : "若番/遅番未設定"}</span>
               </div>
               <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                 <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピーして新規作成</button>
