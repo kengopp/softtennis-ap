@@ -10623,9 +10623,9 @@ export default function App() {
     <MatchList
       key={tick}
       onNew={f=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
-      onOpen={id=>{setMatchId(id); setPrevScreen("list"); setScreen("record");}}
+      onOpen={id=>{setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setScreen("record");}}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
-      onStartScheduled={async (id, firstServer)=>{ try { await startScheduledMatch(id, firstServer); setMatchId(id); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
+      onStartScheduled={async (id, firstServer)=>{ try { await startScheduledMatch(id, firstServer); setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
