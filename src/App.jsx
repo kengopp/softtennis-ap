@@ -6634,8 +6634,8 @@ function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
       />
       {open && filtered.length > 0 && (
         <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:200, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", maxHeight:220, overflowY:"auto", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain", touchAction:"pan-y" }}>
-          <div style={{ padding:"4px 14px", fontSize:10, color:C.textSec, background:"#f5f6f8" }}>{filtered.length}件中 最大50件を表示（枠内をスクロールできます）</div>
-          {filtered.slice(0, 50).map(s => (
+          <div style={{ padding:"4px 14px", fontSize:10, color:C.textSec, background:"#f5f6f8" }}>{filtered.length}件中 最大200件を表示（枠内をスクロールできます）</div>
+          {filtered.slice(0, 200).map(s => (
             <div key={s.name} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
               onMouseDown={e => { e.preventDefault(); onChange(s.name); setOpen(false); }}
             >{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</div>
