@@ -5296,7 +5296,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
   const [opponentDivision, setOpponentDivision] = useState("");
   const [format, setFormat] = useState("best2");
   const [courtNumber, setCourtNumber] = useState("");
-  const [isYounger, setIsYounger] = useState(true);
+  const [isYounger, setIsYounger] = useState(null); // ★デフォルトは未選択（必ず選んでもらう）
   const [showMatchInfo, setShowMatchInfo] = useState(false); // 試合情報の表示/非表示（デフォルト：非表示、個人戦フォームと統一）
   const [schools, setSchools] = useState([]); // SchoolField用（名前リスト、idなし）
   const [schoolsWithId, setSchoolsWithId] = useState([]); // id解決用
@@ -5381,7 +5381,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
     }
   }, [editId]);
 
-  const canSave = opponentName.trim();
+  const canSave = opponentName.trim() && isYounger !== null;
 
   async function handleSave() {
     setSaving(true);
@@ -7142,13 +7142,15 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <FormRow label="コート番号（任意）">
             <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
           </FormRow>
-          <FormRow label="若番 / 遅番（必須）">
-            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
-              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
-            </div>
-          </FormRow>
+          {!isTeamMatchGame && (
+            <FormRow label="若番 / 遅番（必須）">
+              <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+                <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
+              </div>
+            </FormRow>
+          )}
         </FormSec>
 
         <button
