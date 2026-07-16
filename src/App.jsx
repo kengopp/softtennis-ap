@@ -598,10 +598,10 @@ async function dissolveTeam() {
 // 毎回の一覧再読み込み（reload）のたびにネットワーク取得していたのをやめ、
 // 一度取得したらメモリ上にキャッシュして使い回す。追加・編集・削除時だけキャッシュを破棄する。
 let __schoolsCache = null;
-async function getSchools() {
-  if (__schoolsCache) return __schoolsCache;
+async function getSchools(force=false) {
+  if (__schoolsCache && !force) return __schoolsCache;
   const { data, error } = await supabase.from("schools").select("*").order("name");
-  if (error) { console.error(error); return []; }
+  if (error) { console.error(error); return __schoolsCache || []; }
   __schoolsCache = data;
   return data;
 }
@@ -9552,7 +9552,9 @@ function AdminSchoolsScreen({ onBack }) {
 
   const reload = useCallback(() => {
     setLoading(true);
-    getSchools().then(list => { setSchools(list); setLoading(false); });
+    getSchools(true).then(list => { setSchools(list); setLoading(false); });
+    // ★管理画面は「今のDBの正しい状態」を見る場所なので、
+    //   古いキャッシュを使い回さず必ずサーバーへ再取得しにいく（force=true）
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
