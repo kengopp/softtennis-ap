@@ -1878,7 +1878,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
@@ -2124,6 +2124,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       setTrashLoading(false);
     });
   }
+  // ★設定画面の「ゴミ箱」から遷移してきた場合、自動的にゴミ箱を開く
+  useEffect(() => {
+    if (initialShowTrash) {
+      openTrash();
+      onTrashConsumed && onTrashConsumed();
+    }
+  }, []);
   async function handleRestoreTournament(id) {
     await restoreTournament(id);
     setDeletedTournaments(list => list.filter(t => t.id !== id));
@@ -2178,7 +2185,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); }}>{l}</button>
           ))}
         </div>
-        <button onClick={openTrash} style={{ background:"none", border:"none", color:C.textSec, fontSize:11, fontWeight:700, cursor:"pointer", padding:"6px 2px", whiteSpace:"nowrap" }}>🗑 ゴミ箱</button>
       </div>
 
       {/* 共通絞り込みUI（大会タブでは検索欄のみ非表示。ステータス・日付絞り込みは大会タブにも表示） */}
@@ -4571,7 +4577,7 @@ function GroupMembersScreen({ onBack }) {
 
 // マスター管理ハブ画面（選手マスター・学校マスターへの入口）
 // ============================================================
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings }) {
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onTrash, onProfile, onLogout }) {
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
@@ -4614,7 +4620,7 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           </div>
         )}
         <div
-          style={{ ...S.card, padding:"16px 14px", cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
           onClick={onGroupMembers}
         >
           <div>
@@ -4622,6 +4628,35 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
             <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>参加中のメンバーを確認</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
+        <div
+          style={{ ...S.card, padding:"16px 14px", cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onTrash}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>🗑 ゴミ箱</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>削除した大会・試合を確認（24時間以内なら復元可）</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
+
+        <div style={{ height:1, background:C.border, margin:"18px 0 10px" }} />
+
+        <div
+          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onProfile}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>👤 プロフィール</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>名前・紐づけ選手などの設定</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
+        <div
+          style={{ ...S.card, padding:"16px 14px", cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center", color:"#c62828" }}
+          onClick={onLogout}
+        >
+          <div style={{ fontSize:14,fontWeight:700 }}>🚪 ログアウト</div>
         </div>
       </div>
       <NavBar active="master" onNavigate={onNavigate}/>
@@ -5189,21 +5224,9 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   return (
     <div style={S.page}>
       <div style={S.hdr}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <span style={{ fontSize:20,fontWeight:800,color:C.white }}>
-            {profile?.name ? `${profile.name}さん、こんにちは` : "ホーム"}
-          </span>
-          <div style={{ display:"flex",gap:6 }}>
-            <button
-              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
-              onClick={onProfile} title="プロフィール"
-            >👤</button>
-            <button
-              style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:11, padding:"6px 10px", cursor:"pointer" }}
-              onClick={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); } }}
-            >ログアウト</button>
-          </div>
-        </div>
+        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>
+          {profile?.name ? `${profile.name}さん、こんにちは` : "ホーム"}
+        </span>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
         {loading ? (
@@ -10190,6 +10213,7 @@ export default function App() {
   const [teamMatchOrderNum, setTeamMatchOrderNum] = useState(null);
   const [teamMatchCopyId, setTeamMatchCopyId] = useState(null); // コピー元の団体戦ID
   const [listMatchMode, setListMatchMode] = useState("tournament");
+  const [pendingOpenTrash, setPendingOpenTrash] = useState(false); // ★設定画面からゴミ箱を開く指示
   const [serveSelectForTeam, setServeSelectForTeam] = useState(null); // 団体戦サーブ選択 // 履歴画面のタブ状態
   // 大会関連
   const [tournamentContext, setTournamentContext] = useState(null); // 大会詳細画面から試合作成に入った際の大会情報 {id,name,start_date,end_date}
@@ -10505,6 +10529,9 @@ export default function App() {
         onSchoolAdmin={()=>setScreen("schoolAdmin")}
         onGroupMembers={()=>setScreen("groupMembers")}
         onGoalSettings={()=>setScreen("goalSettings")}
+        onProfile={()=>setScreen("profile")}
+        onTrash={()=>{ setPendingOpenTrash(true); setListMatchMode("tournament"); setScreen("list"); }}
+        onLogout={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); window.location.reload(); } }}
       />
     );
   }
@@ -10637,6 +10664,8 @@ export default function App() {
       onCopyTeamMatch={id=>{ setTournamentContext(null); setTeamMatchCopyId(id); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
       onOpenTournament={t=>{ setTournamentContext(t); setListMatchMode("tournament"); setScreen("tournamentDetail"); }}
       initialMatchMode={listMatchMode}
+      initialShowTrash={pendingOpenTrash}
+      onTrashConsumed={()=>setPendingOpenTrash(false)}
     />
   );
 }
