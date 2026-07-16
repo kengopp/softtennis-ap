@@ -1003,6 +1003,21 @@ async function saveTournament(t) {
   return row;
 }
 
+// ★大会名を変更した時、既に作成済みの個人戦・団体戦の tournament_name（文字列で紐付けている）が
+//   追従せず残ってしまい、見た目は同じでも文字として一致しなくなり大会と切り離されてしまう不具合があった。
+//   大会名編集時は必ずこれを呼び、旧名称の試合を新名称に一括で書き換える。
+async function renameTournamentCascade(oldName, newName) {
+  const oldTrimmed = (oldName || "").trim();
+  const newTrimmed = (newName || "").trim();
+  if (!oldTrimmed || !newTrimmed || oldTrimmed === newTrimmed) return;
+  const [r1, r2] = await Promise.all([
+    supabase.from("matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+    supabase.from("team_matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+  ]);
+  if (r1.error) console.error("個人戦の大会名追従に失敗:", r1.error);
+  if (r2.error) console.error("団体戦の大会名追従に失敗:", r2.error);
+}
+
 // ★大会の削除は誤操作対策のため即時完全削除ではなくゴミ箱行き（論理削除）にする
 async function deleteTournament(id) {
   const { error } = await supabase.from("tournaments").update({ deleted_at: new Date().toISOString() }).eq("id", id);
@@ -2062,6 +2077,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         end_date: endDate || startDate,
         venue: venue || null,
       });
+      // ★既存の大会の名前を変更した場合、紐づく個人戦・団体戦の大会名も追従させる
+      if (editingTournament?.name && editingTournament.name.trim() !== trimmed) {
+        await renameTournamentCascade(editingTournament.name, trimmed);
+      }
       setShowTournamentModal(false);
       setEditingTournament(null);
       reload();
@@ -2794,6 +2813,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               if (!startDate) { alert("開始日を選択してください"); return; }
               try {
                 const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null });
+                // ★大会名が変わった場合、既存の個人戦・団体戦の大会名も追従させる（見えない文字ズレによる紐付け解除を防ぐ）
+                if (tournament.name && tournament.name.trim() !== trimmed) {
+                  await renameTournamentCascade(tournament.name, trimmed);
+                }
                 setShowEditModal(false);
                 onSaved && onSaved(saved);
               } catch(e) {
