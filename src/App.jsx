@@ -2003,6 +2003,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return null;
   };
 
+  // 大会の振り分け（開催期間の終了日が今日以降なら「予定・進行中」）
+  const isUpcomingTournament = (t) => {
+    const end = t.end_date || t.start_date;
+    return !end || end >= todayStr;
+  };
+  // 大会は単日ではなく期間を持つため、期間が絞り込み条件と重なっているかで判定する
+  const tournamentMatchesDateFilter = (t) => {
+    if (!dateFilterApplied) return true;
+    const s = t.start_date, e = t.end_date || t.start_date;
+    if (!s) return true;
+    if (dateFilterApplied.mode === "day") return dateFilterApplied.day >= s && dateFilterApplied.day <= e;
+    if (dateFilterApplied.mode === "range") return s <= dateFilterApplied.end && e >= dateFilterApplied.start;
+    if (dateFilterApplied.mode === "month") return s.slice(0,7) <= dateFilterApplied.month && e.slice(0,7) >= dateFilterApplied.month;
+    return true;
+  };
+
   // 共通絞り込みロジック
   const filteredMatches = allMatches.filter(m => {
     if (filterStatus === "upcoming" && !isUpcomingMatch(m)) return false;
@@ -2061,9 +2077,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     individual: allMatches.filter(m => m.tournament_name === name).length,
   });
 
-  const filteredTournaments = tournaments.filter(t =>
-    !tournamentSearch.trim() || t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())
-  );
+  const filteredTournaments = tournaments.filter(t => {
+    if (tournamentSearch.trim() && !t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())) return false;
+    if (filterStatus === "upcoming" && !isUpcomingTournament(t)) return false;
+    if (filterStatus === "finished" && isUpcomingTournament(t)) return false;
+    if (!tournamentMatchesDateFilter(t)) return false;
+    return true;
+  });
 
   async function handleSaveTournament(name, startDate, endDate, venue) {
     const trimmed = name.trim();
@@ -2161,9 +2181,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         <button onClick={openTrash} style={{ background:"none", border:"none", color:C.textSec, fontSize:11, fontWeight:700, cursor:"pointer", padding:"6px 2px", whiteSpace:"nowrap" }}>🗑 ゴミ箱</button>
       </div>
 
-      {/* 共通絞り込みUI（大会タブでは非表示） */}
-      {timeTab !== "tournament" && (
+      {/* 共通絞り込みUI（大会タブでは検索欄のみ非表示。ステータス・日付絞り込みは大会タブにも表示） */}
       <div style={{ padding:"10px 14px 0" }}>
+        {timeTab !== "tournament" && (
         <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", marginBottom:8 }}>
           <span style={{ fontSize:14, marginRight:6, color:C.textSec }}>🔍</span>
           <input
@@ -2174,6 +2194,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           />
           {filterSearch && <button onClick={()=>setFilterSearch("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }}>✕</button>}
         </div>
+        )}
         <div style={{ display:"flex", gap:6, marginBottom:6, flexWrap:"wrap" }}>
           {[["all","すべて"],["upcoming","予定・進行中"],["finished","完了"]].map(([v,l])=>(
             <button key={v} onClick={()=>setFilterStatus(v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+(filterStatus===v?C.navy:C.border), background:filterStatus===v?C.navy:"transparent", color:filterStatus===v?C.white:C.textSec, fontSize:12, fontWeight:700, cursor:"pointer" }}>{l}</button>
@@ -2303,7 +2324,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           );
         })()}
       </div>
-      )}
 
       {/* 大会タブ */}
       {timeTab === "tournament" && (
