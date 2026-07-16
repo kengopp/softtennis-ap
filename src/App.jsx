@@ -598,27 +598,43 @@ async function dissolveTeam() {
 // 毎回の一覧再読み込み（reload）のたびにネットワーク取得していたのをやめ、
 // 一度取得したらメモリ上にキャッシュして使い回す。追加・編集・削除時だけキャッシュを破棄する。
 let __schoolsCache = null;
+let __schoolsRequestVersion = 0; // ★通信競合対策：古いリクエストの結果でキャッシュを上書きしないようにする
 async function getSchools(force=false) {
   if (__schoolsCache && !force) return __schoolsCache;
+  const requestVersion = ++__schoolsRequestVersion;
   const { data, error } = await supabase.from("schools").select("*").order("name");
-  if (error) { console.error(error); return __schoolsCache || []; }
-  __schoolsCache = data;
-  return data;
+  if (error) {
+    console.error("学校一覧の取得に失敗しました:", error);
+    // ★管理画面（force=true）は「今のDBの正しい状態」を見る場所なので、
+    //   通信に失敗した時に古いキャッシュを返してしまうと誤った情報を正しいものとして見せてしまう。
+    //   そのため force=true の時は握りつぶさず例外を投げ、呼び出し側でエラー表示させる。
+    if (force) throw error;
+    return __schoolsCache || [];
+  }
+  const list = data || [];
+  // 途中で別のgetSchools呼び出しが走っていた場合、後から返ってきた古いリクエストの結果で
+  // 新しいキャッシュを上書きしてしまわないようにする
+  if (requestVersion === __schoolsRequestVersion) __schoolsCache = list;
+  return list;
 }
-function invalidateSchoolsCache() { __schoolsCache = null; }
+function invalidateSchoolsCache() { __schoolsCache = null; __schoolsRequestVersion += 1; }
 
 async function addSchool(name, prefecture, category, genderRestriction) {
-  const row = { id: uid(), name: name.trim(), prefecture: prefecture || null, category: category || null, gender_restriction: genderRestriction || "mixed" };
-  const { error } = await supabase.from("schools").insert(row);
+  const trimmedName = name?.trim();
+  if (!trimmedName) throw new Error("学校名を入力してください。");
+  const row = { id: uid(), name: trimmedName, prefecture: prefecture || null, category: category || null, gender_restriction: genderRestriction || "mixed" };
+  const { data, error } = await supabase.from("schools").insert(row).select("*").single();
   if (error) throw error;
   invalidateSchoolsCache();
-  return row;
+  return data; // ★DBが実際に保存した内容（created_at等のデフォルト値も含む）を返す
 }
 
 async function updateSchoolMaster(id, updates) {
-  const { error } = await supabase.from("schools").update(updates).eq("id", id);
+  const { data, error } = await supabase.from("schools").update(updates).eq("id", id).select("*");
   if (error) throw error;
+  if (!data || data.length===0) throw new Error("更新対象の学校が見つからないか、更新権限がありません。");
   invalidateSchoolsCache();
+  return data[0];
 }
 
 // ★チーム共通の目標設定（学校＝チーム単位で1セットのみ保持）
@@ -632,9 +648,11 @@ async function getSchoolGoals(schoolId) {
 }
 
 async function deleteSchoolMaster(id) {
-  const { error } = await supabase.from("schools").delete().eq("id", id);
+  const { data, error } = await supabase.from("schools").delete().eq("id", id).select("id, name");
   if (error) throw error;
+  if (!data || data.length===0) throw new Error("削除対象の学校が見つからないか、削除権限がありません。");
   invalidateSchoolsCache();
+  return data[0];
 }
 
 // ============================================================
@@ -9550,11 +9568,19 @@ function AdminSchoolsScreen({ onBack }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [listPrefFilter, setListPrefFilter] = useState("");
 
-  const reload = useCallback(() => {
+  const reload = useCallback(async () => {
     setLoading(true);
-    getSchools(true).then(list => { setSchools(list); setLoading(false); });
-    // ★管理画面は「今のDBの正しい状態」を見る場所なので、
-    //   古いキャッシュを使い回さず必ずサーバーへ再取得しにいく（force=true）
+    try {
+      const list = await getSchools(true);
+      setSchools(list);
+      // ★管理画面は「今のDBの正しい状態」を見る場所なので、
+      //   古いキャッシュを使い回さず必ずサーバーへ再取得しにいく（force=true）
+    } catch (e) {
+      console.error("学校マスターの再読み込みに失敗しました:", e);
+      alert("学校一覧の取得に失敗しました。\n通信状態を確認して、もう一度再読み込みしてください。");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
