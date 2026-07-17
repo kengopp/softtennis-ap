@@ -4583,13 +4583,20 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
 
   return (
     <div style={S.page}>
-      <div style={S.hdr}>
+      <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>設定</span>
+        <div style={{ display:"flex",gap:6 }}>
+          <button
+            style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:14, padding:"6px 9px", cursor:"pointer" }}
+            onClick={onProfile} title="プロフィール"
+          >👤</button>
+          <button
+            style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:11, padding:"6px 10px", cursor:"pointer" }}
+            onClick={onLogout}
+          >ログアウト</button>
+        </div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
-        <div style={{ background:"red", color:"white", padding:10, marginBottom:10, fontWeight:700, borderRadius:8, textAlign:"center" }}>
-          BUILD TEST 2026-07-17-A
-        </div>
         <div
           style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
           onClick={onGoalSettings}
@@ -4643,24 +4650,6 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
 
-        <div style={{ height:1, background:C.border, margin:"18px 0 10px" }} />
-
-        <div
-          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
-          onClick={onProfile}
-        >
-          <div>
-            <div style={{ fontSize:14,fontWeight:700 }}>👤 プロフィール</div>
-            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>名前・紐づけ選手などの設定</div>
-          </div>
-          <span style={{ fontSize:16,color:C.textSec }}>→</span>
-        </div>
-        <div
-          style={{ ...S.card, padding:"16px 14px", cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center", color:"#c62828" }}
-          onClick={onLogout}
-        >
-          <div style={{ fontSize:14,fontWeight:700 }}>🚪 ログアウト</div>
-        </div>
       </div>
       <NavBar active="master" onNavigate={onNavigate}/>
     </div>
