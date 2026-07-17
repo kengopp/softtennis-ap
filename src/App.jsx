@@ -1705,6 +1705,28 @@ function buildAiSummary(sum) {
   return { text: lines.join(""), todayPoints };
 }
 
+function buildHighlights(sum) {
+  const good = [];
+  const bad = [];
+  if (sum.bestPlays[0])  good.push(`${sum.bestPlays[0].label}の成功率が${sum.bestPlays[0].rate}%で、この試合最大の得点源でした。`);
+  if (sum.worstPlays[0]) bad.push(`${sum.worstPlays[0].label}の成功率が${sum.worstPlays[0].rate}%と低く、次の課題です。`);
+
+  if (sum.totalA>0 && good.length<2) {
+    const pct = Math.round(sum.attackA/sum.totalA*100);
+    if (pct>=50) good.push(`攻撃で決めた得点の割合が${pct}%と高く、自分たちの形で試合を進められました。`);
+  }
+  if (sum.secondServeTotal>0) {
+    const rate = Math.round(sum.secondServeWin/sum.secondServeTotal*100);
+    if (rate>=50 && good.length<2) good.push(`2ndサーブ時の得点率が${rate}%と安定していました。`);
+    else if (rate<50 && bad.length<2) bad.push(`2ndサーブ時の得点率が${rate}%と低く、組み立てを見直しましょう。`);
+  }
+  if (sum.totalB>0 && bad.length<2) {
+    const pct = Math.round(sum.oppAttackA/sum.totalB*100);
+    if (pct>=50) bad.push(`失点の${pct}%は相手の攻撃によるもので、対策が必要です。`);
+  }
+  return { good: good.slice(0,2), bad: bad.slice(0,2) };
+}
+
 function buildPriorities(sum) {
   return sum.worstPlays.map((p,i)=>({
     stars: Math.max(5-i, 1),
@@ -8317,10 +8339,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 // ============================================================
 function MatchSummaryPanel({ match }) {
   const sum = calcMatchSummary(match);
-  const ai = buildAiSummary(sum);
-  const priorities = buildPriorities(sum);
+  const highlights = buildHighlights(sum);
   const teamALabel = match.players.find(p=>p.team==="A")?.club_name || "自チーム";
   const teamBLabel = match.players.find(p=>p.team==="B")?.club_name || "相手チーム";
+  const isFinished = match.status==="finished";
+  const aWin = match.match_score_a > match.match_score_b;
 
   const detailBox = { background:C.white, border:`1px solid ${C.border}`, borderRadius:12, marginBottom:10, overflow:"hidden" };
   const summaryBtn = { fontSize:12, fontWeight:700, color:C.text, padding:"12px 14px", cursor:"pointer", listStyle:"none", display:"flex", alignItems:"center", gap:6 };
@@ -8337,72 +8360,54 @@ function MatchSummaryPanel({ match }) {
 
   return (
     <div style={{ marginBottom:14 }}>
-      {/* ①試合サマリー */}
+      {/* ①試合サマリー（試合結果／良かった点／改善ポイント／決定率・最多得点） */}
       <div style={{ ...detailBox, padding:14 }}>
-        <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>📋 試合サマリー</div>
-        {sum.topScorer && (
-          <div style={{ display:"flex", alignItems:"center", gap:10, background:"#fff7e6", border:"1px solid #f0d999", borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
-            <span style={{ fontSize:20 }}>🎯</span>
-            <div>
-              <div style={{ fontSize:13, fontWeight:800 }}>最多得点：{sum.topScorer.player_name}</div>
-              <div style={{ fontSize:11, color:C.textSec }}>得点{sum.topScorer.winners}</div>
-            </div>
+        <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>📋 試合サマリー</div>
+
+        {isFinished && (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10, background:C.gray, borderRadius:10, padding:14, marginBottom:14 }}>
+            <span style={{ fontSize:13, fontWeight:800, padding:"4px 12px", borderRadius:20, color:C.white, background:aWin?C.accent:C.textSec }}>{aWin?"勝利":"敗北"}</span>
+            <span style={{ fontSize:20, fontWeight:900, color:C.text }}>{match.match_score_a} - {match.match_score_b}</span>
           </div>
         )}
-        <div style={{ textAlign:"center", background:C.navy, color:C.white, borderRadius:10, padding:"10px 0", marginBottom:10 }}>
-          <div style={{ fontSize:26, fontWeight:900 }}>{sum.totalA}点</div>
-          <div style={{ fontSize:10, opacity:0.75 }}>この試合の総得点</div>
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-          {[
-            ["攻撃で決めた", sum.attackA, C.accent],
-            ["相手ミス",     sum.oppMissA, "#9fd9b8"],
-            ["自分ミス（失点）", sum.selfMissA, C.red],
-            ["相手の攻撃（失点）", sum.oppAttackA, "#f0b8c2"],
-          ].map(([l,v,c])=>(
-            <div key={l} style={{ background:C.gray, borderRadius:8, padding:"8px 4px", textAlign:"center" }}>
-              <div style={{ fontSize:18, fontWeight:800, color:c }}>{v}</div>
-              <div style={{ fontSize:10, color:C.textSec, fontWeight:700 }}>{l}</div>
-            </div>
-          ))}
-        </div>
-        {sum.decisionRate!=null && (
-          <div style={{ textAlign:"center", marginTop:10, fontSize:12, color:C.textSec }}>決定率 <b style={{ fontSize:15, color:C.text }}>{sum.decisionRate}%</b></div>
+
+        {highlights.good.length>0 && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:11, fontWeight:800, color:C.accent, marginBottom:6, display:"flex", alignItems:"center", gap:5 }}>👍 良かった点</div>
+            {highlights.good.map((t,i)=>(
+              <div key={i} style={{ fontSize:12.5, color:C.text, lineHeight:1.5, padding:"8px 10px", background:C.gray, borderRadius:8, marginBottom:6 }}>{t}</div>
+            ))}
+          </div>
+        )}
+
+        {highlights.bad.length>0 && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:11, fontWeight:800, color:"#e08a2e", marginBottom:6, display:"flex", alignItems:"center", gap:5 }}>📝 改善ポイント</div>
+            {highlights.bad.map((t,i)=>(
+              <div key={i} style={{ fontSize:12.5, color:C.text, lineHeight:1.5, padding:"8px 10px", background:C.gray, borderRadius:8, marginBottom:6 }}>{t}</div>
+            ))}
+          </div>
+        )}
+
+        {(sum.decisionRate!=null || sum.topScorer) && (
+          <div style={{ display:"flex", gap:10, marginTop:14 }}>
+            {sum.decisionRate!=null && (
+              <div style={{ flex:1, background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+                <div style={{ fontSize:20, fontWeight:900, color:C.navy }}>{sum.decisionRate}%</div>
+                <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>決定率</div>
+              </div>
+            )}
+            {sum.topScorer && (
+              <div style={{ flex:1, background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+                <div style={{ fontSize:13, fontWeight:800, color:C.navy }}>{sum.topScorer.player_name}</div>
+                <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>最多得点（{sum.topScorer.winners}点）</div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {/* ②AI総評 */}
-      {ai.text && (
-        <div style={{ ...detailBox, padding:14 }}>
-          <div style={{ fontSize:13, fontWeight:800, marginBottom:8 }}>🤖 AI総評</div>
-          <div style={{ background:"linear-gradient(135deg,#eef4ff,#f7fbff)", border:"1px solid #cfe0f7", borderRadius:10, padding:12, fontSize:12, lineHeight:1.8, color:"#274566" }}>{ai.text}</div>
-          {ai.todayPoints.length>0 && (
-            <div style={{ background:C.navy, color:C.white, borderRadius:10, padding:"10px 12px", marginTop:10 }}>
-              <div style={{ fontSize:11, fontWeight:800, opacity:0.85, marginBottom:6 }}>📌 今日のポイント</div>
-              <ul style={{ margin:0, paddingLeft:18, fontSize:12, lineHeight:1.8 }}>
-                {ai.todayPoints.map((t,i)=><li key={i}>{t}</li>)}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ③改善優先順位 */}
-      {priorities.length>0 && (
-        <div style={{ ...detailBox, padding:14 }}>
-          <div style={{ fontSize:13, fontWeight:800, marginBottom:8 }}>🎯 改善優先順位</div>
-          {priorities.map((p,i)=>(
-            <div key={i} style={{ padding:"9px 0", borderBottom:i<priorities.length-1?`1px solid ${C.border}`:"none" }}>
-              <div style={{ fontSize:12, color:"#e8a93c", letterSpacing:1 }}>{"★".repeat(p.stars)}{"☆".repeat(5-p.stars)}</div>
-              <div style={{ fontSize:13, fontWeight:700, marginTop:2 }}>{p.text}</div>
-              <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>{p.reason}</div>
-              <div style={{ fontSize:11, color:C.accent, fontWeight:700, marginTop:2 }}>{p.effect}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ④詳細分析（折りたたみ） */}
+      {/* ②詳細分析（折りたたみ） */}
       <div style={{ fontSize:11, color:C.textSec, fontWeight:700, margin:"14px 2px 6px" }}>▼ 詳細分析</div>
 
       {(sum.posStats.front.name || sum.posStats.back.name) && (
