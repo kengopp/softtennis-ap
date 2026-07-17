@@ -5178,14 +5178,19 @@ function GoalSettingsScreen({ onBack }) {
   );
 }
 
-function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats, onProfile, onGoToTournaments }) {
+function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats, onProfile, onGoToTournaments, onOpenTournament }) {
   const [allMatches, setAllMatches] = useState([]);
+  const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
   const [showNewModal, setShowNewModal] = useState(false);
 
-  useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
+  useEffect(() => {
+    Promise.all([getMatches(), getTournaments()]).then(([matches, tns])=>{
+      setAllMatches(matches); setTournaments(tns); setLoading(false);
+    });
+  }, []);
   useEffect(() => {
     (async () => {
       const p = await getMyProfile();
@@ -5200,8 +5205,24 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
 
   const finished = allMatches.filter(m=>m.status==="finished");
   const wins = finished.filter(m=>m.match_score_a>m.match_score_b).length;
-  const winRate = finished.length>0 ? Math.round(wins/finished.length*100) : 0;
   const recent = allMatches.slice(0,3);
+
+  // ★進行中の試合（記録再開の導線）
+  const liveMatch = allMatches.find(m => m.status==="active");
+
+  // ★進行中がない場合に表示する、直近の大会予定（大会単位）
+  const todayStr = today();
+  const upcomingTournament = !liveMatch
+    ? tournaments
+        .filter(t => (t.end_date || t.start_date) >= todayStr)
+        .sort((a,b) => a.start_date.localeCompare(b.start_date))[0]
+    : null;
+
+  // ★成績サマリー：試合数が少ないうちは「集計中」表示に
+  const STATS_MIN = 5;
+  const isStatsReady = finished.length >= STATS_MIN;
+  // ★直近5試合の調子（新しい順）
+  const last5 = finished.slice(0, 5).map(m => m.match_score_a > m.match_score_b);
 
   // ★紐づけ選手（お子さん/自分）の戦績を、この画面で直接計算する
   const linkedMatches = linkedPlayerName ? allMatches.filter(m => m.players.some(p=>p.player_name===linkedPlayerName)) : [];
@@ -5225,7 +5246,36 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
         ) : (
           <>
-            {/* サマリーカード */}
+            {/* ①進行中の試合カード */}
+            {liveMatch && (() => {
+              const aP = liveMatch.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
+              const bP = liveMatch.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+              const bC = liveMatch.players.find(p=>p.team==="B")?.club_name ?? "";
+              return (
+                <div style={{ ...S.card, padding:16, marginBottom:14, borderLeft:`4px solid ${C.navy}` }}>
+                  <div style={{ fontSize:11,fontWeight:800,color:C.navy,marginBottom:8 }}>記録途中の試合があります</div>
+                  <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{aP} vs {bC} {bP}</div>
+                  <div style={{ fontSize:12,color:C.textSec,marginBottom:12 }}>
+                    {fmtDate(liveMatch.match_date)}{liveMatch.tournament_name ? ` ・ ${liveMatch.tournament_name}` : ""}
+                  </div>
+                  <button style={{ ...S.btn(C.navy) }} onClick={()=>onOpen(liveMatch.id)}>記録を続ける →</button>
+                </div>
+              );
+            })()}
+
+            {/* ②次の試合予定カード（進行中がない場合のみ、大会基準） */}
+            {upcomingTournament && (
+              <div
+                style={{ ...S.card, padding:16, marginBottom:14, borderLeft:`4px solid ${C.textSec}`, cursor:"pointer" }}
+                onClick={()=>onOpenTournament && onOpenTournament(upcomingTournament)}
+              >
+                <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
+                <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{upcomingTournament.name}</div>
+                <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(upcomingTournament.start_date)}</div>
+              </div>
+            )}
+
+            {/* ③サマリーカード */}
             <div style={{ ...S.card, padding:16, marginBottom:14 }}>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
                 <div>
@@ -5233,12 +5283,24 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                   <div style={{ fontSize:11,color:C.textSec }}>総試合数</div>
                 </div>
                 <div>
-                  <div style={{ fontSize:22,fontWeight:800,color:C.accent }}>{winRate}%</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                  {isStatsReady ? (
+                    <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{wins}勝{finished.length-wins}敗</div>
+                  ) : (
+                    <div style={{ fontSize:14,fontWeight:700,color:C.textSec }}>集計中</div>
+                  )}
+                  <div style={{ fontSize:11,color:C.textSec }}>戦績{!isStatsReady && finished.length>0 ? `（${wins}勝${finished.length-wins}敗）` : ""}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{wins}勝{finished.length-wins}敗</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                  {last5.length>0 ? (
+                    <div style={{ display:"flex",justifyContent:"center",gap:4 }}>
+                      {last5.map((w,i)=>(
+                        <div key={i} style={{ width:16,height:16,borderRadius:"50%",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",border:`1px solid ${w?C.navy:C.border}`,color:w?C.text:C.textSec }}>{w?"勝":"負"}</div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:14,fontWeight:700,color:C.textSec }}>ー</div>
+                  )}
+                  <div style={{ fontSize:11,color:C.textSec,marginTop:last5.length>0?6:4 }}>直近{last5.length||5}試合の調子</div>
                 </div>
               </div>
             </div>
@@ -5282,7 +5344,10 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
               <div style={{ ...S.card, padding:16, marginBottom:14, border:`1px solid ${C.navy}22` }}>
                 <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:10 }}>🎾 {linkedPlayerName}さんの戦績</div>
                 {linkedFinished.length===0 ? (
-                  <div style={{ fontSize:12,color:C.textSec }}>まだ試合記録がありません</div>
+                  <>
+                    <div style={{ fontSize:12,color:C.textSec,marginBottom:10 }}>まだ試合記録がありません</div>
+                    <button style={{ ...S.btn("#f4f6fa"), color:C.navy, border:`1px solid ${C.border}`, fontSize:12, fontWeight:700, padding:9 }} onClick={onNew}>この選手の試合を記録する</button>
+                  </>
                 ) : (
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
                     <div>
@@ -10502,6 +10567,7 @@ export default function App() {
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
         onProfile={()=>setScreen("profile")}
         onGoToTournaments={()=>{ setTournamentContext(null); setListMatchMode("tournament"); setScreen("list"); }}
+        onOpenTournament={t=>{ setTournamentContext(t); setListMatchMode("tournament"); setScreen("tournamentDetail"); }}
       />
     );
   }
