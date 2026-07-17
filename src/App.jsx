@@ -4587,6 +4587,9 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>設定</span>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
+        <div style={{ background:"red", color:"white", padding:10, marginBottom:10, fontWeight:700, borderRadius:8, textAlign:"center" }}>
+          BUILD TEST 2026-07-17-A
+        </div>
         <div
           style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
           onClick={onGoalSettings}
