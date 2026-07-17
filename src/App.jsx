@@ -8719,8 +8719,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       {comments.length>0&&(
         <div style={{ marginBottom:16 }}>
           {comments.map((c,i)=>(
-            <div key={i} style={{ background:c.type==="strength"?C.accentL:c.type==="warning"?C.redL:C.redL, border:`1px solid ${c.type==="strength"?C.accent:c.type==="warning"?C.red:C.red}`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
-              <div style={{ fontSize:11,fontWeight:700,color:c.type==="strength"?C.accent:c.type==="warning"?C.red:C.red,marginBottom:3 }}>{c.type==="strength"?"💪 強み":"⚠️ 課題"} — {c.player}</div>
+            <div key={i} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.textSec,marginBottom:3 }}>{c.type==="strength"?"💪 強み":"⚠️ 課題"} — {c.player}</div>
               <p style={{ fontSize:12,color:C.navy,lineHeight:1.6 }}>{c.text}</p>
             </div>
           ))}
