@@ -2104,6 +2104,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (filterStatus === "upcoming" && !isUpcomingTournament(t)) return false;
     if (filterStatus === "finished" && isUpcomingTournament(t)) return false;
     if (!tournamentMatchesDateFilter(t)) return false;
+    if (childOnly && linkedPlayerName) {
+      const hasInIndividual = allMatches.some(m => m.tournament_name===t.name && m.players.some(p=>p.player_name===linkedPlayerName));
+      const hasInTeam = allTeamMatches.some(tm => tm.tournament_name===t.name && (tm.games||[]).some(g =>
+        [g.a_player1, g.a_player2, g.b_player1, g.b_player2].some(n => n === linkedPlayerName)
+      ));
+      if (!hasInIndividual && !hasInTeam) return false;
+    }
     return true;
   });
 
