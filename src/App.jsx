@@ -1798,7 +1798,33 @@ const S = {
 // ============================================================
 // 共通コンポーネント
 // ============================================================
+// ★モーダル表示中に背景（body）がスクロールしてしまうのを防ぐ（主にiOSで発生する不具合対策）
+function useBodyScrollLock(locked) {
+  useEffect(() => {
+    if (!locked) return;
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const prev = { position: body.style.position, top: body.style.top, left: body.style.left, right: body.style.right, width: body.style.width, overflow: body.style.overflow };
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    return () => {
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.left = prev.left;
+      body.style.right = prev.right;
+      body.style.width = prev.width;
+      body.style.overflow = prev.overflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [locked]);
+}
+
 function Modal({ children, onClose }) {
+  useBodyScrollLock(true);
   return (
     <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
       <div style={{ background:C.white,borderRadius:20,padding:"28px 20px",width:"100%",maxWidth:340 }} onClick={e=>e.stopPropagation()}>{children}</div>
@@ -5969,8 +5995,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         const aP = (matchData?.match_players||[]).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "自チーム";
         const bP = (matchData?.match_players||[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "相手チーム";
         return (
-          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20 }}>
-            <div style={{ background:C.white, borderRadius:16, padding:24, width:"100%", maxWidth:360, textAlign:"center" }}>
+          <Modal onClose={()=>setServeSelectInfo(null)}>
+            <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
               <h3 style={{ fontSize:16, fontWeight:800, marginBottom:4 }}>最初のサーブを選択</h3>
               <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
@@ -5984,7 +6010,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
               </div>
               <button style={{ width:"100%", padding:12, borderRadius:10, border:`1px solid ${C.border}`, background:C.gray, color:C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setServeSelectInfo(null)}>キャンセル</button>
             </div>
-          </div>
+          </Modal>
         );
       })()}
     </div>
@@ -10261,6 +10287,9 @@ export default function App() {
   const [screen,       setScreen]       = useState("home");
   const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
   const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
+
+  // ★画面が切り替わるたびに、前の画面のスクロール位置が残らないよう先頭に戻す
+  useEffect(() => { window.scrollTo(0, 0); }, [screen]);
 
   // ★動画レビュー画面の状態はここ（App本体）に持たせ、他のタブに移動して戻っても消えないようにする
   const [vrMatchId, setVrMatchId] = useState(null);
