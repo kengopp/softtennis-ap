@@ -8221,6 +8221,28 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               onClick={onRefresh} disabled={refreshing}
             >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
           </div>
+          {/* ★試合が終了していなければ、いつでも自分が記録者としてロックを引き継げるようにする
+                （記録者ロックが自分以外・または不整合になっていても、これで即座に復帰できる） */}
+          {match.status!=="finished" && (
+            <button
+              style={{ ...S.btn(C.navy), fontSize:12, padding:"9px", marginTop:8 }}
+              onClick={async ()=>{
+                try {
+                  const { data:{ user } } = await supabase.auth.getUser();
+                  const profile = await getMyProfile();
+                  if (teamMatchId) {
+                    const { data: tmg } = await supabase.from("team_match_games").select("id").eq("match_id", match.id).maybeSingle();
+                    if (tmg) await updateTeamMatchGame(tmg.id, { recorder_id:user.id, recorder_name: profile?.name || null });
+                  } else {
+                    await supabase.from("matches").update({ created_by:user.id }).eq("id", match.id);
+                  }
+                  onReload();
+                } catch(e) {
+                  alert("エラー: " + (e.message || e));
+                }
+              }}
+            >🔓 自分が記録者になる（続きから記録する）</button>
+          )}
           {/* ★「結果だけ記録」で終えた試合（ゲームが1つも無いまま終了扱い）は、
                 ここから直接ポイント記録に切り替えられるようにする */}
           {match.status==="finished" && match.games.length===0 && (
