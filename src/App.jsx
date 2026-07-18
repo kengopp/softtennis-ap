@@ -3050,7 +3050,13 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
     return () => { cancelled = true; };
   }, [tournament.name]);
 
-  const availableDates = Object.keys(dateGroups).sort();
+  // ★大会の開催期間（start_date〜end_date）に入っていない日付は、
+  //   同じ大会名で誤って別日に記録されたデータの可能性が高いため除外する
+  const tStart = tournament.start_date;
+  const tEnd = tournament.end_date || tournament.start_date;
+  const availableDates = Object.keys(dateGroups)
+    .filter(d => (!tStart || d >= tStart) && (!tEnd || d <= tEnd))
+    .sort();
   const matchesOfDay = selectedDate ? (dateGroups[selectedDate] || []) : [];
 
   // ★選択中の日の自チーム(A)選手ごとの集計
@@ -3072,6 +3078,11 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
         r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
         r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
         seenThisMatch.add(s.player_name);
+      });
+      // ★「結果だけ記録」の試合はポイントデータが無くcalcPlayerStatsに出てこないため、
+      //   match_players（実際に出場したA側の選手）から直接、勝敗の対象に含める
+      (Array.isArray(m.players) ? m.players : []).forEach(p => {
+        if (p.team === "A" && p.player_name && !PLACEHOLDER_NAMES.has(p.player_name)) seenThisMatch.add(p.player_name);
       });
       if (isFinished) {
         seenThisMatch.forEach(name => {
