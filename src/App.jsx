@@ -4,6 +4,7 @@ import { supabase } from "./supabase-client";
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(e) { return { error: e }; }
+  componentDidCatch(error, errorInfo) { console.error("画面描画エラー:", error, errorInfo); }
   render() {
     if (this.state.error) {
       return (
@@ -1513,9 +1514,13 @@ function finalServer(first, played) {
 // 統計計算（play_type / result_type ベースに対応）
 // ============================================================
 function calcPlayerStats(match) {
+  if (!match) return [];
+  const matchPlayers = Array.isArray(match.players) ? match.players : [];
+  const matchGames = Array.isArray(match.games) ? match.games : [];
+
   // 選手名 -> 所属チーム('A'/'B') の対応表（match_playersが正、scoring_teamには依存しない）
   const teamOf = {};
-  for (const p of match.players) teamOf[p.player_name] = p.team;
+  for (const p of matchPlayers) { if (p?.player_name) teamOf[p.player_name] = p.team; }
 
   const result = {};
   const ensure = (playerTeam, playerName) => {
@@ -1533,16 +1538,22 @@ function calcPlayerStats(match) {
 
   // チームごとの選手をorder_num順に並べる（[0]=選手1, [1]=選手2）
   const teamPlayers = {
-    A: match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
-    B: match.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
+    A: matchPlayers.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
+    B: matchPlayers.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
   };
   // ソフトテニスのダブルス規則：1ゲーム内、サーブ側ペアは2ポイントずつ交代でサーブする
   // （選手1が1-2点目、選手2が3-4点目...）。レシーブ側も同じ交代タイミングに対応する選手が受ける。
   // シングルスの場合はteamPlayersが1人なので常にその選手に集計される。
-  const individualAt = (players, turn) => players.length<=1 ? (players[0]??null) : (Math.floor(turn/2)%2===0 ? players[0] : players[1]);
+  const individualAt = (players, turn) => {
+    if (!Array.isArray(players) || players.length===0) return null;
+    if (players.length===1) return players[0];
+    return Math.floor(turn/2)%2===0 ? players[0] : players[1];
+  };
 
-  for (const g of match.games) {
-    for (const pt of g.points) {
+  for (const g of matchGames) {
+    const points = Array.isArray(g.points) ? g.points : [];
+    const faults = Array.isArray(g.faults) ? g.faults : [];
+    for (const pt of points) {
       if (!pt.player_name) continue;
       const playerTeam = teamOf[pt.player_name] ?? pt.scoring_team;
       const r = ensure(playerTeam, pt.player_name);
@@ -1555,7 +1566,7 @@ function calcPlayerStats(match) {
         bucket[pt.play_type] = (bucket[pt.play_type] ?? 0) + 1;
       }
     }
-    for (const f of (g.faults ?? [])) {
+    for (const f of faults) {
       if (!f.player_name) continue;
       const playerTeam = teamOf[f.player_name] ?? f.server_team;
       const r = ensure(playerTeam, f.player_name);
@@ -1565,9 +1576,10 @@ function calcPlayerStats(match) {
     // ★1stサーブ確率・レシーブミス率（2ポイントごとの選手交代を反映して個人に按分）
     let beforeA = 0, beforeB = 0;       // このポイント開始時点のスコア（フォルト記録との突き合わせ用）
     let serveTurnA = 0, serveTurnB = 0; // 各チームがこのゲームで通算何ポイント目のサーブか
-    for (let idx=0; idx<g.points.length; idx++) {
-      const pt = g.points[idx];
+    for (let idx=0; idx<points.length; idx++) {
+      const pt = points[idx];
       const serverTeam  = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
+      if (serverTeam !== "A" && serverTeam !== "B") { beforeA = pt.score_a_after; beforeB = pt.score_b_after; continue; }
       const receiveTeam = serverTeam==="A" ? "B" : "A";
       const serveTurn   = serverTeam==="A" ? serveTurnA : serveTurnB;
 
@@ -1575,7 +1587,7 @@ function calcPlayerStats(match) {
       const receiverPlayer = individualAt(teamPlayers[receiveTeam], serveTurn);
 
       // このポイントの直前に1stフォルトが記録されていたか（スコア一致で突き合わせ）
-      const hadFault = (g.faults ?? []).some(f => f.server_team===serverTeam && f.score_a_at===beforeA && f.score_b_at===beforeB);
+      const hadFault = faults.some(f => f.server_team===serverTeam && f.score_a_at===beforeA && f.score_b_at===beforeB);
 
       if (serverPlayer) {
         const r = ensure(serverTeam, serverPlayer);
@@ -2973,44 +2985,57 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
   const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([getMatches(), getTeamMatches()]).then(([allMatchesRaw, allTeamMatches]) => {
+
+    (async () => {
       try {
-        const matchById = {};
-        allMatchesRaw.forEach(m => { matchById[m.id] = m; });
+        const [matchSummaries, teamMatches] = await Promise.all([getMatches(), getTeamMatches()]);
+
         const teamBoutIds = new Set();
-        allTeamMatches.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); }));
+        teamMatches.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); }));
 
-        const groups = {}; // date -> [match,...]
-        const pushToGroup = (date, match) => {
-          if (!date || !match) return;
-          (groups[date] ??= []).push(match);
-        };
-
-        // 個人戦（この大会に紐づき、団体戦の番手ではないもの）
-        allMatchesRaw
+        // ★対象となる試合ID＋その日付（個人戦はmatch_date、団体戦の各番手は団体戦本体のmatch_dateを使う）
+        const targetRows = [];
+        matchSummaries
           .filter(m => m.tournament_name === tournament.name && !teamBoutIds.has(m.id))
-          .forEach(m => pushToGroup(m.match_date, m));
-
-        // 団体戦（この大会の団体戦。各番手の実データはmatchByIdから取得し、日付は団体戦本体の日付を使う）
-        allTeamMatches
+          .forEach(m => targetRows.push({ matchId: m.id, date: m.match_date }));
+        teamMatches
           .filter(tm => tm.tournament_name === tournament.name)
-          .forEach(tm => {
-            (tm.games || []).forEach(g => {
-              const m = matchById[g.match_id];
-              if (m) pushToGroup(tm.match_date, m);
-            });
-          });
+          .forEach(tm => (tm.games||[]).forEach(g => {
+            if (g.match_id) targetRows.push({ matchId: g.match_id, date: tm.match_date });
+          }));
+        const uniqueRows = Array.from(new Map(targetRows.map(row => [row.matchId, row])).values());
 
+        // ★集計に必要なplayer_name/play_type/faultsなどを含む「詳細データ」を1件ずつ取得する
+        //   （getMatches()の一覧データはポイントの一部項目のみで、選手別集計には使えないため）
+        const detailedMatches = await Promise.all(
+          uniqueRows.map(async row => {
+            const full = await getMatch(row.matchId);
+            return full ? { ...full, ranking_date: row.date || full.match_date } : null;
+          })
+        );
+
+        const groups = {};
+        detailedMatches.filter(Boolean).forEach(m => {
+          const date = m.ranking_date;
+          if (!date) return;
+          (groups[date] ??= []).push(m);
+        });
+
+        if (cancelled) return;
         setDateGroups(groups);
         const dates = Object.keys(groups).sort();
         setSelectedDate(prev => (prev && groups[prev]) ? prev : (dates[0] ?? null));
       } catch (e) {
-        setLoadError(e);
+        if (!cancelled) setLoadError(e);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
-    }).catch(e => { setLoadError(e); setLoading(false); });
+    })();
+
+    return () => { cancelled = true; };
   }, [tournament.name]);
 
   const availableDates = Object.keys(dateGroups).sort();
