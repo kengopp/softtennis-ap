@@ -2096,18 +2096,19 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return true;
   });
 
+  // ★団体戦の各番手(game)の選手名は、a_player1等の列ではなく、
+  //   game.match_id が指す matches の match_players（=allMatchesのm.players）にある。
+  const matchPlayersByMatchId = {};
+  allMatches.forEach(m => { matchPlayersByMatchId[m.id] = m.players; });
+  const teamMatchHasPlayer = (tm, name) => (tm.games || []).some(g =>
+    (matchPlayersByMatchId[g.match_id] || []).some(p => p.player_name === name)
+  );
+
   const filteredTeamMatches = allTeamMatches.filter(tm => {
     if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
     if (filterStatus === "finished" && isUpcomingTeamMatch(tm)) return false;
     if (!matchesDateFilter(tm.match_date)) return false;
-    if (childOnly && linkedPlayerName) {
-      // 団体戦はgames内の選手名で絞り込む
-      const games = tm.games || [];
-      const hasPlayer = games.some(g =>
-        [g.a_player1, g.a_player2, g.b_player1, g.b_player2].some(n => n === linkedPlayerName)
-      );
-      if (!hasPlayer) return false;
-    }
+    if (childOnly && linkedPlayerName && !teamMatchHasPlayer(tm, linkedPlayerName)) return false;
     if (tmMySchoolOnly && mySchoolId) {
       // my_school_idがnullの場合はプロフィールの学校の試合とみなす
       const tmSchoolId = tm.my_school_id || mySchoolId;
@@ -2145,9 +2146,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (!tournamentMatchesDateFilter(t)) return false;
     if (childOnly && linkedPlayerName) {
       const hasInIndividual = allMatches.some(m => m.tournament_name===t.name && m.players.some(p=>p.player_name===linkedPlayerName));
-      const hasInTeam = allTeamMatches.some(tm => tm.tournament_name===t.name && (tm.games||[]).some(g =>
-        [g.a_player1, g.a_player2, g.b_player1, g.b_player2].some(n => n === linkedPlayerName)
-      ));
+      const hasInTeam = allTeamMatches.some(tm => tm.tournament_name===t.name && teamMatchHasPlayer(tm, linkedPlayerName));
       if (!hasInIndividual && !hasInTeam) return false;
     }
     return true;
