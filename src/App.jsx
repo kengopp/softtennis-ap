@@ -393,6 +393,19 @@ async function deleteMatch(id) {
   if (error) throw error;
 }
 
+// ★「結果だけ記録」で終えた試合を、後からポイントごとの詳細記録に切り替えたい時に使う。
+//   既存のgames/points/faultsを消し、スコアと状態を未開始に戻す（recorder_idも解放する）。
+async function resetMatchToUnrecorded(matchId) {
+  const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", matchId);
+  const gameIds = (existingGames ?? []).map(g => g.id);
+  if (gameIds.length) {
+    await supabase.from("points").delete().in("game_id", gameIds);
+    await supabase.from("faults").delete().in("game_id", gameIds);
+    await supabase.from("games").delete().in("id", gameIds);
+  }
+  await supabase.from("matches").update({ match_score_a:0, match_score_b:0, status:"waiting" }).eq("id", matchId);
+}
+
 // ゴミ箱に入っている（個人戦の）試合一覧を取得（軽量：明細は含めない）
 async function getDeletedMatches() {
   const { data, error } = await supabase
@@ -5942,9 +5955,33 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                       </div>
                     )}
                     {(isFinished || isSuspended || isRecording) && game?.match_id && (
-                      <button style={{ ...S.btn("#f0f0f0"), color:C.navy, fontSize:12, padding:"8px" }} onClick={()=>onOpenMatch && onOpenMatch(game.match_id)}>
-                        📋 スコア詳細を見る
-                      </button>
+                      <div style={{ display:"flex", gap:8 }}>
+                        <button style={{ ...S.btn("#f0f0f0"), color:C.navy, fontSize:12, padding:"8px", flex:1 }} onClick={()=>onOpenMatch && onOpenMatch(game.match_id)}>
+                          📋 スコア詳細を見る
+                        </button>
+                        {isFinished && (
+                          <button
+                            style={{ ...S.btn("#f0f0f0"), color:C.textSec, fontSize:12, padding:"8px", flex:1 }}
+                            onClick={async ()=>{
+                              const { data: gamesData } = await supabase.from("games").select("id, points(id)").eq("match_id", game.match_id);
+                              const hasPoints = (gamesData||[]).some(g => (g.points||[]).length>0);
+                              const msg = hasPoints
+                                ? "すでに記録されたポイントがすべて消えます。ポイントから記録し直しますか？"
+                                : "スコアをリセットして、ポイントから記録し直しますか？";
+                              if (!window.confirm(msg)) return;
+                              try {
+                                await resetMatchToUnrecorded(game.match_id);
+                                await updateTeamMatchGame(game.id, { status:"waiting", recorder_id:null, recorder_name:null });
+                                await loadData({ markAsChanged:true });
+                              } catch(e) {
+                                alert("エラー: " + (e.message || e));
+                              }
+                            }}
+                          >
+                            🎾 点数から記録し直す
+                          </button>
+                        )}
+                      </div>
                     )}
                   </>
                 ) : (
