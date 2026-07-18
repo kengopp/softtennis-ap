@@ -2970,69 +2970,97 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [expandedMetric, setExpandedMetric] = useState(null); // 「11位以降を見る」で開く項目キー
 
+  const [loadError, setLoadError] = useState(null);
+
   useEffect(() => {
     setLoading(true);
+    setLoadError(null);
     Promise.all([getMatches(), getTeamMatches()]).then(([allMatchesRaw, allTeamMatches]) => {
-      const matchById = {};
-      allMatchesRaw.forEach(m => { matchById[m.id] = m; });
-      const teamBoutIds = new Set();
-      allTeamMatches.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); }));
+      try {
+        const matchById = {};
+        allMatchesRaw.forEach(m => { matchById[m.id] = m; });
+        const teamBoutIds = new Set();
+        allTeamMatches.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); }));
 
-      const groups = {}; // date -> [match,...]
-      const pushToGroup = (date, match) => {
-        if (!date || !match) return;
-        (groups[date] ??= []).push(match);
-      };
+        const groups = {}; // date -> [match,...]
+        const pushToGroup = (date, match) => {
+          if (!date || !match) return;
+          (groups[date] ??= []).push(match);
+        };
 
-      // 個人戦（この大会に紐づき、団体戦の番手ではないもの）
-      allMatchesRaw
-        .filter(m => m.tournament_name === tournament.name && !teamBoutIds.has(m.id))
-        .forEach(m => pushToGroup(m.match_date, m));
+        // 個人戦（この大会に紐づき、団体戦の番手ではないもの）
+        allMatchesRaw
+          .filter(m => m.tournament_name === tournament.name && !teamBoutIds.has(m.id))
+          .forEach(m => pushToGroup(m.match_date, m));
 
-      // 団体戦（この大会の団体戦。各番手の実データはmatchByIdから取得し、日付は団体戦本体の日付を使う）
-      allTeamMatches
-        .filter(tm => tm.tournament_name === tournament.name)
-        .forEach(tm => {
-          (tm.games || []).forEach(g => {
-            const m = matchById[g.match_id];
-            if (m) pushToGroup(tm.match_date, m);
+        // 団体戦（この大会の団体戦。各番手の実データはmatchByIdから取得し、日付は団体戦本体の日付を使う）
+        allTeamMatches
+          .filter(tm => tm.tournament_name === tournament.name)
+          .forEach(tm => {
+            (tm.games || []).forEach(g => {
+              const m = matchById[g.match_id];
+              if (m) pushToGroup(tm.match_date, m);
+            });
           });
-        });
 
-      setDateGroups(groups);
-      const dates = Object.keys(groups).sort();
-      setSelectedDate(prev => (prev && groups[prev]) ? prev : (dates[0] ?? null));
+        setDateGroups(groups);
+        const dates = Object.keys(groups).sort();
+        setSelectedDate(prev => (prev && groups[prev]) ? prev : (dates[0] ?? null));
+      } catch (e) {
+        setLoadError(e);
+      }
       setLoading(false);
-    });
+    }).catch(e => { setLoadError(e); setLoading(false); });
   }, [tournament.name]);
 
   const availableDates = Object.keys(dateGroups).sort();
   const matchesOfDay = selectedDate ? (dateGroups[selectedDate] || []) : [];
 
   // ★選択中の日の自チーム(A)選手ごとの集計
-  const playerAgg = {};
-  const ensure = (name) => (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0 });
-  matchesOfDay.forEach(m => {
-    const stats = calcPlayerStats(m).filter(s => s.team === "A");
-    const isWin = m.match_score_a > m.match_score_b;
-    const isFinished = m.status === "finished";
-    const seenThisMatch = new Set();
-    stats.forEach(s => {
-      const r = ensure(s.player_name);
-      r.winners += s.winners; r.errors += s.errors;
-      r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
-      r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
-      seenThisMatch.add(s.player_name);
-    });
-    if (isFinished) {
-      seenThisMatch.forEach(name => {
-        const r = ensure(name);
-        r.matches++;
-        if (isWin) r.wins++; else r.losses++;
+  let players = [];
+  let computeError = null;
+  try {
+    const playerAgg = {};
+    const ensure = (name) => (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0 });
+    matchesOfDay.forEach(m => {
+      const stats = calcPlayerStats(m).filter(s => s.team === "A");
+      const isWin = m.match_score_a > m.match_score_b;
+      const isFinished = m.status === "finished";
+      const seenThisMatch = new Set();
+      stats.forEach(s => {
+        const r = ensure(s.player_name);
+        r.winners += s.winners; r.errors += s.errors;
+        r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
+        r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
+        seenThisMatch.add(s.player_name);
       });
-    }
-  });
-  const players = Object.values(playerAgg);
+      if (isFinished) {
+        seenThisMatch.forEach(name => {
+          const r = ensure(name);
+          r.matches++;
+          if (isWin) r.wins++; else r.losses++;
+        });
+      }
+    });
+    players = Object.values(playerAgg);
+  } catch (e) {
+    computeError = e;
+  }
+
+  if (computeError) {
+    return (
+      <div style={S.page}>
+        <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+          <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
+          <span style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング</span>
+        </div>
+        <div style={{ padding:20 }}>
+          <div style={{ fontSize:13, fontWeight:800, color:C.red, marginBottom:8 }}>集計中にエラーが発生しました</div>
+          <div style={{ fontSize:12, color:C.textSec, whiteSpace:"pre-wrap" }}>{computeError.message || String(computeError)}</div>
+        </div>
+      </div>
+    );
+  }
 
   const metrics = [
     { key:"winloss", icon:"🏆", title:"勝敗",
@@ -3088,6 +3116,11 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
       <div style={{ padding:14, paddingBottom:90 }}>
         {loading ? (
           <div style={{ textAlign:"center", color:C.textSec, marginTop:60 }}>読み込み中...</div>
+        ) : loadError ? (
+          <div>
+            <div style={{ fontSize:13, fontWeight:800, color:C.red, marginBottom:8 }}>読み込み中にエラーが発生しました</div>
+            <div style={{ fontSize:12, color:C.textSec, whiteSpace:"pre-wrap" }}>{loadError.message || String(loadError)}</div>
+          </div>
         ) : availableDates.length===0 ? (
           <div style={{ textAlign:"center", color:C.textSec, marginTop:60 }}>この大会にはまだ試合記録がありません</div>
         ) : (
@@ -11115,10 +11148,12 @@ export default function App() {
   }
   if (screen==="dailyRanking" && tournamentContext) {
     return (
-      <DailyPlayerRankingScreen
-        tournament={tournamentContext}
-        onBack={()=>setScreen("tournamentDetail")}
-      />
+      <ErrorBoundary>
+        <DailyPlayerRankingScreen
+          tournament={tournamentContext}
+          onBack={()=>setScreen("tournamentDetail")}
+        />
+      </ErrorBoundary>
     );
   }
   if (screen==="drawSetup" && tournamentContext) {
