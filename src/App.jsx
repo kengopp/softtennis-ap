@@ -1943,6 +1943,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
+  const [allMatchesRaw, setAllMatchesRaw] = useState([]); // ★団体戦の番手も含む「全試合」。個人戦一覧(allMatches)からは除外されるため別途保持
   const [allTeamMatches, setAllTeamMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -1998,6 +1999,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       (schools || []).forEach(s => { smap[s.id] = s.name; });
       setSchoolMap(smap);
       setTournaments(tnList || []);
+      setAllMatchesRaw(list);
       // 団体戦に紐付いたmatch_idを個人戦一覧から除外
       try {
         const { data: tmGames } = await supabase
@@ -2097,9 +2099,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   });
 
   // ★団体戦の各番手(game)の選手名は、a_player1等の列ではなく、
-  //   game.match_id が指す matches の match_players（=allMatchesのm.players）にある。
+  //   game.match_id が指す matches の match_players（=allMatchesRawのm.players）にある。
+  //   allMatchesは団体戦の番手を除外した「個人戦のみ」の一覧なので、ここではallMatchesRawを使う。
   const matchPlayersByMatchId = {};
-  allMatches.forEach(m => { matchPlayersByMatchId[m.id] = m.players; });
+  allMatchesRaw.forEach(m => { matchPlayersByMatchId[m.id] = m.players; });
   const teamMatchHasPlayer = (tm, name) => (tm.games || []).some(g =>
     (matchPlayersByMatchId[g.match_id] || []).some(p => p.player_name === name)
   );
