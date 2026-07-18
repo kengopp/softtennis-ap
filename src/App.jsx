@@ -801,8 +801,8 @@ async function getTeamMatches() {
 }
 
 async function getTeamMatch(id) {
-  const { data: m, error } = await supabase.from("team_matches").select("*").eq("id", id).single();
-  if (error || !m) { console.error(error); return null; }
+  const { data: m, error } = await supabase.from("team_matches").select("*").eq("id", id).is("deleted_at", null).maybeSingle();
+  if (error || !m) { if (error) console.error(error); return null; }
   const { data: games } = await supabase.from("team_match_games").select("*").eq("team_match_id", id).order("order_num");
   return { ...m, games: games ?? [] };
 }
@@ -860,8 +860,15 @@ async function saveTeamMatch(tm) {
   return row;
 }
 
-// ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする
+// ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする。
+//   団体戦本体だけでなく、各番手が参照しているmatches行も一緒に論理削除しないと、
+//   「団体戦は削除済みなのに、その番手のmatches行だけ進行中のまま残る」という不整合が起きる。
 async function deleteTeamMatch(id) {
+  const { data: games } = await supabase.from("team_match_games").select("match_id").eq("team_match_id", id);
+  const matchIds = (games ?? []).map(g => g.match_id).filter(Boolean);
+  if (matchIds.length > 0) {
+    await supabase.from("matches").update({ deleted_at: new Date().toISOString() }).in("id", matchIds);
+  }
   const { error } = await supabase.from("team_matches").update({ deleted_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
 }
@@ -876,6 +883,11 @@ async function getDeletedTeamMatches() {
   return data ?? [];
 }
 async function restoreTeamMatch(id) {
+  const { data: games } = await supabase.from("team_match_games").select("match_id").eq("team_match_id", id);
+  const matchIds = (games ?? []).map(g => g.match_id).filter(Boolean);
+  if (matchIds.length > 0) {
+    await supabase.from("matches").update({ deleted_at: null }).in("id", matchIds);
+  }
   const { error } = await supabase.from("team_matches").update({ deleted_at: null }).eq("id", id);
   if (error) throw error;
 }
@@ -5994,6 +6006,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
 // ============================================================
 function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onNavigate }) {
   const [tm, setTm] = useState(null);
+  const [notFound, setNotFound] = useState(false); // ★削除済みなどで団体戦が見つからない場合
   const [loading, setLoading] = useState(true);
   const [liveActive, setLiveActive] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(Date.now()); // ★最終更新時刻（差分確認・再開ボタン等で使用）
@@ -6022,7 +6035,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       getTeamMatch(teamMatchId),
       getSchools(),
     ]);
-    if (!data) return;
+    if (!data) { setNotFound(true); setLoading(false); return; }
     // 学校IDマップを作成
     const smap = {};
     (schools || []).forEach(s => { smap[s.id] = s.name; });
@@ -6095,6 +6108,22 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     return () => clearInterval(intervalRef.current);
   }, [liveActive, teamMatchId, tm?.status]);
 
+  if (notFound) {
+    return (
+      <div style={S.page}>
+        <div style={S.hdr}>
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+            <span style={{ fontSize:17,fontWeight:800,color:C.white }}>団体戦</span>
+          </div>
+        </div>
+        <div style={{ padding:24, textAlign:"center", color:C.textSec }}>
+          <div style={{ fontSize:32, marginBottom:10 }}>🗑</div>
+          この団体戦は削除されているため表示できません。<br/>試合一覧から最新の状態を確認してください。
+        </div>
+      </div>
+    );
+  }
   if (loading || !tm) {
     return <div style={S.page}><div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div></div>;
   }
