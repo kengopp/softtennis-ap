@@ -3185,6 +3185,26 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
               <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{matchesOfDay.length}試合</div>
             </div>
 
+            {/* ★どの試合が集計対象になっているか確認できるよう、一覧をそのまま表示する（人数が合わない時の確認用） */}
+            <div style={{ ...S.card, padding:14, marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>📋 この日に集計対象となった試合（{matchesOfDay.length}件）</div>
+              {matchesOfDay.length===0 ? (
+                <div style={{ fontSize:12, color:C.textSec, textAlign:"center" }}>試合がありません</div>
+              ) : matchesOfDay.map((m,i)=>{
+                const aP = (m.players||[]).filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "(選手未登録)";
+                const bP = (m.players||[]).filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "(選手未登録)";
+                return (
+                  <div key={m.id||i} style={{ padding:"7px 0", borderBottom: i<matchesOfDay.length-1?`1px solid ${C.border}`:"none", fontSize:11.5 }}>
+                    <div style={{ color:C.text }}>{aP} <span style={{ color:C.textSec }}>vs</span> {bP}</div>
+                    <div style={{ color:C.textSec, marginTop:1 }}>
+                      {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : `状態:${m.status}`}
+                      {m.games?.length===0 && m.status==="finished" ? "（結果だけ記録）" : ""}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
             {metrics.map(m=>(
               <div key={m.key} style={{ ...S.card, padding:14, marginBottom:12 }}>
                 <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>{m.icon} {m.title}</div>
