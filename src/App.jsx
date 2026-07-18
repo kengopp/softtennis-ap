@@ -7967,12 +7967,39 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
 
       {/* タブ */}
       {viewOnly && (
-        <div style={{ background:"#f5f5f5", borderBottom:"1px solid #e0e0e0", padding:"8px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
-          <button
-            style={{ background:C.navy, border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
-            onClick={onRefresh} disabled={refreshing}
-          >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
+        <div style={{ background:"#f5f5f5", borderBottom:"1px solid #e0e0e0", padding:"8px 14px" }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
+            <button
+              style={{ background:C.navy, border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
+              onClick={onRefresh} disabled={refreshing}
+            >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
+          </div>
+          {/* ★「結果だけ記録」で終えた試合（ゲームが1つも無いまま終了扱い）は、
+                ここから直接ポイント記録に切り替えられるようにする */}
+          {match.status==="finished" && match.games.length===0 && (
+            <button
+              style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:12, padding:"9px", marginTop:8 }}
+              onClick={async ()=>{
+                const msg = "スコアをリセットして、ここからポイントを記録し直しますか？";
+                if (!window.confirm(msg)) return;
+                try {
+                  const { data:{ user } } = await supabase.auth.getUser();
+                  const profile = await getMyProfile();
+                  await resetMatchToUnrecorded(match.id);
+                  if (teamMatchId) {
+                    const { data: tmg } = await supabase.from("team_match_games").select("id").eq("match_id", match.id).maybeSingle();
+                    if (tmg) await updateTeamMatchGame(tmg.id, { status:"waiting", recorder_id:user.id, recorder_name: profile?.name || null });
+                  } else {
+                    await supabase.from("matches").update({ created_by:user.id }).eq("id", match.id);
+                  }
+                  onReload();
+                } catch(e) {
+                  alert("エラー: " + (e.message || e));
+                }
+              }}
+            >🎾 ここからポイントを記録し直す</button>
+          )}
         </div>
       )}
       <div style={{ display:"flex",background:C.white,borderBottom:`1px solid ${C.border}` }}>
