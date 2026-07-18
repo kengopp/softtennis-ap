@@ -3054,13 +3054,15 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
   const matchesOfDay = selectedDate ? (dateGroups[selectedDate] || []) : [];
 
   // ★選択中の日の自チーム(A)選手ごとの集計
+  // 「前衛」「後衛」は本来ポジション名であり、選手名として誤登録された場合に紛れ込むため除外する
+  const PLACEHOLDER_NAMES = new Set(["前衛", "後衛"]);
   let players = [];
   let computeError = null;
   try {
     const playerAgg = {};
     const ensure = (name) => (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0 });
     matchesOfDay.forEach(m => {
-      const stats = calcPlayerStats(m).filter(s => s.team === "A");
+      const stats = calcPlayerStats(m).filter(s => s.team === "A" && !PLACEHOLDER_NAMES.has(s.player_name));
       const isWin = m.match_score_a > m.match_score_b;
       const isFinished = m.status === "finished";
       const seenThisMatch = new Set();
