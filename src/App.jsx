@@ -2741,7 +2741,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup }) {
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [matches, setMatches] = useState([]);
@@ -2797,6 +2797,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           style={{ background:"none", border:"none", color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", textDecoration:"underline" }}
           onClick={()=>onOpenDrawSetup && onOpenDrawSetup(seg)}
         >🗂️ ドロー設定</button>
+      </div>
+
+      <div style={{ margin:"10px 14px 0" }}>
+        <button
+          style={{ ...S.btn(C.navy), fontSize:12, padding:"9px", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
+          onClick={()=>onOpenDailyRanking && onOpenDailyRanking(tournament)}
+        >📊 日別選手ランキングを見る</button>
       </div>
 
       <div style={{ padding:"10px 14px", paddingBottom:90 }}>
@@ -2952,6 +2959,184 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     </div>
   );
 }
+
+// ============================================================
+// 日別 選手ランキング（大会×日付を指定し、その日に出場した自チーム選手を
+// 「勝敗／1stサーブ率／レシーブミス／得点／ミス／得失点差」でランキング表示）
+// ============================================================
+function DailyPlayerRankingScreen({ tournament, onBack }) {
+  const [loading, setLoading] = useState(true);
+  const [dateGroups, setDateGroups] = useState({}); // { "YYYY-MM-DD": [match, match, ...] }
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [expandedMetric, setExpandedMetric] = useState(null); // 「11位以降を見る」で開く項目キー
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([getMatches(), getTeamMatches()]).then(([allMatchesRaw, allTeamMatches]) => {
+      const matchById = {};
+      allMatchesRaw.forEach(m => { matchById[m.id] = m; });
+      const teamBoutIds = new Set();
+      allTeamMatches.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); }));
+
+      const groups = {}; // date -> [match,...]
+      const pushToGroup = (date, match) => {
+        if (!date || !match) return;
+        (groups[date] ??= []).push(match);
+      };
+
+      // 個人戦（この大会に紐づき、団体戦の番手ではないもの）
+      allMatchesRaw
+        .filter(m => m.tournament_name === tournament.name && !teamBoutIds.has(m.id))
+        .forEach(m => pushToGroup(m.match_date, m));
+
+      // 団体戦（この大会の団体戦。各番手の実データはmatchByIdから取得し、日付は団体戦本体の日付を使う）
+      allTeamMatches
+        .filter(tm => tm.tournament_name === tournament.name)
+        .forEach(tm => {
+          (tm.games || []).forEach(g => {
+            const m = matchById[g.match_id];
+            if (m) pushToGroup(tm.match_date, m);
+          });
+        });
+
+      setDateGroups(groups);
+      const dates = Object.keys(groups).sort();
+      setSelectedDate(prev => (prev && groups[prev]) ? prev : (dates[0] ?? null));
+      setLoading(false);
+    });
+  }, [tournament.name]);
+
+  const availableDates = Object.keys(dateGroups).sort();
+  const matchesOfDay = selectedDate ? (dateGroups[selectedDate] || []) : [];
+
+  // ★選択中の日の自チーム(A)選手ごとの集計
+  const playerAgg = {};
+  const ensure = (name) => (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0 });
+  matchesOfDay.forEach(m => {
+    const stats = calcPlayerStats(m).filter(s => s.team === "A");
+    const isWin = m.match_score_a > m.match_score_b;
+    const isFinished = m.status === "finished";
+    const seenThisMatch = new Set();
+    stats.forEach(s => {
+      const r = ensure(s.player_name);
+      r.winners += s.winners; r.errors += s.errors;
+      r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
+      r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
+      seenThisMatch.add(s.player_name);
+    });
+    if (isFinished) {
+      seenThisMatch.forEach(name => {
+        const r = ensure(name);
+        r.matches++;
+        if (isWin) r.wins++; else r.losses++;
+      });
+    }
+  });
+  const players = Object.values(playerAgg);
+
+  const metrics = [
+    { key:"winloss", icon:"🏆", title:"勝敗",
+      list: players.filter(p=>p.matches>0).map(p=>({ name:p.name, sub:`${p.matches}試合`, val:`${p.wins}勝${p.losses}敗`, sortVal:p.wins*1000-p.losses })).sort((a,b)=>b.sortVal-a.sortVal) },
+    { key:"firstserve", icon:"🎾", title:"1stサーブ率",
+      list: players.filter(p=>p.serveTotal>0).map(p=>({ name:p.name, sub:`${p.serveTotal-p.serveFault}/${p.serveTotal}本`, val:`${Math.round((p.serveTotal-p.serveFault)/p.serveTotal*100)}%`, sortVal:(p.serveTotal-p.serveFault)/p.serveTotal })).sort((a,b)=>b.sortVal-a.sortVal) },
+    { key:"receivemiss", icon:"🛡", title:"レシーブミスが少ない順",
+      list: players.filter(p=>p.receiveTotal>0).map(p=>({ name:p.name, sub:null, val:`${p.receiveMiss}回`, sortVal:-p.receiveMiss })).sort((a,b)=>b.sortVal-a.sortVal) },
+    { key:"winners", icon:"💪", title:"得点（決めた）が多い順",
+      list: players.map(p=>({ name:p.name, sub:null, val:`${p.winners}点`, sortVal:p.winners })).sort((a,b)=>b.sortVal-a.sortVal) },
+    { key:"errors", icon:"📝", title:"ミスが少ない順",
+      list: players.map(p=>({ name:p.name, sub:null, val:`${p.errors}回`, sortVal:-p.errors })).sort((a,b)=>b.sortVal-a.sortVal) },
+    { key:"diff", icon:"📊", title:"得失点差が大きい順",
+      list: players.map(p=>({ name:p.name, sub:null, val:(p.winners-p.errors)>=0?`+${p.winners-p.errors}`:`${p.winners-p.errors}`, sortVal:p.winners-p.errors })).sort((a,b)=>b.sortVal-a.sortVal) },
+  ];
+
+  if (expandedMetric) {
+    const m = metrics.find(mm => mm.key === expandedMetric);
+    return (
+      <div style={S.page}>
+        <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+          <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={()=>setExpandedMetric(null)}>←</button>
+          <span style={{ fontSize:16, fontWeight:800, color:C.white }}>{m.icon} {m.title}</span>
+        </div>
+        <div style={{ padding:14, paddingBottom:90 }}>
+          <div style={S.card}>
+            {m.list.length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>データがありません</div>}
+            {m.list.map((row,i)=>(
+              <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", borderBottom: i<m.list.length-1?`1px solid ${C.border}`:"none" }}>
+                <div style={{ width:24, textAlign:"center", fontSize:13, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13.5, fontWeight:700 }}>{row.name}</div>
+                  {row.sub && <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                </div>
+                <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>{row.val}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
+        <div>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>{tournament.name}</div>
+        </div>
+      </div>
+      <div style={{ padding:14, paddingBottom:90 }}>
+        {loading ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:60 }}>読み込み中...</div>
+        ) : availableDates.length===0 ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:60 }}>この大会にはまだ試合記録がありません</div>
+        ) : (
+          <>
+            <div style={{ ...S.card, padding:14, marginBottom:14 }}>
+              <div style={{ fontSize:11, color:C.textSec, marginBottom:8, fontWeight:700 }}>日付を選択</div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                {availableDates.map(d=>(
+                  <button key={d} style={{ ...S.togBtn(selectedDate===d, C.navy), fontSize:12, padding:"7px 12px" }} onClick={()=>setSelectedDate(d)}>{fmtDate(d)}</button>
+                ))}
+              </div>
+              <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{matchesOfDay.length}試合</div>
+            </div>
+
+            {metrics.map(m=>(
+              <div key={m.key} style={{ ...S.card, padding:14, marginBottom:12 }}>
+                <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>{m.icon} {m.title}</div>
+                {m.list.length===0 ? (
+                  <div style={{ textAlign:"center", color:C.textSec, fontSize:12, padding:"10px 0" }}>データがありません</div>
+                ) : (
+                  <>
+                    {m.list.slice(0,10).map((row,i)=>(
+                      <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderBottom: i<Math.min(m.list.length,10)-1?`1px solid ${C.border}`:"none" }}>
+                        <div style={{ width:20, textAlign:"center", fontSize:12, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:13, fontWeight:700 }}>{row.name}</div>
+                          {row.sub && <div style={{ fontSize:10, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                        </div>
+                        <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>{row.val}</div>
+                      </div>
+                    ))}
+                    {m.list.length > 10 && (
+                      <button
+                        style={{ width:"100%", textAlign:"center", padding:9, marginTop:8, borderRadius:9, background:C.gray, border:`1px solid ${C.border}`, fontSize:12, fontWeight:700, color:C.navy, cursor:"pointer" }}
+                        onClick={()=>setExpandedMetric(m.key)}
+                      >11位以降を見る（全{m.list.length}人）→</button>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+      <NavBar active="" onNavigate={()=>{}} />
+    </div>
+  );
+}
+
 
 // ============================================================
 // ドロー作成画面（回戦数・試合数の入力 → draw_matches を差分作成）
@@ -10924,6 +11109,15 @@ export default function App() {
         onCopyMatch={id=>{ setTournamentSeg("individual"); setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
         onCopyTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchCopyId(id); setTeamMatchEditId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
         onOpenDrawSetup={(seg)=>{ setTournamentSeg(seg); setScreen("drawSetup"); }}
+        onOpenDailyRanking={(t)=>{ setTournamentContext(t); setScreen("dailyRanking"); }}
+      />
+    );
+  }
+  if (screen==="dailyRanking" && tournamentContext) {
+    return (
+      <DailyPlayerRankingScreen
+        tournament={tournamentContext}
+        onBack={()=>setScreen("tournamentDetail")}
       />
     );
   }
