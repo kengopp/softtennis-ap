@@ -5743,6 +5743,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
   const [matchDetails, setMatchDetails] = useState({});
   const [serveSelectInfo, setServeSelectInfo] = useState(null); // サーブ選択モーダル用
+  const [simpleResultFor, setSimpleResultFor] = useState(null); // ★結果だけ記録モーダル用（{orderNum, game, aLabel, bLabel}）
+  const [simpleResultScoreA, setSimpleResultScoreA] = useState("");
+  const [simpleResultScoreB, setSimpleResultScoreB] = useState("");
+  const [simpleResultSaving, setSimpleResultSaving] = useState(false);
   const intervalRef = useRef(null);
   const inactiveRef = useRef(null);
   const lastSignatureRef = useRef(null); // ★変化検知用：前回確認時点の軽量シグネチャ
@@ -5950,15 +5954,23 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   <>
                     {/* ペア登録済みで未開始 → 試合開始ボタン（選び直しではなく直接開始） */}
                     {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
-                      <button
-                        style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13, marginTop:8 }}
-                        onClick={async ()=>{
-                          const { data: matchData } = await supabase.from("matches").select("id,match_players(team,player_name,order_num)").eq("id", game.match_id).single();
-                          setServeSelectInfo({ matchData, orderNum, game });
-                        }}
-                      >
-                        🎾 試合開始
-                      </button>
+                      <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                        <button
+                          style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13, flex:1 }}
+                          onClick={async ()=>{
+                            const { data: matchData } = await supabase.from("matches").select("id,match_players(team,player_name,order_num)").eq("id", game.match_id).single();
+                            setServeSelectInfo({ matchData, orderNum, game });
+                          }}
+                        >
+                          🎾 試合開始
+                        </button>
+                        <button
+                          style={{ ...S.btn("#f4f6fa"), color:C.navy, border:`1px solid ${C.border}`, fontSize:13, flex:1 }}
+                          onClick={()=>{ setSimpleResultFor({ orderNum, game, aLabel:aPlayers||"自チーム", bLabel:bPlayers||"相手" }); setSimpleResultScoreA(""); setSimpleResultScoreB(""); }}
+                        >
+                          📝 結果だけ記録
+                        </button>
+                      </div>
                     )}
                     {/* ペア未登録 → ペア登録して試合開始 */}
                     {(isWaiting && !(aPlayers || bPlayers)) && (
@@ -6013,6 +6025,50 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           </Modal>
         );
       })()}
+
+      {/* ★結果だけ記録モーダル（2面展開などでポイントを付けられない時に、ゲームカウントだけ記録する） */}
+      {simpleResultFor && (
+        <Modal onClose={()=>setSimpleResultFor(null)}>
+          <div>
+            <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>{simpleResultFor.orderNum}番手・結果だけ記録</div>
+            <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>ポイントを記録せず、ゲームカウントだけ入力します</div>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+              <div style={{ flex:1, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6 }}>{simpleResultFor.aLabel}</div>
+                <input type="number" inputMode="numeric" value={simpleResultScoreA} onChange={e=>setSimpleResultScoreA(e.target.value)}
+                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamA}`, color:C.teamA }} />
+              </div>
+              <div style={{ fontSize:18, color:C.textSec, marginTop:24 }}>-</div>
+              <div style={{ flex:1, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamB, marginBottom:6 }}>{simpleResultFor.bLabel}</div>
+                <input type="number" inputMode="numeric" value={simpleResultScoreB} onChange={e=>setSimpleResultScoreB(e.target.value)}
+                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB }} />
+              </div>
+            </div>
+            <button
+              style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:14 }}
+              disabled={simpleResultSaving || simpleResultScoreA==="" || simpleResultScoreB==="" || simpleResultScoreA===simpleResultScoreB}
+              onClick={async ()=>{
+                const a = parseInt(simpleResultScoreA,10), b = parseInt(simpleResultScoreB,10);
+                if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいゲームカウントを入力してください"); return; }
+                if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                setSimpleResultSaving(true);
+                try {
+                  await supabase.from("matches").update({ match_score_a:a, match_score_b:b, status:"finished" }).eq("id", simpleResultFor.game.match_id);
+                  await updateTeamMatchGame(simpleResultFor.game.id, { status:"finished" });
+                  setSimpleResultFor(null);
+                  await loadData({ markAsChanged:true });
+                } catch(e) {
+                  alert("保存エラー: " + (e.message || e));
+                } finally {
+                  setSimpleResultSaving(false);
+                }
+              }}
+            >{simpleResultSaving ? "保存中..." : "この結果で確定する"}</button>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setSimpleResultFor(null)}>キャンセル</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
