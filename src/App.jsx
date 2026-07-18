@@ -5751,6 +5751,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [tm, setTm] = useState(null);
   const [loading, setLoading] = useState(true);
   const [liveActive, setLiveActive] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(Date.now()); // ★最終更新時刻（差分確認・再開ボタン等で使用）
   const [myUserId, setMyUserId] = useState(null);
   const [myUserName, setMyUserName] = useState("");
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
