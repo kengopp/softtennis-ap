@@ -9929,6 +9929,7 @@ function PlayerRosterScreen({ onBack }) {
   const [editTeamName, setEditTeamName] = useState("");
   const [editDominantHand, setEditDominantHand] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [nameSearch, setNameSearch] = useState(""); // ★学校を問わず選手名で直接検索するための入力
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -10022,6 +10023,27 @@ function PlayerRosterScreen({ onBack }) {
       <div style={{ padding:14 }}>
         <div style={{ background:"#f5f5f5", border:"1px solid #e0e0e0", borderRadius:10, padding:"10px 14px", fontSize:12, color:C.textSec, marginBottom:14 }}>
           {tab==="own" ? "ℹ️ ここで登録した選手は、同じ学校のメンバー全員が試合作成時に「自チーム」として選べます。" : "ℹ️ 対戦相手の選手を登録しておくと、試合作成時に「相手チーム」として選べ、対戦相手別の分析もしやすくなります。"}
+        </div>
+
+        {/* ★学校を問わず、選手名で直接検索・削除できるようにする（誤登録を素早く探す用） */}
+        <div style={{ marginBottom:14 }}>
+          <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>選手名で検索（学校を問わず、このタブ内の全選手が対象）</div>
+          <input style={S.inp} placeholder="例：前衛" value={nameSearch} onChange={e=>setNameSearch(e.target.value)} />
+          {nameSearch.trim() && (
+            <div style={{ ...S.card, marginTop:10, padding:0 }}>
+              {(tab==="own" ? ownPlayers : otherPlayers).filter(p => p.player_name.includes(nameSearch.trim())).length===0 ? (
+                <div style={{ padding:14, fontSize:12, color:C.textSec, textAlign:"center" }}>該当する選手が見つかりません</div>
+              ) : (tab==="own" ? ownPlayers : otherPlayers).filter(p => p.player_name.includes(nameSearch.trim())).map(p=>(
+                <div key={p.id} style={{ display:"flex", alignItems:"center", padding:"12px 14px", gap:10, borderBottom:`1px solid ${C.border}` }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:14, fontWeight:700, color:C.text }}>{p.player_name}</div>
+                    <div style={{ fontSize:11, color:C.textSec }}>{[p.team_name, p.position, handLabel(p.dominant_hand)].filter(Boolean).join(" ・ ")}</div>
+                  </div>
+                  <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer", color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ★他チームタブ：先に都道府県→学校をチップで選び、登録済み選手を確認してから選手名を入力する流れ */}
