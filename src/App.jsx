@@ -10404,6 +10404,25 @@ export default function App() {
   // 大会詳細を経由しているときは、戻る先を「一覧」ではなく「大会詳細」にする
   const backToListOrTournament = () => { setScreen(tournamentContext ? "tournamentDetail" : "list"); };
 
+  // ★試合を「開く」時に、それが団体戦の1番手かどうかを判定して正しい画面へ振り分ける。
+  //   これを通さずに一律 screen="record" にすると、団体戦の記録者ロック（recorder_id）判定がずれて
+  //   本来の記録者なのに観戦モード（閲覧のみ）になってしまう不具合が起きる。
+  async function openMatchSmart(id, { prevScreen: ps, listMatchMode: lmm } = {}) {
+    const { data: tmg } = await supabase.from("team_match_games").select("team_match_id, order_num").eq("match_id", id).maybeSingle();
+    if (tmg) {
+      setTeamMatchId(tmg.team_match_id);
+      setTeamMatchOrderNum(tmg.order_num);
+      setMatchId(id);
+      setTick(t=>t+1);
+      setScreen("teamMatchRecord");
+    } else {
+      setMatchId(id);
+      if (ps) setPrevScreen(ps);
+      if (lmm) setListMatchMode(lmm);
+      setScreen("record");
+    }
+  }
+
 
   // 自動ping：24時間ごとにDBへアクセスしてSupabaseの自動停止を防ぐ
   useEffect(() => {
@@ -10527,7 +10546,7 @@ export default function App() {
     return (
       <PlayerStatsScreen
         onBack={()=>{ setStatsPlayerName(null); setScreen(playerStatsFrom); }}
-        onOpen={id=>{ setMatchId(id); setPrevScreen("home"); setScreen("record"); }}
+        onOpen={id=>openMatchSmart(id, { prevScreen:"home" })}
         initialPlayerName={statsPlayerName}
       />
     );
@@ -10537,7 +10556,7 @@ export default function App() {
       <OpponentStatsScreen
         schoolName={statsOpponentName}
         onBack={()=>{ setStatsOpponentName(null); setScreen("stats"); }}
-        onOpen={id=>{ setMatchId(id); setScreen("record"); }}
+        onOpen={id=>openMatchSmart(id)}
       />
     );
   }
@@ -10659,7 +10678,7 @@ export default function App() {
       <HomeScreen
         onNew={()=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPrevScreen("home"); setScreen("setup"); }}
         onNewTeamMatch={()=>{ setTournamentContext(null); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
-        onOpen={id=>{ setMatchId(id); setScreen("record"); }}
+        onOpen={id=>openMatchSmart(id)}
         onNavigate={goNav}
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
         onProfile={()=>setScreen("profile")}
@@ -10805,7 +10824,7 @@ export default function App() {
     <MatchList
       key={tick}
       onNew={f=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
-      onOpen={id=>{setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setScreen("record");}}
+      onOpen={id=>openMatchSmart(id, { prevScreen:"list", listMatchMode:"individual" })}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
       onStartScheduled={async (id, firstServer)=>{ try { await startScheduledMatch(id, firstServer); setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
       onProfile={()=>setScreen("profile")}
