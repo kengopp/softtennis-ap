@@ -8025,7 +8025,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               <div style={{ fontSize:36,marginBottom:12 }}>🎾</div>
               <p style={{ color:C.textSec,marginBottom:8 }}>第1ゲームを開始してください</p>
               {match.first_server ? (
-                <p style={{ fontSize:13,color:match.first_server==="A"?C.teamA:C.teamB,fontWeight:700,marginBottom:20 }}>最初のサーブ: {match.first_server==="A"?teamALabel:teamBLabel}</p>
+                <>
+                  <p style={{ fontSize:13,color:match.first_server==="A"?C.teamA:C.teamB,fontWeight:700,marginBottom:8 }}>最初のサーブ: {match.first_server==="A"?teamALabel:teamBLabel}</p>
+                  <button
+                    style={{ border:"1px solid "+C.border, background:C.gray, borderRadius:8, fontSize:11, color:C.textSec, cursor:"pointer", padding:"5px 10px", fontWeight:700, marginBottom:20 }}
+                    onClick={()=>persist({ ...match, first_server: match.first_server==="A" ? "B" : "A" })}
+                  >🔄 サーブを入れ替える</button>
+                </>
               ) : (
                 <p style={{ fontSize:13,color:C.textSec,marginBottom:20 }}>最初のサーブは次の画面で選択します</p>
               )}
