@@ -2996,6 +2996,7 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
 
   const [loadError, setLoadError] = useState(null);
   const [roundBreakdown, setRoundBreakdown] = useState([]); // ★診断用：団体戦(ラウンド)ごとのteam_match_games内訳
+  const [dedupDiag, setDedupDiag] = useState(null); // ★診断用：重複除去(dedup)前後の件数
 
   useEffect(() => {
     let cancelled = false;
@@ -3040,6 +3041,18 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
           }));
         const uniqueRows = Array.from(new Map(targetRows.map(row => [row.matchId, row])).values());
 
+        // ★診断用：targetRows→uniqueRowsで件数が減っていれば、
+        //   複数の番手が同じmatch_idを参照している（重複除去で消えている）ことになる
+        const dedupDiag = {
+          targetRowsCount: targetRows.length,
+          uniqueRowsCount: uniqueRows.length,
+          duplicateMatchIds: (() => {
+            const counts = {};
+            targetRows.forEach(r => { counts[r.matchId] = (counts[r.matchId]||0) + 1; });
+            return Object.entries(counts).filter(([,c]) => c > 1).map(([id,c]) => ({ id, count:c }));
+          })(),
+        };
+
         // ★集計に必要なplayer_name/play_type/faultsなどを含む「詳細データ」を1件ずつ取得する
         //   （getMatches()の一覧データはポイントの一部項目のみで、選手別集計には使えないため）
         const detailedMatches = await Promise.all(
@@ -3048,6 +3061,9 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
             return full ? { ...full, ranking_date: row.date || full.match_date } : null;
           })
         );
+        dedupDiag.detailedMatchesCount = detailedMatches.length;
+        dedupDiag.nullDetailCount = detailedMatches.filter(x => !x).length;
+        setDedupDiag(dedupDiag);
 
         const groups = {};
         detailedMatches.filter(Boolean).forEach(m => {
@@ -3204,6 +3220,26 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
               </div>
               <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{matchesOfDay.length}試合</div>
             </div>
+
+            {/* ★診断用：重複除去(dedup)で件数が減っていないか確認する */}
+            {dedupDiag && (
+              <div style={{ ...S.card, padding:14, marginBottom:14, border:`1px solid ${C.red}` }}>
+                <div style={{ fontSize:12, fontWeight:800, marginBottom:8, color:C.red }}>🔍 重複除去の診断</div>
+                <div style={{ fontSize:12, color:C.text }}>集計対象の候補（重複除去前）：{dedupDiag.targetRowsCount}件</div>
+                <div style={{ fontSize:12, color:C.text }}>重複除去後（match_idユニーク）：{dedupDiag.uniqueRowsCount}件</div>
+                <div style={{ fontSize:12, color:C.text }}>詳細データ取得件数：{dedupDiag.detailedMatchesCount}件（うち取得失敗：{dedupDiag.nullDetailCount}件）</div>
+                {dedupDiag.duplicateMatchIds.length > 0 ? (
+                  <div style={{ marginTop:8 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.red }}>⚠️ 同じmatch_idが複数の番手から参照されています：</div>
+                    {dedupDiag.duplicateMatchIds.map(d=>(
+                      <div key={d.id} style={{ fontSize:11, color:C.textSec, marginTop:2 }}>match_id: {d.id.slice(0,8)}...　参照数: {d.count}件</div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize:12, color:C.textSec, marginTop:8 }}>match_idの重複はありません（原因は別にあります）</div>
+                )}
+              </div>
+            )}
 
             {/* ★診断用：この大会の団体戦(ラウンド)ごとに、番手が何件登録され、
                   うち何件がmatch_id付き(＝集計対象)になっているかを確認できるようにする */}
