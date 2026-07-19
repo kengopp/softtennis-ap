@@ -2995,6 +2995,7 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
   const [expandedMetric, setExpandedMetric] = useState(null); // 「11位以降を見る」で開く項目キー
 
   const [loadError, setLoadError] = useState(null);
+  const [roundBreakdown, setRoundBreakdown] = useState([]); // ★診断用：団体戦(ラウンド)ごとのteam_match_games内訳
 
   useEffect(() => {
     let cancelled = false;
@@ -3004,6 +3005,25 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
     (async () => {
       try {
         const [matchSummaries, teamMatches] = await Promise.all([getMatches(), getTeamMatches()]);
+
+        // ★診断用：この大会に属する団体戦(ラウンド)ごとに、番手が何件あり、
+        //   うちmatch_idが入っている(＝集計対象になる)のは何件かを可視化する
+        const breakdown = teamMatches
+          .filter(tm => tm.tournament_name === tournament.name)
+          .map(tm => {
+            const games = tm.games || [];
+            return {
+              id: tm.id,
+              round: tm.round || "(ラウンド名なし)",
+              date: tm.match_date,
+              status: tm.status,
+              format: tm.format,
+              totalGames: games.length,
+              withMatchId: games.filter(g => g.match_id).length,
+              games: games.map(g => ({ order_num:g.order_num, has_match_id: !!g.match_id, status: g.status })),
+            };
+          });
+        setRoundBreakdown(breakdown);
 
         const teamBoutIds = new Set();
         teamMatches.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); }));
@@ -3184,6 +3204,26 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
               </div>
               <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{matchesOfDay.length}試合</div>
             </div>
+
+            {/* ★診断用：この大会の団体戦(ラウンド)ごとに、番手が何件登録され、
+                  うち何件がmatch_id付き(＝集計対象)になっているかを確認できるようにする */}
+            {roundBreakdown.length > 0 && (
+              <div style={{ ...S.card, padding:14, marginBottom:14 }}>
+                <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>🔍 団体戦の内訳（診断用）</div>
+                {roundBreakdown.map(rb=>(
+                  <div key={rb.id} style={{ padding:"8px 0", borderBottom:`1px solid ${C.border}`, fontSize:11.5 }}>
+                    <div style={{ fontWeight:700 }}>{rb.round}　{fmtDate(rb.date)}　({rb.format || "format不明"} / {rb.status})</div>
+                    <div style={{ color:C.textSec, marginTop:2 }}>
+                      番手：{rb.totalGames}件中 {rb.withMatchId}件にmatch_idあり
+                      {rb.totalGames !== rb.withMatchId && <span style={{ color:C.red, fontWeight:700 }}>　← {rb.totalGames - rb.withMatchId}件が集計対象外</span>}
+                    </div>
+                    <div style={{ color:C.textSec, marginTop:2 }}>
+                      {rb.games.map(g=>`${g.order_num}番手:${g.has_match_id?"○":"✕(match_idなし)"}(${g.status})`).join("　")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* ★どの試合が集計対象になっているか確認できるよう、一覧をそのまま表示する（人数が合わない時の確認用） */}
             <div style={{ ...S.card, padding:14, marginBottom:14 }}>
