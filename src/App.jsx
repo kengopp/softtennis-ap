@@ -94,6 +94,8 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
   }));
 const today  = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => iso ? iso.replace(/-/g, "/") : "";
+// ★一覧等で試合の状態を短く表示するための共通ヘルパー（中断した試合を「進行中」と誤表示しないようにする）
+const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? "⏸ 中断" : "進行中";
 // ★品質改善：「清見 祐吾」「清見祐吾」のように空白の有無だけが違う同一人物を
 // 別選手として重複登録してしまわないよう、選手名の比較は空白を除去してから行う
 const normalizePlayerName = (name) => (name || "").replace(/\s+/g, "");
@@ -2498,7 +2500,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const bNames = bPlayers.map(p=>p.player_name).join("/");
               const aClub = aPlayers[0]?.club_name || "";
               const bClub = bPlayers[0]?.club_name || "";
-              const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
+              const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
               const isMyMatch = m.created_by === myId;
               return (
                 <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
@@ -2510,6 +2512,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>🔴 進行中</span>}
                         {m.status==="waiting" && <span style={{ fontSize:10, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏳ 待機中</span>}
                         {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>予定</span>}
+                        {m.status==="suspended" && <span style={{ fontSize:10, color:C.textSec, fontWeight:700, background:"#f0f0f0", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏸ 中断</span>}
                         <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"1px 6px", borderRadius:6, whiteSpace:"nowrap" }}>{m.game_format}G</span>
                       </div>
                     </div>
@@ -2899,7 +2902,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const bNames = bPlayers.map(p=>p.player_name).join("/");
           const aClub = aPlayers[0]?.club_name || "";
           const bClub = bPlayers[0]?.club_name || "";
-          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : aWin ? C.teamA : bWin ? C.teamB : C.border;
+          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
@@ -4616,7 +4619,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       {sideRow(bottomSide, false)}
                       {mi && mi.status !== "scheduled" && (
                         <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : mi.status === "waiting" ? C.purple : C.textSec, fontWeight: (mi.status === "active" || mi.status === "waiting") ? 700 : 400 }}>
-                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : isWalkover ? "不戦勝で終了" : "試合終了"}
+                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : mi.status === "suspended" ? "⏸ 中断" : isWalkover ? "不戦勝で終了" : "試合終了"}
                         </div>
                       )}
                       {winnerSide && !alreadyAdvanced && !!rounds[rn + 1] && (
@@ -5822,7 +5825,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                     <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
                     <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(aWin?"#2ecc71":"#f97316"):C.textSec }}>
-                      {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
+                      {matchStatusShortLabel(m)}
                     </span>
                   </div>
                 </div>
@@ -7023,7 +7026,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:m.memo?6:0 }}>
                         <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
                         <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(win?C.teamA:C.teamB):C.textSec }}>
-                          {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
+                          {matchStatusShortLabel(m)}
                         </span>
                       </div>
                       {m.memo && (
@@ -7146,7 +7149,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:m.memo?6:0 }}>
                         <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bP}</span>
                         <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(win?C.teamA:C.teamB):C.textSec }}>
-                          {m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : "進行中"}
+                          {matchStatusShortLabel(m)}
                         </span>
                       </div>
                       {m.memo && (
@@ -8877,15 +8880,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:40, marginBottom:8 }}>⏹️</div>
             <h3 style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>試合を中断しますか？</h3>
-            <p style={{ fontSize:12, color:C.textSec, marginBottom:20 }}>現在のスコアが保存され、この試合は中断扱いになります。</p>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:20 }}>現在のスコアは保存されますが、勝敗の集計には含まれません。</p>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setSuspendConfirm(false)}>キャンセル</button>
               <button style={{ padding:11, background:"#b45309", color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={async ()=>{
                 setSuspendConfirm(false);
-                const updated = { ...match, status:"finished" };
+                // ★「中断」は「終了(finished)」とは別の状態にし、勝敗・スタッツ集計から除外する
+                const updated = { ...match, status:"suspended" };
                 persist(updated);
+                if (teamMatchId) {
+                  try {
+                    const { data: tmg } = await supabase.from("team_match_games").select("id").eq("match_id", match.id).maybeSingle();
+                    if (tmg) await updateTeamMatchGame(tmg.id, { status:"suspended", recorder_id:null, recorder_name:null });
+                  } catch(e) { /* 同期に失敗しても中断自体は継続 */ }
+                }
                 onBack();
-              }}>中断して終了</button>
+              }}>中断する</button>
             </div>
           </div>
         </Modal>
