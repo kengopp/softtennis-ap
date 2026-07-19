@@ -8523,6 +8523,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               </div>
               <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
               <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
+              <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「中断」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"suspended" }); }}>⏸ 実は中断だった試合として、勝敗集計から除外する</button>
               <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={handleBack}>← 試合一覧に戻る</button>
             </div>
