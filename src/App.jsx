@@ -7029,7 +7029,19 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                           {matchStatusShortLabel(m)}
                         </span>
                       </div>
-                      <div style={{ fontSize:10, color:"#c00", marginTop:2 }}>診断: status={m.status}</div>
+                      {m.status==="finished" && (
+                        <button
+                          style={{ marginTop:6, fontSize:11, color:C.textSec, background:C.gray, border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 10px", cursor:"pointer" }}
+                          onClick={async (e)=>{
+                            e.stopPropagation();
+                            if (!window.confirm("この試合を「中断」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) return;
+                            try {
+                              await supabase.from("matches").update({ status:"suspended" }).eq("id", m.id);
+                              setMatches(prev => prev.map(x => x.id===m.id ? { ...x, status:"suspended" } : x));
+                            } catch(err) { alert("エラー: " + (err.message||err)); }
+                          }}
+                        >⏸ この試合を中断扱いにする（勝敗集計から除外）</button>
+                      )}
                       {m.memo && (
                         <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:4 }}>📝 {m.memo}</div>
                       )}
