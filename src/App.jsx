@@ -7029,6 +7029,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                           {matchStatusShortLabel(m)}
                         </span>
                       </div>
+                      <div style={{ fontSize:10, color:"#c00", marginTop:2 }}>診断: status={m.status}</div>
                       {m.memo && (
                         <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:4 }}>📝 {m.memo}</div>
                       )}
