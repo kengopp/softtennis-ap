@@ -95,7 +95,7 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
 const today  = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => iso ? iso.replace(/-/g, "/") : "";
 // ★一覧等で試合の状態を短く表示するための共通ヘルパー（中断した試合を「進行中」と誤表示しないようにする）
-const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? "⏹ 途中終了" : m.status==="suspended" ? "⏸ 中断" : "進行中";
+const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
 // ★品質改善：「清見 祐吾」「清見祐吾」のように空白の有無だけが違う同一人物を
 // 別選手として重複登録してしまわないよう、選手名の比較は空白を除去してから行う
 const normalizePlayerName = (name) => (name || "").replace(/\s+/g, "");
@@ -2532,7 +2532,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const bNames = bPlayers.map(p=>p.player_name).join("/");
               const aClub = aPlayers[0]?.club_name || "";
               const bClub = bPlayers[0]?.club_name || "";
-              const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? "#fbbf24" : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
+              const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
               const isMyMatch = m.created_by === myId;
               return (
                 <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
@@ -2544,8 +2544,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>🔴 進行中</span>}
                         {m.status==="waiting" && <span style={{ fontSize:10, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏳ 待機中</span>}
                         {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>予定</span>}
-                        {m.status==="suspended" && <span style={{ fontSize:10, color:C.textSec, fontWeight:700, background:"#f0f0f0", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏸ 中断</span>}
-                        {m.status==="abandoned" && <span style={{ fontSize:10, color:"#b45309", fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏹ 途中終了</span>}
+                        {m.status==="suspended" && <span style={{ fontSize:10, color:C.textSec, fontWeight:700, whiteSpace:"nowrap" }}>中断 {m.match_score_a}-{m.match_score_b}</span>}
+                        {m.status==="abandoned" && <span style={{ fontSize:10, color:C.textSec, fontWeight:700, whiteSpace:"nowrap" }}>途中終了 {m.match_score_a}-{m.match_score_b}</span>}
                         <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"1px 6px", borderRadius:6, whiteSpace:"nowrap" }}>{m.game_format}G</span>
                       </div>
                     </div>
@@ -2935,7 +2935,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const bNames = bPlayers.map(p=>p.player_name).join("/");
           const aClub = aPlayers[0]?.club_name || "";
           const bClub = bPlayers[0]?.club_name || "";
-          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? "#fbbf24" : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
+          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
@@ -4652,7 +4652,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       {sideRow(bottomSide, false)}
                       {mi && mi.status !== "scheduled" && (
                         <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : mi.status === "waiting" ? C.purple : C.textSec, fontWeight: (mi.status === "active" || mi.status === "waiting") ? 700 : 400 }}>
-                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : mi.status === "suspended" ? "⏸ 中断" : isWalkover ? "不戦勝で終了" : "試合終了"}
+                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : mi.status === "abandoned" ? "途中終了" : mi.status === "suspended" ? "中断" : isWalkover ? "不戦勝で終了" : "試合終了"}
                         </div>
                       )}
                       {winnerSide && !alreadyAdvanced && !!rounds[rn + 1] && (
@@ -6364,8 +6364,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   <span style={{ fontSize:11,color:"#dc2626",fontWeight:700,background:"#fdecea",padding:"2px 8px",borderRadius:20 }}>🔴 {recorderName} 記録中</span>
                 )}
                 {(isFinished || match?.status === "finished") && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
-                {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>⏸ 中断</span>}
-                {isAbandoned && <span style={{ fontSize:11,color:"#b45309",fontWeight:700 }}>⏹ 途中終了</span>}
+                {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>中断 {match?.match_score_a}-{match?.match_score_b}</span>}
+                {isAbandoned && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>途中終了 {match?.match_score_a}-{match?.match_score_b}</span>}
               </div>
               <div style={{ padding:"10px 14px" }}>
                 {aPlayers || bPlayers ? (
@@ -7076,13 +7076,13 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                           style={{ marginTop:6, fontSize:11, color:C.textSec, background:C.gray, border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 10px", cursor:"pointer" }}
                           onClick={async (e)=>{
                             e.stopPropagation();
-                            if (!window.confirm("この試合を「中断」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) return;
+                            if (!window.confirm("この試合を「途中終了」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) return;
                             try {
-                              await supabase.from("matches").update({ status:"suspended" }).eq("id", m.id);
-                              setMatches(prev => prev.map(x => x.id===m.id ? { ...x, status:"suspended" } : x));
+                              await supabase.from("matches").update({ status:"abandoned" }).eq("id", m.id);
+                              setMatches(prev => prev.map(x => x.id===m.id ? { ...x, status:"abandoned" } : x));
                             } catch(err) { alert("エラー: " + (err.message||err)); }
                           }}
-                        >⏸ この試合を中断扱いにする（勝敗集計から除外）</button>
+                        >この試合を途中終了扱いにする（勝敗集計から除外）</button>
                       )}
                       {m.memo && (
                         <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:4 }}>📝 {m.memo}</div>
@@ -8590,7 +8590,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               </div>
               <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
               <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
-              <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「中断」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"suspended" }); }}>⏸ 実は中断だった試合として、勝敗集計から除外する</button>
+              <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「途中終了」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"abandoned" }); }}>実は途中終了だった試合として、勝敗集計から除外する</button>
               <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={handleBack}>← 試合一覧に戻る</button>
             </div>
