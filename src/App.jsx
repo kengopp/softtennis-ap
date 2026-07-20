@@ -6167,9 +6167,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
   const [matchDetails, setMatchDetails] = useState({});
   const [serveSelectInfo, setServeSelectInfo] = useState(null); // サーブ選択モーダル用
-  const [simpleResultFor, setSimpleResultFor] = useState(null); // ★結果だけ記録モーダル用（{orderNum, game, aLabel, bLabel}）
+  const [simpleResultFor, setSimpleResultFor] = useState(null); // ★結果だけ記録モーダル用（{orderNum, game, aLabel, bLabel, aPlayers, bPlayers}）
   const [simpleResultScoreA, setSimpleResultScoreA] = useState("");
   const [simpleResultScoreB, setSimpleResultScoreB] = useState("");
+  const [simpleResultNamesA, setSimpleResultNamesA] = useState([]); // ★結果だけ記録：自チーム選手名（編集可）
+  const [simpleResultNamesB, setSimpleResultNamesB] = useState([]); // ★結果だけ記録：相手選手名（編集可）
   const [simpleResultSaving, setSimpleResultSaving] = useState(false);
   const intervalRef = useRef(null);
   const inactiveRef = useRef(null);
@@ -6432,7 +6434,14 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                         </button>
                         <button
                           style={{ ...S.btn("#f4f6fa"), color:C.navy, border:`1px solid ${C.border}`, fontSize:13, flex:1 }}
-                          onClick={()=>{ setSimpleResultFor({ orderNum, game, aLabel:aPlayers||"自チーム", bLabel:bPlayers||"相手" }); setSimpleResultScoreA(""); setSimpleResultScoreB(""); }}
+                          onClick={()=>{
+                            const aP = (match?.match_players||[]).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
+                            const bP = (match?.match_players||[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
+                            setSimpleResultFor({ orderNum, game, aLabel:aPlayers||"自チーム", bLabel:bPlayers||"相手", aPlayers:aP, bPlayers:bP });
+                            setSimpleResultScoreA(""); setSimpleResultScoreB("");
+                            setSimpleResultNamesA(aP.map(p=>p.player_name));
+                            setSimpleResultNamesB(bP.map(p=>p.player_name));
+                          }}
                         >
                           📝 結果だけ記録
                         </button>
@@ -6498,6 +6507,21 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           <div>
             <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>{simpleResultFor.orderNum}番手・結果だけ記録</div>
             <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>ポイントを記録せず、ゲームカウントだけ入力します</div>
+
+            {(simpleResultFor.aPlayers?.length>0 || simpleResultFor.bPlayers?.length>0) && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>選手名（必要であれば修正できます）</div>
+                {simpleResultFor.aPlayers?.map((p,i)=>(
+                  <input key={p.id} value={simpleResultNamesA[i]??""} onChange={e=>setSimpleResultNamesA(prev=>{ const next=[...prev]; next[i]=e.target.value; return next; })}
+                    style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`1px solid ${C.teamA}`, fontSize:13, marginBottom:6, color:C.teamA }} placeholder="自チーム選手名" />
+                ))}
+                {simpleResultFor.bPlayers?.map((p,i)=>(
+                  <input key={p.id} value={simpleResultNamesB[i]??""} onChange={e=>setSimpleResultNamesB(prev=>{ const next=[...prev]; next[i]=e.target.value; return next; })}
+                    style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`1px solid ${C.teamB}`, fontSize:13, marginBottom:6, color:C.teamB }} placeholder="相手選手名" />
+                ))}
+              </div>
+            )}
+
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
               <div style={{ flex:1, textAlign:"center" }}>
                 <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6 }}>{simpleResultFor.aLabel}</div>
@@ -6520,6 +6544,15 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
                 setSimpleResultSaving(true);
                 try {
+                  // ★選手名が編集されていれば、スコア保存の前に反映する
+                  const nameUpdates = [
+                    ...(simpleResultFor.aPlayers||[]).map((p,i)=>({ p, name: simpleResultNamesA[i] })),
+                    ...(simpleResultFor.bPlayers||[]).map((p,i)=>({ p, name: simpleResultNamesB[i] })),
+                  ].filter(({p,name}) => name && name.trim() && name.trim() !== p.player_name);
+                  for (const { p, name } of nameUpdates) {
+                    const { error: nameErr } = await supabase.from("match_players").update({ player_name: name.trim() }).eq("id", p.id);
+                    if (nameErr) throw nameErr;
+                  }
                   await supabase.from("matches").update({ match_score_a:a, match_score_b:b, status:"finished" }).eq("id", simpleResultFor.game.match_id);
                   await updateTeamMatchGame(simpleResultFor.game.id, { status:"finished" });
                   setSimpleResultFor(null);
