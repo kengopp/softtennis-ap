@@ -238,12 +238,24 @@ async function getMatch(id) {
   const { data: m, error } = await supabase.from("matches").select("*").eq("id", id).single();
   if (error || !m) { console.error(error); return null; }
 
-  const [{ data: players }, { data: games }, { data: points }, { data: faults }] = await Promise.all([
+  const [
+    { data: players, error: playersErr },
+    { data: games, error: gamesErr },
+    { data: points, error: pointsErr },
+    { data: faults, error: faultsErr },
+  ] = await Promise.all([
     supabase.from("match_players").select("*").eq("match_id", id).order("team").order("order_num"),
     supabase.from("games").select("*").eq("match_id", id).order("game_number"),
     supabase.from("points").select("*").eq("match_id", id).order("point_number"),
     supabase.from("faults").select("*").eq("match_id", id).order("fault_number"),
   ]);
+  // ★重要：ここでエラーを握りつぶして空配列のまま先に進めてしまうと、
+  // 　その後に何らかの保存操作（メモ編集・中断/途中終了フラグなど）が行われた際、
+  // 　saveMatch()の「クライアント側に無い行を削除する」処理により、
+  // 　本当は存在していたgames/points/faultsが誤って全削除されてしまう危険がある。
+  // 　そのため、一部でも取得に失敗した場合はここで確実にエラーにする。
+  const fetchErr = playersErr || gamesErr || pointsErr || faultsErr;
+  if (fetchErr) { console.error(fetchErr); throw new Error("試合データの取得に失敗しました。再読み込みしてください。"); }
 
   return rowToMatchFull(m, players ?? [], games ?? [], points ?? [], faults ?? []);
 }
@@ -325,14 +337,22 @@ async function saveMatch(match) {
   if (mErr) throw mErr;
 
   // 選手情報：一旦削除してから入れ直す（シンプルで確実な方式）
-  await supabase.from("match_players").delete().eq("match_id", match.id);
-  if (match.players?.length) {
-    const playerRows = match.players.map(p => ({
-      id: p.id, match_id: match.id, team: p.team, player_name: p.player_name,
-      club_name: p.club_name || null, position: p.position || null, order_num: p.order_num,
-    }));
-    const { error: pErr } = await supabase.from("match_players").insert(playerRows);
-    if (pErr) throw pErr;
+  // ★安全装置：本来選手が登録されているはずの試合で、保存内容の選手が0人の場合は
+  // 　取得エラー等で空のまま読み込んでしまった可能性が高いため、削除をスキップして実データを保護する
+  const { data: existingPlayers } = await supabase.from("match_players").select("id").eq("match_id", match.id);
+  const playersLooksLikeAccidentalWipe = !(match.players?.length) && (existingPlayers ?? []).length > 0;
+  if (playersLooksLikeAccidentalWipe) {
+    console.error("saveMatch: 既存のmatch_playersがあるのに保存内容が空のため、削除処理をスキップしました。match_id=", match.id);
+  } else {
+    await supabase.from("match_players").delete().eq("match_id", match.id);
+    if (match.players?.length) {
+      const playerRows = match.players.map(p => ({
+        id: p.id, match_id: match.id, team: p.team, player_name: p.player_name,
+        club_name: p.club_name || null, position: p.position || null, order_num: p.order_num,
+      }));
+      const { error: pErr } = await supabase.from("match_players").insert(playerRows);
+      if (pErr) throw pErr;
+    }
   }
 
   // ゲーム・ポイント・フォルト：
@@ -377,17 +397,29 @@ async function saveMatch(match) {
   const currentPointIds = (match.games ?? []).flatMap(g => (g.points ?? []).map(p => p.id));
   const currentFaultIds = (match.games ?? []).flatMap(g => (g.faults ?? []).map(f => f.id));
 
-  const { data: existingPoints } = await supabase.from("points").select("id").eq("match_id", match.id);
-  const stalePointIds = (existingPoints ?? []).map(r => r.id).filter(id => !currentPointIds.includes(id));
-  if (stalePointIds.length) await supabase.from("points").delete().in("id", stalePointIds);
-
-  const { data: existingFaults } = await supabase.from("faults").select("id").eq("match_id", match.id);
-  const staleFaultIds = (existingFaults ?? []).map(r => r.id).filter(id => !currentFaultIds.includes(id));
-  if (staleFaultIds.length) await supabase.from("faults").delete().in("id", staleFaultIds);
-
   const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", match.id);
-  const staleGameIds = (existingGames ?? []).map(r => r.id).filter(id => !currentGameIds.includes(id));
-  if (staleGameIds.length) await supabase.from("games").delete().in("id", staleGameIds);
+
+  // ★安全装置：本来ゲームが存在するはずの試合で、今回保存しようとしている内容にゲームが
+  // 　1件も無い場合、それは「取得エラーなどで空のまま読み込んでしまった」可能性が高い。
+  // 　このケースで無条件に削除処理を走らせると、既存のgames/points/faultsが全消失してしまうため、
+  // 　スコアを本当にゼロへ戻したい場合は必ずresetMatchToUnrecorded()の専用フローを使う前提とし、
+  // 　ここでは削除をスキップして実データを保護する。
+  const looksLikeAccidentalWipe = currentGameIds.length === 0 && (existingGames ?? []).length > 0;
+
+  if (!looksLikeAccidentalWipe) {
+    const { data: existingPoints } = await supabase.from("points").select("id").eq("match_id", match.id);
+    const stalePointIds = (existingPoints ?? []).map(r => r.id).filter(id => !currentPointIds.includes(id));
+    if (stalePointIds.length) await supabase.from("points").delete().in("id", stalePointIds);
+
+    const { data: existingFaults } = await supabase.from("faults").select("id").eq("match_id", match.id);
+    const staleFaultIds = (existingFaults ?? []).map(r => r.id).filter(id => !currentFaultIds.includes(id));
+    if (staleFaultIds.length) await supabase.from("faults").delete().in("id", staleFaultIds);
+
+    const staleGameIds = (existingGames ?? []).map(r => r.id).filter(id => !currentGameIds.includes(id));
+    if (staleGameIds.length) await supabase.from("games").delete().in("id", staleGameIds);
+  } else {
+    console.error("saveMatch: 既存のgamesがあるのに保存内容が空のため、削除処理をスキップしました。match_id=", match.id);
+  }
 }
 
 // ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする
@@ -5121,7 +5153,14 @@ function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pic
     const isNewSelection = prevMatchIdRef.current !== matchId;
     prevMatchIdRef.current = matchId;
     (async () => {
-      const [m, vids] = await Promise.all([getMatch(matchId), getMatchVideos(matchId)]);
+      let m, vids;
+      try {
+        [m, vids] = await Promise.all([getMatch(matchId), getMatchVideos(matchId)]);
+      } catch (err) {
+        alert("試合データの読み込みに失敗しました。もう一度お試しください。\n" + (err.message || err));
+        setMatch(null); setMatchVideos([]);
+        return;
+      }
       setMatch(m);
       setMatchVideos(vids);
       if (isNewSelection) {
@@ -7365,12 +7404,18 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const [e, s] = await Promise.all([
-        editMatchId ? getMatch(editMatchId) : Promise.resolve(null),
-        sourceMatchId ? getMatch(sourceMatchId) : Promise.resolve(null),
-      ]);
-      if (cancelled) return;
-      setEditing(e); setSource(s); setReady(true);
+      try {
+        const [e, s] = await Promise.all([
+          editMatchId ? getMatch(editMatchId) : Promise.resolve(null),
+          sourceMatchId ? getMatch(sourceMatchId) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        setEditing(e); setSource(s); setReady(true);
+      } catch (err) {
+        if (cancelled) return;
+        alert("試合データの読み込みに失敗しました。もう一度お試しください。\n" + (err.message || err));
+        onCancel && onCancel();
+      }
     }
     load();
     return () => { cancelled = true; };
@@ -7913,9 +7958,14 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    const m = await getMatch(matchId);
-    setInitialMatch(m);
-    setRefreshing(false);
+    try {
+      const m = await getMatch(matchId);
+      setInitialMatch(m);
+    } catch (e) {
+      alert("更新に失敗しました。もう一度お試しください。\n" + (e?.message || e));
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   useEffect(() => {
@@ -8886,9 +8936,24 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
               <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setResetConfirm(false)}>キャンセル</button>
               <button
                 style={{ padding:11, background:C.red, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }}
-                onClick={()=>{
+                onClick={async ()=>{
                   setResetConfirm(false);
-                  persist({ ...match, games:[], match_score_a:0, match_score_b:0, status:"scheduled", first_server:null });
+                  // ★意図的な全削除はsaveMatch()の安全装置に阻まれないよう、
+                  // 　ここで直接削除してから、リセット後の状態をDBに反映する
+                  const updated = { ...match, games:[], match_score_a:0, match_score_b:0, status:"scheduled", first_server:null };
+                  setMatch({...updated});
+                  try {
+                    const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", match.id);
+                    const gameIds = (existingGames ?? []).map(g => g.id);
+                    if (gameIds.length) {
+                      await supabase.from("points").delete().in("game_id", gameIds);
+                      await supabase.from("faults").delete().in("game_id", gameIds);
+                      await supabase.from("games").delete().in("id", gameIds);
+                    }
+                    await supabase.from("matches").update({
+                      match_score_a:0, match_score_b:0, status:"scheduled", first_server:null,
+                    }).eq("id", match.id);
+                  } catch(e) { alert("リセットに失敗しました: "+(e.message||e)); }
                 }}
               >リセットする</button>
             </div>
