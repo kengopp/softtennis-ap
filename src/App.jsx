@@ -760,7 +760,7 @@ async function savePlayer(player) {
     player_name: player.player_name,
     position: player.position || null,
     dominant_hand: player.dominant_hand || null,
-    is_own_team: player.is_own_team !== false,
+    is_own_team: player.is_own_team === true,
     team_name: player.team_name || null,
     created_by: user.id,
   };
@@ -2165,7 +2165,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (filterStatus === "upcoming" && !isUpcomingMatch(m)) return false;
     if (filterStatus === "finished" && isUpcomingMatch(m)) return false;
     if (!matchesDateFilter(m.match_date)) return false;
-    if (childOnly && linkedPlayerName && !m.players.some(p => p.player_name === linkedPlayerName)) return false;
+    if (childOnly && linkedPlayerName && !m.players.some(p => p.player_name === linkedPlayerName && p.team==="A")) return false;
     if (filterSearch.trim()) {
       const q = filterSearch.trim().toLowerCase();
       const players = m.players.map(p => p.player_name).join(" ").toLowerCase();
@@ -2182,7 +2182,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const matchPlayersByMatchId = {};
   allMatchesRaw.forEach(m => { matchPlayersByMatchId[m.id] = m.players; });
   const teamMatchHasPlayer = (tm, name) => (tm.games || []).some(g =>
-    (matchPlayersByMatchId[g.match_id] || []).some(p => p.player_name === name)
+    (matchPlayersByMatchId[g.match_id] || []).some(p => p.player_name === name && p.team==="A")
   );
 
   const filteredTeamMatches = allTeamMatches.filter(tm => {
@@ -2226,7 +2226,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (filterStatus === "finished" && isUpcomingTournament(t)) return false;
     if (!tournamentMatchesDateFilter(t)) return false;
     if (childOnly && linkedPlayerName) {
-      const hasInIndividual = allMatches.some(m => m.tournament_name===t.name && m.players.some(p=>p.player_name===linkedPlayerName));
+      const hasInIndividual = allMatches.some(m => m.tournament_name===t.name && m.players.some(p=>p.player_name===linkedPlayerName && p.team==="A"));
       const hasInTeam = allTeamMatches.some(tm => tm.tournament_name===t.name && teamMatchHasPlayer(tm, linkedPlayerName));
       if (!hasInIndividual && !hasInTeam) return false;
     }
@@ -5727,11 +5727,10 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const last5 = finished.slice(0, 5).map(m => m.match_score_a > m.match_score_b);
 
   // ★紐づけ選手（お子さん/自分）の戦績を、この画面で直接計算する
-  const linkedMatches = linkedPlayerName ? allMatches.filter(m => m.players.some(p=>p.player_name===linkedPlayerName)) : [];
+  const linkedMatches = linkedPlayerName ? allMatches.filter(m => m.players.some(p=>p.player_name===linkedPlayerName && p.team==="A")) : [];
   const linkedFinished = linkedMatches.filter(m=>m.status==="finished");
   function linkedIsWin(m) {
-    const onA = m.players.some(p => p.team==="A" && p.player_name===linkedPlayerName);
-    return onA ? m.match_score_a>m.match_score_b : m.match_score_b>m.match_score_a;
+    return m.match_score_a>m.match_score_b;
   }
   const linkedWins = linkedFinished.filter(linkedIsWin).length;
   const linkedWinRate = linkedFinished.length>0 ? Math.round(linkedWins/linkedFinished.length*100) : 0;
@@ -6756,8 +6755,10 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   oppPairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   // 選手別成績（選手マスターの自チーム選手のみ）
+  // ★重要：同姓の相手チーム選手がいる場合の取り違えを防ぐため、
+  // 　自チーム(team==="A")として出場した試合だけを対象にする
   const playerRows = roster.filter(p=>p.is_own_team!==false).map(p=>{
-    const myMatches = finished.filter(m=>m.players.some(pl=>pl.player_name===p.player_name));
+    const myMatches = finished.filter(m=>m.players.some(pl=>pl.player_name===p.player_name && pl.team==="A"));
     const rec = recordOf(myMatches, m=>winForPlayer(m,p.player_name));
     return { name: p.player_name, ...rec };
   }).filter(r=>r.total>0);
@@ -7025,7 +7026,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
 
   const periodMatches = period==="month1" ? withinLastDays(matches, 30) : matches;
   const ownRoster = roster.filter(p=>p.is_own_team!==false);
-  const myMatches = playerName ? periodMatches.filter(m => m.players.some(p => p.player_name === playerName)) : [];
+  const myMatches = playerName ? periodMatches.filter(m => m.players.some(p => p.player_name === playerName && p.team==="A")) : [];
   const finished = myMatches.filter(m => m.status === "finished");
   const rec = recordOf(finished, m=>winForPlayer(m, playerName));
 
@@ -7041,7 +7042,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   partnerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   // 全試合（未確定含む）は日付の新しい順表示用に元のmyMatchesを使う（期間でフィルタ済み）
-  const allFinishedForTrend = playerName ? matches.filter(m=>m.status==="finished" && m.players.some(p=>p.player_name===playerName)) : [];
+  const allFinishedForTrend = playerName ? matches.filter(m=>m.status==="finished" && m.players.some(p=>p.player_name===playerName && p.team==="A")) : [];
 
   return (
     <div style={S.page}>
