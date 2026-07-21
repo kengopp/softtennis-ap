@@ -8875,7 +8875,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                     <tbody>
                       {[["A",teamALabel],["B",teamBLabel]].map(([team,name])=>(
                         <tr key={team}>
-                          <td style={{ fontSize:10,color:team==="A"?C.teamA:C.teamB,fontWeight:700,paddingRight:8,whiteSpace:"nowrap" }}>{name}</td>
+                          <td style={{ fontSize:10,color:team==="A"?C.teamA:C.teamB,fontWeight:700,paddingRight:8,whiteSpace:"nowrap" }}>
+                            {g.server_team===team && <span style={{ display:"inline-block",width:8,height:8,borderRadius:"50%",background:C.red,marginRight:4,verticalAlign:"middle" }} title="サーブ側"/>}
+                            {name}
+                          </td>
                           {g.points.map((pt,i)=>(
                             <td key={i} style={{ padding:"2px 4px",textAlign:"center",background:pt.scoring_team===team?(pt.scoring_team==="A"?"#2ecc7118":"#f9731618"):"transparent",minWidth:28 }}>
                               {pt.scoring_team===team&&(
