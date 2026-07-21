@@ -1601,7 +1601,10 @@ function calcPlayerStats(match) {
     const faults = Array.isArray(g.faults) ? g.faults : [];
     for (const pt of points) {
       if (!pt.player_name) continue;
-      const playerTeam = teamOf[pt.player_name] ?? pt.scoring_team;
+      // ★重要：同じ試合内で自チーム・相手チーム両方に同名の選手（「あ」等の仮名が重複した場合など）が
+      // 　存在すると、名前からの逆引き(teamOf)だけでは特定できない。
+      // 　記録時点でどちらのチームが取った点かが確定しているscoring_teamを優先する。
+      const playerTeam = pt.scoring_team ?? teamOf[pt.player_name];
       const r = ensure(playerTeam, pt.player_name);
       r.total++;
       if (pt.is_winner) r.winners++; else r.errors++;
@@ -1614,7 +1617,7 @@ function calcPlayerStats(match) {
     }
     for (const f of faults) {
       if (!f.player_name) continue;
-      const playerTeam = teamOf[f.player_name] ?? f.server_team;
+      const playerTeam = f.server_team ?? teamOf[f.player_name];
       const r = ensure(playerTeam, f.player_name);
       r.plays["fault"] = (r.plays["fault"] ?? 0) + 1;
     }
