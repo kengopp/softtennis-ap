@@ -6196,7 +6196,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     setSchoolMap(smap);
     const matchIds = (data.games || []).filter(g => g.match_id).map(g => g.match_id);
     if (matchIds.length > 0) {
-      const { data: matches } = await supabase.from("matches").select("id,match_score_a,match_score_b,status,match_players(team,player_name,club_name,order_num)").in("id", matchIds);
+      const { data: matches } = await supabase.from("matches").select("id,match_score_a,match_score_b,status,match_players(id,team,player_name,club_name,order_num)").in("id", matchIds);
       const map = {};
       (matches || []).forEach(m => { map[m.id] = m; });
       setMatchDetails(map);
@@ -6513,11 +6513,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:8 }}>選手名（必要であれば修正できます）</div>
                 {simpleResultFor.aPlayers?.map((p,i)=>(
                   <input key={p.id} value={simpleResultNamesA[i]??""} onChange={e=>setSimpleResultNamesA(prev=>{ const next=[...prev]; next[i]=e.target.value; return next; })}
-                    style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`1px solid ${C.teamA}`, fontSize:13, marginBottom:6, color:C.teamA }} placeholder="自チーム選手名" />
+                    style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${C.border}`, fontSize:13, marginBottom:6, color:C.text, boxSizing:"border-box" }} placeholder="自チーム選手名" />
                 ))}
                 {simpleResultFor.bPlayers?.map((p,i)=>(
                   <input key={p.id} value={simpleResultNamesB[i]??""} onChange={e=>setSimpleResultNamesB(prev=>{ const next=[...prev]; next[i]=e.target.value; return next; })}
-                    style={{ width:"100%", padding:"8px 10px", borderRadius:8, border:`1px solid ${C.teamB}`, fontSize:13, marginBottom:6, color:C.teamB }} placeholder="相手選手名" />
+                    style={{ width:"100%", padding:"7px 9px", borderRadius:8, border:`1px solid ${C.border}`, fontSize:13, marginBottom:6, color:C.text, boxSizing:"border-box" }} placeholder="相手選手名" />
                 ))}
               </div>
             )}
