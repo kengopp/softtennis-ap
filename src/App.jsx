@@ -1601,10 +1601,16 @@ function calcPlayerStats(match) {
     const faults = Array.isArray(g.faults) ? g.faults : [];
     for (const pt of points) {
       if (!pt.player_name) continue;
-      // ★重要：同じ試合内で自チーム・相手チーム両方に同名の選手（「あ」等の仮名が重複した場合など）が
-      // 　存在すると、名前からの逆引き(teamOf)だけでは特定できない。
-      // 　記録時点でどちらのチームが取った点かが確定しているscoring_teamを優先する。
-      const playerTeam = pt.scoring_team ?? teamOf[pt.player_name];
+      // ★重要：「得点(勝ち)」はscoring_teamの選手の得点だが、「ミス」はscoring_teamの
+      // 　"相手"側の選手の失点であり、scoring_teamそのものとイコールではない。
+      // 　（例：相手のレシーブミスで自チームが得点した場合、scoring_team="A"だが
+      // 　　player_nameは相手チームの選手であり、そのミスは相手チームの記録になる）
+      // 　そのためis_winnerとscoring_teamから選手の所属チームを正しく推定し、
+      // 　同名選手が両チームに存在する場合の取り違えを防ぐ。teamOfは推定できない時の保険。
+      const inferredTeam = pt.scoring_team==="A" ? (pt.is_winner ? "A" : "B")
+                         : pt.scoring_team==="B" ? (pt.is_winner ? "B" : "A")
+                         : null;
+      const playerTeam = inferredTeam ?? teamOf[pt.player_name];
       const r = ensure(playerTeam, pt.player_name);
       r.total++;
       if (pt.is_winner) r.winners++; else r.errors++;
