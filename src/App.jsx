@@ -8039,16 +8039,14 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
               .select("recorder_id, status")
               .eq("match_id", matchId)
               .single();
-            if (tmg) {
-              // recorder_idが設定されていて自分以外 → 観戦モード
-              // recorder_idがnull（誰も記録していない）→ 観戦モード（スコア詳細から入った場合）
-              if (!tmg.recorder_id || tmg.recorder_id !== user.id) {
-                setViewOnly(true);
-              }
-            }
+            // recorder_idが設定されていて自分以外 → 観戦モード
+            // recorder_idがnull（誰も記録していない）→ 観戦モード（スコア詳細から入った場合）
+            // ★毎回true/falseを確定させる（一度観戦モードになった後、自分が記録者になっても
+            // 　falseに戻らなかったバグがあったため）
+            setViewOnly(!tmg || !tmg.recorder_id || tmg.recorder_id !== user.id);
           } else {
             // 個人戦：作成者以外は観戦モード
-            if (m.created_by !== user.id) setViewOnly(true);
+            setViewOnly(m.created_by !== user.id);
           }
         }
       } catch(e) {
