@@ -2491,13 +2491,18 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 placeholder="キーワード／大会一覧から選択"
                 style={{ flex:1, marginLeft:6, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
               />
+              {tournamentSearch && (
+                <button onClick={()=>{ setTournamentSearch(""); setTournamentDropdownOpen(false); }} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"2px 6px" }} title="絞り込みをクリア">✕</button>
+              )}
               <button onClick={()=>setTournamentDropdownOpen(v=>!v)} style={{ border:"none", background:"none", color:C.textSec, fontSize:14, cursor:"pointer", padding:"2px 4px" }}>{tournamentDropdownOpen ? "▲" : "▼"}</button>
             </div>
             {tournamentDropdownOpen && (
               <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:20, maxHeight:220, overflowY:"auto" }}>
                 {tournaments.length===0 ? (
                   <div style={{ padding:"12px 14px", fontSize:12, color:C.textSec }}>大会がまだありません</div>
-                ) : tournaments.map(t => (
+                ) : tournaments.filter(t => !tournamentSearch.trim() || t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())).length===0 ? (
+                  <div style={{ padding:"12px 14px", fontSize:12, color:C.textSec }}>一致する大会がありません</div>
+                ) : tournaments.filter(t => !tournamentSearch.trim() || t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())).map(t => (
                   <div key={t.id} onClick={()=>{ setTournamentSearch(t.name); setTournamentDropdownOpen(false); }} style={{ padding:"11px 14px", fontSize:13, color:C.text, cursor:"pointer", borderBottom:"1px solid "+C.border }}>{t.name}</div>
                 ))}
               </div>
