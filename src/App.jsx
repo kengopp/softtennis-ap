@@ -1699,14 +1699,14 @@ function calcMatchSummary(match) {
   const missRanking  = teamAStats.slice().sort((a,b)=>b.errors-a.errors);
   const topScorer = scoreRanking[0] ?? null;
 
-  // 前衛／後衛（登録順=order_num 0番目を前衛、1番目を後衛として扱う）
+  // 前衛／後衛（登録順=order_num 0番目を後衛、1番目を前衛として扱う）
   const aPlayersSorted = match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
   const posStats = {
-    front: { label:"前衛", name: aPlayersSorted[0]?.player_name ?? null, win:0, err:0 },
-    back:  { label:"後衛", name: aPlayersSorted[1]?.player_name ?? null, win:0, err:0 },
+    front: { label:"前衛", name: aPlayersSorted[1]?.player_name ?? null, win:0, err:0 },
+    back:  { label:"後衛", name: aPlayersSorted[0]?.player_name ?? null, win:0, err:0 },
   };
   aPlayersSorted.forEach((p,idx)=>{
-    const key = idx===0 ? "front" : "back";
+    const key = idx===0 ? "back" : "front";
     const s = teamAStats.find(x=>x.player_name===p.player_name);
     if (s && posStats[key]) { posStats[key].win += s.winners; posStats[key].err += s.errors; }
   });
