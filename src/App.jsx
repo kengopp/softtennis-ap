@@ -8086,7 +8086,6 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
 function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
   const [tab,    setTab]    = useState("record");
-  useEffect(() => { if (viewOnly) setTab("score"); }, [viewOnly]);
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
   const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
@@ -8532,15 +8531,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
         </div>
       )}
       <div style={{ display:"flex",background:C.white,borderBottom:`1px solid ${C.border}` }}>
-        {(viewOnly ? [["score","スコア"],["stats","スタッツ"]] : [["record","記録"],["score","スコア"],["stats","スタッツ"]]).map(([v,l])=>(
+        {[["record","記録"],["score","スコア"],["stats","スタッツ"]].map(([v,l])=>(
           <button key={v} style={{ flex:1,padding:11,border:"none",cursor:"pointer",background:"transparent",fontWeight:tab===v?700:400,fontSize:14,color:tab===v?C.accent:C.textSec,borderBottom:tab===v?`3px solid ${C.accent}`:"3px solid transparent" }} onClick={()=>setTab(v)}>{l}</button>
         ))}
       </div>
 
       {/* 記録タブ */}
-      {tab==="record"&&!viewOnly&&(
+      {tab==="record"&&(
         <div style={{ padding:"10px 12px 20px" }}>
-          {match.games.length>0 && (
+          {match.games.length>0 && !viewOnly && (
             <div style={{ textAlign:"right", marginBottom:8 }}>
               <button
                 style={{ border:"1px solid "+C.border, background:C.gray, borderRadius:8, fontSize:11, color:C.textSec, cursor:"pointer", padding:"5px 10px", fontWeight:700 }}
@@ -8622,34 +8621,40 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                 </div>
               </div>
               {/* 試合メモ */}
-              <div style={{ ...S.card, padding:14, marginBottom:8 }}>
-                <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
-                <textarea
-                  style={{ width:"100%",minHeight:70,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:13,fontFamily:"inherit",resize:"vertical" }}
-                  placeholder="気づいたこと、課題、次への作戦などを自由にメモできます"
-                  value={memoDraft}
-                  onChange={e=>{ setMemoDraft(e.target.value); setMemoSaved(false); }}
-                />
-                <button
-                  style={{ ...S.btn(memoSaved?"#f0f0f0":C.navy), color:memoSaved?C.textSec:C.white, fontSize:12, marginTop:8, padding:"9px" }}
-                  disabled={memoSaved}
-                  onClick={()=>{ persist({...match, memo: memoDraft}); setMemoSaved(true); }}
-                >{memoSaved ? "保存済み" : "💾 メモを保存"}</button>
-              </div>
+              {!viewOnly && (
+                <div style={{ ...S.card, padding:14, marginBottom:8 }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
+                  <textarea
+                    style={{ width:"100%",minHeight:70,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:13,fontFamily:"inherit",resize:"vertical" }}
+                    placeholder="気づいたこと、課題、次への作戦などを自由にメモできます"
+                    value={memoDraft}
+                    onChange={e=>{ setMemoDraft(e.target.value); setMemoSaved(false); }}
+                  />
+                  <button
+                    style={{ ...S.btn(memoSaved?"#f0f0f0":C.navy), color:memoSaved?C.textSec:C.white, fontSize:12, marginTop:8, padding:"9px" }}
+                    disabled={memoSaved}
+                    onClick={()=>{ persist({...match, memo: memoDraft}); setMemoSaved(true); }}
+                  >{memoSaved ? "保存済み" : "💾 メモを保存"}</button>
+                </div>
+              )}
               {/* ボタン群 */}
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8 }}>
                 <button style={{ ...S.btn(C.navyMid),fontSize:13 }} onClick={()=>setTab("stats")}>📊 スタッツを見る</button>
                 <button style={{ ...S.btn(C.navyMid),fontSize:13 }} onClick={()=>setTab("score")}>📋 スコアを見る</button>
               </div>
-              <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
-              <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
-              <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「途中終了」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"abandoned" }); }}>実は途中終了だった試合として、勝敗集計から除外する</button>
-              <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
+              {!viewOnly && (
+                <>
+                  <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
+                  <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
+                  <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「途中終了」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"abandoned" }); }}>実は途中終了だった試合として、勝敗集計から除外する</button>
+                  <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
+                </>
+              )}
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={handleBack}>← 試合一覧に戻る</button>
             </div>
           )}
 
-          {match.status==="finished"&&correctMode&&(
+          {match.status==="finished"&&correctMode&&!viewOnly&&(
             <div>
               <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7a5800" }}>
                 ✏️ 修正したいポイントをタップすると内容の変更・削除ができます。「＋」では好きな位置にポイントを追加できます。
@@ -11374,7 +11379,7 @@ export default function App() {
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
         onBack={()=>{ setTeamMatchOrderNum(null); setMatchId(null); setScreen("teamMatchDetail"); }}
-        onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
+        onEdit={id=>{ setEditTargetId(id); setPrevScreen("teamMatchRecord"); setScreen("setup"); }}
         onNavigate={key=>{ recalcTeamMatchScore(teamMatchId); setTick(t=>t+1); setMatchId(null); goNav(key); }}
       />
     );
@@ -11475,6 +11480,11 @@ export default function App() {
           setInitMatchType(null);
           setEditTargetId(null);
           setMatchId(id);
+          if (prevScreen === "teamMatchRecord") {
+            // ★団体戦の番手から編集した場合は、team_matchの文脈を保ったまま番手の記録画面に戻す
+            setScreen("teamMatchRecord");
+            return;
+          }
           const fromTournament = creatingFromTournament && tournamentContext;
           if (!fromTournament) setListMatchMode("individual"); // ★個人戦タブに戻れるようにする
           setPrevScreen(fromTournament ? "tournamentDetail" : "list");
@@ -11485,7 +11495,11 @@ export default function App() {
           setCopySourceId(null);
           setInitMatchType(null);
           setCreatingFromTournament(false);
-          if (editTargetId) {
+          if (prevScreen === "teamMatchRecord" && editTargetId) {
+            // ★団体戦の番手から編集を開いてキャンセルした場合も、同じくteam_matchの文脈に戻す
+            setEditTargetId(null);
+            setScreen("teamMatchRecord");
+          } else if (editTargetId) {
             const back = editTargetId;
             setEditTargetId(null);
             setMatchId(back);
