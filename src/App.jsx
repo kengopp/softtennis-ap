@@ -109,18 +109,31 @@ const fmtDateRange = (start, end) => {
 // ============================================================
 // 統計集計用 共通ヘルパー
 // ============================================================
+// 指定選手が、この試合でどちら側(A/B)として出場したかを判定する。
+// ★東福岡 対 東福岡 のような自チーム同士の練習試合の場合、B側の選手も自チームの一員なので、
+// 　mySchoolNameを渡すことでB側の出場も対象に含められる（通常はteam A側のみを対象にする）
+function ownSideFor(m, playerName, mySchoolName) {
+  const onA = m.players.find(p=>p.player_name===playerName && p.team==="A");
+  if (onA) return "A";
+  if (mySchoolName) {
+    const onB = m.players.find(p=>p.player_name===playerName && p.team==="B" && p.club_name && p.club_name.trim()===mySchoolName.trim());
+    if (onB) return "B";
+  }
+  return null;
+}
 // 指定選手の視点で、その試合が勝ちかどうかを判定（出場していなければnull）
 // ★この関数は常に自チーム選手の戦績を見る用途で使われるため、同名の選手が
 // 　相手チームにも存在する場合の取り違えを防ぐよう、まず自チーム(A)側を優先して探す
-function winForPlayer(m, playerName) {
-  const team = m.players.find(p=>p.player_name===playerName && p.team==="A")?.team
+// 　mySchoolNameを渡すと、自チーム同士の練習試合でB側に出た場合も対象にする
+function winForPlayer(m, playerName, mySchoolName) {
+  const team = ownSideFor(m, playerName, mySchoolName)
             ?? m.players.find(p=>p.player_name===playerName)?.team;
   if (!team) return null;
   return team==="A" ? m.match_score_a>m.match_score_b : m.match_score_b>m.match_score_a;
 }
 // 指定選手の、その試合での相方（ペア）名を取得
-function partnerOf(m, playerName) {
-  const team = m.players.find(p=>p.player_name===playerName && p.team==="A")?.team
+function partnerOf(m, playerName, mySchoolName) {
+  const team = ownSideFor(m, playerName, mySchoolName)
             ?? m.players.find(p=>p.player_name===playerName)?.team;
   if (!team) return null;
   const partner = m.players.find(p=>p.team===team && p.player_name!==playerName);
@@ -5687,6 +5700,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [profile, setProfile] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
 
   useEffect(() => {
     Promise.all([getMatches(), getTournaments()]).then(([matches, tns])=>{
@@ -5701,6 +5715,11 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
         const roster = await getPlayerRoster();
         const found = roster.find(r => r.id === p.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
+      }
+      if (p?.school_id) {
+        const schools = await getSchools();
+        const s = schools.find(s => s.id === p.school_id);
+        if (s) setMySchoolName(s.name);
       }
     })();
   }, []);
@@ -5727,10 +5746,10 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const last5 = finished.slice(0, 5).map(m => m.match_score_a > m.match_score_b);
 
   // ★紐づけ選手（お子さん/自分）の戦績を、この画面で直接計算する
-  const linkedMatches = linkedPlayerName ? allMatches.filter(m => m.players.some(p=>p.player_name===linkedPlayerName && p.team==="A")) : [];
+  const linkedMatches = linkedPlayerName ? allMatches.filter(m => ownSideFor(m, linkedPlayerName, mySchoolName)) : [];
   const linkedFinished = linkedMatches.filter(m=>m.status==="finished");
   function linkedIsWin(m) {
-    return m.match_score_a>m.match_score_b;
+    return winForPlayer(m, linkedPlayerName, mySchoolName);
   }
   const linkedWins = linkedFinished.filter(linkedIsWin).length;
   const linkedWinRate = linkedFinished.length>0 ? Math.round(linkedWins/linkedFinished.length*100) : 0;
@@ -6677,9 +6696,20 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   const [showBreakdown, setShowBreakdown] = useState(false); // 総合成績カードの内訳一覧
   const [deletedTournamentNames, setDeletedTournamentNames] = useState([]); // ゴミ箱に入っている大会名（絞り込み選択肢から除外用）
+  const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
 
   useEffect(() => { getMatches().then(list=>{ setAllMatches(list); setLoading(false); }); }, []);
   useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+  useEffect(() => {
+    (async () => {
+      const p = await getMyProfile();
+      if (p?.school_id) {
+        const schools = await getSchools();
+        const s = schools.find(s => s.id === p.school_id);
+        if (s) setMySchoolName(s.name);
+      }
+    })();
+  }, []);
   // ★ゴミ箱に入っている大会名を取得。試合データ自体は削除しないが、
   //   絞り込みプルダウンには削除済みの大会名を出さないようにするため。
   useEffect(() => { getDeletedTournaments().then(list => setDeletedTournamentNames(list.map(t => t.name))); }, []);
@@ -6729,14 +6759,21 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const teamRecord = recordOf(finished, m=>m.match_score_a>m.match_score_b);
 
   // ペア別成績（自チームAのペア名を「選手1／選手2」形式で集計）
+  // ★相手チームが同じ学校（練習試合）の場合は、B側のペアも自チームのペアとして含める
   const byPair = {};
   finished.forEach(m => {
     const aPlayers = m.players.filter(p => p.team === "A").sort((a,b) => a.order_num - b.order_num);
     const pairKey = aPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
-    (byPair[pairKey] ??= []).push(m);
+    (byPair[pairKey] ??= []).push({ match: m, win: m.match_score_a > m.match_score_b });
+    const bPlayers = m.players.filter(p => p.team === "B").sort((a,b) => a.order_num - b.order_num);
+    const bClub = bPlayers[0]?.club_name;
+    if (mySchoolName && bClub && bClub.trim()===mySchoolName.trim()) {
+      const bPairKey = bPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
+      (byPair[bPairKey] ??= []).push({ match: m, win: m.match_score_b > m.match_score_a });
+    }
   });
   const pairRows = Object.entries(byPair).map(([name, list]) => ({
-    name, ...recordOf(list, m => m.match_score_a > m.match_score_b),
+    name, ...recordOf(list, x => x.win),
   }));
   pairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
@@ -6756,10 +6793,12 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   // 選手別成績（選手マスターの自チーム選手のみ）
   // ★重要：同姓の相手チーム選手がいる場合の取り違えを防ぐため、
-  // 　自チーム(team==="A")として出場した試合だけを対象にする
+  // 　自チーム(team==="A")として出場した試合だけを対象にする。
+  // 　ただし相手チームが同じ学校（東福岡 対 東福岡の練習試合など）の場合は、
+  // 　B側で出場した試合も自チームの成績として含める。
   const playerRows = roster.filter(p=>p.is_own_team!==false).map(p=>{
-    const myMatches = finished.filter(m=>m.players.some(pl=>pl.player_name===p.player_name && pl.team==="A"));
-    const rec = recordOf(myMatches, m=>winForPlayer(m,p.player_name));
+    const myMatches = finished.filter(m=>ownSideFor(m,p.player_name,mySchoolName));
+    const rec = recordOf(myMatches, m=>winForPlayer(m,p.player_name,mySchoolName));
     return { name: p.player_name, ...rec };
   }).filter(r=>r.total>0);
   playerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
@@ -7008,6 +7047,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState("desc");
+  const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
 
   useEffect(() => {
     (async () => {
@@ -7018,6 +7058,11 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
         const found = rosterList.find(p => p.id === profile.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
       }
+      if (profile?.school_id) {
+        const schools = await getSchools();
+        const s = schools.find(s => s.id === profile.school_id);
+        if (s) setMySchoolName(s.name);
+      }
       const list = await getMatches();
       setMatches(list);
       setLoading(false);
@@ -7026,23 +7071,23 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
 
   const periodMatches = period==="month1" ? withinLastDays(matches, 30) : matches;
   const ownRoster = roster.filter(p=>p.is_own_team!==false);
-  const myMatches = playerName ? periodMatches.filter(m => m.players.some(p => p.player_name === playerName && p.team==="A")) : [];
+  const myMatches = playerName ? periodMatches.filter(m => ownSideFor(m, playerName, mySchoolName)) : [];
   const finished = myMatches.filter(m => m.status === "finished");
-  const rec = recordOf(finished, m=>winForPlayer(m, playerName));
+  const rec = recordOf(finished, m=>winForPlayer(m, playerName, mySchoolName));
 
   // ペア（相方）別成績
   const byPartner = {};
   finished.forEach(m=>{
-    const partner = partnerOf(m, playerName) || "（相方不明）";
+    const partner = partnerOf(m, playerName, mySchoolName) || "（相方不明）";
     (byPartner[partner] ??= []).push(m);
   });
   const partnerRows = Object.entries(byPartner).map(([name,list])=>({
-    name, ...recordOf(list, m=>winForPlayer(m,playerName)),
+    name, ...recordOf(list, m=>winForPlayer(m,playerName,mySchoolName)),
   }));
   partnerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   // 全試合（未確定含む）は日付の新しい順表示用に元のmyMatchesを使う（期間でフィルタ済み）
-  const allFinishedForTrend = playerName ? matches.filter(m=>m.status==="finished" && m.players.some(p=>p.player_name===playerName && p.team==="A")) : [];
+  const allFinishedForTrend = playerName ? matches.filter(m=>m.status==="finished" && ownSideFor(m, playerName, mySchoolName)) : [];
 
   return (
     <div style={S.page}>
