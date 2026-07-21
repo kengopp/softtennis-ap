@@ -110,14 +110,18 @@ const fmtDateRange = (start, end) => {
 // 統計集計用 共通ヘルパー
 // ============================================================
 // 指定選手の視点で、その試合が勝ちかどうかを判定（出場していなければnull）
+// ★この関数は常に自チーム選手の戦績を見る用途で使われるため、同名の選手が
+// 　相手チームにも存在する場合の取り違えを防ぐよう、まず自チーム(A)側を優先して探す
 function winForPlayer(m, playerName) {
-  const team = m.players.find(p=>p.player_name===playerName)?.team;
+  const team = m.players.find(p=>p.player_name===playerName && p.team==="A")?.team
+            ?? m.players.find(p=>p.player_name===playerName)?.team;
   if (!team) return null;
   return team==="A" ? m.match_score_a>m.match_score_b : m.match_score_b>m.match_score_a;
 }
 // 指定選手の、その試合での相方（ペア）名を取得
 function partnerOf(m, playerName) {
-  const team = m.players.find(p=>p.player_name===playerName)?.team;
+  const team = m.players.find(p=>p.player_name===playerName && p.team==="A")?.team
+            ?? m.players.find(p=>p.player_name===playerName)?.team;
   if (!team) return null;
   const partner = m.players.find(p=>p.team===team && p.player_name!==playerName);
   return partner ? partner.player_name : null;
@@ -1641,8 +1645,10 @@ function calcPlayerStats(match) {
       const serverPlayer   = individualAt(teamPlayers[serverTeam],  serveTurn);
       const receiverPlayer = individualAt(teamPlayers[receiveTeam], serveTurn);
 
-      // このポイントの直前に1stフォルトが記録されていたか（スコア一致で突き合わせ）
-      const hadFault = faults.some(f => f.server_team===serverTeam && f.score_a_at===beforeA && f.score_b_at===beforeB);
+      // ★このポイントの直前に1stフォルトがあったかは、ポイント自身が持つfault_countで確実に判定できる
+      // 　（別テーブルのfaultsとスコアで突き合わせる方式は、フォルト記録時のスコアが実際とズレていると
+      // 　　対応が取れなくなり、集計から漏れることがあったため廃止）
+      const hadFault = (pt.fault_count ?? 0) >= 1;
 
       if (serverPlayer) {
         const r = ensure(serverTeam, serverPlayer);
@@ -1839,11 +1845,16 @@ function buildCsv(match) {
   const rows = [];
   for (const g of match.games) {
     for (const f of (g.faults ?? [])) {
-      const pl = match.players.find(p=>p.player_name===f.player_name);
+      // ★同名選手が両チームにいる場合の取り違えを防ぐため、まずチームも一致する選手を優先して探す
+      const pl = match.players.find(p=>p.player_name===f.player_name && p.team===f.server_team)
+              ?? match.players.find(p=>p.player_name===f.player_name);
       rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO","","",f.server_team==="A"?"自チーム":"相手チーム",f.player_name??"",pl?.club_name??""," 1stフォルト","","fault",f.score_a_at,f.score_b_at]);
     }
     for (const pt of g.points) {
-      const pl = match.players.find(p=>p.player_name===pt.player_name);
+      // ★得点(勝ち)なら得点チーム、ミスなら相手チームの選手なので、それに合わせてチームを絞って探す
+      const ptTeam = pt.is_winner ? pt.scoring_team : (pt.scoring_team==="A" ? "B" : pt.scoring_team==="B" ? "A" : null);
+      const pl = match.players.find(p=>p.player_name===pt.player_name && p.team===ptTeam)
+              ?? match.players.find(p=>p.player_name===pt.player_name);
       rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO",pt.point_number,pt.scoring_team,pt.scoring_team==="A"?"自チーム":"相手チーム",pt.player_name??"",pl?.club_name??"",pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):"",pt.score_a_after,pt.score_b_after]);
     }
   }
