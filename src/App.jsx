@@ -7222,8 +7222,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:16 }}>
-        <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
+      <div style={{ background:C.navy, color:C.white, padding:"16px 16px 0" }}>
+        <div style={{ fontSize:20, fontWeight:800, marginBottom:12 }}>分析</div>
+        <div style={{ display:"flex", background:"rgba(255,255,255,0.12)", borderRadius:10, padding:3, marginBottom:0 }}>
+          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:"#fff", color:C.navy }}>個人分析</div>
+          <div onClick={onOpenTeamStats} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:"#c7cfe0", cursor:"pointer" }}>チーム統計</div>
+        </div>
       </div>
       <div style={{ padding:14 }}>
 
@@ -7335,11 +7339,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
           </>
         )}
 
-        {onOpenTeamStats && (
-          <div onClick={onOpenTeamStats} style={{ textAlign:"center", fontSize:12, color:C.textSec, padding:"10px 0", cursor:"pointer" }}>
-            チーム全体の統計（選手別・ペア別ランキング）を見る ›
-          </div>
-        )}
       </div>
       <NavBar active="stats" onNavigate={onNavigate}/>
     </div>
@@ -7498,8 +7497,12 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   return (
     <div style={S.page}>
-      <div style={S.hdr}>
-        <span style={{ fontSize:20,fontWeight:800,color:C.white }}>統計</span>
+      <div style={{ background:C.navy, color:C.white, padding:"16px 16px 0" }}>
+        <div style={{ fontSize:20, fontWeight:800, marginBottom:12 }}>分析</div>
+        <div style={{ display:"flex", background:"rgba(255,255,255,0.12)", borderRadius:10, padding:3 }}>
+          <div onClick={()=>onNavigate&&onNavigate("stats")} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:"#c7cfe0", cursor:"pointer" }}>個人分析</div>
+          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:"#fff", color:C.navy }}>チーム統計</div>
+        </div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
         {loading ? (
