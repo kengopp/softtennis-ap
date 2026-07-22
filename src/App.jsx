@@ -2078,7 +2078,6 @@ function NavBar({ active, onNavigate }) {
   const items = [
     ["home",   "🏠", "ホーム"],
     ["list",   "📋", "試合"],
-    ["video",  "🎥", "動画"],
     ["stats",  "📊", "分析"],
     ["master", "🗂",  "設定"],
   ];
