@@ -902,6 +902,24 @@ async function savePlayer(player) {
 // クライアント側から他のユーザーの linked_player_id を直接更新しようとしても、
 // RLS（自分の行しか更新できない制限）に阻まれて実際には解除されないケースがあったため、
 // 紐づけ解除＋削除をまとめてDB側（Postgres関数）で安全に行う。
+// ★選手マスターで選手名を変更した時、過去の試合記録（match_players/points/faults）にも反映する。
+// 　同姓の別選手（相手チームなど）を誤って巻き込まないよう、対象を絞り込んでから更新する。
+async function renamePlayerEverywhere(oldName, newName, team, clubName) {
+  if (!oldName || !newName || oldName === newName) return;
+  let q = supabase.from("match_players").select("id, match_id, club_name").eq("player_name", oldName);
+  if (team) q = q.eq("team", team);
+  const { data: rows, error } = await q;
+  if (error) { console.error(error); return; }
+  let targets = rows ?? [];
+  if (clubName) targets = targets.filter(r => (r.club_name || "").trim() === clubName.trim());
+  if (targets.length === 0) return;
+  const matchPlayerIds = targets.map(r => r.id);
+  const matchIds = Array.from(new Set(targets.map(r => r.match_id)));
+  await supabase.from("match_players").update({ player_name: newName }).in("id", matchPlayerIds);
+  await supabase.from("points").update({ player_name: newName }).eq("player_name", oldName).in("match_id", matchIds);
+  await supabase.from("faults").update({ player_name: newName }).eq("player_name", oldName).in("match_id", matchIds);
+}
+
 async function deletePlayerFromRoster(id) {
   const { error } = await supabase.rpc("delete_player_and_unlink", { p_player_id: id });
   if (error) throw error;
@@ -6897,7 +6915,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
     if (schoolPickerOpen) {
       const filteredSchools = knownSchoolNames.filter(n => !schoolSearch.trim() || n.toLowerCase().includes(schoolSearch.trim().toLowerCase()));
       return (
-        <div style={{ minHeight:"100vh", background:C.gray }}>
+        <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
           <div style={{ background:C.navy, color:C.white, padding:16 }}>
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setSchoolPickerOpen(false)}>←</span>
@@ -6932,7 +6950,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
     const filteredRoster = rosterForSchool.filter(p => !teamSearch.trim() || p.player_name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
     return (
-      <div style={{ minHeight:"100vh", background:C.gray }}>
+      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ background:C.navy, color:C.white, padding:16 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("results")}>←</span>
@@ -7000,7 +7018,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
     };
 
     return (
-      <div style={{ minHeight:"100vh", background:C.gray }}>
+      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ background:C.navy, color:C.white, padding:16 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("wizardPlayer")}>←</span>
@@ -7199,7 +7217,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const metricLabel = { serveRate:"1stサーブ成功率", receiveMissRate:"レシーブミス率", decisionRate:"決定率" };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70 }}>
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:C.white, padding:16 }}>
         <div style={{ fontSize:17, fontWeight:800 }}>分析</div>
       </div>
@@ -10985,7 +11003,12 @@ function PlayerRosterScreen({ onBack }) {
       const finalTeamName = editTeamName;
       // ★学校名が自チームと同じかどうかで自チーム／他チームを判定する（タブではなく実際の学校名で判定）
       const isOwn = !!mySchoolName && finalTeamName.trim() === mySchoolName.trim();
+      const oldName = players.find(p => p.id === id)?.player_name;
       await savePlayer({ id, player_name: fullName, position: editPosition || null, dominant_hand: editDominantHand || null, is_own_team: isOwn, team_name: finalTeamName });
+      // ★名前を変更した場合、過去の試合記録（そのチーム側の出場分）にも反映する
+      if (oldName && oldName !== fullName) {
+        await renamePlayerEverywhere(oldName, fullName, isOwn ? "A" : "B", isOwn ? null : finalTeamName);
+      }
       setEditingId(null); reload();
     } catch (e) { setErrorMsg("更新に失敗しました: " + (e.message || JSON.stringify(e))); }
   }
