@@ -904,20 +904,25 @@ async function savePlayer(player) {
 // 紐づけ解除＋削除をまとめてDB側（Postgres関数）で安全に行う。
 // ★選手マスターで選手名を変更した時、過去の試合記録（match_players/points/faults）にも反映する。
 // 　同姓の別選手（相手チームなど）を誤って巻き込まないよう、対象を絞り込んでから更新する。
+// 　戻り値は更新した試合数（0件やエラーの場合は原因を呼び出し元で分かるようにする）。
 async function renamePlayerEverywhere(oldName, newName, team, clubName) {
-  if (!oldName || !newName || oldName === newName) return;
+  if (!oldName || !newName || oldName === newName) return 0;
   let q = supabase.from("match_players").select("id, match_id, club_name").eq("player_name", oldName);
   if (team) q = q.eq("team", team);
-  const { data: rows, error } = await q;
-  if (error) { console.error(error); return; }
+  const { data: rows, error: selErr } = await q;
+  if (selErr) throw selErr;
   let targets = rows ?? [];
   if (clubName) targets = targets.filter(r => (r.club_name || "").trim() === clubName.trim());
-  if (targets.length === 0) return;
+  if (targets.length === 0) return 0;
   const matchPlayerIds = targets.map(r => r.id);
   const matchIds = Array.from(new Set(targets.map(r => r.match_id)));
-  await supabase.from("match_players").update({ player_name: newName }).in("id", matchPlayerIds);
-  await supabase.from("points").update({ player_name: newName }).eq("player_name", oldName).in("match_id", matchIds);
-  await supabase.from("faults").update({ player_name: newName }).eq("player_name", oldName).in("match_id", matchIds);
+  const { error: mpErr } = await supabase.from("match_players").update({ player_name: newName }).in("id", matchPlayerIds);
+  if (mpErr) throw mpErr;
+  const { error: ptErr } = await supabase.from("points").update({ player_name: newName }).eq("player_name", oldName).in("match_id", matchIds);
+  if (ptErr) throw ptErr;
+  const { error: flErr } = await supabase.from("faults").update({ player_name: newName }).eq("player_name", oldName).in("match_id", matchIds);
+  if (flErr) throw flErr;
+  return matchIds.length;
 }
 
 async function deletePlayerFromRoster(id) {
@@ -6920,7 +6925,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setSchoolPickerOpen(false)}>←</span>
               <div>
-                <div style={{ fontSize:16, fontWeight:800 }}>分析</div>
+                <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
                 <div style={{ fontSize:11, color:"#b9c2d6" }}>チームを選択</div>
               </div>
             </div>
@@ -6955,7 +6960,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("results")}>←</span>
             <div>
-              <div style={{ fontSize:16, fontWeight:800 }}>分析</div>
+              <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
               <div style={{ fontSize:11, color:"#b9c2d6" }}>選手を選択</div>
             </div>
           </div>
@@ -7023,7 +7028,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("wizardPlayer")}>←</span>
             <div>
-              <div style={{ fontSize:16, fontWeight:800 }}>分析</div>
+              <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
               <div style={{ fontSize:11, color:"#b9c2d6" }}>{selectedPlayer}さんの試合を選択</div>
             </div>
           </div>
@@ -7219,7 +7224,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:C.white, padding:16 }}>
-        <div style={{ fontSize:17, fontWeight:800 }}>分析</div>
+        <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14 }}>
 
@@ -11007,7 +11012,14 @@ function PlayerRosterScreen({ onBack }) {
       await savePlayer({ id, player_name: fullName, position: editPosition || null, dominant_hand: editDominantHand || null, is_own_team: isOwn, team_name: finalTeamName });
       // ★名前を変更した場合、過去の試合記録（そのチーム側の出場分）にも反映する
       if (oldName && oldName !== fullName) {
-        await renamePlayerEverywhere(oldName, fullName, isOwn ? "A" : "B", isOwn ? null : finalTeamName);
+        try {
+          const n = await renamePlayerEverywhere(oldName, fullName, isOwn ? "A" : "B", isOwn ? null : finalTeamName);
+          if (n === 0) {
+            alert(`選手情報は更新しましたが、「${oldName}」名義の過去の試合記録は見つかりませんでした。`);
+          }
+        } catch (renameErr) {
+          alert("選手情報は更新しましたが、過去の試合記録への反映でエラーが起きました:\n" + (renameErr.message || renameErr));
+        }
       }
       setEditingId(null); reload();
     } catch (e) { setErrorMsg("更新に失敗しました: " + (e.message || JSON.stringify(e))); }
