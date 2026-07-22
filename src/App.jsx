@@ -6829,7 +6829,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const [schoolSearch, setSchoolSearch] = useState("");
   const [teamSearch, setTeamSearch] = useState(""); // 選手検索キーワード
 
-  const [selectSubTab, setSelectSubTab] = useState("period"); // period | tournament | individual | all
+  const [selectSubTab, setSelectSubTab] = useState("all"); // period | tournament | individual | all
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [selectedTournaments, setSelectedTournaments] = useState([]);
