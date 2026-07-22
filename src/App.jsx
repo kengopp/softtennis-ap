@@ -6910,7 +6910,20 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   }, [loading, selectedPlayer]);
 
   if (loading) {
-    return <div style={{ padding:40, textAlign:"center", color:C.textSec }}>読み込み中...</div>;
+    return (
+      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+        <div style={{ background:C.navy, color:C.white, padding:16 }}>
+          <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
+        </div>
+        <div style={{ padding:14 }}>
+          <div style={{ display:"flex", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:3, marginBottom:12 }}>
+            <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:C.navy, color:"#fff" }}>個人分析</div>
+            <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:C.textSec }}>チーム統計</div>
+          </div>
+          <div style={{ padding:40, textAlign:"center", color:C.textSec }}>読み込み中...</div>
+        </div>
+      </div>
+    );
   }
 
   // ============ ① 選手選択 ============
@@ -7222,14 +7235,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:"16px 16px 0" }}>
-        <div style={{ fontSize:20, fontWeight:800, marginBottom:12 }}>分析</div>
-        <div style={{ display:"flex", background:"rgba(255,255,255,0.12)", borderRadius:10, padding:3, marginBottom:0 }}>
-          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:"#fff", color:C.navy }}>個人分析</div>
-          <div onClick={onOpenTeamStats} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:"#c7cfe0", cursor:"pointer" }}>チーム統計</div>
-        </div>
+      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14 }}>
+        <div style={{ display:"flex", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:3, marginBottom:12 }}>
+          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:C.navy, color:"#fff" }}>個人分析</div>
+          <div onClick={onOpenTeamStats} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:C.textSec, cursor:"pointer" }}>チーム統計</div>
+        </div>
 
         <div style={{ background:C.navy, color:"#fff", borderRadius:14, padding:14, marginBottom:12 }}>
           <div style={{ fontSize:11, color:"#b9c2d6", marginBottom:4 }}>{resultCondLabel}</div>
@@ -7497,14 +7510,14 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   return (
     <div style={S.page}>
-      <div style={{ background:C.navy, color:C.white, padding:"16px 16px 0" }}>
-        <div style={{ fontSize:20, fontWeight:800, marginBottom:12 }}>分析</div>
-        <div style={{ display:"flex", background:"rgba(255,255,255,0.12)", borderRadius:10, padding:3 }}>
-          <div onClick={()=>onNavigate&&onNavigate("stats")} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:"#c7cfe0", cursor:"pointer" }}>個人分析</div>
-          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:"#fff", color:C.navy }}>チーム統計</div>
-        </div>
+      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
+        <div style={{ display:"flex", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:3, marginBottom:12 }}>
+          <div onClick={()=>onNavigate&&onNavigate("stats")} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:C.textSec, cursor:"pointer" }}>個人分析</div>
+          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:C.navy, color:"#fff" }}>チーム統計</div>
+        </div>
         {loading ? (
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
         ) : allMatches.filter(m=>m.status==="finished").length===0 ? (
