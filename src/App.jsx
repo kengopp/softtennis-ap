@@ -6802,6 +6802,9 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
   const [mode, setMode] = useState("results"); // results | wizardPlayer | wizardMatches
   const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [selectedSchoolName, setSelectedSchoolName] = useState(""); // 空なら自チーム
+  const [schoolPickerOpen, setSchoolPickerOpen] = useState(false);
+  const [schoolSearch, setSchoolSearch] = useState("");
   const [teamSearch, setTeamSearch] = useState(""); // 選手検索キーワード
 
   const [selectSubTab, setSelectSubTab] = useState("period"); // period | tournament | individual | all
@@ -6809,6 +6812,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const [periodEnd, setPeriodEnd] = useState("");
   const [selectedTournaments, setSelectedTournaments] = useState([]);
   const [selectedMatchIds, setSelectedMatchIds] = useState([]);
+
+  // 期間タブのカレンダーUI用
+  const [calFilterMode, setCalFilterMode] = useState("range"); // day | range | month
+  const [calDay, setCalDay] = useState(null);
+  const [calRangeStart, setCalRangeStart] = useState(null);
+  const [calRangeEnd, setCalRangeEnd] = useState(null);
+  const [calRangeStep, setCalRangeStep] = useState("start");
+  const [calMonth, setCalMonth] = useState(null);
+  const [calViewYear, setCalViewYear] = useState(new Date().getFullYear());
+  const [calViewMonth, setCalViewMonth] = useState(new Date().getMonth());
+  const [calMonthViewYear, setCalMonthViewYear] = useState(new Date().getFullYear());
 
   const [resultMatches, setResultMatches] = useState([]); // 詳細データ込みの試合（分析対象）
   const [resultLoading, setResultLoading] = useState(false);
@@ -6836,9 +6850,21 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
     })();
   }, []);
 
+  const effectiveSchoolName = selectedSchoolName || mySchoolName;
+  const isOwnSchool = effectiveSchoolName === mySchoolName;
   const ownRoster = roster.filter(r => r.is_own_team !== false);
+  // 選択中の学校に応じた選手候補（自チームなら選手マスター、それ以外は試合記録から拾った名前）
+  const rosterForSchool = isOwnSchool
+    ? ownRoster.map(r => ({ id: r.id, player_name: r.player_name }))
+    : Array.from(new Set(
+        allMatches.flatMap(m => m.players.filter(p => p.club_name && p.club_name.trim() === effectiveSchoolName.trim()).map(p => p.player_name))
+      )).map(name => ({ id: name, player_name: name }));
+  // 候補となる学校名（自チーム＋これまで対戦した相手校）
+  const knownSchoolNames = Array.from(new Set(
+    [mySchoolName, ...allMatches.flatMap(m => m.players.map(p => p.club_name))].filter(Boolean)
+  ));
   const playerMatches = selectedPlayer
-    ? allMatches.filter(m => m.status === "finished" && ownSideFor(m, selectedPlayer, mySchoolName))
+    ? allMatches.filter(m => m.status === "finished" && ownSideFor(m, selectedPlayer, effectiveSchoolName))
     : [];
 
   async function loadResults(matchSummaries, condLabel) {
@@ -6867,7 +6893,44 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
   // ============ ① 選手選択 ============
   if (mode === "wizardPlayer") {
-    const filteredRoster = ownRoster.filter(p => !teamSearch.trim() || p.player_name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
+    // 学校を変更する（検索）画面
+    if (schoolPickerOpen) {
+      const filteredSchools = knownSchoolNames.filter(n => !schoolSearch.trim() || n.toLowerCase().includes(schoolSearch.trim().toLowerCase()));
+      return (
+        <div style={{ minHeight:"100vh", background:C.gray }}>
+          <div style={{ background:C.navy, color:C.white, padding:16 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setSchoolPickerOpen(false)}>←</span>
+              <div>
+                <div style={{ fontSize:16, fontWeight:800 }}>分析</div>
+                <div style={{ fontSize:11, color:"#b9c2d6" }}>チームを選択</div>
+              </div>
+            </div>
+          </div>
+          <div style={{ padding:14 }}>
+            <div style={{ display:"flex", alignItems:"center", background:C.white, border:`1px solid ${C.navy}`, borderRadius:10, padding:"9px 12px", marginBottom:10, fontSize:13, gap:6 }}>
+              🔍<input value={schoolSearch} onChange={e=>setSchoolSearch(e.target.value)} placeholder="学校名・チーム名で検索" style={{ flex:1, border:"none", outline:"none", fontSize:13, background:"transparent" }} autoFocus />
+            </div>
+            <div style={S.card}>
+              {filteredSchools.length===0 && <div style={{ padding:16, textAlign:"center", color:C.textSec, fontSize:12 }}>見つかりません</div>}
+              {filteredSchools.map(name => (
+                <div key={name} onClick={()=>{
+                  setSelectedSchoolName(name === mySchoolName ? "" : name);
+                  setSelectedPlayer(null);
+                  setSchoolSearch(""); setSchoolPickerOpen(false);
+                }} style={{ display:"flex", alignItems:"center", gap:8, padding:"12px 14px", borderBottom:`1px solid ${C.border}`, cursor:"pointer" }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:C.text, flex:1 }}>{name}</div>
+                  {name===mySchoolName && <span style={{ fontSize:9.5,color:C.accent,background:C.accentL,padding:"2px 7px",borderRadius:6 }}>自チーム</span>}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize:11, color:C.textSec, padding:"6px 4px" }}>これまで対戦した相手チームも候補に出てきます。選ぶとその学校の選手一覧に切り替わります。</div>
+          </div>
+        </div>
+      );
+    }
+
+    const filteredRoster = rosterForSchool.filter(p => !teamSearch.trim() || p.player_name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
     return (
       <div style={{ minHeight:"100vh", background:C.gray }}>
         <div style={{ background:C.navy, color:C.white, padding:16 }}>
@@ -6880,6 +6943,15 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
           </div>
         </div>
         <div style={{ padding:14 }}>
+          <div style={{ fontSize:11.5, fontWeight:700, color:C.text, marginBottom:6 }}>チーム・学校</div>
+          <div onClick={()=>setSchoolPickerOpen(true)} style={{ ...S.card, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
+            <div>
+              <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>{effectiveSchoolName || "（未設定）"}</div>
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{isOwnSchool ? "自分の所属チーム（デフォルト）" : "相手チーム"}</div>
+            </div>
+            <div style={{ fontSize:11, color:C.accent, fontWeight:700 }}>変更する ›</div>
+          </div>
+
           <div style={{ display:"flex", alignItems:"center", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:"9px 12px", marginBottom:10, fontSize:13, gap:6 }}>
             🔍<input value={teamSearch} onChange={e=>setTeamSearch(e.target.value)} placeholder="選手名で検索" style={{ flex:1, border:"none", outline:"none", fontSize:13, background:"transparent" }} />
           </div>
@@ -6891,7 +6963,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
                 <div style={{ width:34,height:34,borderRadius:"50%",background:C.accentL,color:C.accent,fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{p.player_name[0]}</div>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:13.5, fontWeight:700, color:C.text }}>{p.player_name}{p.player_name===linkedPlayerName && <span style={{ fontSize:9.5,color:C.purple,background:"#eef0fe",padding:"2px 7px",borderRadius:6,marginLeft:6 }}>自分</span>}</div>
-                  <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{mySchoolName}</div>
+                  <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{effectiveSchoolName}</div>
                 </div>
                 <div style={{ width:19,height:19,borderRadius:"50%",border:`2px solid ${p.player_name===selectedPlayer?C.accent:C.border}`,background:p.player_name===selectedPlayer?C.accent:"transparent" }}/>
               </div>
@@ -6945,16 +7017,108 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
             ))}
           </div>
 
-          {selectSubTab === "period" && (
-            <div style={S.card}>
-              <div style={{ padding:14 }}>
-                <div style={{ fontSize:11.5, fontWeight:700, marginBottom:6 }}>開始日</div>
-                <input type="date" value={periodStart} onChange={e=>setPeriodStart(e.target.value)} style={{ width:"100%", padding:"9px 10px", border:`1px solid ${C.border}`, borderRadius:8, fontSize:12.5, marginBottom:10 }}/>
-                <div style={{ fontSize:11.5, fontWeight:700, marginBottom:6 }}>終了日</div>
-                <input type="date" value={periodEnd} onChange={e=>setPeriodEnd(e.target.value)} style={{ width:"100%", padding:"9px 10px", border:`1px solid ${C.border}`, borderRadius:8, fontSize:12.5 }}/>
+          {selectSubTab === "period" && (() => {
+            const daysInMonth = new Date(calViewYear, calViewMonth+1, 0).getDate();
+            const firstDow = new Date(calViewYear, calViewMonth, 1).getDay();
+            const todayIso = today();
+            const padMonth = (m) => String(m+1).padStart(2,"0");
+            const toIso = (d) => `${calViewYear}-${padMonth(calViewMonth)}-${String(d).padStart(2,"0")}`;
+            const handleDayClick = (d) => {
+              const iso = toIso(d);
+              if (calFilterMode === "day") {
+                setCalDay(iso); setPeriodStart(iso); setPeriodEnd(iso);
+              } else if (calFilterMode === "range") {
+                if (calRangeStep === "start") {
+                  setCalRangeStart(iso); setCalRangeEnd(null); setCalRangeStep("end");
+                } else {
+                  if (iso < calRangeStart) { setCalRangeStart(iso); setCalRangeStep("end"); }
+                  else { setCalRangeEnd(iso); setCalRangeStep("start"); setPeriodStart(calRangeStart); setPeriodEnd(iso); }
+                }
+              }
+            };
+            const getDayClass = (iso) => {
+              if (calFilterMode === "day") return iso === calDay ? "sel" : "";
+              if (calFilterMode === "range") {
+                if (iso === calRangeStart) return "rs";
+                if (iso === calRangeEnd) return "re";
+                if (calRangeStart && calRangeEnd && iso > calRangeStart && iso < calRangeEnd) return "ir";
+              }
+              return "";
+            };
+            const DOW = ["日","月","火","水","木","金","土"];
+            return (
+              <div style={{ background:C.white, borderRadius:14, border:`1.5px solid ${C.border}`, overflow:"hidden", marginBottom:12 }}>
+                <div style={{ display:"flex", borderBottom:`1.5px solid ${C.border}` }}>
+                  {[["day","1日指定"],["range","期間指定"],["month","月指定"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>{ setCalFilterMode(v); if(v==="range"){setCalRangeStart(null);setCalRangeEnd(null);setCalRangeStep("start");} }} style={{ flex:1, padding:"10px 4px", textAlign:"center", fontSize:13, fontWeight:700, color:calFilterMode===v?C.accent:C.textSec, border:"none", background:"none", cursor:"pointer", borderBottom:calFilterMode===v?`2px solid ${C.accent}`:"2px solid transparent" }}>{l}</button>
+                  ))}
+                </div>
+                <div style={{ padding:"12px 14px 0" }}>
+                  {(calFilterMode==="day"||calFilterMode==="range") && (<>
+                    {calFilterMode==="range" && (
+                      <p style={{ fontSize:11, color:C.textSec, textAlign:"center", marginBottom:8 }}>
+                        {calRangeStep==="start" ? <>開始日 → 終了日の順にタップ（<b style={{color:C.accent}}>開始日</b>を選択中）</> : <>開始日 → 終了日の順にタップ（<b style={{color:C.accent}}>終了日</b>を選択中）</>}
+                      </p>
+                    )}
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                      <button onClick={()=>{ if(calViewMonth===0){setCalViewMonth(11);setCalViewYear(y=>y-1);}else setCalViewMonth(m=>m-1); }} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:C.navy, padding:"4px 8px" }}>‹</button>
+                      <span style={{ fontSize:15, fontWeight:800, color:C.navy }}>{calViewYear}年{calViewMonth+1}月</span>
+                      <button onClick={()=>{ if(calViewMonth===11){setCalViewMonth(0);setCalViewYear(y=>y+1);}else setCalViewMonth(m=>m+1); }} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:C.navy, padding:"4px 8px" }}>›</button>
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:10 }}>
+                      {DOW.map((d,i)=>(
+                        <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:i===0?"#e53935":i===6?"#1565c0":C.textSec, padding:"3px 0" }}>{d}</div>
+                      ))}
+                      {Array.from({length:firstDow}).map((_,i)=><div key={"e"+i}/>)}
+                      {Array.from({length:daysInMonth}).map((_,i)=>{
+                        const d=i+1; const iso=toIso(d); const dc=getDayClass(iso);
+                        const dow=(firstDow+i)%7;
+                        const isToday=iso===todayIso;
+                        const isSel=dc==="sel"||dc==="rs"||dc==="re";
+                        const isInRange=dc==="ir";
+                        return (
+                          <button key={d} onClick={()=>handleDayClick(d)} style={{
+                            textAlign:"center", fontSize:13, padding:"7px 2px", borderRadius: dc==="rs"?"8px 0 0 8px":dc==="re"?"0 8px 8px 0":"8px",
+                            cursor:"pointer", fontWeight:600, border:"none",
+                            background:isSel?C.accent:isInRange?C.accentL:"transparent",
+                            color:isSel?"#fff":isInRange?"#00874f":dow===0?"#e53935":dow===6?"#1565c0":isToday?C.accent:C.text,
+                            outline:isToday&&!isSel?`1.5px solid ${C.accent}`:"none",
+                          }}>{d}</button>
+                        );
+                      })}
+                    </div>
+                  </>)}
+                  {calFilterMode==="month" && (<>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:16, marginBottom:10 }}>
+                      <button onClick={()=>setCalMonthViewYear(y=>y-1)} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:C.navy }}>‹</button>
+                      <span style={{ fontSize:15, fontWeight:800, color:C.navy }}>{calMonthViewYear}年</span>
+                      <button onClick={()=>setCalMonthViewYear(y=>y+1)} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:C.navy }}>›</button>
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:10 }}>
+                      {Array.from({length:12}).map((_,i)=>{
+                        const mStr = `${calMonthViewYear}-${String(i+1).padStart(2,"0")}`;
+                        const isSel = calMonth===mStr;
+                        const hasData = playerMatches.some(m=>(m.match_date||"").slice(0,7)===mStr);
+                        return (
+                          <button key={i} onClick={()=>{
+                            setCalMonth(mStr);
+                            const lastDay = new Date(calMonthViewYear, i+1, 0).getDate();
+                            setPeriodStart(`${mStr}-01`); setPeriodEnd(`${mStr}-${String(lastDay).padStart(2,"0")}`);
+                          }} style={{ padding:"10px 4px", textAlign:"center", borderRadius:8, cursor:"pointer", fontSize:14, fontWeight:700, border: isSel?`1.5px solid ${C.accent}`:hasData?`1.5px solid ${C.accent}`:`1.5px solid ${C.border}`, background:isSel?C.accent:"#fff", color:isSel?"#fff":hasData?"#00874f":C.text }}>{i+1}月</button>
+                        );
+                      })}
+                    </div>
+                    <p style={{ fontSize:11, color:C.textSec, textAlign:"center", marginBottom:10 }}>枠線あり＝試合データあり</p>
+                  </>)}
+                </div>
+                {(periodStart || periodEnd) && (
+                  <div style={{ padding:"0 14px 14px" }}>
+                    <button onClick={()=>{ setPeriodStart(""); setPeriodEnd(""); setCalDay(null); setCalRangeStart(null); setCalRangeEnd(null); setCalMonth(null); }} style={{ width:"100%", padding:"9px", background:C.gray, color:C.textSec, border:"none", borderRadius:10, fontSize:12.5, fontWeight:700, cursor:"pointer" }}>選択をクリア（{periodStart||"…"} 〜 {periodEnd||"…"}）</button>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {selectSubTab === "tournament" && (
             <div style={S.card}>
@@ -6976,8 +7140,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
               <div style={{ padding:"6px 4px", maxHeight:360, overflowY:"auto" }}>
                 {sortedForList.length===0 && <div style={{ padding:16, textAlign:"center", color:C.textSec, fontSize:12 }}>対象の試合がありません</div>}
                 {sortedForList.map(m => {
-                  const win = winForPlayer(m, selectedPlayer, mySchoolName);
-                  const oppSide = m.players.find(p=>p.player_name!==selectedPlayer && p.team!==(ownSideFor(m,selectedPlayer,mySchoolName)));
+                  const win = winForPlayer(m, selectedPlayer, effectiveSchoolName);
+                  const oppSide = m.players.find(p=>p.player_name!==selectedPlayer && p.team!==(ownSideFor(m,selectedPlayer,effectiveSchoolName)));
                   const on = selectedMatchIds.includes(m.id);
                   return (
                     <div key={m.id} onClick={()=>setSelectedMatchIds(prev => on ? prev.filter(id=>id!==m.id) : [...prev, m.id])}
@@ -6985,7 +7149,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
                       <div style={{ width:18,height:18,borderRadius:5,border:`2px solid ${on?C.accent:C.border}`, background:on?C.accent:"transparent", color:"#fff", fontSize:11, display:"flex",alignItems:"center",justifyContent:"center", flexShrink:0 }}>{on?"✓":""}</div>
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontSize:10, color:C.textSec }}>{fmtDate(m.match_date)}・{m.tournament_name}</div>
-                        <div style={{ fontSize:12, fontWeight:700, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>vs {oppSide?.club_name || ""} {m.players.filter(p=>p.team!==ownSideFor(m,selectedPlayer,mySchoolName)).map(p=>p.player_name).join("/")}</div>
+                        <div style={{ fontSize:12, fontWeight:700, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>vs {oppSide?.club_name || ""} {m.players.filter(p=>p.team!==ownSideFor(m,selectedPlayer,effectiveSchoolName)).map(p=>p.player_name).join("/")}</div>
                       </div>
                       <div style={{ fontSize:11, fontWeight:800, padding:"2px 8px", borderRadius:6, color:win?C.accent:C.red, background:win?C.accentL:C.redL, flexShrink:0 }}>{win?"勝ち":"負け"}</div>
                     </div>
@@ -7016,7 +7180,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   }
 
   // ============ ③ 分析結果（デフォルト表示もここ） ============
-  const agg = aggregatePlayerStats(resultMatches, selectedPlayer, mySchoolName);
+  const agg = aggregatePlayerStats(resultMatches, selectedPlayer, effectiveSchoolName);
   const topPlaysWin = Object.entries(agg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,4);
   const topPlaysErr = Object.entries(agg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,4);
   const maxPlayCount = Math.max(1, ...topPlaysWin.map(x=>x[1]), ...topPlaysErr.map(x=>x[1]));
@@ -7024,13 +7188,13 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const sortedResults = [...resultMatches].sort((a,b)=> new Date(a.match_date)-new Date(b.match_date));
   const oldestM = sortedResults[0], newestM = sortedResults[sortedResults.length-1];
   const canShowGrowth = sortedResults.length >= 2 && oldestM.id !== newestM.id;
-  const oldestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([oldestM], selectedPlayer, mySchoolName)) : null;
-  const newestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([newestM], selectedPlayer, mySchoolName)) : null;
+  const oldestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([oldestM], selectedPlayer, effectiveSchoolName)) : null;
+  const newestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([newestM], selectedPlayer, effectiveSchoolName)) : null;
 
-  const wonMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, mySchoolName) === true);
-  const lostMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, mySchoolName) === false);
-  const wonRates = keyRatesFromAgg(aggregatePlayerStats(wonMatches, selectedPlayer, mySchoolName));
-  const lostRates = keyRatesFromAgg(aggregatePlayerStats(lostMatches, selectedPlayer, mySchoolName));
+  const wonMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true);
+  const lostMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === false);
+  const wonRates = keyRatesFromAgg(aggregatePlayerStats(wonMatches, selectedPlayer, effectiveSchoolName));
+  const lostRates = keyRatesFromAgg(aggregatePlayerStats(lostMatches, selectedPlayer, effectiveSchoolName));
 
   const metricLabel = { serveRate:"1stサーブ成功率", receiveMissRate:"レシーブミス率", decisionRate:"決定率" };
 
