@@ -7047,7 +7047,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
         </div>
         <div style={{ padding:14, paddingBottom:90 }}>
           <div style={{ display:"flex", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:3, marginBottom:12 }}>
-            {[["period","期間"],["tournament","大会"],["individual","個別"],["all","すべて"]].map(([v,l])=>(
+            {[["all","すべて"],["period","期間"],["tournament","大会"],["individual","個別"]].map(([v,l])=>(
               <div key={v} onClick={()=>setSelectSubTab(v)} style={{ flex:1, textAlign:"center", fontSize:11.5, fontWeight:700, padding:"8px 2px", borderRadius:8, cursor:"pointer", background:selectSubTab===v?C.navy:"transparent", color:selectSubTab===v?"#fff":C.textSec }}>{l}</div>
             ))}
           </div>
