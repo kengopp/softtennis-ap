@@ -7138,7 +7138,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
             onClick={()=>setMode("wizardMatches")}
             style={{ width:"100%", padding:13, borderRadius:11, border:"none", fontSize:14, fontWeight:800, cursor:selectedPlayer?"pointer":"default",
               background: selectedPlayer ? C.navy : "#d5dae2", color:"#fff" }}
-          >{selectedPlayer ? `${selectedPlayer}さんで次へ →` : "選手を選んでください"}</button>
+          >{selectedPlayer ? "次へ →" : "選手を選んでください"}</button>
         </div>
       </div>
     );
