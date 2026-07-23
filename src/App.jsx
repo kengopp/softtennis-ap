@@ -6037,13 +6037,26 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
 
             {/* ②次の試合予定カード（進行中がない場合のみ、大会基準） */}
             {upcomingTournament && (
-              <div
-                style={{ ...S.card, padding:16, marginBottom:14, borderLeft:`4px solid ${C.textSec}`, cursor:"pointer" }}
-                onClick={()=>onOpenTournament && onOpenTournament(upcomingTournament)}
-              >
-                <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
-                <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{upcomingTournament.name}</div>
-                <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(upcomingTournament.start_date)}</div>
+              <div style={{ ...S.card, padding:16, marginBottom:14, borderLeft:`4px solid ${C.textSec}` }}>
+                <div style={{ cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(upcomingTournament)}>
+                  <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
+                  <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{upcomingTournament.name}</div>
+                  <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(upcomingTournament.start_date)}</div>
+                </div>
+                {(upcomingTournament.venue_link || upcomingTournament.guideline_url) && (
+                  <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                    <button
+                      disabled={!upcomingTournament.venue_link}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: upcomingTournament.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: upcomingTournament.venue_link ? "pointer" : "default" }}
+                      onClick={e=>{ e.stopPropagation(); if (upcomingTournament.venue_link) window.open(upcomingTournament.venue_link, "_blank", "noopener,noreferrer"); }}
+                    ><span style={{ color: upcomingTournament.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
+                    <button
+                      disabled={!upcomingTournament.guideline_url}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: upcomingTournament.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: upcomingTournament.guideline_url ? "pointer" : "default" }}
+                      onClick={e=>{ e.stopPropagation(); if (upcomingTournament.guideline_url) window.open(upcomingTournament.guideline_url, "_blank", "noopener,noreferrer"); }}
+                    ><span style={{ color: upcomingTournament.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
+                  </div>
+                )}
               </div>
             )}
 
