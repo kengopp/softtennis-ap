@@ -8914,6 +8914,10 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
   const [loadKey, setLoadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [viewOnly, setViewOnly] = useState(false); // 観戦モード
+  // ★中断／途中終了の試合は、記録者本人であっても「自分が記録者になる（続きから記録する）」を
+  //   押すまでは観戦モード（閲覧のみ）にしておく。押した瞬間だけこのフラグをtrueにして即アクティブ化する。
+  const [statusLockOverride, setStatusLockOverride] = useState(false);
+  useEffect(() => { setStatusLockOverride(false); }, [matchId]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -8938,6 +8942,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
         if (cancelled) return;
         setInitialMatch(m);
         if (m && user) {
+          const suspendedLike = m.status === "abandoned" || m.status === "suspended";
           if (teamMatchId) {
             // 団体戦：team_match_gamesのrecorder_idと自分のIDを比較
             const { data: tmg } = await supabase
@@ -8949,10 +8954,12 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
             // recorder_idがnull（誰も記録していない）→ 観戦モード（スコア詳細から入った場合）
             // ★毎回true/falseを確定させる（一度観戦モードになった後、自分が記録者になっても
             // 　falseに戻らなかったバグがあったため）
-            setViewOnly(!tmg || !tmg.recorder_id || tmg.recorder_id !== user.id);
+            const baseViewOnly = !tmg || !tmg.recorder_id || tmg.recorder_id !== user.id;
+            setViewOnly(baseViewOnly || (suspendedLike && !statusLockOverride));
           } else {
             // 個人戦：作成者以外は観戦モード
-            setViewOnly(m.created_by !== user.id);
+            const baseViewOnly = m.created_by !== user.id;
+            setViewOnly(baseViewOnly || (suspendedLike && !statusLockOverride));
           }
         }
       } catch(e) {
@@ -8977,6 +8984,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
         onBack={onBack}
         onEdit={onEdit}
         onReload={()=>setLoadKey(k=>k+1)}
+        onClaimRecorder={()=>setStatusLockOverride(true)}
         onRefresh={handleRefresh}
         refreshing={refreshing}
         onNavigate={onNavigate}
@@ -8987,7 +8995,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
   const [tab,    setTab]    = useState("record");
   const [fault,  setFault]  = useState(0);
@@ -9400,6 +9408,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onRefresh, r
                   } else {
                     await supabase.from("matches").update({ created_by:user.id }).eq("id", match.id);
                   }
+                  onClaimRecorder && onClaimRecorder();
                   onReload();
                 } catch(e) {
                   alert("エラー: " + (e.message || e));
