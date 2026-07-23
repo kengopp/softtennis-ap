@@ -3026,6 +3026,9 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
           value={venueLink}
           onChange={e=>setVenueLink(e.target.value)}
         />
+        {venueLink && (
+          <span style={{ color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }} onClick={()=>setVenueLink("")}>✕</span>
+        )}
       </div>
 
       <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>試合要項（任意）</div>
