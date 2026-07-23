@@ -9460,7 +9460,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               >🗑️ スコア全削除</button>
             </div>
           )}
-          {match.games.length===0&&match.status!=="finished"&&(
+          {match.games.length===0&&match.status!=="finished"&&!viewOnly&&(
             <div style={{ textAlign:"center",padding:"40px 0" }}>
               <div style={{ fontSize:36,marginBottom:12 }}>🎾</div>
               <p style={{ color:C.textSec,marginBottom:8 }}>第1ゲームを開始してください</p>
@@ -9487,7 +9487,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               )}
             </div>
           )}
-          {!currentGame&&match.games.length>0&&match.status!=="finished"&&(
+          {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(
             <div style={{ textAlign:"center",padding:"30px 0" }}>
               <p style={{ color:C.textSec,marginBottom:16 }}>ゲーム終了。次のゲームへ</p>
               <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>startNewGame()}>第{match.games.length+1}ゲーム開始</button>
@@ -9632,7 +9632,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             />
           )}
 
-          {currentGame&&match.status!=="finished"&&(
+          {currentGame&&match.status!=="finished"&&!viewOnly&&(
             <>
               {/* サーブ表示：大型セグメントボタン（1st=緑／2nd=黄／df=赤、案①の配色＋案②サイズ） */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10 }}>
