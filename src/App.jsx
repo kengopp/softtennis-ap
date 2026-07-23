@@ -2882,8 +2882,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>この大会を削除しますか？</h3>
             <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>大会の情報のみ削除されます。紐づく試合記録は削除されません。削除してもゴミ箱から元に戻せます。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteTournament(null)}>キャンセル</button>
               <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>handleDeleteTournament(confirmDeleteTournament)}>削除する</button>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteTournament(null)}>キャンセル</button>
             </div>
           </div>
         </Modal>
