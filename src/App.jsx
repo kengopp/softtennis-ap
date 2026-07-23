@@ -3544,8 +3544,8 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
               <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{matchesOfDay.length}試合</div>
             </div>
 
-            {/* ★診断用：重複除去(dedup)で件数が減っていないか確認する */}
-            {dedupDiag && (
+            {/* ★診断用：重複除去(dedup)で件数が減っていないか確認する（通常は非表示。確認したい時だけ dedupDiag && ... の前に false && を外す） */}
+            {false && dedupDiag && (
               <div style={{ ...S.card, padding:14, marginBottom:14, border:`1px solid ${C.red}` }}>
                 <div style={{ fontSize:12, fontWeight:800, marginBottom:8, color:C.red }}>🔍 重複除去の診断</div>
                 <div style={{ fontSize:12, color:C.text }}>集計対象の候補（重複除去前）：{dedupDiag.targetRowsCount}件</div>
@@ -3565,8 +3565,8 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
             )}
 
             {/* ★診断用：この大会の団体戦(ラウンド)ごとに、番手が何件登録され、
-                  うち何件がmatch_id付き(＝集計対象)になっているかを確認できるようにする */}
-            {roundBreakdown.length > 0 && (
+                  うち何件がmatch_id付き(＝集計対象)になっているかを確認できるようにする（通常は非表示） */}
+            {false && roundBreakdown.length > 0 && (
               <div style={{ ...S.card, padding:14, marginBottom:14 }}>
                 <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>🔍 団体戦の内訳（診断用）</div>
                 {roundBreakdown.map(rb=>(
@@ -3584,7 +3584,8 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
               </div>
             )}
 
-            {/* ★どの試合が集計対象になっているか確認できるよう、一覧をそのまま表示する（人数が合わない時の確認用） */}
+            {/* ★どの試合が集計対象になっているか確認できるよう、一覧をそのまま表示する（人数が合わない時の確認用）（通常は非表示） */}
+            {false && (
             <div style={{ ...S.card, padding:14, marginBottom:14 }}>
               <div style={{ fontSize:12, fontWeight:800, marginBottom:10 }}>📋 この日に集計対象となった試合（{matchesOfDay.length}件）</div>
               {matchesOfDay.length===0 ? (
@@ -3603,6 +3604,7 @@ function DailyPlayerRankingScreen({ tournament, onBack }) {
                 );
               })}
             </div>
+            )}
 
             {metrics.map(m=>(
               <div key={m.key} style={{ ...S.card, padding:14, marginBottom:12 }}>
