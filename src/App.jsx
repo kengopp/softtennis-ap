@@ -683,6 +683,18 @@ async function updateMyAvatar(avatarUrl) {
   if (error) throw error;
 }
 
+// 大会要項（PDF）アップロード
+async function uploadTournamentGuideline(file) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
+  const path = `${user.id}/${uid()}.${ext}`;
+  const { error: upErr } = await supabase.storage.from("guidelines").upload(path, file, { upsert: true, contentType: file.type || "application/pdf" });
+  if (upErr) throw upErr;
+  const { data } = supabase.storage.from("guidelines").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 async function saveMyProfile(profile) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
@@ -1212,6 +1224,8 @@ async function saveTournament(t) {
     start_date: t.start_date,
     end_date: t.end_date || t.start_date,
     venue: t.venue || null,
+    venue_link: t.venue_link || null,
+    guideline_url: t.guideline_url || null,
   };
   const { error } = await supabase.from("tournaments").upsert(row);
   if (error) throw error;
@@ -2383,7 +2397,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return true;
   });
 
-  async function handleSaveTournament(name, startDate, endDate, venue) {
+  async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl) {
     const trimmed = name.trim();
     if (!trimmed) { alert("大会名を入力してください"); return; }
     if (!startDate) { alert("開始日を選択してください"); return; }
@@ -2394,6 +2408,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         start_date: startDate,
         end_date: endDate || startDate,
         venue: venue || null,
+        venue_link: venueLink || null,
+        guideline_url: guidelineUrl || null,
       });
       // ★既存の大会の名前を変更した場合、紐づく個人戦・団体戦の大会名も追従させる
       if (editingTournament?.name && editingTournament.name.trim() !== trimmed) {
@@ -2677,10 +2693,25 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       </div>
                     </div>
                   </div>
-                  <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                    <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>📂 試合一覧を見る</button>
-                    <button style={{ width:48, padding:"8px", background:"#eef0f4", color:C.textSec, border:"none", borderLeft:"1px solid "+C.border, fontSize:14, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setEditingTournament(t);setShowTournamentModal(true);}}>✏️</button>
-                    <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDeleteTournament(t.id);}}>🗑</button>
+                  <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
+                    <button
+                      disabled={!t.venue_link}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
+                      onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
+                    ><span style={{ color: t.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
+                    <button
+                      disabled={!t.guideline_url}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
+                      onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
+                    ><span style={{ color: t.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
+                    <button
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
+                      onClick={e=>{e.stopPropagation();setEditingTournament(t);setShowTournamentModal(true);}}
+                    ><span style={{ color:"#fb8c00" }}>✏️</span> 編集</button>
+                    <button
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff3f3", color:"#e53935", border:"1px solid #f8b4b4", cursor:"pointer" }}
+                      onClick={e=>{e.stopPropagation();setConfirmDeleteTournament(t.id);}}
+                    ><span>🗑</span> 削除</button>
                   </div>
                 </div>
               );
@@ -2944,8 +2975,31 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
   const [endDate, setEndDate] = useState(initial?.end_date || initial?.start_date || today());
   const [venue, setVenue] = useState(initial?.venue || "");
   const [venues, setVenues] = useState([]);
+  const [venueLink, setVenueLink] = useState(initial?.venue_link || "");
+  const [guidelineMode, setGuidelineMode] = useState("file"); // "file" | "link"
+  const [guidelineUrl, setGuidelineUrl] = useState(initial?.guideline_url || "");
+  const [guidelineFileName, setGuidelineFileName] = useState(
+    initial?.guideline_url ? decodeURIComponent(initial.guideline_url.split("/").pop() || "") : ""
+  );
+  const [uploadingGuideline, setUploadingGuideline] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => { getKnownVenues().then(setVenues); }, []);
+
+  async function handleGuidelineFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingGuideline(true);
+    try {
+      const url = await uploadTournamentGuideline(file);
+      setGuidelineUrl(url);
+      setGuidelineFileName(file.name);
+    } catch(err) {
+      alert("アップロードに失敗しました: " + (err.message || err));
+    }
+    setUploadingGuideline(false);
+    e.target.value = "";
+  }
+
   return (
     <div>
       <h3 style={{ fontSize:16, fontWeight:800, marginBottom:14, textAlign:"center" }}>{initial ? "✏️ 大会を編集" : "📋 大会を作成"}</h3>
@@ -2962,12 +3016,67 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
       <div style={{ marginBottom:16 }}>
         <VenueField value={venue} onChange={setVenue} venues={venues} placeholder="例：○○市民コート"/>
       </div>
+
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>会場リンク（任意）</div>
+      <div style={{ display:"flex", alignItems:"center", gap:8, borderBottom:"1px solid "+C.border, paddingBottom:8, marginBottom:16 }}>
+        <span style={{ fontSize:14, color:C.textSec }}>🔗</span>
+        <input
+          style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+          placeholder="Googleマップ等のURLを貼り付け"
+          value={venueLink}
+          onChange={e=>setVenueLink(e.target.value)}
+        />
+      </div>
+
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>試合要項（任意）</div>
+      <div style={{ border:"1px dashed "+C.border, borderRadius:10, padding:12, marginBottom:16 }}>
+        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+          <button
+            type="button"
+            style={{ flex:1, textAlign:"center", padding:"6px", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer",
+              border:"1px solid "+(guidelineMode==="file"?C.navy:C.border), background:guidelineMode==="file"?C.navy:"#fff", color:guidelineMode==="file"?"#fff":C.textSec }}
+            onClick={()=>setGuidelineMode("file")}
+          >📎 ファイル添付</button>
+          <button
+            type="button"
+            style={{ flex:1, textAlign:"center", padding:"6px", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer",
+              border:"1px solid "+(guidelineMode==="link"?C.navy:C.border), background:guidelineMode==="link"?C.navy:"#fff", color:guidelineMode==="link"?"#fff":C.textSec }}
+            onClick={()=>setGuidelineMode("link")}
+          >🔗 リンクを貼る</button>
+        </div>
+
+        {guidelineMode==="file" ? (
+          guidelineUrl ? (
+            <div style={{ display:"flex", alignItems:"center", gap:8, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
+              <span style={{ fontSize:18 }}>📄</span>
+              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{guidelineFileName || "添付済みファイル"}</span>
+              <span style={{ color:C.textSec, fontSize:12, cursor:"pointer" }} onClick={()=>{ setGuidelineUrl(""); setGuidelineFileName(""); }}>✕</span>
+            </div>
+          ) : (
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, color:C.textSec, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
+              {uploadingGuideline ? "アップロード中..." : "📎 PDFを選択"}
+              <input type="file" accept="application/pdf" style={{ display:"none" }} disabled={uploadingGuideline} onChange={handleGuidelineFileChange}/>
+            </label>
+          )
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:14, color:C.textSec }}>🔗</span>
+            <input
+              style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+              placeholder="要項が載っているURLを貼り付け"
+              value={guidelineUrl}
+              onChange={e=>{ setGuidelineUrl(e.target.value); setGuidelineFileName(""); }}
+            />
+          </div>
+        )}
+      </div>
+
       <div style={{ display:"flex", gap:8 }}>
         <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:"#f0f2f6", color:C.textSec, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
         <button
           style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
-          disabled={saving}
-          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue); setSaving(false); }}
+          disabled={saving || uploadingGuideline}
+          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl); setSaving(false); }}
         >{initial ? "保存する" : "作成する"}</button>
       </div>
     </div>
@@ -3145,12 +3254,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <TournamentFormFields
             initial={tournament}
             onCancel={()=>setShowEditModal(false)}
-            onSave={async (name, startDate, endDate, venue)=>{
+            onSave={async (name, startDate, endDate, venue, venueLink, guidelineUrl)=>{
               const trimmed = name.trim();
               if (!trimmed) { alert("大会名を入力してください"); return; }
               if (!startDate) { alert("開始日を選択してください"); return; }
               try {
-                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null });
+                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null });
                 // ★大会名が変わった場合、既存の個人戦・団体戦の大会名も追従させる（見えない文字ズレによる紐付け解除を防ぐ）
                 if (tournament.name && tournament.name.trim() !== trimmed) {
                   await renameTournamentCascade(tournament.name, trimmed);
