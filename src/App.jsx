@@ -7094,7 +7094,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
     const filteredRoster = rosterForSchool.filter(p => !teamSearch.trim() || p.player_name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
     return (
-      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ background:C.navy, color:C.white, padding:16 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("results")}>←</span>
@@ -7120,8 +7120,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
           <div style={S.card}>
             {filteredRoster.length===0 && <div style={{ padding:16, textAlign:"center", color:C.textSec, fontSize:12 }}>選手が見つかりません</div>}
             {filteredRoster.map(p => (
-              <div key={p.id} onClick={()=>{ setSelectedPlayer(p.player_name); setMode("wizardMatches"); }}
-                style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", borderBottom:`1px solid ${C.border}`, cursor:"pointer" }}>
+              <div key={p.id} onClick={()=>setSelectedPlayer(p.player_name)}
+                style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", borderBottom:`1px solid ${C.border}`, cursor:"pointer", background:p.player_name===selectedPlayer?C.accentL:"transparent" }}>
                 <div style={{ width:34,height:34,borderRadius:"50%",background:C.accentL,color:C.accent,fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{p.player_name[0]}</div>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:13.5, fontWeight:700, color:C.text }}>{p.player_name}{p.player_name===linkedPlayerName && <span style={{ fontSize:9.5,color:C.purple,background:"#eef0fe",padding:"2px 7px",borderRadius:6,marginLeft:6 }}>自分</span>}</div>
@@ -7131,6 +7131,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
               </div>
             ))}
           </div>
+        </div>
+        <div style={{ position:"fixed", left:0, right:0, bottom:0, padding:14, background:C.gray, borderTop:`1px solid ${C.border}` }}>
+          <button
+            disabled={!selectedPlayer}
+            onClick={()=>setMode("wizardMatches")}
+            style={{ width:"100%", padding:13, borderRadius:11, border:"none", fontSize:14, fontWeight:800, cursor:selectedPlayer?"pointer":"default",
+              background: selectedPlayer ? C.navy : "#d5dae2", color:"#fff" }}
+          >{selectedPlayer ? `${selectedPlayer}さんで次へ →` : "選手を選んでください"}</button>
         </div>
       </div>
     );
@@ -7374,6 +7382,31 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
         <div style={{ background:C.navy, color:"#fff", borderRadius:14, padding:14, marginBottom:12 }}>
           <div style={{ fontSize:11, color:"#b9c2d6", marginBottom:4 }}>{resultCondLabel}</div>
           <div style={{ fontSize:15, fontWeight:800 }}>{selectedPlayer}さん・{resultMatches.length}試合</div>
+        </div>
+
+        <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:6 }}>選手はそのままで試合数だけ変える</div>
+        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+          {[3,5,10,20].map(n => {
+            const active = resultCondLabel === `直近${n}試合`;
+            return (
+              <button
+                key={n}
+                disabled={resultLoading}
+                onClick={()=>{
+                  const recentN = [...playerMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).slice(0,n);
+                  loadResults(recentN, `直近${n}試合`);
+                }}
+                style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
+                  border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}
+              >直近{n}試合</button>
+            );
+          })}
+          <button
+            disabled={resultLoading}
+            onClick={()=>loadResults(playerMatches, "すべて")}
+            style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
+              border:`1px solid ${resultCondLabel==="すべて"?C.navy:C.border}`, background:resultCondLabel==="すべて"?C.navy:"#fff", color:resultCondLabel==="すべて"?"#fff":C.textSec }}
+          >全部</button>
         </div>
 
         <button
