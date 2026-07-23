@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, Component } from "react";
+import { useState, useCallback, useEffect, useRef, Component, Fragment } from "react";
 import { supabase } from "./supabase-client";
 
 class ErrorBoundary extends Component {
@@ -11624,6 +11624,9 @@ function translateAuthError(msg) {
 // ★品質改善メモ：
 // ・選手を探す際は「名前が同じ」だけでなく「学校IDも同じ」かどうかを見て、
 //   同姓同名の別選手に誤ってリンクしてしまわないようにしている。
+// ・選手マスターから明示的に選手を選んだ場合（selectedId指定時）は、名前の文字列一致に頼らず
+//   選手IDで直接更新・紐づけを行う。姓しか登録されていない選手に名を追記して登録した場合も、
+//   文字列が変わって一致しなくなることがないよう、IDベースで確実に同一選手として扱う。
 // ・users テーブルの update() は結果(error)を必ず確認し、失敗時ははっきり例外を投げる
 //   （黙って0件更新のまま処理が続いてしまうのを防ぐ）。
 // ・複数ステップ（プロフィール保存→選手検索→選手作成→ユーザー更新）はDBトランザクションではないため、
@@ -11646,31 +11649,65 @@ async function completeProfileRegistration(userId, payload) {
     throw new Error("プロフィール保存に失敗しました: " + (e.message || e));
   }
 
-  async function linkOrCreatePlayer(playerName, position, hand) {
+  // selectedId が指定されている場合：選手マスターから明示的に選ばれた選手にIDで直接紐づける。
+  // 「名」が未登録だった選手に backfillFirst（新しく入力された名）があれば、選手マスター側も更新する。
+  // selectedId が無い場合：従来通り「入力された名前の文字列」で一致検索し、無ければ新規作成する。
+  async function linkOrCreatePlayer(playerName, position, hand, selectedId, backfillFirst) {
     let roster;
     try {
       roster = await getPlayerRoster();
     } catch(e) {
       throw new Error("選手検索に失敗しました: " + (e.message || e));
     }
-    // 同姓同名でも別の学校の選手を誤ってリンクしないよう、学校IDも条件に含める
-    const existing = roster.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(playerName) && p.is_own_team && p.school_id === payload.schoolId);
-    let linkedId = existing?.id;
-    if (!existing) {
-      try {
-        await savePlayer({ player_name: playerName, position, dominant_hand: hand, is_own_team: true, school_id: payload.schoolId });
-      } catch(e) {
-        throw new Error("選手の新規作成に失敗しました: " + (e.message || e));
+
+    let linkedId = null;
+
+    if (selectedId) {
+      const existing = roster.find(p => p.id === selectedId);
+      if (existing) {
+        const trimmedBackfill = (backfillFirst || "").trim();
+        const hasGivenName = /\s/.test((existing.player_name || "").trim());
+        let finalName = existing.player_name;
+        if (!hasGivenName && trimmedBackfill) {
+          finalName = `${(existing.player_name || "").trim()} ${trimmedBackfill}`;
+        }
+        if (finalName !== existing.player_name || position || hand) {
+          try {
+            await savePlayer({
+              ...existing,
+              player_name: finalName,
+              position: position || existing.position,
+              dominant_hand: hand || existing.dominant_hand,
+            });
+          } catch(e) {
+            throw new Error("選手マスターの更新に失敗しました: " + (e.message || e));
+          }
+        }
+        linkedId = existing.id;
       }
-      let refreshed;
-      try {
-        refreshed = await getPlayerRoster();
-      } catch(e) {
-        throw new Error("作成した選手の再取得に失敗しました: " + (e.message || e));
-      }
-      const saved = refreshed.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(playerName) && p.is_own_team && p.school_id === payload.schoolId);
-      linkedId = saved?.id;
     }
+
+    if (!linkedId) {
+      // 同姓同名でも別の学校の選手を誤ってリンクしないよう、学校IDも条件に含める
+      const existing = roster.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(playerName) && p.is_own_team && p.school_id === payload.schoolId);
+      linkedId = existing?.id;
+      if (!existing) {
+        try {
+          await savePlayer({ player_name: playerName, position, dominant_hand: hand, is_own_team: true, school_id: payload.schoolId });
+        } catch(e) {
+          throw new Error("選手の新規作成に失敗しました: " + (e.message || e));
+        }
+        let refreshed;
+        try {
+          refreshed = await getPlayerRoster();
+        } catch(e) {
+          throw new Error("作成した選手の再取得に失敗しました: " + (e.message || e));
+        }
+        const saved = refreshed.find(p => normalizePlayerName(p.player_name) === normalizePlayerName(playerName) && p.is_own_team && p.school_id === payload.schoolId);
+        linkedId = saved?.id;
+      }
+    }
+
     if (linkedId) {
       const { error } = await supabase.from("users").update({ linked_player_id: linkedId }).eq("id", userId);
       if (error) throw new Error("ユーザーと選手の紐づけに失敗しました: " + error.message);
@@ -11678,16 +11715,17 @@ async function completeProfileRegistration(userId, payload) {
   }
 
   if (payload.registerMode === "player") {
-    await linkOrCreatePlayer(payload.fullName, payload.playerPosition, payload.playerHand);
+    await linkOrCreatePlayer(payload.fullName, payload.playerPosition, payload.playerHand, payload.playerSelectedId, payload.playerBackfillFirst);
   }
 
   if (payload.registerMode === "guardian" && payload.childName) {
-    await linkOrCreatePlayer(payload.childName, payload.childPosition, payload.childHand);
+    await linkOrCreatePlayer(payload.childName, payload.childPosition, payload.childHand, payload.childSelectedId, payload.childBackfillFirst);
   }
 }
 
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login"); // login | signup
+  const [step, setStep] = useState(1); // 新規登録のステップ：1=基本情報 2=登録区分 3=選手情報 "confirm"=確認画面
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [lastName,     setLastName]     = useState("");
@@ -11699,20 +11737,32 @@ function AuthScreen({ onAuthed }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
+  const [roster, setRoster] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
   const [inviteInput, setInviteInput] = useState("");
   // 登録区分: null=未選択, "player"=選手, "guardian"=保護者
   const [registerMode, setRegisterMode] = useState(null);
   const [playerPosition, setPlayerPosition] = useState(null);
   const [playerHand, setPlayerHand] = useState(null);
-  // 保護者：直接入力用
+  // 選手（本人）を選手マスターと連携する方法： "auto"=名前で自動連携, "master"=マスターから選び直す
+  const [playerLinkMode, setPlayerLinkMode] = useState("auto");
+  const [playerSelectedId, setPlayerSelectedId] = useState(null);
+  const [playerBackfillFirst, setPlayerBackfillFirst] = useState("");
+  // 保護者：お子さん・関連選手
+  const [childMode, setChildMode] = useState("master"); // master | manual
+  const [childSelectedId, setChildSelectedId] = useState(null);
+  const [childBackfillFirst, setChildBackfillFirst] = useState("");
   const [childLastName, setChildLastName] = useState("");
   const [childFirstName, setChildFirstName] = useState("");
-  const [childMode, setChildMode] = useState("select"); // select | input
   const [childPosition, setChildPosition] = useState(null);
   const [childHand, setChildHand] = useState(null);
 
-  useEffect(() => { getSchools().then(setSchools); }, []);
+  useEffect(() => { getSchools().then(setSchools); getPlayerRoster().then(setRoster); }, []);
+
+  const fullName = [lastName.trim(), firstName.trim()].filter(Boolean).join(" ");
+
+  // 選択中の学校に紐づく自チームの選手一覧（選手マスターから選ぶ用）
+  const schoolRoster = roster.filter(p => p.is_own_team && p.school_id === schoolId);
 
   async function handleLogin() {
     setErrorMsg("");
@@ -11730,19 +11780,37 @@ function AuthScreen({ onAuthed }) {
     }
   }
 
-  async function handleSignup() {
+  function goStep1() { setErrorMsg(""); setStep(1); }
+  function goStep2() {
     setErrorMsg("");
-    const fullName = [lastName.trim(), firstName.trim()].filter(Boolean).join(" ");
     if (!email.trim()) { setErrorMsg("メールアドレスを入力してください"); return; }
     if (password.length < 6) { setErrorMsg("パスワードは6文字以上で入力してください"); return; }
     if (!fullName) { setErrorMsg("お名前（姓）を入力してください"); return; }
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
-    if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
-    if (!category) { setErrorMsg("区分を選択してください"); return; }
+    if (!category) { setErrorMsg("所属区分を選択してください"); return; }
+    if (!genderCategory) { setErrorMsg("チーム区分を選択してください"); return; }
+    setStep(2);
+  }
+  function goStep3() {
+    setErrorMsg("");
+    if (!registerMode) { setErrorMsg("選手本人／保護者・関係者のいずれかを選択してください"); return; }
+    setStep(3);
+  }
+  function goConfirm() {
+    setErrorMsg("");
     if (!inviteInput.trim()) { setErrorMsg("招待コードを入力してください"); return; }
+    if (registerMode === "player" && playerLinkMode === "master" && !playerSelectedId) {
+      setErrorMsg("選手マスターから選手を選択してください"); return;
+    }
+    setStep("confirm");
+  }
 
+  async function handleSignup() {
+    setErrorMsg("");
     const codeOk = await verifyInviteCode(schoolId, inviteInput);
     if (!codeOk) { setErrorMsg("招待コードが正しくありません。管理者に確認してください。"); return; }
+
+    const childName = [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ");
 
     setLoading(true);
     try {
@@ -11752,8 +11820,12 @@ function AuthScreen({ onAuthed }) {
         const payload = {
           fullName, schoolId, prefecture, genderCategory, category, registerMode,
           playerPosition, playerHand,
-          childName: [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" "),
+          playerSelectedId: registerMode==="player" && playerLinkMode==="master" ? playerSelectedId : null,
+          playerBackfillFirst,
+          childName,
           childPosition, childHand,
+          childSelectedId: registerMode==="guardian" && childMode==="master" ? childSelectedId : null,
+          childBackfillFirst,
         };
         if (data.session) {
           // メール確認不要 or 即セッション確立 → その場で登録を完了させる
@@ -11774,6 +11846,32 @@ function AuthScreen({ onAuthed }) {
     }
   }
 
+  // ---- 選手マスターの選択肢（姓のみの選手には「名 未登録」の目印を付ける） ----
+  function rosterOptionLabel(p) {
+    const hasGiven = /\s/.test((p.player_name || "").trim());
+    return hasGiven ? p.player_name : `${p.player_name}（名 未登録）`;
+  }
+
+  const stepLabels = [["基本情報",1], ["登録区分",2], ["選手情報",3]];
+  function StepBar() {
+    const curNum = step === "confirm" ? 3 : step;
+    return (
+      <div style={{ marginBottom:16 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginBottom:6 }}>
+          {[1,2,3].map((n,i) => (
+            <Fragment key={n}>
+              <div style={{ width:24, height:24, borderRadius:"50%", fontSize:11, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", background:n < curNum ? C.accent : (n === curNum ? C.navy : C.border), color:n <= curNum ? C.white : C.textSec }}>{n}</div>
+              {i < 2 && <div style={{ width:30, height:2, background:n < curNum ? C.accent : C.border }} />}
+            </Fragment>
+          ))}
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:10.5, color:C.textSec, padding:"0 4px" }}>
+          {stepLabels.map(([l,n]) => <span key={n} style={{ fontWeight:n===curNum?800:400, color:n===curNum?C.navy:C.textSec }}>{l}</span>)}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ ...S.page, display:"flex", flexDirection:"column", justifyContent:"center", padding:"24px 20px" }}>
       <div style={{ textAlign:"center", marginBottom:28 }}>
@@ -11785,41 +11883,68 @@ function AuthScreen({ onAuthed }) {
       {/* タブ切替 */}
       <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, marginBottom:18 }}>
         {[["login","ログイン"],["signup","新規登録"]].map(([v,l]) => (
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:mode===v?C.white:"transparent", color:mode===v?C.navy:C.textSec, boxShadow:mode===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setMode(v); setErrorMsg(""); }}>{l}</button>
+          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:mode===v?C.white:"transparent", color:mode===v?C.navy:C.textSec, boxShadow:mode===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setMode(v); setErrorMsg(""); if (v==="signup") setStep(1); }}>{l}</button>
         ))}
       </div>
 
-      <div style={S.card}>
-        <div style={{ padding:"14px 16px" }}>
-          <label style={S.lbl}>メールアドレス</label>
-          <input type="email" style={S.inp} placeholder="example@email.com" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="none"/>
-        </div>
-        <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-          <label style={S.lbl}>パスワード（6文字以上）</label>
-          <input type="password" style={S.inp} placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)}/>
-        </div>
+      {mode==="signup" && <StepBar />}
 
-        {mode==="signup" && (
-          <>
-            {/* 姓・名 */}
+      {mode==="login" && (
+        <div style={S.card}>
+          <div style={{ padding:"14px 16px" }}>
+            <label style={S.lbl}>メールアドレス</label>
+            <input type="email" style={S.inp} placeholder="example@email.com" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="none"/>
+          </div>
+          <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+            <label style={S.lbl}>パスワード（6文字以上）</label>
+            <input type="password" style={S.inp} placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)}/>
+          </div>
+        </div>
+      )}
+
+      {/* ============ STEP 1: 基本情報 ============ */}
+      {mode==="signup" && step===1 && (
+        <>
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>① アカウント情報</div>
+          <div style={S.card}>
+            <div style={{ padding:"14px 16px" }}>
+              <label style={S.lbl}>メールアドレス</label>
+              <input type="email" style={S.inp} placeholder="example@email.com" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="none"/>
+            </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>お名前</label>
+              <label style={S.lbl}>パスワード（6文字以上）</label>
+              <input type="password" style={S.inp} placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)}/>
+            </div>
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <label style={S.lbl}>お名前（ご本人）</label>
               <div style={{ display:"flex", gap:10 }}>
                 <input style={{ ...S.inp, flex:1 }} placeholder="姓（名字）" value={lastName} onChange={e=>setLastName(e.target.value)}/>
                 <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={firstName} onChange={e=>setFirstName(e.target.value)}/>
               </div>
               <div style={{ fontSize:11, color:"#aaa", marginTop:4 }}>💡 姓だけでも登録できます</div>
             </div>
+          </div>
 
-            {/* 都道府県（学校リストと連動） */}
-            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"14px 0 8px" }}>② 所属情報</div>
+          <div style={S.card}>
+            <div style={{ padding:"14px 16px" }}>
               <label style={S.lbl}>都道府県</label>
               <select style={{ ...S.inp, background:"transparent" }} value={prefecture} onChange={e=>{ setPrefecture(e.target.value); setSchoolPrefFilter(e.target.value); setSchoolId(null); }}>
                 {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
-
-            {/* 男女区分 */}
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <label style={S.lbl}>学校名またはチーム名</label>
+              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} genderCategory={null} />
+            </div>
+            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
+              <label style={S.lbl}>所属区分</label>
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                {CATEGORY_OPTIONS.filter(c=>["adult","university","high_school","junior_high"].includes(c.key)).map(c => (
+                  <button key={c.key} style={S.togBtn(category===c.key)} onClick={()=>setCategory(c.key)}>{c.label}</button>
+                ))}
+              </div>
+            </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>チーム区分</label>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -11828,24 +11953,145 @@ function AuthScreen({ onAuthed }) {
                 ))}
               </div>
             </div>
+          </div>
 
-            {/* 区分 */}
+          {errorMsg && (
+            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+          )}
+          <button style={{ ...S.btn(C.navy), marginTop:16 }} onClick={goStep2}>次へ</button>
+        </>
+      )}
+
+      {/* ============ STEP 2: 登録区分 ============ */}
+      {mode==="signup" && step===2 && (
+        <>
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>③ 登録区分</div>
+          <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>ご自身の立場を選択してください</div>
+
+          <div onClick={()=>setRegisterMode("player")} style={{ display:"flex", alignItems:"center", gap:12, padding:16, border:`1.5px solid ${registerMode==="player"?C.navy:C.border}`, borderRadius:12, marginBottom:10, cursor:"pointer", background:registerMode==="player"?"#eef3ff":C.white }}>
+            <div style={{ width:42, height:42, borderRadius:"50%", background:registerMode==="player"?C.navy:"#eef1f8", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🎾</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>選手本人として登録</div>
+              <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>ご自身の試合記録やデータを管理します</div>
+            </div>
+            <div style={{ width:18, height:18, borderRadius:"50%", border:`2px solid ${registerMode==="player"?C.navy:"#ccc"}`, background:registerMode==="player"?C.navy:C.white, flexShrink:0 }} />
+          </div>
+
+          <div onClick={()=>setRegisterMode("guardian")} style={{ display:"flex", alignItems:"center", gap:12, padding:16, border:`1.5px solid ${registerMode==="guardian"?C.navy:C.border}`, borderRadius:12, marginBottom:10, cursor:"pointer", background:registerMode==="guardian"?"#eef3ff":C.white }}>
+            <div style={{ width:42, height:42, borderRadius:"50%", background:registerMode==="guardian"?C.navy:"#eef1f8", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>👤</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>保護者・関係者として登録</div>
+              <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>選手の試合記録やデータを管理・サポートします</div>
+            </div>
+            <div style={{ width:18, height:18, borderRadius:"50%", border:`2px solid ${registerMode==="guardian"?C.navy:"#ccc"}`, background:registerMode==="guardian"?C.navy:C.white, flexShrink:0 }} />
+          </div>
+
+          <div style={{ background:"#eef3ff", color:"#2b4f9e", fontSize:11, padding:"9px 12px", borderRadius:8, marginBottom:4 }}>ℹ️ 選択した区分によって、次の入力項目が変わります。</div>
+
+          {errorMsg && (
+            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+          )}
+          <button style={{ ...S.btn(C.navy), marginTop:16 }} onClick={goStep3}>次へ</button>
+          <button style={{ ...S.btn(C.white,C.textSec), marginTop:8, border:`1.5px solid ${C.border}` }} onClick={goStep1}>戻る</button>
+        </>
+      )}
+
+      {/* ============ STEP 3: 選手情報 ============ */}
+      {mode==="signup" && step===3 && (
+        <>
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>
+            ④ {registerMode==="player" ? "選手情報" : "お子さん・関連選手の情報"}
+          </div>
+
+          <div style={S.card}>
+            {registerMode==="player" ? (
+              <div style={{ padding:"14px 16px" }}>
+                <label style={S.lbl}>選手マスターとの連携</label>
+                <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:9, marginBottom:10 }}>
+                  <button style={{ flex:1, border:"none", padding:8, fontSize:12, fontWeight:700, borderRadius:7, cursor:"pointer", background:playerLinkMode==="auto"?C.white:"transparent", color:playerLinkMode==="auto"?C.navy:C.textSec, boxShadow:playerLinkMode==="auto"?"0 1px 4px rgba(0,0,0,.08)":"none" }} onClick={()=>setPlayerLinkMode("auto")}>「{fullName || "お名前"}」で自動連携</button>
+                  <button style={{ flex:1, border:"none", padding:8, fontSize:12, fontWeight:700, borderRadius:7, cursor:"pointer", background:playerLinkMode==="master"?C.white:"transparent", color:playerLinkMode==="master"?C.navy:C.textSec, boxShadow:playerLinkMode==="master"?"0 1px 4px rgba(0,0,0,.08)":"none" }} onClick={()=>setPlayerLinkMode("master")}>選手マスターから選び直す</button>
+                </div>
+
+                {playerLinkMode==="auto" ? (
+                  <div style={{ fontSize:11, color:C.textSec }}>ステップ①で入力したお名前「{fullName || "―"}」で選手マスターに自動登録・連携します。</div>
+                ) : (
+                  <>
+                    <select style={{ ...S.inp, background:"transparent" }} value={playerSelectedId || ""} onChange={e=>{ setPlayerSelectedId(e.target.value || null); setPlayerBackfillFirst(""); }}>
+                      <option value="">選手を選択してください</option>
+                      {schoolRoster.map(p => <option key={p.id} value={p.id}>{rosterOptionLabel(p)}</option>)}
+                    </select>
+                    {playerSelectedId && !/\s/.test((schoolRoster.find(p=>p.id===playerSelectedId)?.player_name||"").trim()) && (
+                      <div style={{ marginTop:10, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 12px" }}>
+                        <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>名（選手マスターに未登録のため入力してください）</div>
+                        <input style={S.inp} placeholder="名（例：太郎）" value={playerBackfillFirst} onChange={e=>setPlayerBackfillFirst(e.target.value)} />
+                        <div style={{ fontSize:11, color:"#046a45", background:C.accentL, borderRadius:8, padding:"8px 10px", marginTop:8 }}>ℹ️ 入力すると選手マスターにも反映されます。</div>
+                      </div>
+                    )}
+                  </>
+                )}
+                <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>※部活動で使用している正式な氏名で連携してください。</div>
+              </div>
+            ) : (
+              <div style={{ padding:"14px 16px" }}>
+                <label style={S.lbl}>登録方法（任意）</label>
+                <div style={{ display:"flex", gap:10, marginBottom:10 }}>
+                  <div onClick={()=>setChildMode("master")} style={{ flex:1, textAlign:"center", padding:"14px 8px", border:`1.5px solid ${childMode==="master"?C.navy:C.border}`, borderRadius:12, cursor:"pointer", background:childMode==="master"?"#eef3ff":C.white }}>
+                    <div style={{ fontSize:20, marginBottom:6 }}>🔍</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.navy }}>選手マスターから選ぶ</div>
+                  </div>
+                  <div onClick={()=>setChildMode("manual")} style={{ flex:1, textAlign:"center", padding:"14px 8px", border:`1.5px solid ${childMode==="manual"?C.navy:C.border}`, borderRadius:12, cursor:"pointer", background:childMode==="manual"?"#eef3ff":C.white }}>
+                    <div style={{ fontSize:20, marginBottom:6 }}>✏️</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.navy }}>新しく登録する</div>
+                  </div>
+                </div>
+
+                {childMode==="master" ? (
+                  <>
+                    <label style={S.lbl}>選手名</label>
+                    <select style={{ ...S.inp, background:"transparent" }} value={childSelectedId || ""} onChange={e=>{ setChildSelectedId(e.target.value || null); setChildBackfillFirst(""); }}>
+                      <option value="">選手を選択してください</option>
+                      {schoolRoster.map(p => <option key={p.id} value={p.id}>{rosterOptionLabel(p)}</option>)}
+                    </select>
+                    {childSelectedId && !/\s/.test((schoolRoster.find(p=>p.id===childSelectedId)?.player_name||"").trim()) && (
+                      <div style={{ marginTop:10, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 12px" }}>
+                        <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>名（選手マスターに未登録のため入力してください）</div>
+                        <input style={S.inp} placeholder="名（例：太郎）" value={childBackfillFirst} onChange={e=>setChildBackfillFirst(e.target.value)} />
+                        <div style={{ fontSize:11, color:"#046a45", background:C.accentL, borderRadius:8, padding:"8px 10px", marginTop:8 }}>ℹ️ 入力すると選手マスターにも反映されます。</div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <label style={S.lbl}>選手名（本名）</label>
+                    <div style={{ display:"flex", gap:10 }}>
+                      <input style={{ ...S.inp, flex:1 }} placeholder="姓（例：福岡）" value={childLastName} onChange={e=>setChildLastName(e.target.value)}/>
+                      <input style={{ ...S.inp, flex:1 }} placeholder="名（例：太郎）" value={childFirstName} onChange={e=>setChildFirstName(e.target.value)}/>
+                    </div>
+                  </>
+                )}
+                <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>※部活動で使用している正式な氏名でご登録ください。</div>
+              </div>
+            )}
+
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>世代区分</label>
-              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                {CATEGORY_OPTIONS.map(c => (
-                  <button key={c.key} style={S.togBtn(category===c.key)} onClick={()=>setCategory(c.key)}>{c.label}</button>
-                ))}
+              <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
+              <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                {["前衛","後衛"].map(v => {
+                  const cur = registerMode==="player" ? playerPosition : childPosition;
+                  const set = registerMode==="player" ? setPlayerPosition : setChildPosition;
+                  return <button key={v} style={S.togBtn(cur===v)} onClick={()=>set(cur===v?null:v)}>{v}</button>;
+                })}
+              </div>
+              <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
+              <div style={{ display:"flex", gap:8 }}>
+                {["右","左"].map(v => {
+                  const cur = registerMode==="player" ? playerHand : childHand;
+                  const set = registerMode==="player" ? setPlayerHand : setChildHand;
+                  return <button key={v} style={S.togBtn(cur===v)} onClick={()=>set(cur===v?null:v)}>{v}</button>;
+                })}
               </div>
             </div>
 
-            {/* 学校名（都道府県・男女・区分連動） */}
-            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>学校名またはチーム名</label>
-              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} genderCategory={genderCategory} />
-            </div>
-
-            {/* 招待コード */}
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>招待コード</label>
               <input
@@ -11857,96 +12103,74 @@ function AuthScreen({ onAuthed }) {
               />
               <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>チームの管理者から招待コードを受け取り入力してください。</div>
             </div>
+          </div>
 
-            {/* 登録区分 2ブロック */}
-            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-                <label style={S.lbl}>選手登録</label>
-                {registerMode && (
-                  <button style={{ fontSize:12, color:C.textSec, background:"none", border:"none", cursor:"pointer", textDecoration:"underline" }} onClick={()=>setRegisterMode(null)}>選択をリセット</button>
-                )}
-              </div>
-
-              {/* ブロックA: 選手 */}
-              <div
-                onClick={()=>{ if(registerMode!=="player") setRegisterMode("player"); }}
-                style={{ border:`1.5px solid ${registerMode==="player" ? C.navy : C.border}`, borderRadius:10, marginBottom:8, overflow:"hidden", cursor:"pointer", opacity:registerMode==="guardian"?0.4:1, pointerEvents:registerMode==="guardian"?"none":"auto", transition:"opacity 0.2s" }}
-              >
-                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background:registerMode==="player"?"#eef1f8":"#fafafa" }}>
-                  <div style={{ width:20, height:20, borderRadius:"50%", border:`2px solid ${registerMode==="player"?C.navy:"#ccc"}`, background:registerMode==="player"?C.navy:"white", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                    {registerMode==="player" && <div style={{ width:8, height:8, borderRadius:"50%", background:"white" }} />}
-                  </div>
-                  <div>
-                    <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>🎾 選手として登録する</div>
-                    <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>自分自身が選手です（部員・選手本人）</div>
-                  </div>
-                </div>
-                {registerMode==="player" && (
-                  <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}` }} onClick={e=>e.stopPropagation()}>
-                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
-                    <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-                      {["前衛","後衛"].map(v => <button key={v} style={S.togBtn(playerPosition===v)} onClick={()=>setPlayerPosition(playerPosition===v?null:v)}>{v}</button>)}
-                    </div>
-                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
-                    <div style={{ display:"flex", gap:8 }}>
-                      {["右","左"].map(v => <button key={v} style={S.togBtn(playerHand===v)} onClick={()=>setPlayerHand(playerHand===v?null:v)}>{v}</button>)}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* ブロックB: 保護者 */}
-              <div
-                onClick={()=>{ if(registerMode!=="guardian") setRegisterMode("guardian"); }}
-                style={{ border:`1.5px solid ${registerMode==="guardian"?C.navy:C.border}`, borderRadius:10, overflow:"hidden", cursor:"pointer", opacity:registerMode==="player"?0.4:1, pointerEvents:registerMode==="player"?"none":"auto", transition:"opacity 0.2s" }}
-              >
-                <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", background:registerMode==="guardian"?"#eef1f8":"#fafafa" }}>
-                  <div style={{ width:20, height:20, borderRadius:"50%", border:`2px solid ${registerMode==="guardian"?C.navy:"#ccc"}`, background:registerMode==="guardian"?C.navy:"white", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                    {registerMode==="guardian" && <div style={{ width:8, height:8, borderRadius:"50%", background:"white" }} />}
-                  </div>
-                  <div>
-                    <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>👤 保護者・関係者として登録する</div>
-                    <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>お子さんや関連選手の戦績を確認したい方</div>
-                  </div>
-                </div>
-                {registerMode==="guardian" && (
-                  <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}` }} onClick={e=>e.stopPropagation()}>
-                    <div style={{ fontSize:12, color:C.textSec, marginBottom:10 }}>お子さん／関連選手を登録します（任意）</div>
-                    <div style={{ display:"flex", gap:10, marginBottom:4 }}>
-                      <input style={{ ...S.inp, flex:1 }} placeholder="姓（名字）" value={childLastName} onChange={e=>setChildLastName(e.target.value)} onClick={e=>e.stopPropagation()}/>
-                      <input style={{ ...S.inp, flex:1 }} placeholder="名（任意）" value={childFirstName} onChange={e=>setChildFirstName(e.target.value)} onClick={e=>e.stopPropagation()}/>
-                    </div>
-                    <div style={{ fontSize:11, color:"#aaa", marginBottom:10 }}>💡 姓だけでも登録できます</div>
-                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>ポジション（任意）</div>
-                    <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-                      {["前衛","後衛"].map(v => <button key={v} style={S.togBtn(childPosition===v)} onClick={e=>{ e.stopPropagation(); setChildPosition(childPosition===v?null:v); }}>{v}</button>)}
-                    </div>
-                    <div style={{ fontSize:12, color:C.textSec, marginBottom:8 }}>利き手（任意）</div>
-                    <div style={{ display:"flex", gap:8 }}>
-                      {["右","左"].map(v => <button key={v} style={S.togBtn(childHand===v)} onClick={e=>{ e.stopPropagation(); setChildHand(childHand===v?null:v); }}>{v}</button>)}
-                    </div>
-                    <div style={{ fontSize:11, color:C.textSec, marginTop:10 }}>※ 入力しなくても登録後にプロフィール画面から選手を選択できます。</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {errorMsg && (
-        <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>
-          ⚠️ {errorMsg}
-        </div>
+          {errorMsg && (
+            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+          )}
+          <button style={{ ...S.btn(C.navy), marginTop:16 }} onClick={goConfirm}>入力内容を確認する</button>
+          <button style={{ ...S.btn(C.white,C.textSec), marginTop:8, border:`1.5px solid ${C.border}` }} onClick={()=>{ setErrorMsg(""); setStep(2); }}>戻る</button>
+        </>
       )}
 
-      <button
-        style={{ ...S.btn(mode==="login" ? `linear-gradient(135deg,${C.accent},#00a066)` : C.navy), marginTop:16, opacity:loading?0.6:1 }}
-        disabled={loading}
-        onClick={mode==="login" ? handleLogin : handleSignup}
-      >
-        {loading ? "処理中..." : (mode==="login" ? "ログイン" : "新規登録する")}
-      </button>
+      {/* ============ 確認画面 ============ */}
+      {mode==="signup" && step==="confirm" && (
+        <>
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>✓ 入力内容の確認</div>
+          <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>内容をご確認のうえ、登録してください</div>
+
+          <div style={S.card}>
+            <div style={{ padding:"14px 16px" }}>
+              {[
+                ["アカウント情報", [["メールアドレス", email], ["お名前", fullName]]],
+                ["所属情報", [["都道府県", prefecture], ["学校・チーム名", schools.find(s=>s.id===schoolId)?.name || "―"], ["所属区分", categoryLabel(category)], ["チーム区分", GENDER_OPTIONS.find(g=>g.key===genderCategory)?.label || "―"]]],
+                ["登録区分", [["立場", registerMode==="player" ? "選手本人として登録" : "保護者・関係者として登録"]]],
+                [registerMode==="player" ? "選手情報" : "お子さん・関連選手の情報", [
+                  ["選手名", registerMode==="player"
+                    ? (playerLinkMode==="master"
+                        ? (schoolRoster.find(p=>p.id===playerSelectedId)?.player_name || "―") + (playerBackfillFirst ? ` ${playerBackfillFirst}` : "")
+                        : fullName)
+                    : (childMode==="master"
+                        ? (schoolRoster.find(p=>p.id===childSelectedId)?.player_name || "未選択") + (childBackfillFirst ? ` ${childBackfillFirst}` : "")
+                        : ([childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ") || "未入力"))],
+                  ["ポジション", (registerMode==="player" ? playerPosition : childPosition) || "未選択"],
+                  ["利き手", (registerMode==="player" ? playerHand : childHand) || "未選択"],
+                ]],
+                ["招待コード", [["コード", inviteInput || "未入力"]]],
+              ].map(([title, rows], i) => (
+                <div key={i} style={{ marginBottom: i<4 ? 14 : 0 }}>
+                  <div style={{ fontSize:12, fontWeight:800, color:C.navy, marginBottom:6 }}>{title}</div>
+                  {rows.map(([k,v]) => (
+                    <div key={k} style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"6px 0", borderBottom:`1px dashed ${C.border}` }}>
+                      <span style={{ color:C.textSec }}>{k}</span>
+                      <span style={{ fontWeight:700 }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {errorMsg && (
+            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+          )}
+          <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16, opacity:loading?0.6:1 }} disabled={loading} onClick={handleSignup}>
+            {loading ? "処理中..." : "上記の内容で登録する"}
+          </button>
+          <button style={{ ...S.btn(C.white,C.textSec), marginTop:8, border:`1.5px solid ${C.border}` }} onClick={()=>{ setErrorMsg(""); setStep(3); }}>修正する</button>
+        </>
+      )}
+
+      {mode==="login" && (
+        <>
+          {errorMsg && (
+            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+          )}
+          <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16, opacity:loading?0.6:1 }} disabled={loading} onClick={handleLogin}>
+            {loading ? "処理中..." : "ログイン"}
+          </button>
+        </>
+      )}
     </div>
   );
 }
