@@ -55,7 +55,7 @@
 .st-login-visual,.st-login-heading,.st-login-card,.st-login-features,.st-login-footer{ position:relative; z-index:1; }
 
 .st-login-visual{ display:flex; justify-content:center; margin-top:3px; }
-.st-login-racket{ width:120px; height:auto; }
+.st-login-emoji{ font-size:56px; line-height:1; }
 
 .st-login-heading{ margin:6px auto 22px; text-align:center; }
 .st-login-heading h1{ margin:0; font-size:clamp(1.9rem,8vw,2.6rem); line-height:1.22; letter-spacing:.01em; font-weight:800; color:var(--st-navy); }
@@ -136,7 +136,7 @@
 
 @media (max-width:520px){
   .st-login-hero{ padding:26px 16px 24px; }
-  .st-login-racket{ width:100px; }
+  .st-login-emoji{ font-size:46px; }
   .st-login-heading{ margin-bottom:18px; }
   .st-login-card{ padding:14px; border-radius:20px; }
   .st-login-tabs{ margin-bottom:16px; }

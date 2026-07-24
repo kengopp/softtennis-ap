@@ -38,29 +38,7 @@ export default function LoginScreen({ onLogin, onSwitchToSignup, onForgotPasswor
     <main className="st-login-page">
       <section className="st-login-hero" aria-labelledby="login-title">
         <div className="st-login-visual" aria-hidden="true">
-          <svg className="st-login-racket" viewBox="0 0 240 170">
-            <defs>
-              <linearGradient id="racketNavy" x1="0" x2="1">
-                <stop offset="0%" stopColor="#1a3360" />
-                <stop offset="100%" stopColor="#0f2044" />
-              </linearGradient>
-              <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
-                <feDropShadow dx="0" dy="4" stdDeviation="5" floodOpacity="0.18" />
-              </filter>
-            </defs>
-            <g filter="url(#softShadow)" transform="rotate(-17 125 90)">
-              <ellipse cx="132" cy="58" rx="43" ry="56" fill="#fff" stroke="url(#racketNavy)" strokeWidth="8" />
-              <g stroke="#b8c4d7" strokeWidth="1.4" opacity="0.9">
-                <line x1="100" y1="28" x2="165" y2="91" /><line x1="95" y1="40" x2="160" y2="103" />
-                <line x1="94" y1="54" x2="151" y2="110" /><line x1="103" y1="20" x2="168" y2="84" />
-                <line x1="164" y1="23" x2="100" y2="89" /><line x1="169" y1="36" x2="105" y2="101" />
-                <line x1="170" y1="50" x2="113" y2="108" /><line x1="153" y1="17" x2="95" y2="77" />
-              </g>
-              <path d="M113 108 L95 132" stroke="url(#racketNavy)" strokeWidth="9" strokeLinecap="round" />
-              <path d="M95 132 L75 157" stroke="#232b38" strokeWidth="13" strokeLinecap="round" />
-            </g>
-            <g filter="url(#softShadow)"><circle cx="66" cy="55" r="18" fill="#fff" /><circle cx="70" cy="54" r="2.5" fill="#00c27a" /></g>
-          </svg>
+          <span className="st-login-emoji">🎾</span>
         </div>
 
         <div className="st-login-heading">
