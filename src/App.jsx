@@ -777,6 +777,13 @@ async function transferAdmin(schoolId, toUserId) {
   if (error) throw error;
 }
 
+// ★管理者が同じチームのメンバーを削除する（本人のusersレコード・authアカウントの両方を削除）
+// 権限チェックはSQL側のRPC関数（admin_remove_member）でも二重に行っている
+async function removeGroupMember(targetId) {
+  const { error } = await supabase.rpc("admin_remove_member", { target_id: targetId });
+  if (error) throw error;
+}
+
 // チームを解散（全データ削除）
 async function dissolveTeam() {
   const { error } = await supabase.rpc("dissolve_team");
@@ -5560,28 +5567,47 @@ function GroupMembersScreen({ onBack }) {
   const [schoolInfo, setSchoolInfo] = useState(null);
   const [mySchoolName, setMySchoolName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [confirmRemove, setConfirmRemove] = useState(null); // ★削除確認対象のメンバー
+  const [removing, setRemoving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      const p = await getMyProfile();
-      setMyProfile(p);
-      if (p?.school_id) {
-        const [info, schools] = await Promise.all([
-          getSchoolInviteInfo(p.school_id),
-          getSchools(),
-        ]);
-        setSchoolInfo(info);
-        const school = schools.find(s => s.id === p.school_id);
-        const genderLabel = GENDER_OPTIONS.find(g => g.key === p.gender_category)?.label || "";
-        setMySchoolName(school ? `${school.name}（${school.prefecture}・${categoryLabel(school.category)}${genderLabel ? "・"+genderLabel : ""}）` : "");
-      }
-      const list = await getGroupMembers();
-      setMembers(list);
-      setLoading(false);
-    })();
+  const reload = useCallback(async () => {
+    setLoading(true);
+    const p = await getMyProfile();
+    setMyProfile(p);
+    if (p?.school_id) {
+      const [info, schools] = await Promise.all([
+        getSchoolInviteInfo(p.school_id),
+        getSchools(),
+      ]);
+      setSchoolInfo(info);
+      const school = schools.find(s => s.id === p.school_id);
+      const genderLabel = GENDER_OPTIONS.find(g => g.key === p.gender_category)?.label || "";
+      setMySchoolName(school ? `${school.name}（${school.prefecture}・${categoryLabel(school.category)}${genderLabel ? "・"+genderLabel : ""}）` : "");
+    }
+    const list = await getGroupMembers();
+    setMembers(list);
+    setLoading(false);
   }, []);
 
+  useEffect(() => { reload(); }, [reload]);
+
   const adminId = schoolInfo?.admin_user_id;
+
+  async function handleRemove() {
+    if (!confirmRemove) return;
+    setRemoving(true);
+    setErrorMsg("");
+    try {
+      await removeGroupMember(confirmRemove.id);
+      setConfirmRemove(null);
+      await reload();
+    } catch (e) {
+      setErrorMsg(e.message || "削除に失敗しました");
+    } finally {
+      setRemoving(false);
+    }
+  }
 
   return (
     <div style={S.page}>
@@ -5601,23 +5627,59 @@ function GroupMembersScreen({ onBack }) {
               <span style={{ background:C.navy,color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20 }}>{members.length}人</span>
             </div>
             {members.map(m => (
-              <div key={m.id} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}` }}>
-                <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+              <div key={m.id} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}`,gap:8 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:10,minWidth:0 }}>
                   <div style={{ width:36,height:36,borderRadius:"50%",background:C.accentL,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:C.accent,flexShrink:0,overflow:"hidden" }}>
                     {m.avatar_url ? <img src={m.avatar_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }}/> : (m.name?.charAt(0) || "?")}
                   </div>
-                  <span style={{ fontSize:14,fontWeight:700,color:C.text }}>{m.name}</span>
+                  <span style={{ fontSize:14,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{m.name}</span>
                 </div>
-                {m.id === adminId ? (
-                  <span style={{ background:"#6366f1",color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap" }}>👑 管理者</span>
-                ) : (
-                  <span style={{ background:C.textSec,color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap" }}>メンバー</span>
-                )}
+                <div style={{ display:"flex",alignItems:"center",gap:6,flexShrink:0 }}>
+                  {m.id === adminId ? (
+                    <span style={{ background:"#6366f1",color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap" }}>👑 管理者</span>
+                  ) : (
+                    <span style={{ background:C.textSec,color:C.white,fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,whiteSpace:"nowrap" }}>メンバー</span>
+                  )}
+                  {myProfile?.is_admin && m.id !== myProfile.id && (
+                    <button
+                      style={{ background:C.redL,color:C.red,border:"none",borderRadius:8,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap" }}
+                      onClick={()=>setConfirmRemove(m)}
+                    >削除</button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {confirmRemove && (
+        <Modal onClose={()=>{ if(!removing){ setConfirmRemove(null); setErrorMsg(""); } }}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40,marginBottom:8 }}>⚠️</div>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>{confirmRemove.name} さんを削除しますか？</h3>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:16 }}>
+              このメンバーのアカウントとチームへの参加が完全に削除されます。この操作は元に戻せません。
+              選手マスターの選手データ自体は削除されません。
+            </p>
+            {errorMsg && (
+              <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginBottom:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+            )}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <button
+                style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:removing?"default":"pointer",opacity:removing?0.6:1 }}
+                disabled={removing}
+                onClick={handleRemove}
+              >{removing ? "削除中..." : "削除する"}</button>
+              <button
+                style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }}
+                disabled={removing}
+                onClick={()=>{ setConfirmRemove(null); setErrorMsg(""); }}
+              >キャンセル</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
