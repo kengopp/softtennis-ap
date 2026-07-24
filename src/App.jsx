@@ -723,6 +723,10 @@ async function saveMyProfile(profile) {
     linked_player_id: profile.linked_player_id ?? null,
   };
   if (profile.is_approved !== undefined) updates.is_approved = profile.is_approved;
+  // ★新規登録フローの「途中経過」を判定するためのフラグ。明示的に渡された時だけ更新し、
+  //   通常のプロフィール編集（ProfileScreenなど）からの保存では触らないようにする
+  //   （うっかり完了済みユーザーを未完了扱いに戻してしまわないため）。
+  if (profile.signup_completed !== undefined) updates.signup_completed = profile.signup_completed;
   // ★update だと usersテーブルに行がまだ存在しない場合、0件更新のままエラーも出さずに終わってしまい、
   // 保存できたように見えて実は何も保存されていない、という無限ループの原因になっていた。
   // upsert にすることで、行がなければ新規作成、あれば更新、のどちらでも確実に保存されるようにする。
@@ -860,7 +864,12 @@ async function deleteSchoolMaster(id) {
 // ============================================================
 async function getPlayerRoster() {
   const { data, error } = await supabase.from("players").select("*").order("player_name");
-  if (error) { console.error(error); return []; }
+  if (error) {
+    console.error(error);
+    // ★以前はエラー時に空配列を返しており、呼び出し側が「選手0人」と誤判定して
+    // 新規選手を重複作成してしまう不具合があった。取得失敗は必ず呼び出し元に伝える。
+    throw new Error("選手マスターの取得に失敗しました: " + error.message);
+  }
   return data;
 }
 
@@ -12058,10 +12067,21 @@ async function saveProfileOnly(payload) {
       gender_category: payload.genderCategory,
       category: payload.category,
       is_approved: true,
+      // ★この時点ではまだ選手情報登録（ステップ4）が終わっていないため、明示的に未完了にする。
+      // これにより、途中でブラウザバック・再読み込みされても「登録完了済み」と誤判定されず、
+      // 次回アクセス時にステップ4から再開できる。
+      signup_completed: false,
     });
   } catch(e) {
     throw new Error("プロフィール保存に失敗しました: " + (e.message || e));
   }
+}
+
+// ★選手情報登録（ステップ4）が完了したことを記録する。
+// これが呼ばれるまでは、途中で離脱してもステップ4からやり直しになる。
+async function markSignupCompleted(userId) {
+  const { error } = await supabase.from("users").update({ signup_completed: true }).eq("id", userId);
+  if (error) throw new Error("登録完了の記録に失敗しました: " + error.message);
 }
 
 // ★選手マスターとの連携（作成 or 既存へのID直接紐づけ・名前バックフィル）。
@@ -12152,6 +12172,7 @@ async function linkPlayerToUser(userId, payload) {
 async function completeProfileRegistration(userId, payload) {
   await saveProfileOnly(payload);
   await linkPlayerToUser(userId, payload);
+  await markSignupCompleted(userId);
 }
 
 function AuthScreen({ onAuthed }) {
@@ -12195,6 +12216,11 @@ function AuthScreen({ onAuthed }) {
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState("");
+  // ★メール確認が必須の環境向け：確認メール送信後は二重送信を防ぐため専用の状態で固定する
+  const [emailConfirmSent, setEmailConfirmSent] = useState(false);
+  // ★ページ再読み込み・ブラウザバック等でReactのstateが初期化された後、
+  // 既にアカウント作成済み（ステップ4途中）かどうかを判定できるまでは登録ボタンを触らせない
+  const [sessionRestoreChecked, setSessionRestoreChecked] = useState(false);
 
   async function handleForgotSubmit() {
     setForgotError("");
@@ -12213,13 +12239,80 @@ function AuthScreen({ onAuthed }) {
 
   useEffect(() => { getSchools().then(setSchools); }, []);
 
+  // ★新規登録の入力状態を全て初期化する。「新規登録」タブを新しく開始する時にだけ呼ぶ。
+  // アカウント作成済み・選手情報登録が未完了（ステップ4途中）の場合はここは呼ばない
+  // （下の復元用useEffectがステップ4をそのまま復元するため）。
+  function resetSignupState() {
+    setEmail(""); setPassword("");
+    setLastName(""); setFirstName("");
+    setSchoolId(null); setPrefecture("東京都"); setSchoolPrefFilter("");
+    setGenderCategory(null); setCategory(null);
+    setInviteInput("");
+    setRegisterMode(null);
+    setPlayerPosition(null); setPlayerHand(null);
+    setPlayerLinkMode("auto"); setPlayerSelectedId(null); setPlayerBackfillFirst("");
+    setChildMode("master"); setChildSelectedId(null); setChildBackfillFirst("");
+    setChildLastName(""); setChildFirstName("");
+    setChildPosition(null); setChildHand(null);
+    setCreatedUserId(null);
+    setErrorMsg("");
+    setEmailConfirmSent(false);
+    setStep(1);
+  }
+
+  // 新規登録タブを開始する（ログインから来た場合も含め、常にクリーンな状態から始める）
+  function startFreshSignup() {
+    resetSignupState();
+    setMode("signup");
+  }
+
+  // ★ブラウザバック・画面再読み込みでReactのstateが消えた後の復元処理。
+  // すでにSupabase側でアカウントが作成済み（＝ステップ3を通過済み）なのに、
+  // ステップ1に戻ってしまい、もう一度招待コードを確認しようとすると
+  // 「すでに登録済みです」エラーになってしまう不具合を防ぐ。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) { if (!cancelled) setSessionRestoreChecked(true); return; }
+
+        // usersテーブルの登録状態を確認する
+        const { data: profileRow } = await supabase.from("users").select("*").eq("id", session.user.id).maybeSingle();
+
+        if (cancelled) return;
+
+        if (profileRow?.is_approved && profileRow?.signup_completed) {
+          // 選手情報登録まで完了済み＝登録は完了している → そのままホームへ
+          onAuthed();
+          return;
+        }
+        if (profileRow?.is_approved) {
+          // プロフィール保存（ステップ3）までは完了しているが、選手情報登録（ステップ4）が未完了
+          // → 入力し直させず、ステップ4をそのまま復元する
+          setCreatedUserId(session.user.id);
+          setMode("signup");
+          setStep(4);
+        }
+      } catch (e) {
+        console.error("登録状態の復元チェックに失敗:", e);
+      } finally {
+        if (!cancelled) setSessionRestoreChecked(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // ★選手マスター（players）はRLSで「同じチームの承認済みユーザーのみ閲覧可」となっており、
   // 新規登録の途中（まだアカウント未作成・未承認）の状態では誰であっても取得できない
   // （＝関係のない選手の個人情報が外部に見えてしまうことはない）。
   // そのため、招待コード確認・アカウント作成が完了して承認済みになった後（step4）にのみ取得する。
   useEffect(() => {
     if (step === 4 && createdUserId) {
-      getPlayerRoster().then(setRoster);
+      getPlayerRoster().then(setRoster).catch(e => {
+        console.error(e);
+        setErrorMsg("選手マスターの取得に失敗しました。通信状態を確認してもう一度お試しください。");
+      });
     }
   }, [step, createdUserId]);
 
@@ -12261,6 +12354,8 @@ function AuthScreen({ onAuthed }) {
         const basePayload = { fullName, schoolId, prefecture, genderCategory, category, registerMode };
         if (data.session) {
           await saveProfileOnly(basePayload);
+          // ★ブラウザバック・再読み込みでReactのstateが消えても、この後ステップ4を復元できるようにする
+          try { localStorage.setItem("signup_step4_pending_" + data.user.id, "1"); } catch(e){}
           setCreatedUserId(data.user.id);
           setLoading(false);
           setStep(4);
@@ -12277,7 +12372,10 @@ function AuthScreen({ onAuthed }) {
           };
           try { localStorage.setItem("pendingProfile_"+email.trim(), JSON.stringify(payload)); } catch(e){}
           setLoading(false);
-          alert("確認メールを送信しました。メール内のリンクをタップしてから、このアプリにログインしてください。ログイン後、選手情報の登録画面が表示されます。");
+          // ★確認メール送信後は、もう一度「次へ」を押しても再度signUpされて
+          // 「すでに登録済み」エラーになってしまうため、専用の完了表示に切り替えて
+          // ボタンを二度と押せないようにする（alertでは無く画面自体を切り替える）。
+          setEmailConfirmSent(true);
           return;
         }
       }
@@ -12308,6 +12406,11 @@ function AuthScreen({ onAuthed }) {
         childBackfillFirst,
       };
       await linkPlayerToUser(createdUserId, payload);
+      // ★選手登録まで完了したことを記録する（お子さんを紐づけない保護者の場合でも、
+      // これが無いと linked_player_id が付かず「まだ未完了」と誤判定され続けてしまうため）
+      await markSignupCompleted(createdUserId);
+      // ★登録完了後は復元用フラグを消しておく（次回リロード時にステップ4へ引き戻されないように）
+      try { localStorage.removeItem("signup_step4_pending_" + createdUserId); } catch(e){}
       onAuthed();
     } catch (e) {
       setErrorMsg(e.message || "登録に失敗しました");
@@ -12350,6 +12453,19 @@ function AuthScreen({ onAuthed }) {
     onAuthed();
   }
 
+  // ★アカウント作成済み（ステップ4途中）かどうかの確認が終わるまでは、
+  // 一瞬でもステップ1が見えてから飛び直す、という見た目のガタつきを避けるため簡易ローディングを表示する
+  if (!sessionRestoreChecked) {
+    return (
+      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#f4f6f9" }}>
+        <div style={{ textAlign:"center", color:C.textSec }}>
+          <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
+          読み込み中...
+        </div>
+      </div>
+    );
+  }
+
   // ★ログイン画面はデザイン刷新済みの LoginScreen コンポーネントに全面的に委譲する。
   // 新規登録（4ステップウィザード）は既存のまま、こちらの下に続けて描画する。
   if (mode === "login") {
@@ -12357,7 +12473,7 @@ function AuthScreen({ onAuthed }) {
       <>
         <LoginScreen
           onLogin={handleLoginSubmit}
-          onSwitchToSignup={()=>{ setErrorMsg(""); setStep(1); setMode("signup"); }}
+          onSwitchToSignup={startFreshSignup}
           onForgotPassword={()=>{ setForgotSent(false); setForgotError(""); setShowForgot(true); }}
         />
         {showForgot && (
@@ -12410,7 +12526,7 @@ function AuthScreen({ onAuthed }) {
               type="button" role="tab" aria-selected={mode==="signup"}
               className={mode==="signup" ? "st-login-tab is-active" : "st-login-tab"}
               disabled={step===4}
-              onClick={()=>{ if(step===4) return; setErrorMsg(""); setMode("signup"); setStep(1); }}
+              onClick={()=>{ if(step===4) return; resetSignupState(); setMode("signup"); }}
             >✎ 新規登録</button>
           </div>
 
@@ -12512,7 +12628,23 @@ function AuthScreen({ onAuthed }) {
       )}
 
       {/* ============ STEP 3: 招待コード（ここでアカウントを作成） ============ */}
-      {mode==="signup" && step===3 && (
+      {mode==="signup" && step===3 && emailConfirmSent && (
+        <>
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>④ 確認メールを送信しました</div>
+          <div style={S.card}>
+            <div style={{ padding:"20px 16px", textAlign:"center" }}>
+              <div style={{ fontSize:36, marginBottom:10 }}>📩</div>
+              <div style={{ fontSize:13, color:C.text, lineHeight:1.7 }}>
+                「{email}」宛に確認メールを送信しました。<br/>
+                メール内のリンクをタップしてから、ログインタブよりログインしてください。<br/>
+                ログイン後、選手情報の登録画面が自動的に表示されます。
+              </div>
+            </div>
+          </div>
+          <button style={{ ...S.btn(C.navy), marginTop:16 }} onClick={()=>{ resetSignupState(); setMode("login"); }}>ログイン画面へ</button>
+        </>
+      )}
+      {mode==="signup" && step===3 && !emailConfirmSent && (
         <>
           <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>④ 招待コード</div>
           <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>チームの管理者から受け取った招待コードを入力してください</div>
@@ -12694,10 +12826,25 @@ export default function App() {
   const [inAuthFlow, setInAuthFlow] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       setUser(data.user ?? null);
       setAuthChecked(true);
-      if (!data.user) setInAuthFlow(true);
+      if (!data.user) {
+        setInAuthFlow(true);
+        return;
+      }
+      // ★ブラウザバック・画面再読み込みの直後は、たとえ既にログイン済みセッションが
+      // 復元されていても、「新規登録ステップ4（選手情報登録）の途中で離脱していないか」を
+      // ここでも確認する。確認せずに素通りすると、プロフィール未完了時の強制ProfileScreenに
+      // 飛ばされてしまい、AuthScreen側のステップ4復元ロジックが一度も走らなくなってしまう。
+      try {
+        const { data: profileRow } = await supabase.from("users").select("is_approved, linked_player_id").eq("id", data.user.id).maybeSingle();
+        if (profileRow?.is_approved && !profileRow?.linked_player_id) {
+          setInAuthFlow(true);
+        }
+      } catch (e) {
+        console.error("登録状態の確認に失敗:", e);
+      }
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
@@ -12896,6 +13043,14 @@ export default function App() {
         onSaved={()=>{ getMyProfile().then(setProfile); }}
       />
     );
+  }
+
+  // ★アカウント作成・プロフィール保存（ステップ3）までは終わっているが、選手情報登録（ステップ4）が
+  // 未完了のまま離脱した場合。ここでチェックしないと、school_id/gender_categoryは既に設定済みのため
+  // 上のprofileIncomplete判定を素通りしてそのままホーム画面に入れてしまい、選手登録が永久に
+  // スキップされてしまう。AuthScreen自身がセッションとusersテーブルの状態を見てステップ4を復元する。
+  if (profile.signup_completed === false) {
+    return <AuthScreen onAuthed={()=>{ getMyProfile().then(setProfile); }} />;
   }
 
   if (screen==="profile") {
