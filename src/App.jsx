@@ -13017,7 +13017,17 @@ export default function App() {
 
   // 未ログイン、または新規登録フローの途中（アカウント作成済みだが選手情報の入力がまだ）ならログイン画面へ
   if (!user || inAuthFlow) {
-    return <AuthScreen onAuthed={()=>setInAuthFlow(false)} />;
+    return (
+      <AuthScreen
+        onAuthed={()=>{
+          setInAuthFlow(false);
+          // ★アカウント作成直後（ステップ3）に一度だけ取得したプロフィールは、保存処理と
+          // タイミングが重なって「学校名・性別区分がまだ空」の状態のまま古くなっていることがある。
+          // 登録完了（ステップ4）のタイミングで必ず最新の状態を取り直す。
+          getMyProfile().then(setProfile);
+        }}
+      />
+    );
   }
 
   // プロフィール確認中、または保留中データの自動適用中は簡易ローディング表示
