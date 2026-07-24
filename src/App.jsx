@@ -12128,6 +12128,29 @@ function AuthScreen({ onAuthed }) {
   const [childHand, setChildHand] = useState(null);
   // 招待コード確認後に作成されたユーザーID（この時点から選手マスターを読める＝承認済みになる）
   const [createdUserId, setCreatedUserId] = useState(null);
+  // ★ログイン画面デザイン刷新用
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState("");
+
+  async function handleForgotSubmit() {
+    setForgotError("");
+    if (!forgotEmail.trim()) { setForgotError("メールアドレスを入力してください"); return; }
+    setForgotLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim());
+      if (error) throw error;
+      setForgotSent(true);
+    } catch (e) {
+      setForgotError(translateAuthError(e.message) || "送信に失敗しました");
+    } finally {
+      setForgotLoading(false);
+    }
+  }
 
   useEffect(() => { getSchools().then(setSchools); }, []);
 
@@ -12277,33 +12300,121 @@ function AuthScreen({ onAuthed }) {
   }
 
   return (
-    <div style={{ ...S.page, display:"flex", flexDirection:"column", justifyContent:"center", padding:"24px 20px" }}>
-      <div style={{ textAlign:"center", marginBottom:28 }}>
-        <div style={{ fontSize:44, marginBottom:8 }}>🎾</div>
-        <div style={{ fontSize:20, fontWeight:800, color:C.navy }}>ソフトテニス記録アプリ</div>
-        <div style={{ fontSize:12, color:C.textSec, marginTop:4 }}>スコア記録・データ分析</div>
+    <div style={{
+      minHeight:"100vh",
+      display:"flex", flexDirection:"column", justifyContent:"center",
+      padding:"32px 20px 24px",
+      background:"radial-gradient(circle at 8% 6%, rgba(0,194,122,0.18), transparent 40%), radial-gradient(circle at 92% 10%, rgba(0,194,122,0.14), transparent 45%), linear-gradient(180deg, #eef7f1 0%, #f4f8f5 55%, #ffffff 100%)",
+    }}>
+      <div style={{ textAlign:"center", marginBottom:26 }}>
+        <div style={{ fontSize:46, marginBottom:6 }}>🎾</div>
+        <div style={{ fontSize:24, fontWeight:800, color:C.navy, lineHeight:1.25 }}>ソフトテニス<br/>記録アプリ</div>
+        <div style={{ fontSize:12.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>スコア記録・データ分析で<br/>チームの成長をサポート</div>
       </div>
 
-      {/* タブ切替（アカウント作成後の選手情報ステップでは切替不可にする） */}
-      <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, marginBottom:18 }}>
-        {[["login","ログイン"],["signup","新規登録"]].map(([v,l]) => (
-          <button key={v} disabled={step===4} style={{ flex:1, padding:9, border:"none", cursor:step===4?"default":"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:mode===v?C.white:"transparent", color:mode===v?C.navy:C.textSec, boxShadow:mode===v?"0 1px 4px rgba(0,0,0,0.1)":"none", opacity:step===4?0.5:1 }} onClick={()=>{ if(step===4) return; setMode(v); setErrorMsg(""); if (v==="signup") setStep(1); }}>{l}</button>
-        ))}
-      </div>
+      <div style={{ background:C.white, borderRadius:20, padding:"18px 18px 20px", boxShadow:"0 6px 24px rgba(15,32,68,0.08)" }}>
+        {/* タブ切替（アカウント作成後の選手情報ステップでは切替不可にする） */}
+        <div style={{ display:"flex", gap:8, marginBottom:18 }}>
+          {[["login","👤","ログイン"],["signup","✏️","新規登録"]].map(([v,icon,l]) => (
+            <button
+              key={v}
+              disabled={step===4}
+              style={{
+                flex:1, padding:"11px 6px", cursor:step===4?"default":"pointer", borderRadius:10, fontSize:13.5, fontWeight:700,
+                display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+                background: mode===v ? C.accentL : "#f3f4f6",
+                color: mode===v ? C.accent : C.textSec,
+                border: mode===v ? `1.5px solid ${C.accent}` : "1.5px solid transparent",
+                opacity:step===4?0.5:1,
+              }}
+              onClick={()=>{ if(step===4) return; setMode(v); setErrorMsg(""); if (v==="signup") setStep(1); }}
+            >{icon} {l}</button>
+          ))}
+        </div>
 
-      {mode==="signup" && <StepBar />}
+        {mode==="signup" && <StepBar />}
+
+        {mode==="login" && (
+          <div>
+            <label style={{ ...S.lbl, fontSize:12.5, marginBottom:6 }}>メールアドレス</label>
+            <div style={{ display:"flex", alignItems:"center", gap:8, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"11px 12px", marginBottom:16 }}>
+              <span style={{ fontSize:15, color:C.textSec }}>✉️</span>
+              <input
+                type="email" autoCapitalize="none"
+                style={{ flex:1, border:"none", outline:"none", fontSize:14.5, background:"transparent", color:C.text }}
+                placeholder="メールアドレスを入力" value={email} onChange={e=>setEmail(e.target.value)}
+              />
+            </div>
+
+            <label style={{ ...S.lbl, fontSize:12.5, marginBottom:6 }}>パスワード（6文字以上）</label>
+            <div style={{ display:"flex", alignItems:"center", gap:8, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"11px 12px", marginBottom:12 }}>
+              <span style={{ fontSize:15, color:C.textSec }}>🔒</span>
+              <input
+                type={showPassword ? "text" : "password"}
+                style={{ flex:1, border:"none", outline:"none", fontSize:14.5, background:"transparent", color:C.text }}
+                placeholder="パスワードを入力" value={password} onChange={e=>setPassword(e.target.value)}
+              />
+              <span style={{ fontSize:15, color:C.textSec, cursor:"pointer" }} onClick={()=>setShowPassword(v=>!v)}>{showPassword ? "🙈" : "👁"}</span>
+            </div>
+
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+              <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.text, cursor:"pointer" }}>
+                <input type="checkbox" checked={rememberMe} onChange={e=>setRememberMe(e.target.checked)} style={{ width:16, height:16, accentColor:C.accent }}/>
+                ログイン状態を保持する
+              </label>
+              <span style={{ fontSize:12, color:C.accent, fontWeight:700, cursor:"pointer" }} onClick={()=>{ setForgotEmail(email); setForgotSent(false); setForgotError(""); setShowForgot(true); }}>パスワードをお忘れの方</span>
+            </div>
+
+            {errorMsg && (
+              <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginBottom:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+            )}
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), opacity:loading?0.6:1 }} disabled={loading} onClick={handleLogin}>
+              {loading ? "処理中..." : "ログイン"}
+            </button>
+          </div>
+        )}
+      </div>
 
       {mode==="login" && (
-        <div style={S.card}>
-          <div style={{ padding:"14px 16px" }}>
-            <label style={S.lbl}>メールアドレス</label>
-            <input type="email" style={S.inp} placeholder="example@email.com" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="none"/>
+        <>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginTop:26, textAlign:"center" }}>
+            {[
+              ["📋","スコアを簡単記録","試合のスコアを素早く入力"],
+              ["📊","データを分析","プレーやチームの傾向を可視化"],
+              ["☁️","いつでも同期","複数端末でデータを安全に共有"],
+            ].map(([icon,t,d]) => (
+              <div key={t}>
+                <div style={{ width:44, height:44, borderRadius:"50%", background:C.accentL, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, margin:"0 auto 8px" }}>{icon}</div>
+                <div style={{ fontSize:11, fontWeight:800, color:C.accent }}>{t}</div>
+                <div style={{ fontSize:9.5, color:C.textSec, marginTop:2, lineHeight:1.4 }}>{d}</div>
+              </div>
+            ))}
           </div>
-          <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-            <label style={S.lbl}>パスワード（6文字以上）</label>
-            <input type="password" style={S.inp} placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)}/>
-          </div>
-        </div>
+          <div style={{ textAlign:"center", fontSize:10.5, color:C.textSec, marginTop:22 }}>© 2026 Soft Tennis App</div>
+        </>
+      )}
+
+      {showForgot && (
+        <Modal onClose={()=>setShowForgot(false)}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:10, textAlign:"center" }}>パスワード再設定</h3>
+          {forgotSent ? (
+            <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", padding:"8px 0 4px" }}>
+              入力されたメールアドレス宛に、パスワード再設定用のリンクを送信しました。メール内のリンクから再設定してください。
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize:12, color:C.textSec, marginBottom:10, textAlign:"center" }}>登録したメールアドレスを入力してください。再設定用のリンクをお送りします。</div>
+              <input type="email" autoCapitalize="none" style={S.inp} placeholder="example@email.com" value={forgotEmail} onChange={e=>setForgotEmail(e.target.value)} />
+              {forgotError && (
+                <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {forgotError}</div>
+              )}
+              <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16, opacity:forgotLoading?0.6:1 }} disabled={forgotLoading} onClick={handleForgotSubmit}>
+                {forgotLoading ? "送信中..." : "送信する"}
+              </button>
+            </>
+          )}
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, marginTop:8 }} onClick={()=>setShowForgot(false)}>閉じる</button>
+        </Modal>
       )}
 
       {/* ============ STEP 1: 基本情報 ============ */}
@@ -12539,17 +12650,6 @@ function AuthScreen({ onAuthed }) {
           )}
           <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16, opacity:loading?0.6:1 }} disabled={loading} onClick={handleFinalizeLink}>
             {loading ? "処理中..." : "登録を完了する"}
-          </button>
-        </>
-      )}
-
-      {mode==="login" && (
-        <>
-          {errorMsg && (
-            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
-          )}
-          <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16, opacity:loading?0.6:1 }} disabled={loading} onClick={handleLogin}>
-            {loading ? "処理中..." : "ログイン"}
           </button>
         </>
       )}
