@@ -105,6 +105,13 @@ async function performLogout() {
   window.location.reload();
 }
 const fmtDate = (iso) => iso ? iso.replace(/-/g, "/") : "";
+// ★大会予定日までの残り日数を計算（当日=0、翌日=1、過去はマイナス）
+const daysUntil = (iso) => {
+  if (!iso) return null;
+  const d1 = new Date(`${today()}T00:00:00`);
+  const d2 = new Date(`${iso}T00:00:00`);
+  return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+};
 // ★一覧等で試合の状態を短く表示するための共通ヘルパー（中断した試合を「進行中」と誤表示しないようにする）
 const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
 // ★品質改善：「清見 祐吾」「清見祐吾」のように空白の有無だけが違う同一人物を
@@ -6323,7 +6330,9 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
+  const [playerRoster, setPlayerRoster] = useState([]); // ★次の試合予定カードの参加選手表示用
 
+  useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
   useEffect(() => {
     Promise.all([getMatches(), getTournaments()]).then(([matches, tns])=>{
       setAllMatches(matches); setTournaments(tns); setLoading(false);
@@ -6415,11 +6424,27 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
             {upcomingTournaments.length > 0 && (
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
-                {upcomingTournaments.map((t, idx) => (
+                {upcomingTournaments.map((t, idx) => {
+                  const d = daysUntil(t.start_date);
+                  const countdownLabel = d === 0 ? "本日" : d === 1 ? "明日" : d > 1 ? `あと${d}日` : "";
+                  const participantNames = playerRoster
+                    .filter(p => (t.participant_player_ids || []).includes(p.id))
+                    .map(p => p.player_name);
+                  return (
                   <div key={t.id ?? idx} style={{ ...S.card, padding:16, marginBottom: idx===upcomingTournaments.length-1?0:10, borderLeft:`4px solid ${C.textSec}` }}>
                     <div style={{ cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
-                      <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{t.name}</div>
+                      <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:8 }}>
+                        <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{t.name}</div>
+                        {countdownLabel && (
+                          <div style={{ fontSize:16,fontWeight:800,color:C.accent,whiteSpace:"nowrap" }}>{countdownLabel}</div>
+                        )}
+                      </div>
                       <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(t.start_date)}</div>
+                      {participantNames.length > 0 && (
+                        <div style={{ fontSize:12,color:C.textSec,marginTop:6,lineHeight:1.5 }}>
+                          👥 {participantNames.join("、")}
+                        </div>
+                      )}
                     </div>
                     {(t.venue_link || t.guideline_url) && (
                       <div style={{ display:"flex", gap:8, marginTop:12 }}>
@@ -6436,7 +6461,8 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
