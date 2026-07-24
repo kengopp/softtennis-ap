@@ -97,8 +97,11 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
 // 日付が1日ずれてしまう不具合があった。利用者は全員日本国内のため、常に日本時間(JST/UTC+9)を
 // 明示的に計算して「今日の日付」とする。
 const today  = () => {
-  const now = new Date();
-  const jst = new Date(now.getTime() + (now.getTimezoneOffset() + 540) * 60000);
+  // ★Date.getTime()（絶対時刻）は端末のタイムゾーン設定に関わらず常にUTC基準の値なので、
+  // 端末のタイムゾーンオフセットを混ぜて補正しようとすると、端末が既に日本時間の場合に
+  // 補正が相殺されて何も直らないバグになる。単純にUTC+9時間した絶対時刻をUTC表記で
+  // 読み出すだけで、端末の設定に関係なく常に正しい「日本時間の今日」が得られる。
+  const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   return jst.toISOString().slice(0, 10);
 };
 // ★ログアウトなど「意図した画面遷移」の際は、beforeunloadの確認ダイアログ（アプリを終了しますか？）
