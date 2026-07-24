@@ -2242,8 +2242,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
   const [confirmDeleteTournament, setConfirmDeleteTournament] = useState(null);
   const [openTournamentMenuId, setOpenTournamentMenuId] = useState(null); // ★カード下部「その他」メニューの開閉
-  const [statsDetailFor, setStatsDetailFor] = useState(null); // ★統計行タップ時の内訳確認モーダル（大会オブジェクト）
-  const [playerRoster, setPlayerRoster] = useState([]); // ★内訳確認モーダルで参加選手の名前を表示するための選手マスター全件
   const [showTrash, setShowTrash] = useState(false);
   const [trashTab, setTrashTab] = useState("tournament"); // tournament | team | individual
   const [deletedTournaments, setDeletedTournaments] = useState([]);
@@ -2279,7 +2277,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
-  useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []); // ★内訳確認モーダルの参加選手名表示用
   useEffect(() => {
     (async () => {
       const p = await getMyProfile();
@@ -2746,8 +2743,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       </div>
                     </div>
                     <div
-                      onClick={e=>{ e.stopPropagation(); setStatsDetailFor(t); }}
-                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background:"#f7f9fc", borderRadius:10, cursor:"pointer" }}
+                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background:"#f7f9fc", borderRadius:10 }}
                     >
                       <div style={{ textAlign:"center" }}>
                         <div style={{ fontSize:12 }}>👥</div>
@@ -2770,7 +2766,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
                       </div>
                     </div>
-                    <div style={{ textAlign:"center", fontSize:10, color:C.textSec, marginTop:4 }}>タップして内訳を確認 ›</div>
+                    <div style={{ textAlign:"center", fontSize:10, color:C.textSec, marginTop:4 }}>タップして大会の内訳を見る ›</div>
                   </div>
                   <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
                     <button
@@ -2965,75 +2961,6 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           />
         </FullScreenSheet>
       )}
-      {statsDetailFor && (() => {
-        const t = statsDetailFor;
-        const name = t.name;
-        const individualForT = allMatches.filter(m => m.tournament_name === name);
-        const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
-        const participantNames = playerRoster.filter(p => (t.participant_player_ids || []).includes(p.id)).map(p => p.player_name);
-        const statusLabel = (status) => ({
-          finished: "✅ 終了", abandoned: "⛔ 途中終了", active: "🔴 進行中", waiting: "⏳ 待機中", scheduled: "📅 予定", suspended: "⏸ 中断中",
-        }[status] || status || "―");
-        return (
-          <FullScreenSheet title={`📊 ${t.name} の内訳`} onClose={()=>setStatsDetailFor(null)}>
-            <div style={{ marginBottom:22 }}>
-              <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:8 }}>👥 参加選手（{participantNames.length}人）</div>
-              {participantNames.length===0 ? (
-                <div style={{ fontSize:12, color:C.textSec }}>出場選手が登録されていません。大会の編集画面から選択できます。</div>
-              ) : (
-                <div>{participantNames.map(n => <span key={n} style={S.chip(false)}>{n}</span>)}</div>
-              )}
-            </div>
-
-            <div style={{ marginBottom:22 }}>
-              <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:8 }}>🏆 団体戦の内訳</div>
-              {teamMatchesForT.length===0 ? (
-                <div style={{ fontSize:12, color:C.textSec }}>この大会の団体戦記録がありません。</div>
-              ) : teamMatchesForT.map(tm => (
-                <div key={tm.id} style={{ border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
-                  <div style={{ fontSize:13, fontWeight:700, marginBottom:6 }}>
-                    {[tm.opponent_name, tm.opponent_division].filter(Boolean).join("") || "対戦相手未設定"}
-                    {tm.match_date ? `（${fmtDate(tm.match_date)}）` : ""}
-                  </div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                    {(tm.games || []).length === 0 && <span style={{ fontSize:11, color:C.textSec }}>番手が設定されていません</span>}
-                    {(tm.games || []).map(g => {
-                      const linkedMatch = g.match_id ? allMatchesRaw.find(m => m.id === g.match_id) : null;
-                      const created = !!g.match_id;
-                      const done = created && isDoneStatus(linkedMatch?.status);
-                      const label = created ? statusLabel(linkedMatch?.status) : "❌ 未作成";
-                      const bg = !created ? C.redL : done ? C.accentL : "#fff8e1";
-                      const fg = !created ? C.red : done ? "#046a45" : "#8a6d00";
-                      return (
-                        <span key={g.id} style={{ fontSize:11, fontWeight:700, padding:"4px 10px", borderRadius:20, background:bg, color:fg, whiteSpace:"nowrap" }}>
-                          {g.order_num}番手：{label}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div>
-              <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:8 }}>🎾 個人戦の内訳</div>
-              {individualForT.length===0 ? (
-                <div style={{ fontSize:12, color:C.textSec }}>この大会の個人戦記録がありません。</div>
-              ) : individualForT.map(m => {
-                const aNames = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "―";
-                const bNames = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "―";
-                const done = isDoneStatus(m.status);
-                return (
-                  <div key={m.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px dashed ${C.border}` }}>
-                    <span style={{ fontSize:12, flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{aNames} vs {bNames}</span>
-                    <span style={{ fontSize:11, fontWeight:700, color: done ? "#046a45" : C.textSec, whiteSpace:"nowrap" }}>{statusLabel(m.status)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </FullScreenSheet>
-        );
-      })()}
       {confirmDeleteTournament && (
         <Modal onClose={()=>setConfirmDeleteTournament(null)}>
           <div style={{ textAlign:"center" }}>
@@ -3287,6 +3214,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
+  const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -3300,6 +3228,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       }
       setMatches(list.filter(m => m.tournament_name === tournament.name));
       setTeamMatches(tList.filter(tm => tm.tournament_name === tournament.name));
+      const statusMap = {};
+      list.forEach(m => { statusMap[m.id] = m.status; });
+      setMatchStatusById(statusMap);
       setLoading(false);
     });
     Promise.all([getDrawSummary(tournament.id, "team"), getDrawSummary(tournament.id, "individual")]).then(([teamCount, indivCount]) => {
@@ -3339,6 +3270,44 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         >📊 日別選手ランキングを見る</button>
       </div>
 
+      {(() => {
+        // ★大会内訳の統計行（試合一覧のカードと同じ考え方で算出。参加選手一覧・会場一覧などの
+        // 専用画面はまだ無いため、現時点ではタップ遷移はせず表示のみ）
+        const isDoneStatus = (status) => status === "finished" || status === "abandoned";
+        const createdTeamGames = teamMatches.flatMap(tm => (tm.games || []).filter(g => g.match_id));
+        const totalMatches = matches.length + createdTeamGames.length;
+        const registeredMatches = matches.filter(m => isDoneStatus(m.status)).length + createdTeamGames.filter(g => isDoneStatus(matchStatusById[g.match_id])).length;
+        const participantCount = (tournament.participant_player_ids || []).length;
+        const venueSet = new Set();
+        if (tournament.venue) venueSet.add(tournament.venue);
+        matches.forEach(m => { if (m.venue) venueSet.add(m.venue); });
+        teamMatches.forEach(tm => { if (tm.venue) venueSet.add(tm.venue); });
+        return (
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, margin:"10px 14px 0", padding:"9px 8px", background:"#f7f9fc", borderRadius:10 }}>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:12 }}>👥</div>
+              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{participantCount}人</div>
+              <div style={{ fontSize:9.5, color:C.textSec }}>参加選手</div>
+            </div>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:12 }}>🎾</div>
+              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{totalMatches}試合</div>
+              <div style={{ fontSize:9.5, color:C.textSec }}>試合数</div>
+            </div>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:12 }}>✅</div>
+              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{registeredMatches}試合</div>
+              <div style={{ fontSize:9.5, color:C.textSec }}>登録済</div>
+            </div>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:12 }}>📍</div>
+              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{venueSet.size}か所</div>
+              <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ padding:"10px 14px", paddingBottom:90 }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
 
@@ -3374,6 +3343,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
           const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
+          const games = (tm.games || []).slice().sort((a,b)=>a.order_num - b.order_num);
+          const isDoneStatus = (status) => status === "finished" || status === "abandoned";
           return (
             <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
               <div style={{ height:4, background:statusColor }}/>
@@ -3389,6 +3360,22 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 </div>
                 <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
                 <span style={{ fontSize:10, color:C.textSec, marginLeft:8 }}>{tm.is_younger===false ? "遅番" : tm.is_younger===true ? "若番" : "若番/遅番未設定"}</span>
+                {games.length > 0 && (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginTop:8, paddingTop:8, borderTop:"1px dashed "+C.border }}>
+                    {games.map(g => {
+                      const created = !!g.match_id;
+                      const done = created && isDoneStatus(matchStatusById[g.match_id]);
+                      const label = !created ? "❌ 未作成" : done ? "✅ 終了" : matchStatusById[g.match_id] === "active" ? "🔴 進行中" : "⏳ 未終了";
+                      const bg = !created ? C.redL : done ? C.accentL : "#fff8e1";
+                      const fg = !created ? C.red : done ? "#046a45" : "#8a6d00";
+                      return (
+                        <span key={g.id} style={{ fontSize:10.5, fontWeight:700, padding:"3px 8px", borderRadius:20, background:bg, color:fg, whiteSpace:"nowrap" }}>
+                          {g.order_num}番手：{label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                 <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピーして新規作成</button>
