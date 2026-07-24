@@ -2084,7 +2084,25 @@ function Modal({ children, onClose }) {
   useBodyScrollLock(true);
   return (
     <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
-      <div style={{ background:C.white,borderRadius:20,padding:"28px 20px",width:"100%",maxWidth:340 }} onClick={e=>e.stopPropagation()}>{children}</div>
+      <div style={{ background:C.white,borderRadius:20,padding:"28px 20px",width:"100%",maxWidth:340,maxHeight:"85vh",overflowY:"auto",WebkitOverflowScrolling:"touch" }} onClick={e=>e.stopPropagation()}>{children}</div>
+    </div>
+  );
+}
+
+// ★大会作成など、項目数が多く小さなカード型モーダルには収まりきらないフォーム用の全画面シート。
+// ヘッダーを固定し、本文だけがスクロールするので、内容がどれだけ長くなっても画面からはみ出したり
+// 操作ボタンが見えなくなったりしない。
+function FullScreenSheet({ title, onClose, children }) {
+  useBodyScrollLock(true);
+  return (
+    <div style={{ position:"fixed", inset:0, background:C.white, zIndex:999, display:"flex", flexDirection:"column" }}>
+      <div style={{ flexShrink:0, display:"flex", alignItems:"center", gap:10, padding:"14px 16px", borderBottom:`1px solid ${C.border}`, background:C.white }}>
+        <button onClick={onClose} style={{ border:"none", background:"none", fontSize:22, color:C.navy, cursor:"pointer", padding:"0 4px", lineHeight:1 }}>✕</button>
+        <div style={{ fontSize:16, fontWeight:800, color:C.navy }}>{title}</div>
+      </div>
+      <div style={{ flex:1, minHeight:0, overflowY:"auto", WebkitOverflowScrolling:"touch", padding:"18px 16px 0" }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -2932,13 +2950,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         </Modal>
       )}
       {showTournamentModal && (
-        <Modal onClose={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}>
+        <FullScreenSheet title={editingTournament ? "✏️ 大会を編集" : "📋 大会を作成"} onClose={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}>
           <TournamentFormFields
             initial={editingTournament}
             onCancel={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}
             onSave={handleSaveTournament}
           />
-        </Modal>
+        </FullScreenSheet>
       )}
       {confirmDeleteTournament && (
         <Modal onClose={()=>setConfirmDeleteTournament(null)}>
@@ -3077,7 +3095,6 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 
   return (
     <div>
-      <h3 style={{ fontSize:16, fontWeight:800, marginBottom:14, textAlign:"center" }}>{initial ? "✏️ 大会を編集" : "📋 大会を作成"}</h3>
       <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>大会名</div>
       <input style={{ ...S.inp, marginBottom:14 }} placeholder="例：令和8年度 新人戦" value={name} onChange={e=>setName(e.target.value)}/>
       <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>開催期間</div>
@@ -3157,7 +3174,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
           value={rosterSearch}
           onChange={e=>setRosterSearch(e.target.value)}
         />
-        <div style={{ maxHeight:220, overflowY:"auto" }}>
+        <div>
           {roster.length === 0 && <div style={{ fontSize:12, color:C.textSec, padding:"6px 2px" }}>選手マスターに選手が登録されていません</div>}
           {roster.length > 0 && filteredRoster.length === 0 && <div style={{ fontSize:12, color:C.textSec, padding:"6px 2px" }}>一致する選手がいません</div>}
           {filteredRoster.map(p => (
@@ -3167,7 +3184,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{participantIds.length}人選択中</div>
       </div>
 
-      <div style={{ display:"flex", gap:8 }}>
+      <div style={{ display:"flex", gap:8, position:"sticky", bottom:0, background:C.white, padding:"12px 0 18px", marginTop:16, borderTop:`1px solid ${C.border}` }}>
         <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:"#f0f2f6", color:C.textSec, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
         <button
           style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
