@@ -94,6 +94,16 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
     return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
   }));
 const today  = () => new Date().toISOString().slice(0, 10);
+// ★ログアウトなど「意図した画面遷移」の際は、beforeunloadの確認ダイアログ（アプリを終了しますか？）
+// を出さないようにするための共有フラグ。ログアウト確認→リロードの間に二重で確認が出る不具合を防ぐ。
+let skipUnloadConfirm = false;
+// ★ログアウト処理を1箇所に共通化（確認ダイアログの表示 → 実際のログアウト → リロード）
+async function performLogout() {
+  if (!window.confirm("ログアウトしますか？")) return;
+  skipUnloadConfirm = true;
+  await supabase.auth.signOut();
+  window.location.reload();
+}
 const fmtDate = (iso) => iso ? iso.replace(/-/g, "/") : "";
 // ★一覧等で試合の状態を短く表示するための共通ヘルパー（中断した試合を「進行中」と誤表示しないようにする）
 const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
@@ -2134,7 +2144,7 @@ function NavBar({ active, onNavigate }) {
   return (
     <div style={{ position:"fixed",bottom:0,left:0,right:0,background:C.white,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:10 }}>
       {items.map(([key,icon,label])=>(
-        <div key={key} onClick={()=>onNavigate&&onNavigate(key)} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0 4px",fontSize:9,fontWeight:600,color:active===key?C.accent:C.textSec,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none" }}>
+        <div key={key} onClick={()=>onNavigate&&onNavigate(key)} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0 4px",fontSize:12,fontWeight:700,color:active===key?C.accent:C.textSec,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none" }}>
           <span style={{ fontSize:20 }}>{icon}</span>{label}
         </div>
       ))}
@@ -6344,12 +6354,18 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const liveMatch = allMatches.find(m => m.status==="active");
 
   // ★進行中がない場合に表示する、直近の大会予定（大会単位）
+  // 同じ日に複数の大会・練習試合がある場合は、すべて表示する
   const todayStr = today();
-  const upcomingTournament = !liveMatch
-    ? tournaments
-        .filter(t => (t.end_date || t.start_date) >= todayStr)
-        .sort((a,b) => a.start_date.localeCompare(b.start_date))[0]
-    : null;
+  const upcomingTournaments = !liveMatch
+    ? (() => {
+        const sorted = tournaments
+          .filter(t => (t.end_date || t.start_date) >= todayStr)
+          .sort((a,b) => a.start_date.localeCompare(b.start_date));
+        if (sorted.length === 0) return [];
+        const nearestDate = sorted[0].start_date;
+        return sorted.filter(t => t.start_date === nearestDate);
+      })()
+    : [];
 
   // ★成績サマリー：試合数が少ないうちは「集計中」表示に
   const STATS_MIN = 5;
@@ -6395,28 +6411,32 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
               );
             })()}
 
-            {/* ②次の試合予定カード（進行中がない場合のみ、大会基準） */}
-            {upcomingTournament && (
-              <div style={{ ...S.card, padding:16, marginBottom:14, borderLeft:`4px solid ${C.textSec}` }}>
-                <div style={{ cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(upcomingTournament)}>
-                  <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
-                  <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{upcomingTournament.name}</div>
-                  <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(upcomingTournament.start_date)}</div>
-                </div>
-                {(upcomingTournament.venue_link || upcomingTournament.guideline_url) && (
-                  <div style={{ display:"flex", gap:8, marginTop:12 }}>
-                    <button
-                      disabled={!upcomingTournament.venue_link}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: upcomingTournament.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: upcomingTournament.venue_link ? "pointer" : "default" }}
-                      onClick={e=>{ e.stopPropagation(); if (upcomingTournament.venue_link) window.open(upcomingTournament.venue_link, "_blank", "noopener,noreferrer"); }}
-                    ><span style={{ color: upcomingTournament.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
-                    <button
-                      disabled={!upcomingTournament.guideline_url}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: upcomingTournament.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: upcomingTournament.guideline_url ? "pointer" : "default" }}
-                      onClick={e=>{ e.stopPropagation(); if (upcomingTournament.guideline_url) window.open(upcomingTournament.guideline_url, "_blank", "noopener,noreferrer"); }}
-                    ><span style={{ color: upcomingTournament.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
+            {/* ②次の試合予定カード（進行中がない場合のみ、大会基準／同日複数件はすべて表示） */}
+            {upcomingTournaments.length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
+                {upcomingTournaments.map((t, idx) => (
+                  <div key={t.id ?? idx} style={{ ...S.card, padding:16, marginBottom: idx===upcomingTournaments.length-1?0:10, borderLeft:`4px solid ${C.textSec}` }}>
+                    <div style={{ cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                      <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{t.name}</div>
+                      <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(t.start_date)}</div>
+                    </div>
+                    {(t.venue_link || t.guideline_url) && (
+                      <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                        <button
+                          disabled={!t.venue_link}
+                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
+                          onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
+                        ><span style={{ color: t.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
+                        <button
+                          disabled={!t.guideline_url}
+                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
+                          onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
+                        ><span style={{ color: t.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
             )}
 
@@ -11108,7 +11128,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         {forced && (
           <div style={{ display:"flex", gap:8 }}>
             <button style={{ background:"none",border:"none",color:"rgba(255,255,255,0.7)",fontSize:13,cursor:"pointer" }} onClick={onBack}>スキップ →</button>
-            <button style={{ background:"rgba(255,255,255,0.15)",border:"none",color:"white",fontSize:12,cursor:"pointer",borderRadius:6,padding:"4px 10px" }} onClick={async()=>{ await supabase.auth.signOut(); window.location.reload(); }}>ログアウト</button>
+            <button style={{ background:"rgba(255,255,255,0.15)",border:"none",color:"white",fontSize:12,cursor:"pointer",borderRadius:6,padding:"4px 10px" }} onClick={performLogout}>ログアウト</button>
           </div>
         )}
       </div>
@@ -11416,7 +11436,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
         {/* ログアウトボタン（常に表示） */}
         <button
           style={{ display:"block", width:"100%", marginTop:12, padding:"14px", background:"none", border:`1.5px solid ${C.border}`, borderRadius:12, fontSize:15, fontWeight:700, color:C.textSec, cursor:"pointer" }}
-          onClick={async()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); window.location.reload(); } }}
+          onClick={performLogout}
         >ログアウト</button>
 
         {!forced && (
@@ -12946,6 +12966,7 @@ export default function App() {
   // ② ブラウザを閉じる・リロード時に確認ダイアログを表示
   useEffect(() => {
     const handler = (e) => {
+      if (skipUnloadConfirm) return; // ★ログアウトなど意図したリロードでは警告を出さない
       e.preventDefault();
       e.returnValue = "アプリを終了しますか？";
       return e.returnValue;
@@ -13235,7 +13256,7 @@ export default function App() {
         onGoalSettings={()=>setScreen("goalSettings")}
         onProfile={()=>setScreen("profile")}
         onTrash={()=>{ setPendingOpenTrash(true); setListMatchMode("tournament"); setScreen("list"); }}
-        onLogout={async ()=>{ if(window.confirm("ログアウトしますか？")) { await supabase.auth.signOut(); window.location.reload(); } }}
+        onLogout={performLogout}
       />
     );
   }
