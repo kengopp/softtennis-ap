@@ -6455,7 +6455,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                 <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
                 {upcomingTournaments.map((t, idx) => {
                   const d = daysUntil(t.start_date);
-                  const countdownLabel = d === 0 ? "本日" : d === 1 ? "明日" : d > 1 ? `あと${d}日` : "";
+                  const countdownLabel = d >= 0 ? `あと${d}日` : "";
                   const participantCount = (t.participant_player_ids || []).length;
                   return (
                   <div key={t.id ?? idx} style={{ ...S.card, padding:16, marginBottom: idx===upcomingTournaments.length-1?0:10, borderLeft:`4px solid ${C.textSec}` }}>
@@ -6463,7 +6463,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                       <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:8 }}>
                         <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{t.name}</div>
                         {countdownLabel && (
-                          <div style={{ fontSize:16,fontWeight:800,color:C.accent,whiteSpace:"nowrap" }}>{countdownLabel}</div>
+                          <div style={{ fontSize:16,fontWeight:800,color:C.red,whiteSpace:"nowrap" }}>{countdownLabel}</div>
                         )}
                       </div>
                       <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(t.start_date)}</div>
