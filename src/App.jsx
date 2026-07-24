@@ -93,7 +93,14 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() :
     const r = Math.random() * 16 | 0;
     return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
   }));
-const today  = () => new Date().toISOString().slice(0, 10);
+// ★重要：new Date().toISOString()はUTC基準のため、日本時間の夜〜早朝（UTCとの9時間のズレの間）に
+// 日付が1日ずれてしまう不具合があった。利用者は全員日本国内のため、常に日本時間(JST/UTC+9)を
+// 明示的に計算して「今日の日付」とする。
+const today  = () => {
+  const now = new Date();
+  const jst = new Date(now.getTime() + (now.getTimezoneOffset() + 540) * 60000);
+  return jst.toISOString().slice(0, 10);
+};
 // ★ログアウトなど「意図した画面遷移」の際は、beforeunloadの確認ダイアログ（アプリを終了しますか？）
 // を出さないようにするための共有フラグ。ログアウト確認→リロードの間に二重で確認が出る不具合を防ぐ。
 let skipUnloadConfirm = false;
