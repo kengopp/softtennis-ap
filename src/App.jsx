@@ -12387,40 +12387,35 @@ function AuthScreen({ onAuthed }) {
   }
 
   return (
-    <div style={{
-      minHeight:"100vh",
-      display:"flex", flexDirection:"column", justifyContent:"center",
-      padding:"32px 20px 24px",
-      background:"radial-gradient(circle at 8% 6%, rgba(0,194,122,0.18), transparent 40%), radial-gradient(circle at 92% 10%, rgba(0,194,122,0.14), transparent 45%), linear-gradient(180deg, #eef7f1 0%, #f4f8f5 55%, #ffffff 100%)",
-    }}>
-      <div style={{ textAlign:"center", marginBottom:26 }}>
-        <div style={{ fontSize:46, marginBottom:6 }}>🎾</div>
-        <div style={{ fontSize:24, fontWeight:800, color:C.navy, lineHeight:1.25 }}>ソフトテニス<br/>記録アプリ</div>
-        <div style={{ fontSize:12.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>スコア記録・データ分析で<br/>チームの成長をサポート</div>
-      </div>
-
-      <div style={{ background:C.white, borderRadius:20, padding:"18px 18px 20px", boxShadow:"0 6px 24px rgba(15,32,68,0.08)" }}>
-        {/* タブ切替（アカウント作成後の選手情報ステップでは切替不可にする） */}
-        <div style={{ display:"flex", gap:8, marginBottom:18 }}>
-          {[["login","👤","ログイン"],["signup","✏️","新規登録"]].map(([v,icon,l]) => (
-            <button
-              key={v}
-              disabled={step===4}
-              style={{
-                flex:1, padding:"11px 6px", cursor:step===4?"default":"pointer", borderRadius:10, fontSize:13.5, fontWeight:700,
-                display:"flex", alignItems:"center", justifyContent:"center", gap:6,
-                background: mode===v ? C.accentL : "#f3f4f6",
-                color: mode===v ? C.accent : C.textSec,
-                border: mode===v ? `1.5px solid ${C.accent}` : "1.5px solid transparent",
-                opacity:step===4?0.5:1,
-              }}
-              onClick={()=>{ if(step===4) return; setErrorMsg(""); setMode(v); if (v==="signup") setStep(1); }}
-            >{icon} {l}</button>
-          ))}
+    <main className="st-login-page">
+      <section className="st-login-hero">
+        <div className="st-login-visual" aria-hidden="true">
+          <span className="st-login-emoji">🎾</span>
+        </div>
+        <div className="st-login-heading">
+          <h1>ソフトテニス<br/>記録アプリ</h1>
+          <p>スコア記録・データ分析で<br/>チームの成長をサポート</p>
         </div>
 
-        <StepBar />
-      </div>
+        <div className="st-login-card">
+          {/* タブ切替（アカウント作成後の選手情報ステップでは切替不可にする） */}
+          <div className="st-login-tabs" role="tablist" aria-label="認証方法">
+            <button
+              type="button" role="tab" aria-selected={mode==="login"}
+              className={mode==="login" ? "st-login-tab is-active" : "st-login-tab"}
+              disabled={step===4}
+              onClick={()=>{ if(step===4) return; setErrorMsg(""); setMode("login"); }}
+            >👤 ログイン</button>
+            <button
+              type="button" role="tab" aria-selected={mode==="signup"}
+              className={mode==="signup" ? "st-login-tab is-active" : "st-login-tab"}
+              disabled={step===4}
+              onClick={()=>{ if(step===4) return; setErrorMsg(""); setMode("signup"); setStep(1); }}
+            >✎ 新規登録</button>
+          </div>
+
+          <StepBar />
+        </div>
 
       {/* ============ STEP 1: 基本情報 ============ */}
       {mode==="signup" && step===1 && (
@@ -12658,7 +12653,8 @@ function AuthScreen({ onAuthed }) {
           </button>
         </>
       )}
-    </div>
+      </section>
+    </main>
   );
 }
 
