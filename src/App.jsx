@@ -2242,6 +2242,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
   const [confirmDeleteTournament, setConfirmDeleteTournament] = useState(null);
   const [openTournamentMenuId, setOpenTournamentMenuId] = useState(null); // ★カード下部「その他」メニューの開閉
+  const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
+  const [breakdownModalFor, setBreakdownModalFor] = useState(null); // ★「試合数」タップ時のポップアップ（大会オブジェクト）
+  const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧の名前表示用：選手マスター全件
   const [showTrash, setShowTrash] = useState(false);
   const [trashTab, setTrashTab] = useState("tournament"); // tournament | team | individual
   const [deletedTournaments, setDeletedTournaments] = useState([]);
@@ -2277,6 +2280,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []); // ★参加選手一覧ポップアップ用
   useEffect(() => {
     (async () => {
       const p = await getMyProfile();
@@ -2397,12 +2401,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }
 
   // 大会ごとの団体戦・個人戦の件数（大会名の一致で集計）
-  const countsForTournament = (name) => ({
-    team: allTeamMatches.filter(tm => tm.tournament_name === name).length,
-    individual: allMatches.filter(m => m.tournament_name === name).length,
-  });
-
-  // ★大会カードの統計行（参加選手・試合数・登録済・会場数）
+  // ★大会カードの統計行（参加選手・試合数・終了・会場数）
   // 新しいテーブルや列は使わず、既存の matches / team_match_games / players（選手マスター）だけで集計する。
   const isDoneStatus = (status) => status === "finished" || status === "abandoned"; // 途中終了も「登録済」に含める
   const statsForTournament = (t) => {
@@ -2430,6 +2429,26 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     teamMatchesForT.forEach(tm => { if (tm.venue) venueSet.add(tm.venue); });
 
     return { totalMatches, registeredMatches, participantCount, venueCount: venueSet.size };
+  };
+
+  // ★大会カードの「◯勝◯敗」表示用。団体戦と個人戦は勝敗の単位が違う（団体は団体戦本体の勝敗、
+  // 個人戦はペアごとの勝敗）ため、まとめず別々に算出する。終了していない試合（予定・進行中・中断中）は
+  // 数字に含めない。
+  const recordForTournament = (t) => {
+    const name = t.name;
+    const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
+    const individualForT = allMatches.filter(m => m.tournament_name === name);
+    const teamRecord = teamMatchesForT.filter(tm => isDoneStatus(tm.status)).reduce((acc, tm) => {
+      if (tm.my_score > tm.opponent_score) acc.win++;
+      else if (tm.my_score < tm.opponent_score) acc.loss++;
+      return acc;
+    }, { win: 0, loss: 0 });
+    const individualRecord = individualForT.filter(m => isDoneStatus(m.status)).reduce((acc, m) => {
+      if (m.match_score_a > m.match_score_b) acc.win++;
+      else if (m.match_score_a < m.match_score_b) acc.loss++;
+      return acc;
+    }, { win: 0, loss: 0 });
+    return { teamRecord, individualRecord };
   };
 
   const filteredTournaments = tournaments.filter(t => {
@@ -2728,37 +2747,39 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {!loading && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
             {!loading && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
             {!loading && filteredTournaments.map(t => {
-              const counts = countsForTournament(t.name);
               const stats = statsForTournament(t);
+              const { teamRecord, individualRecord } = recordForTournament(t);
               return (
                 <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative" }}>
                   <div style={{ height:4, background:C.navy }}/>
                   <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
                     <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{t.name}</div>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:8 }}>
+                    <div style={{ marginTop:8 }}>
                       <span style={{ fontSize:11, color:C.textSec }}>📅 {fmtDateRange(t.start_date, t.end_date)}</span>
-                      <div style={{ display:"flex", gap:4 }}>
-                        {counts.team>0 && <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"2px 8px", borderRadius:10 }}>🏆 団体 {counts.team}</span>}
-                        {counts.individual>0 && <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"2px 8px", borderRadius:10 }}>🎾 個人 {counts.individual}</span>}
-                      </div>
                     </div>
+                    {(teamRecord.win+teamRecord.loss>0 || individualRecord.win+individualRecord.loss>0) && (
+                      <div style={{ display:"flex", flexDirection:"column", gap:2, marginTop:6 }}>
+                        {teamRecord.win+teamRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color:C.text }}>🏆 団体戦：{teamRecord.win}勝{teamRecord.loss}敗</span>}
+                        {individualRecord.win+individualRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color:C.text }}>🎾 個人戦：{individualRecord.win}勝{individualRecord.loss}敗</span>}
+                      </div>
+                    )}
                     <div
                       style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background:"#f7f9fc", borderRadius:10 }}
                     >
-                      <div style={{ textAlign:"center" }}>
+                      <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}>
                         <div style={{ fontSize:12 }}>👥</div>
                         <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.participantCount}人</div>
-                        <div style={{ fontSize:9.5, color:C.textSec }}>参加選手</div>
+                        <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
                       </div>
-                      <div style={{ textAlign:"center" }}>
+                      <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setBreakdownModalFor(t); }}>
                         <div style={{ fontSize:12 }}>🎾</div>
                         <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.totalMatches}試合</div>
-                        <div style={{ fontSize:9.5, color:C.textSec }}>試合数</div>
+                        <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>試合数</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
                         <div style={{ fontSize:12 }}>✅</div>
                         <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.registeredMatches}試合</div>
-                        <div style={{ fontSize:9.5, color:C.textSec }}>登録済</div>
+                        <div style={{ fontSize:9.5, color:C.textSec }}>終了</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
                         <div style={{ fontSize:12 }}>📍</div>
@@ -2766,7 +2787,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
                       </div>
                     </div>
-                    <div style={{ textAlign:"center", fontSize:10, color:C.textSec, marginTop:4 }}>タップして大会の内訳を見る ›</div>
+                    <button
+                      style={{ width:"100%", marginTop:10, padding:10, border:"1px solid "+C.border, borderRadius:10, background:C.white, color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
+                      onClick={e=>{ e.stopPropagation(); onOpenTournament && onOpenTournament(t); }}
+                    >試合一覧へ ›</button>
                   </div>
                   <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
                     <button
@@ -2961,6 +2985,96 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           />
         </FullScreenSheet>
       )}
+      {participantsModalFor && (
+        <Modal onClose={()=>setParticipantsModalFor(null)}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:12, textAlign:"center" }}>👥 参加選手一覧</h3>
+          {(() => {
+            const names = playerRoster.filter(p => (participantsModalFor.participant_player_ids || []).includes(p.id)).map(p => p.player_name);
+            if (names.length === 0) {
+              return <div style={{ fontSize:12, color:C.textSec, textAlign:"center", padding:"12px 0" }}>出場選手が登録されていません。大会の「✏️ 編集」から選択できます。</div>;
+            }
+            return <div>{names.map(n => <span key={n} style={S.chip(false)}>{n}</span>)}</div>;
+          })()}
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, marginTop:16 }} onClick={()=>setParticipantsModalFor(null)}>閉じる</button>
+        </Modal>
+      )}
+      {breakdownModalFor && (() => {
+        const t = breakdownModalFor;
+        const name = t.name;
+        const individualForT = allMatches.filter(m => m.tournament_name === name);
+        const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
+        const statusLabel = (status) => ({
+          finished: "✅ 終了", abandoned: "⛔ 途中終了", active: "🔴 進行中", waiting: "⏳ 待機中", scheduled: "📅 予定", suspended: "⏸ 中断中",
+        }[status] || status || "―");
+        return (
+          <FullScreenSheet title={`🎾 ${t.name} の試合数の内訳`} onClose={()=>setBreakdownModalFor(null)}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <div style={{ fontSize:13, fontWeight:800, color:C.navy }}>🏆 団体戦の内訳</div>
+              <button
+                style={{ border:"none", background:"none", color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}
+                onClick={()=>{ setBreakdownModalFor(null); onOpenTournament && onOpenTournament(t); }}
+              >試合一覧を見る ›</button>
+            </div>
+            {teamMatchesForT.length===0 ? (
+              <div style={{ fontSize:12, color:C.textSec, marginBottom:20 }}>この大会の団体戦記録がありません。</div>
+            ) : teamMatchesForT.map(tm => {
+              const games = (tm.games || []).slice().sort((a,b)=>a.order_num - b.order_num);
+              const createdCount = games.filter(g=>g.match_id).length;
+              const doneCount = games.filter(g=>g.match_id && isDoneStatus(allMatchesRaw.find(m=>m.id===g.match_id)?.status)).length;
+              const summaryLabel = games.length>0 && doneCount===games.length ? "終了" : createdCount>0 ? "進行中" : "予定";
+              const summaryBg = summaryLabel==="終了" ? C.accentL : summaryLabel==="進行中" ? "#fff3e6" : "#f0f0f0";
+              const summaryFg = summaryLabel==="終了" ? "#046a45" : summaryLabel==="進行中" ? "#c05a00" : C.textSec;
+              return (
+                <div
+                  key={tm.id}
+                  style={{ border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 12px", marginBottom:8, cursor:"pointer" }}
+                  onClick={()=>{ setBreakdownModalFor(null); onOpenTeamMatch && onOpenTeamMatch(tm.id); }}
+                >
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                    <span style={{ fontSize:13, fontWeight:700 }}>{[tm.opponent_name, tm.opponent_division].filter(Boolean).join("") || "対戦相手未設定"} <span style={{ color:C.textSec, fontWeight:400 }}>›</span></span>
+                    {games.length>0 && <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:10, background:summaryBg, color:summaryFg, whiteSpace:"nowrap" }}>全{games.length}ペア {summaryLabel}</span>}
+                  </div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+                    {games.length === 0 && <span style={{ fontSize:11, color:C.textSec }}>番手が設定されていません</span>}
+                    {games.map(g => {
+                      const linkedMatch = g.match_id ? allMatchesRaw.find(m => m.id === g.match_id) : null;
+                      const created = !!g.match_id;
+                      const done = created && isDoneStatus(linkedMatch?.status);
+                      const label = created ? statusLabel(linkedMatch?.status) : "❌ 未作成";
+                      const bg = !created ? C.redL : done ? C.accentL : "#fff8e1";
+                      const fg = !created ? C.red : done ? "#046a45" : "#8a6d00";
+                      return (
+                        <span key={g.id} style={{ fontSize:10.5, fontWeight:700, padding:"3px 8px", borderRadius:20, background:bg, color:fg, whiteSpace:"nowrap" }}>
+                          {g.order_num}番手：{label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"18px 0 8px" }}>🎾 個人戦の内訳</div>
+            {individualForT.length===0 ? (
+              <div style={{ fontSize:12, color:C.textSec }}>この大会の個人戦記録がありません。</div>
+            ) : individualForT.map(m => {
+              const aNames = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") || "―";
+              const bNames = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/") || "―";
+              const done = isDoneStatus(m.status);
+              return (
+                <div
+                  key={m.id}
+                  style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px dashed ${C.border}`, cursor:"pointer" }}
+                  onClick={()=>{ setBreakdownModalFor(null); onOpen && onOpen(m.id); }}
+                >
+                  <span style={{ fontSize:12, flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{aNames} vs {bNames} <span style={{ color:C.textSec }}>›</span></span>
+                  <span style={{ fontSize:11, fontWeight:700, color: done ? "#046a45" : C.textSec, whiteSpace:"nowrap" }}>{statusLabel(m.status)}</span>
+                </div>
+              );
+            })}
+          </FullScreenSheet>
+        );
+      })()}
       {confirmDeleteTournament && (
         <Modal onClose={()=>setConfirmDeleteTournament(null)}>
           <div style={{ textAlign:"center" }}>
@@ -3348,8 +3462,6 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
           const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
-          const games = (tm.games || []).slice().sort((a,b)=>a.order_num - b.order_num);
-          const isDoneStatus = (status) => status === "finished" || status === "abandoned";
           return (
             <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
               <div style={{ height:4, background:statusColor }}/>
@@ -3365,22 +3477,6 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 </div>
                 <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
                 <span style={{ fontSize:10, color:C.textSec, marginLeft:8 }}>{tm.is_younger===false ? "遅番" : tm.is_younger===true ? "若番" : "若番/遅番未設定"}</span>
-                {games.length > 0 && (
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginTop:8, paddingTop:8, borderTop:"1px dashed "+C.border }}>
-                    {games.map(g => {
-                      const created = !!g.match_id;
-                      const done = created && isDoneStatus(matchStatusById[g.match_id]);
-                      const label = !created ? "❌ 未作成" : done ? "✅ 終了" : matchStatusById[g.match_id] === "active" ? "🔴 進行中" : "⏳ 未終了";
-                      const bg = !created ? C.redL : done ? C.accentL : "#fff8e1";
-                      const fg = !created ? C.red : done ? "#046a45" : "#8a6d00";
-                      return (
-                        <span key={g.id} style={{ fontSize:10.5, fontWeight:700, padding:"3px 8px", borderRadius:20, background:bg, color:fg, whiteSpace:"nowrap" }}>
-                          {g.order_num}番手：{label}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
               <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                 <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピーして新規作成</button>
