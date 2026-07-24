@@ -11633,9 +11633,11 @@ function translateAuthError(msg) {
 //   途中で失敗すると一部だけ保存された状態になり得る。どのステップで失敗したかを例外メッセージに
 //   含めることで、少なくとも原因調査と手動リカバリはしやすくしている。
 //   （将来的にはSupabaseのRPC/Postgres関数にまとめ、DB側で1トランザクションにするのが望ましい）
-async function completeProfileRegistration(userId, payload) {
-  // ★school_name の取得やNOT NULL対応、エラー処理などを二重に持たず、
-  // 必ず saveMyProfile を通すことで保存ロジックを一本化する（今回のような食い違いバグの再発防止）
+// ★新規登録時のusersテーブル保存を担う処理（選手マスターへの連携は含まない）。
+// 選手マスター（players）は「同じチームの承認済みユーザーのみ閲覧・登録可」というRLSになっているため、
+// アカウント作成・プロフィール承認が完了する前は選手一覧を読み取ることができない。
+// そのため、選手マスターとの連携（linkPlayerToUser）は必ずこの後、承認済みの状態で呼び出す。
+async function saveProfileOnly(payload) {
   try {
     await saveMyProfile({
       name: payload.fullName,
@@ -11648,10 +11650,19 @@ async function completeProfileRegistration(userId, payload) {
   } catch(e) {
     throw new Error("プロフィール保存に失敗しました: " + (e.message || e));
   }
+}
 
-  // selectedId が指定されている場合：選手マスターから明示的に選ばれた選手にIDで直接紐づける。
-  // 「名」が未登録だった選手に backfillFirst（新しく入力された名）があれば、選手マスター側も更新する。
-  // selectedId が無い場合：従来通り「入力された名前の文字列」で一致検索し、無ければ新規作成する。
+// ★選手マスターとの連携（作成 or 既存へのID直接紐づけ・名前バックフィル）。
+// 呼び出し時点でユーザーがすでに承認済み（is_approved=true）である必要がある
+// （RLS: 同じチームの承認済みユーザーのみ players を閲覧・登録できるため）。
+//
+// ★品質改善メモ：
+// ・選手を探す際は「名前が同じ」だけでなく「学校IDも同じ」かどうかを見て、
+//   同姓同名の別選手に誤ってリンクしてしまわないようにしている。
+// ・選手マスターから明示的に選手を選んだ場合（selectedId指定時）は、名前の文字列一致に頼らず
+//   選手IDで直接更新・紐づけを行う。姓しか登録されていない選手に名を追記して登録した場合も、
+//   文字列が変わって一致しなくなることがないよう、IDベースで確実に同一選手として扱う。
+async function linkPlayerToUser(userId, payload) {
   async function linkOrCreatePlayer(playerName, position, hand, selectedId, backfillFirst) {
     let roster;
     try {
@@ -11723,9 +11734,18 @@ async function completeProfileRegistration(userId, payload) {
   }
 }
 
+// ★メール確認が必須の設定だと、登録直後はまだセッションがなく保存に失敗するため、
+// その場合は一時保存しておき、確認メール経由で初めてログインできた時にこの関数を呼んで自動で仕上げる。
+// （この経路では選手マスターの閲覧ができない状態から始まるため、選手の紐づけまで一括で行う）
+async function completeProfileRegistration(userId, payload) {
+  await saveProfileOnly(payload);
+  await linkPlayerToUser(userId, payload);
+}
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState("login"); // login | signup
-  const [step, setStep] = useState(1); // 新規登録のステップ：1=基本情報 2=登録区分 3=選手情報 "confirm"=確認画面
+  // 新規登録のステップ：1=基本情報 2=登録区分 3=招待コード（ここでアカウントを作成） 4=選手情報（作成後、承認済みの状態で選手マスターに接続）
+  const [step, setStep] = useState(1);
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [lastName,     setLastName]     = useState("");
@@ -11756,8 +11776,20 @@ function AuthScreen({ onAuthed }) {
   const [childFirstName, setChildFirstName] = useState("");
   const [childPosition, setChildPosition] = useState(null);
   const [childHand, setChildHand] = useState(null);
+  // 招待コード確認後に作成されたユーザーID（この時点から選手マスターを読める＝承認済みになる）
+  const [createdUserId, setCreatedUserId] = useState(null);
 
-  useEffect(() => { getSchools().then(setSchools); getPlayerRoster().then(setRoster); }, []);
+  useEffect(() => { getSchools().then(setSchools); }, []);
+
+  // ★選手マスター（players）はRLSで「同じチームの承認済みユーザーのみ閲覧可」となっており、
+  // 新規登録の途中（まだアカウント未作成・未承認）の状態では誰であっても取得できない
+  // （＝関係のない選手の個人情報が外部に見えてしまうことはない）。
+  // そのため、招待コード確認・アカウント作成が完了して承認済みになった後（step4）にのみ取得する。
+  useEffect(() => {
+    if (step === 4 && createdUserId) {
+      getPlayerRoster().then(setRoster);
+    }
+  }, [step, createdUserId]);
 
   const fullName = [lastName.trim(), firstName.trim()].filter(Boolean).join(" ");
 
@@ -11796,51 +11828,73 @@ function AuthScreen({ onAuthed }) {
     if (!registerMode) { setErrorMsg("選手本人／保護者・関係者のいずれかを選択してください"); return; }
     setStep(3);
   }
-  function goConfirm() {
+
+  // ★招待コードを確認し、その場でアカウントを作成する。
+  // 選手マスターの閲覧・選択（ステップ4）は、ここでユーザーが承認済みになった後でないと行えない。
+  async function handleCreateAccount() {
     setErrorMsg("");
     if (!inviteInput.trim()) { setErrorMsg("招待コードを入力してください"); return; }
-    if (registerMode === "player" && playerLinkMode === "master" && !playerSelectedId) {
-      setErrorMsg("選手マスターから選手を選択してください"); return;
-    }
-    setStep("confirm");
-  }
-
-  async function handleSignup() {
-    setErrorMsg("");
     const codeOk = await verifyInviteCode(schoolId, inviteInput);
     if (!codeOk) { setErrorMsg("招待コードが正しくありません。管理者に確認してください。"); return; }
-
-    const childName = [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ");
 
     setLoading(true);
     try {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) throw error;
       if (data.user) {
-        const payload = {
-          fullName, schoolId, prefecture, genderCategory, category, registerMode,
-          playerPosition, playerHand,
-          playerSelectedId: registerMode==="player" && playerLinkMode==="master" ? playerSelectedId : null,
-          playerBackfillFirst,
-          childName,
-          childPosition, childHand,
-          childSelectedId: registerMode==="guardian" && childMode==="master" ? childSelectedId : null,
-          childBackfillFirst,
-        };
+        const basePayload = { fullName, schoolId, prefecture, genderCategory, category, registerMode };
         if (data.session) {
-          // メール確認不要 or 即セッション確立 → その場で登録を完了させる
-          await completeProfileRegistration(data.user.id, payload);
+          await saveProfileOnly(basePayload);
+          setCreatedUserId(data.user.id);
+          setLoading(false);
+          setStep(4);
+          return;
         } else {
-          // メール確認が必須の設定 → 今は保存できないので一時保存し、確認後の初回ログイン時に自動で仕上げる
+          // ★メール確認が必須の環境向けフォールバック：
+          // この時点では選手マスターにまだアクセスできないため、選手の紐づけは
+          // 「入力済みのお名前で自動連携」のみ行い、保護者のお子さん登録は
+          // 確認メール経由の初回ログイン後にプロフィール画面から追加してもらう。
+          const payload = {
+            ...basePayload,
+            playerPosition: null, playerHand: null, playerSelectedId: null, playerBackfillFirst: "",
+            childName: "", childPosition: null, childHand: null, childSelectedId: null, childBackfillFirst: "",
+          };
           try { localStorage.setItem("pendingProfile_"+email.trim(), JSON.stringify(payload)); } catch(e){}
           setLoading(false);
-          alert("確認メールを送信しました。メール内のリンクをタップしてから、このアプリにログインしてください。選手情報は自動で登録されます。");
+          alert("確認メールを送信しました。メール内のリンクをタップしてから、このアプリにログインしてください。ログイン後、選手情報の登録画面が表示されます。");
           return;
         }
       }
-      onAuthed();
     } catch (e) {
       setErrorMsg(translateAuthError(e.message) || "登録に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ★選手マスターとの連携を確定し、登録を完了する（この時点でアカウントはすでに作成・承認済み）
+  async function handleFinalizeLink() {
+    setErrorMsg("");
+    if (registerMode === "player" && playerLinkMode === "master" && !playerSelectedId) {
+      setErrorMsg("選手マスターから選手を選択してください"); return;
+    }
+    const childName = [childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ");
+    setLoading(true);
+    try {
+      const payload = {
+        fullName, schoolId, registerMode,
+        playerPosition, playerHand,
+        playerSelectedId: registerMode==="player" && playerLinkMode==="master" ? playerSelectedId : null,
+        playerBackfillFirst,
+        childName,
+        childPosition, childHand,
+        childSelectedId: registerMode==="guardian" && childMode==="master" ? childSelectedId : null,
+        childBackfillFirst,
+      };
+      await linkPlayerToUser(createdUserId, payload);
+      onAuthed();
+    } catch (e) {
+      setErrorMsg(e.message || "登録に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -11852,20 +11906,20 @@ function AuthScreen({ onAuthed }) {
     return hasGiven ? p.player_name : `${p.player_name}（名 未登録）`;
   }
 
-  const stepLabels = [["基本情報",1], ["登録区分",2], ["選手情報",3]];
+  const stepLabels = [["基本情報",1], ["登録区分",2], ["招待コード",3], ["選手情報",4]];
   function StepBar() {
-    const curNum = step === "confirm" ? 3 : step;
+    const curNum = step;
     return (
       <div style={{ marginBottom:16 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginBottom:6 }}>
-          {[1,2,3].map((n,i) => (
+          {[1,2,3,4].map((n,i) => (
             <Fragment key={n}>
               <div style={{ width:24, height:24, borderRadius:"50%", fontSize:11, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", background:n < curNum ? C.accent : (n === curNum ? C.navy : C.border), color:n <= curNum ? C.white : C.textSec }}>{n}</div>
-              {i < 2 && <div style={{ width:30, height:2, background:n < curNum ? C.accent : C.border }} />}
+              {i < 3 && <div style={{ width:22, height:2, background:n < curNum ? C.accent : C.border }} />}
             </Fragment>
           ))}
         </div>
-        <div style={{ display:"flex", justifyContent:"space-between", fontSize:10.5, color:C.textSec, padding:"0 4px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:C.textSec, padding:"0 2px" }}>
           {stepLabels.map(([l,n]) => <span key={n} style={{ fontWeight:n===curNum?800:400, color:n===curNum?C.navy:C.textSec }}>{l}</span>)}
         </div>
       </div>
@@ -11880,10 +11934,10 @@ function AuthScreen({ onAuthed }) {
         <div style={{ fontSize:12, color:C.textSec, marginTop:4 }}>スコア記録・データ分析</div>
       </div>
 
-      {/* タブ切替 */}
+      {/* タブ切替（アカウント作成後の選手情報ステップでは切替不可にする） */}
       <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, marginBottom:18 }}>
         {[["login","ログイン"],["signup","新規登録"]].map(([v,l]) => (
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:mode===v?C.white:"transparent", color:mode===v?C.navy:C.textSec, boxShadow:mode===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setMode(v); setErrorMsg(""); if (v==="signup") setStep(1); }}>{l}</button>
+          <button key={v} disabled={step===4} style={{ flex:1, padding:9, border:"none", cursor:step===4?"default":"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:mode===v?C.white:"transparent", color:mode===v?C.navy:C.textSec, boxShadow:mode===v?"0 1px 4px rgba(0,0,0,0.1)":"none", opacity:step===4?0.5:1 }} onClick={()=>{ if(step===4) return; setMode(v); setErrorMsg(""); if (v==="signup") setStep(1); }}>{l}</button>
         ))}
       </div>
 
@@ -11996,12 +12050,43 @@ function AuthScreen({ onAuthed }) {
         </>
       )}
 
-      {/* ============ STEP 3: 選手情報 ============ */}
+      {/* ============ STEP 3: 招待コード（ここでアカウントを作成） ============ */}
       {mode==="signup" && step===3 && (
         <>
-          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>
-            ④ {registerMode==="player" ? "選手情報" : "お子さん・関連選手の情報"}
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>④ 招待コード</div>
+          <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>チームの管理者から受け取った招待コードを入力してください</div>
+
+          <div style={S.card}>
+            <div style={{ padding:"14px 16px" }}>
+              <label style={S.lbl}>招待コード</label>
+              <input
+                style={{ ...S.inp, textAlign:"center", fontSize:18, fontWeight:800, letterSpacing:6 }}
+                placeholder=""
+                value={inviteInput}
+                maxLength={6}
+                onChange={e=>setInviteInput(e.target.value.toUpperCase())}
+              />
+              <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>コードを確認すると、この画面でアカウントが作成されます。選手の詳細情報は次のステップで入力します。</div>
+            </div>
           </div>
+
+          {errorMsg && (
+            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
+          )}
+          <button style={{ ...S.btn(C.navy), marginTop:16, opacity:loading?0.6:1 }} disabled={loading} onClick={handleCreateAccount}>
+            {loading ? "確認中..." : "コードを確認して次へ"}
+          </button>
+          <button style={{ ...S.btn(C.white,C.textSec), marginTop:8, border:`1.5px solid ${C.border}` }} onClick={()=>{ setErrorMsg(""); setStep(2); }}>戻る</button>
+        </>
+      )}
+
+      {/* ============ STEP 4: 選手情報（アカウント作成・承認済みの状態で選手マスターに接続） ============ */}
+      {mode==="signup" && step===4 && (
+        <>
+          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>
+            ⑤ {registerMode==="player" ? "選手情報" : "お子さん・関連選手の情報"}
+          </div>
+          <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>アカウントの作成が完了しました。最後に選手情報を登録してください。</div>
 
           <div style={S.card}>
             {registerMode==="player" ? (
@@ -12020,6 +12105,9 @@ function AuthScreen({ onAuthed }) {
                       <option value="">選手を選択してください</option>
                       {schoolRoster.map(p => <option key={p.id} value={p.id}>{rosterOptionLabel(p)}</option>)}
                     </select>
+                    {schoolRoster.length === 0 && (
+                      <div style={{ fontSize:11, color:C.textSec, marginTop:6 }}>この学校にはまだ選手マスターが登録されていません。</div>
+                    )}
                     {playerSelectedId && !/\s/.test((schoolRoster.find(p=>p.id===playerSelectedId)?.player_name||"").trim()) && (
                       <div style={{ marginTop:10, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 12px" }}>
                         <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>名（選手マスターに未登録のため入力してください）</div>
@@ -12052,6 +12140,9 @@ function AuthScreen({ onAuthed }) {
                       <option value="">選手を選択してください</option>
                       {schoolRoster.map(p => <option key={p.id} value={p.id}>{rosterOptionLabel(p)}</option>)}
                     </select>
+                    {schoolRoster.length === 0 && (
+                      <div style={{ fontSize:11, color:C.textSec, marginTop:6 }}>この学校にはまだ選手マスターが登録されていません。</div>
+                    )}
                     {childSelectedId && !/\s/.test((schoolRoster.find(p=>p.id===childSelectedId)?.player_name||"").trim()) && (
                       <div style={{ marginTop:10, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"10px 12px" }}>
                         <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>名（選手マスターに未登録のため入力してください）</div>
@@ -12069,7 +12160,7 @@ function AuthScreen({ onAuthed }) {
                     </div>
                   </>
                 )}
-                <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>※部活動で使用している正式な氏名でご登録ください。</div>
+                <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>※部活動で使用している正式な氏名でご登録ください。入力しなくても後からプロフィール画面で追加できます。</div>
               </div>
             )}
 
@@ -12091,73 +12182,14 @@ function AuthScreen({ onAuthed }) {
                 })}
               </div>
             </div>
-
-            <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
-              <label style={S.lbl}>招待コード</label>
-              <input
-                style={{ ...S.inp, textAlign:"center", fontSize:18, fontWeight:800, letterSpacing:6 }}
-                placeholder=""
-                value={inviteInput}
-                maxLength={6}
-                onChange={e=>setInviteInput(e.target.value.toUpperCase())}
-              />
-              <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>チームの管理者から招待コードを受け取り入力してください。</div>
-            </div>
           </div>
 
           {errorMsg && (
             <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
           )}
-          <button style={{ ...S.btn(C.navy), marginTop:16 }} onClick={goConfirm}>入力内容を確認する</button>
-          <button style={{ ...S.btn(C.white,C.textSec), marginTop:8, border:`1.5px solid ${C.border}` }} onClick={()=>{ setErrorMsg(""); setStep(2); }}>戻る</button>
-        </>
-      )}
-
-      {/* ============ 確認画面 ============ */}
-      {mode==="signup" && step==="confirm" && (
-        <>
-          <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"4px 0 8px" }}>✓ 入力内容の確認</div>
-          <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>内容をご確認のうえ、登録してください</div>
-
-          <div style={S.card}>
-            <div style={{ padding:"14px 16px" }}>
-              {[
-                ["アカウント情報", [["メールアドレス", email], ["お名前", fullName]]],
-                ["所属情報", [["都道府県", prefecture], ["学校・チーム名", schools.find(s=>s.id===schoolId)?.name || "―"], ["所属区分", categoryLabel(category)], ["チーム区分", GENDER_OPTIONS.find(g=>g.key===genderCategory)?.label || "―"]]],
-                ["登録区分", [["立場", registerMode==="player" ? "選手本人として登録" : "保護者・関係者として登録"]]],
-                [registerMode==="player" ? "選手情報" : "お子さん・関連選手の情報", [
-                  ["選手名", registerMode==="player"
-                    ? (playerLinkMode==="master"
-                        ? (schoolRoster.find(p=>p.id===playerSelectedId)?.player_name || "―") + (playerBackfillFirst ? ` ${playerBackfillFirst}` : "")
-                        : fullName)
-                    : (childMode==="master"
-                        ? (schoolRoster.find(p=>p.id===childSelectedId)?.player_name || "未選択") + (childBackfillFirst ? ` ${childBackfillFirst}` : "")
-                        : ([childLastName.trim(), childFirstName.trim()].filter(Boolean).join(" ") || "未入力"))],
-                  ["ポジション", (registerMode==="player" ? playerPosition : childPosition) || "未選択"],
-                  ["利き手", (registerMode==="player" ? playerHand : childHand) || "未選択"],
-                ]],
-                ["招待コード", [["コード", inviteInput || "未入力"]]],
-              ].map(([title, rows], i) => (
-                <div key={i} style={{ marginBottom: i<4 ? 14 : 0 }}>
-                  <div style={{ fontSize:12, fontWeight:800, color:C.navy, marginBottom:6 }}>{title}</div>
-                  {rows.map(([k,v]) => (
-                    <div key={k} style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"6px 0", borderBottom:`1px dashed ${C.border}` }}>
-                      <span style={{ color:C.textSec }}>{k}</span>
-                      <span style={{ fontWeight:700 }}>{v}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {errorMsg && (
-            <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>
-          )}
-          <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16, opacity:loading?0.6:1 }} disabled={loading} onClick={handleSignup}>
-            {loading ? "処理中..." : "上記の内容で登録する"}
+          <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16, opacity:loading?0.6:1 }} disabled={loading} onClick={handleFinalizeLink}>
+            {loading ? "処理中..." : "登録を完了する"}
           </button>
-          <button style={{ ...S.btn(C.white,C.textSec), marginTop:8, border:`1.5px solid ${C.border}` }} onClick={()=>{ setErrorMsg(""); setStep(3); }}>修正する</button>
         </>
       )}
 
