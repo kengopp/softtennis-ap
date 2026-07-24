@@ -3215,6 +3215,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
+  const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
+  const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
+
+  useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -3271,8 +3275,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       </div>
 
       {(() => {
-        // ★大会内訳の統計行（試合一覧のカードと同じ考え方で算出。参加選手一覧・会場一覧などの
-        // 専用画面はまだ無いため、現時点ではタップ遷移はせず表示のみ）
+        // ★大会内訳の統計行（試合一覧のカードと同じ考え方で算出）。
+        // 参加選手はタップで一覧モーダルを表示。登録済試合一覧・会場一覧などの専用画面はまだ無いため、
+        // それらは現時点では表示のみ。
         const isDoneStatus = (status) => status === "finished" || status === "abandoned";
         const createdTeamGames = teamMatches.flatMap(tm => (tm.games || []).filter(g => g.match_id));
         const totalMatches = matches.length + createdTeamGames.length;
@@ -3284,10 +3289,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         teamMatches.forEach(tm => { if (tm.venue) venueSet.add(tm.venue); });
         return (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, margin:"10px 14px 0", padding:"9px 8px", background:"#f7f9fc", borderRadius:10 }}>
-            <div style={{ textAlign:"center" }}>
+            <div style={{ textAlign:"center", cursor:"pointer" }} onClick={()=>setShowParticipants(true)}>
               <div style={{ fontSize:12 }}>👥</div>
               <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{participantCount}人</div>
-              <div style={{ fontSize:9.5, color:C.textSec }}>参加選手</div>
+              <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
             </div>
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:12 }}>🎾</div>
@@ -3426,16 +3431,16 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       >＋</button>
 
       {showEditModal && (
-        <Modal onClose={()=>setShowEditModal(false)}>
+        <FullScreenSheet title="✏️ 大会を編集" onClose={()=>setShowEditModal(false)}>
           <TournamentFormFields
             initial={tournament}
             onCancel={()=>setShowEditModal(false)}
-            onSave={async (name, startDate, endDate, venue, venueLink, guidelineUrl)=>{
+            onSave={async (name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds)=>{
               const trimmed = name.trim();
               if (!trimmed) { alert("大会名を入力してください"); return; }
               if (!startDate) { alert("開始日を選択してください"); return; }
               try {
-                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null });
+                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null, participant_player_ids: participantIds || [] });
                 // ★大会名が変わった場合、既存の個人戦・団体戦の大会名も追従させる（見えない文字ズレによる紐付け解除を防ぐ）
                 if (tournament.name && tournament.name.trim() !== trimmed) {
                   await renameTournamentCascade(tournament.name, trimmed);
@@ -3447,6 +3452,20 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               }
             }}
           />
+        </FullScreenSheet>
+      )}
+
+      {showParticipants && (
+        <Modal onClose={()=>setShowParticipants(false)}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:12, textAlign:"center" }}>👥 参加選手一覧</h3>
+          {(() => {
+            const names = playerRoster.filter(p => (tournament.participant_player_ids || []).includes(p.id)).map(p => p.player_name);
+            if (names.length === 0) {
+              return <div style={{ fontSize:12, color:C.textSec, textAlign:"center", padding:"12px 0" }}>出場選手が登録されていません。「✏️ 編集」から選択できます。</div>;
+            }
+            return <div>{names.map(n => <span key={n} style={S.chip(false)}>{n}</span>)}</div>;
+          })()}
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, marginTop:16 }} onClick={()=>setShowParticipants(false)}>閉じる</button>
         </Modal>
       )}
 
