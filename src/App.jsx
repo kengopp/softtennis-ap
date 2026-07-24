@@ -2521,7 +2521,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         participant_player_ids: participantIds || [],
       });
       // ★既存の大会の名前を変更した場合、紐づく個人戦・団体戦の大会名も追従させる
-      if (editingTournament?.name && editingTournament.name.trim() !== trimmed) {
+      // （コピー作成時はeditingTournamentにidが無いため、誤って元の大会の試合まで巻き込んでリネームしないようにする）
+      if (editingTournament?.id && editingTournament?.name && editingTournament.name.trim() !== trimmed) {
         await renameTournamentCascade(editingTournament.name, trimmed);
       }
       setShowTournamentModal(false);
@@ -2858,6 +2859,23 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                           onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setEditingTournament(t); setShowTournamentModal(true); }}
                         >✏️ 編集</button>
                         <button
+                          style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                          onClick={e=>{
+                            e.stopPropagation();
+                            setOpenTournamentMenuId(null);
+                            // ★大会名・開催期間・場所・会場リンク・要項のみコピーし、出場選手や試合データは引き継がない
+                            setEditingTournament({
+                              name: t.name,
+                              start_date: t.start_date,
+                              end_date: t.end_date,
+                              venue: t.venue,
+                              venue_link: t.venue_link,
+                              guideline_url: t.guideline_url,
+                            });
+                            setShowTournamentModal(true);
+                          }}
+                        >📄 コピー</button>
+                        <button
                           style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.red }}
                           onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setConfirmDeleteTournament(t.id); }}
                         >🗑 削除</button>
@@ -3018,7 +3036,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         </Modal>
       )}
       {showTournamentModal && (
-        <FullScreenSheet title={editingTournament ? "✏️ 大会を編集" : "📋 大会を作成"} onClose={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}>
+        <FullScreenSheet title={editingTournament?.id ? "✏️ 大会を編集" : "📋 大会を作成"} onClose={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}>
           <TournamentFormFields
             initial={editingTournament}
             onCancel={()=>{ setShowTournamentModal(false); setEditingTournament(null); }}
