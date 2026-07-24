@@ -6331,6 +6331,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [showNewModal, setShowNewModal] = useState(false);
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
   const [playerRoster, setPlayerRoster] = useState([]); // ★次の試合予定カードの参加選手表示用
+  const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
   useEffect(() => {
@@ -6427,9 +6428,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                 {upcomingTournaments.map((t, idx) => {
                   const d = daysUntil(t.start_date);
                   const countdownLabel = d === 0 ? "本日" : d === 1 ? "明日" : d > 1 ? `あと${d}日` : "";
-                  const participantNames = playerRoster
-                    .filter(p => (t.participant_player_ids || []).includes(p.id))
-                    .map(p => p.player_name);
+                  const participantCount = (t.participant_player_ids || []).length;
                   return (
                   <div key={t.id ?? idx} style={{ ...S.card, padding:16, marginBottom: idx===upcomingTournaments.length-1?0:10, borderLeft:`4px solid ${C.textSec}` }}>
                     <div style={{ cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
@@ -6440,12 +6439,17 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                         )}
                       </div>
                       <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(t.start_date)}</div>
-                      {participantNames.length > 0 && (
-                        <div style={{ fontSize:12,color:C.textSec,marginTop:6,lineHeight:1.5 }}>
-                          👥 {participantNames.join("、")}
-                        </div>
-                      )}
                     </div>
+                    {participantCount > 0 && (
+                      <div
+                        style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:8, cursor:"pointer" }}
+                        onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}
+                      >
+                        <span style={{ fontSize:13 }}>👥</span>
+                        <span style={{ fontSize:12.5, fontWeight:700, color:C.text }}>{participantCount}人</span>
+                        <span style={{ fontSize:11, color:C.textSec, textDecoration:"underline" }}>参加選手</span>
+                      </div>
+                    )}
                     {(t.venue_link || t.guideline_url) && (
                       <div style={{ display:"flex", gap:8, marginTop:12 }}>
                         <button
@@ -6464,6 +6468,21 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                   );
                 })}
               </div>
+            )}
+
+            {/* 参加選手一覧ポップアップ */}
+            {participantsModalFor && (
+              <Modal onClose={()=>setParticipantsModalFor(null)}>
+                <h3 style={{ fontSize:15, fontWeight:800, marginBottom:12, textAlign:"center" }}>👥 参加選手一覧</h3>
+                {(() => {
+                  const names = playerRoster.filter(p => (participantsModalFor.participant_player_ids || []).includes(p.id)).map(p => p.player_name);
+                  if (names.length === 0) {
+                    return <div style={{ fontSize:12, color:C.textSec, textAlign:"center", padding:"12px 0" }}>出場選手が登録されていません。</div>;
+                  }
+                  return <div>{names.map(n => <span key={n} style={S.chip(false)}>{n}</span>)}</div>;
+                })()}
+                <button style={{ ...S.btn("#f0f0f0"), color:C.text, marginTop:16 }} onClick={()=>setParticipantsModalFor(null)}>閉じる</button>
+              </Modal>
             )}
 
             {/* ③サマリーカード */}
