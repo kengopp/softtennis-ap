@@ -8702,6 +8702,67 @@ function SchoolIdSelect({ value, onChange, schools, prefFilter, genderCategory }
   );
 }
 
+// ★新規登録画面用：学校名をキーワード入力→候補一覧から選ぶ形式のフィールド。
+// SchoolIdSelect（プルダウン）と違い、試合作成の「チーム名/学校名」入力と同じ操作感にするためのもの。
+// ただしこちらは実在する学校（school_id）を必ず1つ選ぶ必要があるため、候補をタップして確定するまでは
+// 「未選択」のまま（自由な文字列では確定できない）。
+function SchoolIdSearchField({ value, onChange, schools, prefFilter, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = schools.find(s => s.id === value) || null;
+
+  if (schools.length === 0) {
+    return (
+      <div style={{ fontSize:12,color:C.textSec,padding:"10px 0" }}>
+        学校がまだ登録されていません。管理者に学校の追加を依頼してください。
+      </div>
+    );
+  }
+
+  const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
+  const q = query.trim();
+  const filtered = q ? visibleSchools.filter(s => s.name.includes(q)) : visibleSchools;
+
+  if (selected) {
+    return (
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:C.accentL, border:`1.5px solid ${C.accent}`, borderRadius:8, padding:"10px 12px" }}>
+        <span style={{ fontSize:14, fontWeight:800, color:C.navy }}>✅ {selected.name}</span>
+        <span style={{ fontSize:12, color:C.textSec, cursor:"pointer", textDecoration:"underline" }} onClick={()=>{ onChange(null); setQuery(""); }}>変更する</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position:"relative" }}>
+      <input
+        style={S.inp}
+        placeholder={placeholder || "学校名を入力（例：東福岡）"}
+        value={query}
+        onChange={e=>{ setQuery(e.target.value); setOpen(true); }}
+        onFocus={()=>setOpen(true)}
+        onBlur={()=>setTimeout(()=>setOpen(false), 200)}
+        autoCapitalize="none"
+      />
+      {open && filtered.length > 0 && (
+        <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:8, zIndex:200, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", maxHeight:220, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+          <div style={{ padding:"4px 14px", fontSize:10, color:C.textSec, background:"#f5f6f8" }}>{filtered.length}件</div>
+          {filtered.slice(0, 200).map(s => {
+            const tags = [categoryLabel(s.category), s.prefecture].filter(Boolean).join("・");
+            return (
+              <div key={s.id} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
+                onMouseDown={e=>{ e.preventDefault(); onChange(s.id); setQuery(""); setOpen(false); }}
+              >{s.name}{tags ? `（${tags}）` : ""}</div>
+            );
+          })}
+        </div>
+      )}
+      {!prefFilter && (
+        <div style={{ fontSize:11, color:"#aaa", marginTop:4 }}>💡 都道府県を選ぶと候補が絞られます</div>
+      )}
+    </div>
+  );
+}
+
 // ============================================================
 // 試合セットアップ
 // ============================================================
@@ -12450,7 +12511,7 @@ function AuthScreen({ onAuthed }) {
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>学校名またはチーム名</label>
-              <SchoolIdSelect value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} genderCategory={null} />
+              <SchoolIdSearchField value={schoolId} onChange={setSchoolId} schools={schools} prefFilter={schoolPrefFilter} />
             </div>
             <div style={{ padding:"14px 16px", borderTop:"1px solid "+C.border }}>
               <label style={S.lbl}>所属区分</label>
@@ -12684,11 +12745,19 @@ export default function App() {
   // ログイン状態の確認
   const [authChecked, setAuthChecked] = useState(false);
   const [user,        setUser]        = useState(null);
+  // ★新規登録フロー中に「アカウントは作成済みだが選手情報の入力がまだ」という状態が生まれるため、
+  // supabase側でセッションができた瞬間（user が非nullになった瞬間）に即座にAuthScreenを手放してしまうと、
+  // まだ選手情報を入力中のAuthScreenのステップ4を素通りして、プロフィール未完了時の強制ProfileScreenが
+  // 一瞬だけ（実際には表示されたまま）出てしまう不具合があった。
+  // そのため、AuthScreenを一度表示したら、AuthScreen自身が onAuthed() を呼ぶまでは
+  // user の変化だけでは手放さないようにする。
+  const [inAuthFlow, setInAuthFlow] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user ?? null);
       setAuthChecked(true);
+      if (!data.user) setInAuthFlow(true);
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
@@ -12859,9 +12928,9 @@ export default function App() {
     );
   }
 
-  // 未ログインならログイン画面へ
-  if (!user) {
-    return <AuthScreen onAuthed={()=>{}} />;
+  // 未ログイン、または新規登録フローの途中（アカウント作成済みだが選手情報の入力がまだ）ならログイン画面へ
+  if (!user || inAuthFlow) {
+    return <AuthScreen onAuthed={()=>setInAuthFlow(false)} />;
   }
 
   // プロフィール確認中、または保留中データの自動適用中は簡易ローディング表示
