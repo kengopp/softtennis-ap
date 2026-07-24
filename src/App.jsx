@@ -1226,6 +1226,7 @@ async function saveTournament(t) {
     venue: t.venue || null,
     venue_link: t.venue_link || null,
     guideline_url: t.guideline_url || null,
+    participant_player_ids: t.participant_player_ids || [],
   };
   const { error } = await supabase.from("tournaments").upsert(row);
   if (error) throw error;
@@ -2216,14 +2217,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [monthViewYear, setMonthViewYear] = useState(new Date().getFullYear());
 
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
-
-  // 大会タブ関連
   const [tournaments, setTournaments] = useState([]);
   const [tournamentSearch, setTournamentSearch] = useState("");
   const [tournamentDropdownOpen, setTournamentDropdownOpen] = useState(false);
   const [showTournamentModal, setShowTournamentModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
   const [confirmDeleteTournament, setConfirmDeleteTournament] = useState(null);
+  const [openTournamentMenuId, setOpenTournamentMenuId] = useState(null); // ★カード下部「その他」メニューの開閉
   const [showTrash, setShowTrash] = useState(false);
   const [trashTab, setTrashTab] = useState("tournament"); // tournament | team | individual
   const [deletedTournaments, setDeletedTournaments] = useState([]);
@@ -2384,6 +2384,36 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     individual: allMatches.filter(m => m.tournament_name === name).length,
   });
 
+  // ★大会カードの統計行（参加選手・試合数・登録済・会場数）
+  // 新しいテーブルや列は使わず、既存の matches / team_match_games / players（選手マスター）だけで集計する。
+  const isDoneStatus = (status) => status === "finished" || status === "abandoned"; // 途中終了も「登録済」に含める
+  const statsForTournament = (t) => {
+    const name = t.name;
+    const individualForT = allMatches.filter(m => m.tournament_name === name);
+    const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
+    // 団体戦のうち、実際に試合レコードが作成済みの番手のみ（枠だけの未着手番手は含めない）
+    const createdTeamGames = teamMatchesForT.flatMap(tm => (tm.games || []).filter(g => g.match_id));
+
+    // 試合数：作成済みの試合レコードの総数（個人戦＋団体戦の作成済み番手）
+    const totalMatches = individualForT.length + createdTeamGames.length;
+
+    // 登録済：そのうち、試合終了まで（途中終了も含む）スコアが記録されているもの
+    const doneIndividual = individualForT.filter(m => isDoneStatus(m.status)).length;
+    const doneTeamGames = createdTeamGames.filter(g => isDoneStatus(matchPlayersByMatchId[g.match_id] ? allMatchesRaw.find(m=>m.id===g.match_id)?.status : null)).length;
+    const registeredMatches = doneIndividual + doneTeamGames;
+
+    // 参加選手：大会作成・編集時に選択した「出場選手」の人数（試合データからの逆算ではなく、選択リストそのもの）
+    const participantCount = (t.participant_player_ids || []).length;
+
+    // 会場数：大会自体の会場＋個人戦・団体戦それぞれの会場を重複なしで集計
+    const venueSet = new Set();
+    if (t.venue) venueSet.add(t.venue);
+    individualForT.forEach(m => { if (m.venue) venueSet.add(m.venue); });
+    teamMatchesForT.forEach(tm => { if (tm.venue) venueSet.add(tm.venue); });
+
+    return { totalMatches, registeredMatches, participantCount, venueCount: venueSet.size };
+  };
+
   const filteredTournaments = tournaments.filter(t => {
     if (tournamentSearch.trim() && !t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())) return false;
     if (filterStatus === "upcoming" && !isUpcomingTournament(t)) return false;
@@ -2397,7 +2427,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return true;
   });
 
-  async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl) {
+  async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds) {
     const trimmed = name.trim();
     if (!trimmed) { alert("大会名を入力してください"); return; }
     if (!startDate) { alert("開始日を選択してください"); return; }
@@ -2410,6 +2440,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         venue: venue || null,
         venue_link: venueLink || null,
         guideline_url: guidelineUrl || null,
+        participant_player_ids: participantIds || [],
       });
       // ★既存の大会の名前を変更した場合、紐づく個人戦・団体戦の大会名も追従させる
       if (editingTournament?.name && editingTournament.name.trim() !== trimmed) {
@@ -2680,8 +2711,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {!loading && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
             {!loading && filteredTournaments.map(t => {
               const counts = countsForTournament(t.name);
+              const stats = statsForTournament(t);
               return (
-                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
+                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative" }}>
                   <div style={{ height:4, background:C.navy }}/>
                   <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
                     <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{t.name}</div>
@@ -2690,6 +2722,28 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       <div style={{ display:"flex", gap:4 }}>
                         {counts.team>0 && <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"2px 8px", borderRadius:10 }}>🏆 団体 {counts.team}</span>}
                         {counts.individual>0 && <span style={{ fontSize:10, color:C.textSec, background:"#f0f0f0", padding:"2px 8px", borderRadius:10 }}>🎾 個人 {counts.individual}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background:"#f7f9fc", borderRadius:10 }}>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:12 }}>👥</div>
+                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.participantCount}人</div>
+                        <div style={{ fontSize:9.5, color:C.textSec }}>参加選手</div>
+                      </div>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:12 }}>🎾</div>
+                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.totalMatches}試合</div>
+                        <div style={{ fontSize:9.5, color:C.textSec }}>試合数</div>
+                      </div>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:12 }}>✅</div>
+                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.registeredMatches}試合</div>
+                        <div style={{ fontSize:9.5, color:C.textSec }}>登録済</div>
+                      </div>
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:12 }}>📍</div>
+                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.venueCount}か所</div>
+                        <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
                       </div>
                     </div>
                   </div>
@@ -2706,13 +2760,24 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     ><span style={{ color: t.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
                     <button
                       style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
-                      onClick={e=>{e.stopPropagation();setEditingTournament(t);setShowTournamentModal(true);}}
-                    ><span style={{ color:"#fb8c00" }}>✏️</span> 編集</button>
-                    <button
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff3f3", color:"#e53935", border:"1px solid #f8b4b4", cursor:"pointer" }}
-                      onClick={e=>{e.stopPropagation();setConfirmDeleteTournament(t.id);}}
-                    ><span>🗑</span> 削除</button>
+                      onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(v => v===t.id ? null : t.id); }}
+                    >⋯ その他</button>
                   </div>
+                  {openTournamentMenuId === t.id && (
+                    <>
+                      <div style={{ position:"fixed", inset:0, zIndex:9 }} onClick={()=>setOpenTournamentMenuId(null)} />
+                      <div style={{ position:"absolute", right:14, bottom:56, width:150, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", overflow:"hidden", zIndex:10 }}>
+                        <button
+                          style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                          onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setEditingTournament(t); setShowTournamentModal(true); }}
+                        >✏️ 編集</button>
+                        <button
+                          style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.red }}
+                          onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setConfirmDeleteTournament(t.id); }}
+                        >🗑 削除</button>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })}
@@ -2983,7 +3048,17 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
   );
   const [uploadingGuideline, setUploadingGuideline] = useState(false);
   const [saving, setSaving] = useState(false);
+  // ★出場選手（選手マスターの自チーム選手から複数選択）
+  const [participantIds, setParticipantIds] = useState(initial?.participant_player_ids || []);
+  const [roster, setRoster] = useState([]);
+  const [rosterSearch, setRosterSearch] = useState("");
   useEffect(() => { getKnownVenues().then(setVenues); }, []);
+  useEffect(() => { getPlayerRoster().then(list => setRoster(list.filter(p => p.is_own_team))); }, []);
+
+  function toggleParticipant(id) {
+    setParticipantIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+  const filteredRoster = roster.filter(p => !rosterSearch.trim() || p.player_name.includes(rosterSearch.trim()));
 
   async function handleGuidelineFileChange(e) {
     const file = e.target.files?.[0];
@@ -3074,12 +3149,30 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         )}
       </div>
 
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>出場選手（任意・複数選択可）</div>
+      <div style={{ border:"1px solid "+C.border, borderRadius:10, padding:10, marginBottom:16 }}>
+        <input
+          style={{ ...S.inp, marginBottom:8 }}
+          placeholder="選手名で絞り込み"
+          value={rosterSearch}
+          onChange={e=>setRosterSearch(e.target.value)}
+        />
+        <div style={{ maxHeight:220, overflowY:"auto" }}>
+          {roster.length === 0 && <div style={{ fontSize:12, color:C.textSec, padding:"6px 2px" }}>選手マスターに選手が登録されていません</div>}
+          {roster.length > 0 && filteredRoster.length === 0 && <div style={{ fontSize:12, color:C.textSec, padding:"6px 2px" }}>一致する選手がいません</div>}
+          {filteredRoster.map(p => (
+            <span key={p.id} style={S.chip(participantIds.includes(p.id))} onClick={()=>toggleParticipant(p.id)}>{p.player_name}</span>
+          ))}
+        </div>
+        <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{participantIds.length}人選択中</div>
+      </div>
+
       <div style={{ display:"flex", gap:8 }}>
         <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:"#f0f2f6", color:C.textSec, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
         <button
           style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
           disabled={saving || uploadingGuideline}
-          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl); setSaving(false); }}
+          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds); setSaving(false); }}
         >{initial ? "保存する" : "作成する"}</button>
       </div>
     </div>
