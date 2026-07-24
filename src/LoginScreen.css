@@ -32,26 +32,6 @@
   overflow:hidden;
   padding:38px 22px 30px;
 }
-/* ソフトテニスコートをぼかして表現した背景（主張しすぎないよう薄く） */
-.st-login-hero:before{
-  content:"";
-  position:absolute; inset:0; z-index:0;
-  background:
-    linear-gradient(rgba(255,255,255,.5),rgba(255,255,255,.84)),
-    repeating-linear-gradient(90deg,transparent 0 95px, rgba(15,32,68,.05) 96px 98px),
-    linear-gradient(0deg,transparent 0 31%, rgba(0,194,122,.07) 31.2% 31.6%, transparent 31.8% 100%);
-  pointer-events:none;
-  filter:blur(0.5px);
-}
-.st-login-hero:after{
-  content:"";
-  position:absolute; left:-15%; right:-15%; top:215px; height:250px; z-index:0;
-  border-top:2px solid rgba(15,32,68,.08);
-  border-bottom:2px solid rgba(15,32,68,.06);
-  transform:perspective(430px) rotateX(64deg);
-  transform-origin:center top;
-  pointer-events:none;
-}
 .st-login-visual,.st-login-heading,.st-login-card,.st-login-features,.st-login-footer{ position:relative; z-index:1; }
 
 .st-login-visual{ display:flex; justify-content:center; margin-top:3px; }
