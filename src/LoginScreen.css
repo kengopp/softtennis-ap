@@ -1,0 +1,149 @@
+:root{
+  --st-navy:#0f2044;
+  --st-navy-soft:#1a3360;
+  --st-green:#00c27a;
+  --st-green-dark:#00a066;
+  --st-green-soft:#e6faf3;
+  --st-border:#dde2ea;
+  --st-muted:#7a8499;
+  --st-bg:#f4f6f9;
+  --st-card:rgba(255,255,255,.94);
+  --st-shadow:0 18px 48px rgba(15,32,68,.12);
+}
+*{box-sizing:border-box}
+.st-login-page *{font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic",system-ui,-apple-system,BlinkMacSystemFont,sans-serif}
+.st-login-page button,.st-login-page input{font:inherit}
+
+.st-login-page{
+  min-height:100dvh;
+  margin:0;
+  color:var(--st-navy);
+  background:
+    radial-gradient(circle at 8% 5%, rgba(0,194,122,.12), transparent 23rem),
+    radial-gradient(circle at 95% 20%, rgba(59,130,246,.12), transparent 24rem),
+    linear-gradient(180deg,#fff 0%,#f5f8fc 62%,#f4faf6 100%);
+}
+
+.st-login-hero{
+  position:relative;
+  width:min(100%,760px);
+  min-height:100dvh;
+  margin:0 auto;
+  overflow:hidden;
+  padding:38px 22px 30px;
+}
+/* ソフトテニスコートをぼかして表現した背景（主張しすぎないよう薄く） */
+.st-login-hero:before{
+  content:"";
+  position:absolute; inset:0; z-index:0;
+  background:
+    linear-gradient(rgba(255,255,255,.5),rgba(255,255,255,.84)),
+    repeating-linear-gradient(90deg,transparent 0 95px, rgba(15,32,68,.05) 96px 98px),
+    linear-gradient(0deg,transparent 0 31%, rgba(0,194,122,.07) 31.2% 31.6%, transparent 31.8% 100%);
+  pointer-events:none;
+  filter:blur(0.5px);
+}
+.st-login-hero:after{
+  content:"";
+  position:absolute; left:-15%; right:-15%; top:215px; height:250px; z-index:0;
+  border-top:2px solid rgba(15,32,68,.08);
+  border-bottom:2px solid rgba(15,32,68,.06);
+  transform:perspective(430px) rotateX(64deg);
+  transform-origin:center top;
+  pointer-events:none;
+}
+.st-login-visual,.st-login-heading,.st-login-card,.st-login-features,.st-login-footer{ position:relative; z-index:1; }
+
+.st-login-visual{ display:flex; justify-content:center; margin-top:3px; }
+.st-login-racket{ width:120px; height:auto; }
+
+.st-login-heading{ margin:6px auto 22px; text-align:center; }
+.st-login-heading h1{ margin:0; font-size:clamp(1.9rem,8vw,2.6rem); line-height:1.22; letter-spacing:.01em; font-weight:800; color:var(--st-navy); }
+.st-login-heading p{ margin:14px 0 0; color:var(--st-muted); font-size:clamp(.85rem,3.2vw,1rem); line-height:1.6; }
+
+.st-login-card{
+  padding:18px;
+  border:1px solid rgba(219,225,235,.85);
+  border-radius:24px;
+  background:var(--st-card);
+  box-shadow:var(--st-shadow);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+}
+
+.st-login-tabs{
+  display:grid; grid-template-columns:1fr 1fr;
+  margin-bottom:20px; padding:4px; border-radius:14px;
+  background:#f1f3f7;
+}
+.st-login-tab{
+  min-height:48px; border:0; border-radius:11px; background:transparent;
+  color:var(--st-muted); font-weight:700; font-size:.95rem; cursor:pointer;
+}
+.st-login-tab.is-active{
+  background:#fff; color:var(--st-green-dark);
+  box-shadow:0 4px 13px rgba(15,32,68,.1);
+  outline:1.5px solid rgba(0,194,122,.4);
+}
+
+.st-login-form{ display:grid; gap:15px; }
+.st-login-field{ display:grid; gap:8px; color:var(--st-navy-soft); font-weight:700; font-size:.85rem; }
+.st-login-input-wrap{
+  display:flex; align-items:center; min-height:54px;
+  border:1.5px solid var(--st-border); border-radius:14px; background:#fff;
+  transition:border-color .18s ease, box-shadow .18s ease;
+}
+.st-login-input-wrap:focus-within{
+  border-color:var(--st-green);
+  box-shadow:0 0 0 4px rgba(0,194,122,.12);
+}
+.st-login-input-icon{ width:44px; text-align:center; color:var(--st-muted); font-size:1.1rem; }
+.st-login-input-wrap input{
+  min-width:0; flex:1; height:52px; border:0; outline:0;
+  background:transparent; color:var(--st-navy); font-size:.95rem; font-weight:400;
+}
+.st-login-input-wrap input::placeholder{ color:#a3abba; }
+.st-login-eye{ margin-right:8px; padding:8px 9px; border:0; background:transparent; font-size:1rem; cursor:pointer; }
+
+.st-login-options{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.st-login-check{ display:inline-flex; align-items:center; gap:8px; color:var(--st-navy-soft); font-size:.82rem; font-weight:400; }
+.st-login-check input{ width:18px; height:18px; accent-color:var(--st-green); }
+.st-login-link{ padding:0; border:0; background:transparent; color:var(--st-green-dark); font-weight:700; font-size:.82rem; cursor:pointer; }
+
+.st-login-error{ margin:-2px 0 0; padding:10px 12px; border-radius:10px; background:#fdecea; color:#e53935; font-size:.82rem; font-weight:700; }
+
+.st-login-submit{
+  min-height:58px; border:0; border-radius:15px;
+  background:linear-gradient(135deg,var(--st-green),var(--st-green-dark));
+  color:#fff; font-size:1rem; font-weight:800;
+  box-shadow:0 11px 24px rgba(0,160,102,.28);
+  cursor:pointer;
+}
+.st-login-submit:disabled{ cursor:not-allowed; opacity:.65; }
+.st-login-submit:active:not(:disabled){ transform:translateY(1px); }
+
+.st-login-features{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:26px; }
+.st-login-features article{ display:grid; justify-items:center; gap:6px; padding:10px 4px; text-align:center; }
+.st-login-feature-icon{
+  display:grid; width:48px; height:48px; place-items:center;
+  border-radius:50%; background:var(--st-green-soft); color:var(--st-green-dark);
+  font-size:1.3rem; font-weight:800;
+}
+.st-login-features strong{ color:var(--st-navy); font-size:.82rem; }
+.st-login-features span{ color:var(--st-muted); font-size:.7rem; line-height:1.5; }
+
+.st-login-footer{ margin-top:18px; text-align:center; color:#a3abba; font-size:.72rem; }
+
+@media (max-width:520px){
+  .st-login-hero{ padding:26px 16px 24px; }
+  .st-login-racket{ width:100px; }
+  .st-login-heading{ margin-bottom:18px; }
+  .st-login-card{ padding:14px; border-radius:20px; }
+  .st-login-tabs{ margin-bottom:16px; }
+  .st-login-tab{ min-height:46px; font-size:.88rem; }
+  .st-login-options{ align-items:flex-start; flex-direction:column; gap:8px; }
+  .st-login-features{ gap:2px; }
+  .st-login-feature-icon{ width:42px; height:42px; font-size:1.15rem; }
+  .st-login-features strong{ font-size:.76rem; }
+  .st-login-features span{ font-size:.65rem; }
+}
