@@ -2801,6 +2801,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     <div style={{ fontSize:16, fontWeight:800, color:C.text }}>{t.name}</div>
                     <div style={{ marginTop:8 }}>
                       <span style={{ fontSize:11, color:C.textSec }}>📅 {fmtDateRange(t.start_date, t.end_date)}</span>
+                      {t.venue && <span style={{ fontSize:11, color:C.textSec, marginLeft:8 }}>📍 {t.venue}</span>}
                     </div>
                     {(teamRecord.win+teamRecord.loss>0 || individualRecord.win+individualRecord.loss>0) && (
                       <div style={{ display:"flex", flexDirection:"column", gap:2, marginTop:6 }}>
