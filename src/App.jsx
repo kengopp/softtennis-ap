@@ -3479,40 +3479,29 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       </div>
 
       {(() => {
-        // ★大会内訳の統計行（試合一覧のカードと同じ考え方で算出）。
-        // 参加選手はタップで一覧モーダルを表示。登録済試合一覧・会場一覧などの専用画面はまだ無いため、
-        // それらは現時点では表示のみ。
-        const isDoneStatus = (status) => status === "finished" || status === "abandoned";
-        const createdTeamGames = teamMatches.flatMap(tm => (tm.games || []).filter(g => g.match_id));
-        const totalMatches = matches.length + createdTeamGames.length;
-        const registeredMatches = matches.filter(m => isDoneStatus(m.status)).length + createdTeamGames.filter(g => isDoneStatus(matchStatusById[g.match_id])).length;
-        const participantCount = (tournament.participant_player_ids || []).length;
-        const venueSet = new Set();
-        if (tournament.venue) venueSet.add(tournament.venue);
-        matches.forEach(m => { if (m.venue) venueSet.add(m.venue); });
-        teamMatches.forEach(tm => { if (tm.venue) venueSet.add(tm.venue); });
+        // ★参加選手・試合数などの内訳の代わりに、選んでいるタブ（団体戦/個人戦）に応じた
+        //   自チームの成績（○勝○敗）だけをシンプルに表示する。
+        let win = 0, lose = 0;
+        if (seg === "team") {
+          teamMatches.forEach(tm => {
+            if (tm.status === "finished") {
+              if (tm.my_score > tm.opponent_score) win++;
+              else if (tm.my_score < tm.opponent_score) lose++;
+            }
+          });
+        } else {
+          matches.forEach(m => {
+            if (m.status === "finished") {
+              if (m.match_score_a > m.match_score_b) win++;
+              else if (m.match_score_a < m.match_score_b) lose++;
+            }
+          });
+        }
+        const total = win + lose;
         return (
-          <div style={{ display:"flex", gap:6, overflowX:"auto", margin:"10px 14px 0", paddingBottom:2 }}>
-            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", cursor:"pointer", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }} onClick={()=>setShowParticipants(true)}>
-              <div style={{ fontSize:11 }}>👥</div>
-              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{participantCount}人</div>
-              <div style={{ fontSize:8, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
-            </div>
-            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }}>
-              <div style={{ fontSize:11 }}>🎾</div>
-              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{totalMatches}試合</div>
-              <div style={{ fontSize:8, color:C.textSec }}>試合数</div>
-            </div>
-            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }}>
-              <div style={{ fontSize:11 }}>✅</div>
-              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{registeredMatches}試合</div>
-              <div style={{ fontSize:8, color:C.textSec }}>登録済</div>
-            </div>
-            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }}>
-              <div style={{ fontSize:11 }}>📍</div>
-              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{venueSet.size}か所</div>
-              <div style={{ fontSize:8, color:C.textSec }}>会場数</div>
-            </div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"10px 14px 0", background:"#f7f9fc", borderRadius:10, padding:"11px 14px" }}>
+            <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec }}>{seg==="team" ? "🏆 団体戦成績" : "🎾 個人戦成績"}</span>
+            <span style={{ fontSize:17, fontWeight:800, color:C.text }}>{total>0 ? `${win}勝${lose}敗` : "ー"}</span>
           </div>
         );
       })()}
