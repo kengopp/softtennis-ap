@@ -6699,8 +6699,6 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
               </div>
             </div>
 
-            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:14 }} onClick={()=>setShowNewModal(true)}>＋ 新規試合を記録する</button>
-
             {showNewModal && (
               <Modal onClose={()=>setShowNewModal(false)}>
                 <div style={{ textAlign:"center" }}>
