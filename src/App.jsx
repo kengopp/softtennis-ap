@@ -8378,6 +8378,10 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
     })();
   }, []);
 
+  // ★一覧から選手を選んで詳細表示に切り替える際、トップレベルのscreenは変わらないため
+  // 画面の途中までスクロールしたままになるのを防ぎ、常にページ先頭から表示する
+  useEffect(() => { window.scrollTo(0, 0); }, [playerName]);
+
   const periodMatches = period==="month1" ? withinLastDays(matches, 30) : matches;
   const ownRoster = roster.filter(p=>p.is_own_team!==false);
   const myMatches = playerName ? periodMatches.filter(m => ownSideFor(m, playerName, mySchoolName)) : [];
