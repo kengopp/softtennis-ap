@@ -7603,7 +7603,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
         const s = schools.find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
       }
-      setSelectedPlayer(linked || rosterList.find(r => r.is_own_team !== false)?.player_name || null);
+      // ★linked_player_idが選手マスターの再登録などで古いID（存在しないID）を指したままになっていると、
+      //   紐づく選手が見つからず、以前は「ロースター先頭の選手」が勝手にデフォルト選択されてしまい、
+      //   ログインした本人とは全く違う人の分析が表示される不具合があった。
+      //   まずは自分のプロフィール名と選手マスターの名前が一致するものが無いか探し（自動復旧）、
+      //   それでも見つからない場合は他の誰かを勝手に選ばず「未選択」のままにする。
+      let defaultPlayer = linked;
+      if (!defaultPlayer && p?.name) {
+        const nameMatch = rosterList.find(r => r.is_own_team !== false && normalizePlayerName(r.player_name) === normalizePlayerName(p.name));
+        if (nameMatch) defaultPlayer = nameMatch.player_name;
+      }
+      setSelectedPlayer(defaultPlayer || null);
       setLoading(false);
     })();
   }, []);
@@ -7641,6 +7651,11 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
       setHasLoadedDefault(true);
       const recent5 = [...playerMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).slice(0,5);
       loadResults(recent5, "直近5試合");
+    }
+    // ★誰の分析かを自動特定できなかった場合、空の結果画面を出さず選手選択画面を案内する
+    if (!loading && !selectedPlayer && !hasLoadedDefault) {
+      setHasLoadedDefault(true);
+      setMode("wizardPlayer");
     }
     // eslint-disable-next-line
   }, [loading, selectedPlayer]);
