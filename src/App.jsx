@@ -2834,9 +2834,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       </div>
                     </div>
                     <button
-                      style={{ width:"100%", marginTop:10, padding:10, border:"1px solid "+C.border, borderRadius:10, background:C.white, color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
+                      style={{ width:"100%", marginTop:10, padding:"13px 10px", border:"1px solid #BFD5FF", borderRadius:14, background:"#EEF4FF", color:"#1E3A8A", fontSize:15, fontWeight:700, cursor:"pointer" }}
                       onClick={e=>{ e.stopPropagation(); onOpenTournament && onOpenTournament(t); }}
-                    >試合一覧へ ›</button>
+                    >▶ 試合一覧へ</button>
                   </div>
                   <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
                     <button
