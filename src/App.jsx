@@ -3412,7 +3412,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([getMatches(), getTeamMatches(), getSchools(), getMyProfile()]).then(([list, tList, schools, profile]) => {
+    Promise.all([getMatches(), getTeamMatches(), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches()]).then(([list, tList, schools, profile, simpleList]) => {
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
       setSchoolMap(smap);
@@ -3420,7 +3420,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         const s = schools.find(s => s.id === profile.school_id);
         if (s) setMySchoolName(s.name);
       }
-      setMatches(list.filter(m => m.tournament_name === tournament.name));
+      // ★ドロー表で「結果だけ記録」した簡易記録はmatchesテーブルに行が作られないため、
+      //   別途取得してこの大会の一覧・成績に合流させる
+      const simpleForThisTournament = simpleList.filter(m => m.tournament_name === tournament.name);
+      setMatches([...list.filter(m => m.tournament_name === tournament.name), ...simpleForThisTournament]);
       setTeamMatches(tList.filter(tm => tm.tournament_name === tournament.name));
       const statusMap = {};
       list.forEach(m => { statusMap[m.id] = m.status; });
@@ -3659,8 +3662,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
-              <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenMatch(m.id)}>
-                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>{fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}</div>
+              <div style={{ padding:"10px 14px", cursor:m.is_simple_draw_result?"default":"pointer" }} onClick={()=>{ if (!m.is_simple_draw_result) onOpenMatch(m.id); }}>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
+                  {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}
+                  {m.is_simple_draw_result && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#f1efff", color:C.purple, border:"1px solid "+C.purple }}>簡易記録</span>}
+                </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
@@ -3669,10 +3675,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                 </div>
               </div>
-              <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>
-                <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>
-              </div>
+              {!m.is_simple_draw_result && (
+                <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                  <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>
+                  <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>
+                </div>
+              )}
             </div>
           );
         })}
