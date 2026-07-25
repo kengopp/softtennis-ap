@@ -9118,7 +9118,11 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [bP2,    setBP2]    = useState(bBase2?.player_name ?? "");
 
   const isScheduledEdit = editing?.status === "scheduled";
-  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && bP1.trim() && (!isDoubles || bP2.trim()) && isYounger !== null;
+  // ★対戦相手の選手名が分からない場合に「あ」「ああ」等の仮名前を毎回入力する手間を無くすため、
+  //   相手選手名は空欄でも保存できるようにする（保存時に「選手A」「選手B」を自動で補う）。
+  //   自チーム側の選手名だけは必須のままにする。
+  const canSave = aP1.trim() && (!isDoubles || aP2.trim()) && isYounger !== null;
+  const withPlaceholder = (v, label) => (v && v.trim()) || label;
 
   const [saving, setSaving] = useState(false);
   const [scheduledId, setScheduledId] = useState(editing?.status==="scheduled" ? editing.id : null); // 予定登録済みのID
@@ -9225,8 +9229,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const players = [
         { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
         ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2 }] : []),
-        ...(fBP1.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:fBP1.trim(), club_name:fBClub.trim(), position:null, order_num:1 }] : []),
-        ...(isDoubles && fBP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:fBP2.trim(), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
+        ...(fBP1.trim() || fBClub.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1 }] : []),
+        ...(isDoubles && (fBP1.trim() || fBClub.trim()) ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
       ];
       const match = {
         id:mid, created_by:"me",
@@ -9269,8 +9273,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         const updatedPlayers = [
           { id: aBase?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:aBase?.position ?? null, order_num:1 },
           ...(isDoubles && aP2.trim() ? [{ id: aBase2?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:aBase2?.position ?? null, order_num:2 }] : []),
-          { id: bBase?.id ?? uid(), match_id: editing.id, team:"B", player_name:bP1.trim(), club_name:bClub.trim(), position:bBase?.position ?? null, order_num:1 },
-          ...(isDoubles && bP2.trim() ? [{ id: bBase2?.id ?? uid(), match_id: editing.id, team:"B", player_name:bP2.trim(), club_name:bClub.trim(), position:bBase2?.position ?? null, order_num:2 }] : []),
+          { id: bBase?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP1, "選手A"), club_name:bClub.trim(), position:bBase?.position ?? null, order_num:1 },
+          ...(isDoubles ? [{ id: bBase2?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP2, "選手B"), club_name:bClub.trim(), position:bBase2?.position ?? null, order_num:2 }] : []),
         ];
         const updated = {
           ...editing,
@@ -9301,8 +9305,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const players = [
         { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
         ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2 }] : []),
-        { id:uid(), match_id:mid, team:"B", player_name:fBP1.trim(), club_name:fBClub.trim(), position:null, order_num:1 },
-        ...(isDoubles && fBP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:fBP2.trim(), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
+        { id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1 },
+        ...(isDoubles ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
       ];
       const match = {
         id:mid, created_by:"me",
@@ -9315,7 +9319,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const autoRegisterTasks = [
         autoRegisterPlayerToRoster(fAP1.trim(), fAClub.trim(), true),
         ...(isDoubles && fAP2.trim() ? [autoRegisterPlayerToRoster(fAP2.trim(), fAClub.trim(), true)] : []),
-        autoRegisterPlayerToRoster(fBP1.trim(), fBClub.trim(), false),
+        ...(fBP1.trim() ? [autoRegisterPlayerToRoster(fBP1.trim(), fBClub.trim(), false)] : []),
         ...(isDoubles && fBP2.trim() ? [autoRegisterPlayerToRoster(fBP2.trim(), fBClub.trim(), false)] : []),
       ];
       await Promise.all(autoRegisterTasks);
@@ -9488,7 +9492,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             )}
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
-            <input style={S.inp} placeholder="選手名" value={bP1} onChange={e => setBP1(e.target.value)}/>
+            <input style={S.inp} placeholder="選手名（不明な場合は空欄でOK）" value={bP1} onChange={e => setBP1(e.target.value)}/>
             {bClub && oppRoster.filter(p => p.team_name === bClub).length>0 && (
               <div style={{ marginTop:6 }}>
                 {oppRoster.filter(p => p.team_name === bClub).map(p=>(
@@ -9499,7 +9503,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           </FormRow>
           {isDoubles && (
             <FormRow label="選手2（ペア）">
-              <input style={S.inp} placeholder="選手名" value={bP2} onChange={e => setBP2(e.target.value)}/>
+              <input style={S.inp} placeholder="選手名（不明な場合は空欄でOK）" value={bP2} onChange={e => setBP2(e.target.value)}/>
               {bClub && oppRoster.filter(p => p.team_name === bClub).length>0 && (
                 <div style={{ marginTop:6 }}>
                   {oppRoster.filter(p => p.team_name === bClub).map(p=>(
