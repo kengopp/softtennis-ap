@@ -11864,11 +11864,17 @@ function PlayerRosterScreen({ onBack }) {
   const ownPlayers = players.filter(p => p.is_own_team !== false);
   const otherPlayers = players.filter(p => p.is_own_team === false);
   const otherSchoolNames = [...new Set(otherPlayers.map(p => p.team_name).filter(Boolean))].sort();
-  const visibleOtherPlayers = filterSchool ? otherPlayers.filter(p => p.team_name === filterSchool) : otherPlayers;
-  const availablePrefs = [...new Set(schools.map(s => s.prefecture).filter(Boolean))].sort();
   // ★登録済みの対戦相手の学校名 → 都道府県 の対応表（都道府県チップでの絞り込み用）
   const schoolPrefByName = {};
   schools.forEach(s => { schoolPrefByName[s.name] = s.prefecture; });
+  // ★特定の学校を選んでいなくても、都道府県チップで絞り込んでいればその都道府県の選手だけに絞る
+  //   （これまでは学校未選択時に都道府県フィルタが効かず、他県の選手も一覧に混ざってしまっていた）
+  const visibleOtherPlayers = filterSchool
+    ? otherPlayers.filter(p => p.team_name === filterSchool)
+    : schoolPrefFilter
+      ? otherPlayers.filter(p => schoolPrefByName[p.team_name] === schoolPrefFilter)
+      : otherPlayers;
+  const availablePrefs = [...new Set(schools.map(s => s.prefecture).filter(Boolean))].sort();
   const filteredOtherSchoolNames = schoolPrefFilter
     ? otherSchoolNames.filter(n => schoolPrefByName[n] === schoolPrefFilter)
     : otherSchoolNames;
@@ -12014,7 +12020,7 @@ function PlayerRosterScreen({ onBack }) {
         {tab==="other" && (
           <div style={{ marginBottom:14 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <div style={{ fontSize:12, fontWeight:800, color:C.textSec }}>{filterSchool ? `${filterSchool} の登録済み選手` : "登録済み選手（すべて）"}</div>
+              <div style={{ fontSize:12, fontWeight:800, color:C.textSec }}>{filterSchool ? `${filterSchool} の登録済み選手` : schoolPrefFilter ? `登録済み選手（${schoolPrefFilter}）` : "登録済み選手（すべて）"}</div>
               <div style={{ fontSize:11, color:C.textSec, fontWeight:700 }}>{visibleOtherPlayers.length}人</div>
             </div>
             {visibleOtherPlayers.length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"14px 0", fontSize:12 }}>まだ登録されていません</div>}
