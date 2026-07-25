@@ -3389,9 +3389,10 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking }) {
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, autoOpenBulkImport, onAutoOpenBulkImportHandled }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
+  const [showMoreMenu, setShowMoreMenu] = useState(false); // ★ヘッダー右上「⋯」メニューの開閉
   const [matches, setMatches] = useState([]);
   const [teamMatches, setTeamMatches] = useState([]);
   const [schoolMap, setSchoolMap] = useState({});
@@ -3440,26 +3441,37 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>📅 {fmtDateRange(tournament.start_date, tournament.end_date)}</div>
         </div>
-        <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:12, padding:"6px 10px", cursor:"pointer", whiteSpace:"nowrap" }} onClick={()=>setShowEditModal(true)}>✏️ 編集</button>
-      </div>
-
-      <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 14px 0" }}>
-        <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, flex:1 }}>
-          {[["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:seg===v?C.white:"transparent", color:seg===v?C.navy:C.textSec, boxShadow:seg===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setSeg(v)}>{l}</button>
-          ))}
+        <div style={{ position:"relative" }}>
+          <button
+            style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, width:32, height:32, cursor:"pointer", lineHeight:1 }}
+            onClick={()=>setShowMoreMenu(v=>!v)}
+          >⋯</button>
+          {showMoreMenu && (
+            <>
+              <div style={{ position:"fixed", inset:0, zIndex:9 }} onClick={()=>setShowMoreMenu(false)} />
+              <div style={{ position:"absolute", top:38, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 6px 16px rgba(0,0,0,0.18)", overflow:"hidden", zIndex:10, minWidth:190 }}>
+                <button
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                  onClick={()=>{ setShowMoreMenu(false); setShowEditModal(true); }}
+                >✏️ 大会を編集</button>
+                <button
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                  onClick={()=>{ setShowMoreMenu(false); onOpenDrawSetup && onOpenDrawSetup(seg); }}
+                >🗂️ ドロー設定</button>
+                <button
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                  onClick={()=>{ setShowMoreMenu(false); onOpenDailyRanking && onOpenDailyRanking(tournament); }}
+                >📊 日別選手ランキング</button>
+              </div>
+            </>
+          )}
         </div>
-        <button
-          style={{ background:"none", border:"none", color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", textDecoration:"underline" }}
-          onClick={()=>onOpenDrawSetup && onOpenDrawSetup(seg)}
-        >🗂️ ドロー設定</button>
       </div>
 
-      <div style={{ margin:"10px 14px 0" }}>
-        <button
-          style={{ ...S.btn(C.navy), fontSize:12, padding:"9px", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}
-          onClick={()=>onOpenDailyRanking && onOpenDailyRanking(tournament)}
-        >📊 日別選手ランキングを見る</button>
+      <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, margin:"10px 14px 0" }}>
+        {[["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
+          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:seg===v?C.white:"transparent", color:seg===v?C.navy:C.textSec, boxShadow:seg===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setSeg(v)}>{l}</button>
+        ))}
       </div>
 
       {(() => {
@@ -3476,26 +3488,26 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         matches.forEach(m => { if (m.venue) venueSet.add(m.venue); });
         teamMatches.forEach(tm => { if (tm.venue) venueSet.add(tm.venue); });
         return (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, margin:"10px 14px 0", padding:"9px 8px", background:"#f7f9fc", borderRadius:10 }}>
-            <div style={{ textAlign:"center", cursor:"pointer" }} onClick={()=>setShowParticipants(true)}>
-              <div style={{ fontSize:12 }}>👥</div>
-              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{participantCount}人</div>
-              <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
+          <div style={{ display:"flex", gap:6, overflowX:"auto", margin:"10px 14px 0", paddingBottom:2 }}>
+            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", cursor:"pointer", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }} onClick={()=>setShowParticipants(true)}>
+              <div style={{ fontSize:11 }}>👥</div>
+              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{participantCount}人</div>
+              <div style={{ fontSize:8, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
             </div>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:12 }}>🎾</div>
-              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{totalMatches}試合</div>
-              <div style={{ fontSize:9.5, color:C.textSec }}>試合数</div>
+            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }}>
+              <div style={{ fontSize:11 }}>🎾</div>
+              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{totalMatches}試合</div>
+              <div style={{ fontSize:8, color:C.textSec }}>試合数</div>
             </div>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:12 }}>✅</div>
-              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{registeredMatches}試合</div>
-              <div style={{ fontSize:9.5, color:C.textSec }}>登録済</div>
+            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }}>
+              <div style={{ fontSize:11 }}>✅</div>
+              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{registeredMatches}試合</div>
+              <div style={{ fontSize:8, color:C.textSec }}>登録済</div>
             </div>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:12 }}>📍</div>
-              <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{venueSet.size}か所</div>
-              <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
+            <div style={{ flex:"0 0 auto", minWidth:64, textAlign:"center", background:"#f7f9fc", borderRadius:10, padding:"7px 8px" }}>
+              <div style={{ fontSize:11 }}>📍</div>
+              <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{venueSet.size}か所</div>
+              <div style={{ fontSize:8, color:C.textSec }}>会場数</div>
             </div>
           </div>
         );
@@ -3524,6 +3536,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   mySchoolName={mySchoolName}
                   onOpenMatch={(id)=>{ if (seg==="individual") onOpenMatch(id); else onOpenTeamMatch(id); }}
                   onCopyMatch={seg==="individual" ? onCopyMatch : undefined}
+                  autoOpenBulkImport={!!autoOpenBulkImport}
+                  onAutoOpened={onAutoOpenBulkImportHandled}
                 />
               </div>
             )}
@@ -4254,8 +4268,13 @@ function DrawSetup({ tournament, category, onBack }) {
         if (unblockedRemaining > 0) {
           msg += `\n※「すべて（ブロックなし）」側に対戦情報が入った枠が${unblockedRemaining}件残っているため、そちらは削除していません。`;
         }
-        alert(msg);
-        if (unblockedRemaining === 0) onBack();
+        if (unblockedRemaining === 0) {
+          // ★作成した直後に、続けて出場チーム・選手をまとめて登録できるようにする
+          const continueToBulk = window.confirm(`${msg}\n\n続けて出場チーム・選手をまとめて登録しますか？\n（あとから行うこともできます）`);
+          onBack({ openBulkImport: continueToBulk });
+        } else {
+          alert(msg);
+        }
       }
     } catch (e) {
       alert("保存エラー: " + (e.message || e));
@@ -4754,7 +4773,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 // ============================================================
 // トーナメント表（ドローの実データ表示）
 // ============================================================
-function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMatch }) {
+function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMatch, autoOpenBulkImport, onAutoOpened }) {
   const [blockLabels, setBlockLabels] = useState([]);
   const [selectedBlock, setSelectedBlock] = useState(null); // null = ブロックなし("すべて"扱い)
   const [drawMatches, setDrawMatches] = useState([]);
@@ -5170,6 +5189,15 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     }
   };
 
+  // ★ドロー作成直後に「続けて出場チームを登録」を選んだ場合、この画面を開いた時点で
+  //   一括登録モーダルを自動的に開く。開いたら親に知らせてフラグを1回きりにする。
+  useEffect(() => {
+    if (autoOpenBulkImport && !loading && roundNos.length > 0 && !bulkImportOpen) {
+      openBulkImport();
+      onAutoOpened && onAutoOpened();
+    }
+  }, [autoOpenBulkImport, loading, roundNos.length]);
+
   if (loading) return <div style={{ textAlign: "center", color: C.textSec, marginTop: 30 }}>ドローを読み込み中...</div>;
   if (drawMatches.length === 0) return null;
 
@@ -5183,20 +5211,21 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         </div>
       )}
       <div style={{ textAlign: "right", marginBottom: 10 }}>
-        <button
-          style={{ border: "1px solid " + C.navy, background: C.white, color: C.navy, borderRadius: 8, fontSize: 11.5, fontWeight: 700, cursor: "pointer", padding: "6px 12px" }}
+        <span
+          style={{ color: C.navy, fontSize: 11, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}
           onClick={openBulkImport}
-        >📋 一覧から一括登録</button>
+        >📋 一覧から一括登録</span>
       </div>
-      <div style={{ overflowX: "auto", paddingBottom: 4 }}>
-        <div style={{ display: "flex", gap: 10, minWidth: roundNos.length * 190 }}>
-          {roundNos.map(rn => (
-            <div key={rn} style={{ width: 180, flex: "none" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 10 }}>
-                <button
-                  style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
-                  disabled={adjustingRound === rn}
-                  onClick={() => adjustRoundCount(rn, -1)}
+      <div style={{ position:"relative" }}>
+        <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+          <div style={{ display: "flex", gap: 10, minWidth: roundNos.length * 190 }}>
+            {roundNos.map(rn => (
+              <div key={rn} style={{ width: 180, flex: "none" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 10 }}>
+                  <button
+                    style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
+                    disabled={adjustingRound === rn}
+                    onClick={() => adjustRoundCount(rn, -1)}
                 >－</button>
                 <div style={{ flex: 1, textAlign: "center", fontWeight: 800, fontSize: 11.5, color: C.navy, background: C.accentL, borderRadius: 7, padding: "4px 0" }}>
                   {rn}回戦（{rounds[rn].length}試合）
@@ -5339,6 +5368,10 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
             </div>
           ))}
         </div>
+        </div>
+        {roundNos.length > 1 && (
+          <div style={{ position:"absolute", top:0, right:0, bottom:4, width:26, background:"linear-gradient(to right, rgba(244,246,249,0), rgba(244,246,249,0.9))", pointerEvents:"none" }} />
+        )}
       </div>
       <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合画面が開きます（実際のスコア入力は「第1ゲーム開始」を押すまで始まりません）。作成済みの試合は長押しでコピー・削除ができます。</div>
 
@@ -13012,6 +13045,7 @@ export default function App() {
   const [tournamentContext, setTournamentContext] = useState(null); // 大会詳細画面から試合作成に入った際の大会情報 {id,name,start_date,end_date}
   const [creatingFromTournament, setCreatingFromTournament] = useState(false); // 大会の＋ボタンから試合作成に入ったかどうか
   const [tournamentSeg, setTournamentSeg] = useState("team"); // 大会詳細画面のタブ（team/individual）を試合詳細から戻った時も維持する
+  const [autoOpenBulkImport, setAutoOpenBulkImport] = useState(false); // ★ドロー作成直後に続けて一括登録画面を自動で開くためのフラグ
 
   // ★大会詳細から試合を開いた後に「戻る」を押したとき、途中でアプリが再読み込みされていても
   //   元の大会・タブに戻れるよう、tournamentContext/tournamentSegをsessionStorageにも控えておく。
@@ -13485,6 +13519,8 @@ export default function App() {
         onCopyTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchCopyId(id); setTeamMatchEditId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
         onOpenDrawSetup={(seg)=>{ setTournamentSeg(seg); setScreen("drawSetup"); }}
         onOpenDailyRanking={(t)=>{ setTournamentContext(t); setScreen("dailyRanking"); }}
+        autoOpenBulkImport={autoOpenBulkImport}
+        onAutoOpenBulkImportHandled={()=>setAutoOpenBulkImport(false)}
       />
     );
   }
@@ -13503,7 +13539,7 @@ export default function App() {
       <DrawSetup
         tournament={tournamentContext}
         category={tournamentSeg}
-        onBack={()=>setScreen("tournamentDetail")}
+        onBack={(opts)=>{ if (opts?.openBulkImport) setAutoOpenBulkImport(true); setScreen("tournamentDetail"); }}
       />
     );
   }
