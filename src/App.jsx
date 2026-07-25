@@ -3597,7 +3597,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <button
                 style={{ flex:1, padding:"10px 0", border:"none", background: drawViewMode==="list" ? C.accentL : "none", color: drawViewMode==="list" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
                 onClick={()=>setDrawViewMode("list")}
-              >📋 試合一覧</button>
+              >📋 ペア別一覧</button>
             </div>
             {drawViewMode==="draw" && (
               <div style={{ marginBottom: 12 }}>
