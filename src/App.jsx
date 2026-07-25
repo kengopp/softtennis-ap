@@ -12011,10 +12011,10 @@ function PlayerRosterScreen({ onBack }) {
           </>
         )}
 
-        {tab==="other" && filterSchool && (
+        {tab==="other" && (
           <div style={{ marginBottom:14 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <div style={{ fontSize:12, fontWeight:800, color:C.textSec }}>{filterSchool} の登録済み選手</div>
+              <div style={{ fontSize:12, fontWeight:800, color:C.textSec }}>{filterSchool ? `${filterSchool} の登録済み選手` : "登録済み選手（すべて）"}</div>
               <div style={{ fontSize:11, color:C.textSec, fontWeight:700 }}>{visibleOtherPlayers.length}人</div>
             </div>
             {visibleOtherPlayers.length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"14px 0", fontSize:12 }}>まだ登録されていません</div>}
