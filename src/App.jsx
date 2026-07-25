@@ -124,6 +124,17 @@ const daysUntil = (iso) => {
 };
 // ★一覧等で試合の状態を短く表示するための共通ヘルパー（中断した試合を「進行中」と誤表示しないようにする）
 const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
+// ★試合レコードのどちらの選手たちが「自チーム」かを判定する共通ヘルパー。
+//   通常の試合記録は「自チーム＝Aチーム」の前提で保存されるが、ドロー表の「結果だけ記録」機能は
+//   ブラケット上のA/Bどちらが自チームかが一定しないため、club_nameで判定する。一致しない場合は
+//   従来通りAチーム側を自チームとみなす（フォールバック）。
+const mySideOf = (m, mySchoolName) => {
+  if (!mySchoolName) return "A";
+  const bIsMine = (m.players || []).some(p => p.team === "B" && p.club_name === mySchoolName);
+  const aIsMine = (m.players || []).some(p => p.team === "A" && p.club_name === mySchoolName);
+  if (bIsMine && !aIsMine) return "B";
+  return "A";
+};
 // ★品質改善：「清見 祐吾」「清見祐吾」のように空白の有無だけが違う同一人物を
 // 別選手として重複登録してしまわないよう、選手名の比較は空白を除去してから行う
 const normalizePlayerName = (name) => (name || "").replace(/\s+/g, "");
@@ -3416,13 +3427,18 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
       setSchoolMap(smap);
+      let myName = "";
       if (profile?.school_id) {
         const s = schools.find(s => s.id === profile.school_id);
-        if (s) setMySchoolName(s.name);
+        if (s) { myName = s.name; setMySchoolName(s.name); }
       }
       // ★ドロー表で「結果だけ記録」した簡易記録はmatchesテーブルに行が作られないため、
-      //   別途取得してこの大会の一覧・成績に合流させる
-      const simpleForThisTournament = simpleList.filter(m => m.tournament_name === tournament.name);
+      //   別途取得してこの大会の一覧・成績に合流させる。
+      //   大会内の全試合が対象のテーブルなので、自チームが関係する試合だけに絞り込む。
+      const simpleForThisTournament = simpleList.filter(m =>
+        m.tournament_name === tournament.name &&
+        (m.players || []).some(p => p.club_name === myName)
+      );
       setMatches([...list.filter(m => m.tournament_name === tournament.name), ...simpleForThisTournament]);
       setTeamMatches(tList.filter(tm => tm.tournament_name === tournament.name));
       const statusMap = {};
@@ -3507,10 +3523,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           });
         } else {
           individualMatches.forEach(m => {
-            if (m.status === "finished") {
-              if (m.match_score_a > m.match_score_b) win++;
-              else if (m.match_score_a < m.match_score_b) lose++;
-            }
+            if (m.status !== "finished") return;
+            // ★通常の試合記録は「自チーム＝Aチーム」の前提で保存されるが、ドロー表の簡易記録は
+            //   ブラケット上のA/Bがどちらか一定しないため、選手のclub_nameで自チーム側を判定する。
+            const side = mySideOf(m, mySchoolName);
+            const myScore = side === "B" ? m.match_score_b : m.match_score_a;
+            const oppScore = side === "B" ? m.match_score_a : m.match_score_b;
+            if (myScore > oppScore) win++;
+            else if (myScore < oppScore) lose++;
           });
         }
         const total = win + lose;
@@ -3581,8 +3601,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <div style={{ fontSize:9.5, color:C.textSec, marginBottom:5 }}>{r.roundLabel}{r.orderNum ? `・${r.orderNum}番手` : ""}</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <div style={{ fontSize:11.5, lineHeight:1.5 }}>
-                  <div><b>{r.myClub}</b> {r.myNames}</div>
-                  <div><b>{r.oppClub}</b> {r.oppNames}</div>
+                  <div style={{ fontWeight:r.win?800:600, color:C.teamA }}><b>{r.myClub}</b> {r.myNames}</div>
+                  <div style={{ fontWeight:r.win?600:800, color:r.win?C.text:C.teamB }}><b>{r.oppClub}</b> {r.oppNames}</div>
                 </div>
                 <div style={{ fontSize:15, fontWeight:800, color:r.win?C.accent:C.orange }}>{r.scoreA}-{r.scoreB}</div>
               </div>
@@ -3650,15 +3670,20 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.map(m => {
-          const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
-          const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
+          const mySide = mySideOf(m, mySchoolName);
+          const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
+          const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
+          const myWin = m.status==="finished" && myScore > oppScore;
+          const oppWin = m.status==="finished" && oppScore > myScore;
           const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
           const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
-          const aNames = aPlayers.map(p=>p.player_name).join("/");
-          const bNames = bPlayers.map(p=>p.player_name).join("/");
-          const aClub = aPlayers[0]?.club_name || "";
-          const bClub = bPlayers[0]?.club_name || "";
-          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
+          const myPlayers = mySide==="B" ? bPlayers : aPlayers;
+          const oppPlayers = mySide==="B" ? aPlayers : bPlayers;
+          const myNames = myPlayers.map(p=>p.player_name).join("/");
+          const oppNames = oppPlayers.map(p=>p.player_name).join("/");
+          const myClub = myPlayers[0]?.club_name || "";
+          const oppClub = oppPlayers[0]?.club_name || "";
+          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : myWin ? C.teamA : oppWin ? C.teamB : C.border;
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
@@ -3669,10 +3694,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
-                    <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
+                    <div style={{ fontSize:13, fontWeight:myWin?800:600, color:C.teamA }}>{myClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{myClub}</span>}{myNames}</div>
+                    <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppWin?C.teamB:C.text, marginTop:2 }}>{oppClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClub}</span>}{oppNames}</div>
                   </div>
-                  {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
+                  {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
                 </div>
               </div>
               {!m.is_simple_draw_result && (
