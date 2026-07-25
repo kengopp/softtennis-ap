@@ -8065,16 +8065,26 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   // ペア別成績（自チームAのペア名を「選手1／選手2」形式で集計）
   // ★相手チームが同じ学校（練習試合）の場合は、B側のペアも自チームのペアとして含める
+  // ★A側に記録されているのが本来「自チーム」のはずでも、対戦相手の学校名の入力ミスなどで
+  //   実際には相手選手が紛れ込んでいるケースがあるため、選手マスターで自チーム登録されている
+  //   選手同士のペアのみを「自チームのペア」として集計する（マスター未登録の名前が混ざるものは除外）
+  const ownNameSet = new Set(roster.filter(p => p.is_own_team !== false).map(p => (p.player_name||"").trim()));
   const byPair = {};
   finished.forEach(m => {
     const aPlayers = m.players.filter(p => p.team === "A").sort((a,b) => a.order_num - b.order_num);
-    const pairKey = aPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
-    (byPair[pairKey] ??= []).push({ match: m, win: m.match_score_a > m.match_score_b });
+    const aNames = aPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
+    if (aNames.length && aNames.every(n => ownNameSet.has(n))) {
+      const pairKey = aNames.join("／") || "（不明）";
+      (byPair[pairKey] ??= []).push({ match: m, win: m.match_score_a > m.match_score_b });
+    }
     const bPlayers = m.players.filter(p => p.team === "B").sort((a,b) => a.order_num - b.order_num);
     const bClub = bPlayers[0]?.club_name;
     if (mySchoolName && bClub && bClub.trim()===mySchoolName.trim()) {
-      const bPairKey = bPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
-      (byPair[bPairKey] ??= []).push({ match: m, win: m.match_score_b > m.match_score_a });
+      const bNames = bPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
+      if (bNames.length && bNames.every(n => ownNameSet.has(n))) {
+        const bPairKey = bNames.join("／") || "（不明）";
+        (byPair[bPairKey] ??= []).push({ match: m, win: m.match_score_b > m.match_score_a });
+      }
     }
   });
   const pairRows = Object.entries(byPair).map(([name, list]) => ({
