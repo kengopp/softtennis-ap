@@ -3433,6 +3433,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
   useEffect(() => { reload(); }, [reload]);
 
+  // ★団体戦の中の1試合（1番手・2番手…）としてteam_match_gamesに紐づいているmatchesは、
+  //   本来「個人戦」ではないため、個人戦タブの一覧・成績からは除外する。
+  //   （団体戦タブ側の各カードから開けば、これまで通り中身を確認できる）
+  const teamLinkedMatchIds = new Set(teamMatches.flatMap(tm => (tm.games || []).map(g => g.match_id).filter(Boolean)));
+  const individualMatches = matches.filter(m => !teamLinkedMatchIds.has(m.id));
+
   return (
     <div style={S.page}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
@@ -3490,7 +3496,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             }
           });
         } else {
-          matches.forEach(m => {
+          individualMatches.forEach(m => {
             if (m.status === "finished") {
               if (m.match_score_a > m.match_score_b) win++;
               else if (m.match_score_a < m.match_score_b) lose++;
@@ -3567,8 +3573,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           );
         })}
 
-        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && matches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
-        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && matches.map(m => {
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.map(m => {
           const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
           const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
           const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
