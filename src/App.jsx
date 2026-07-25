@@ -3389,7 +3389,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, autoOpenBulkImport, onAutoOpenBulkImportHandled }) {
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [showMoreMenu, setShowMoreMenu] = useState(false); // ★ヘッダー右上「⋯」メニューの開閉
@@ -3462,6 +3462,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                   onClick={()=>{ setShowMoreMenu(false); onOpenDailyRanking && onOpenDailyRanking(tournament); }}
                 >📊 日別選手ランキング</button>
+                <button
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                  onClick={()=>{ setShowMoreMenu(false); setDrawViewMode("draw"); onRequestBulkImport && onRequestBulkImport(); }}
+                >📋 一覧から一括登録</button>
               </div>
             </>
           )}
@@ -5220,12 +5224,6 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           ))}
         </div>
       )}
-      <div style={{ textAlign: "right", marginBottom: 10 }}>
-        <span
-          style={{ color: C.navy, fontSize: 11, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}
-          onClick={openBulkImport}
-        >📋 一覧から一括登録</span>
-      </div>
       <div style={{ position:"relative" }}>
         <div style={{ overflowX: "auto", paddingBottom: 4 }}>
           <div style={{ display: "flex", gap: 10, minWidth: roundNos.length * 190 }}>
@@ -13531,6 +13529,7 @@ export default function App() {
         onOpenDailyRanking={(t)=>{ setTournamentContext(t); setScreen("dailyRanking"); }}
         autoOpenBulkImport={autoOpenBulkImport}
         onAutoOpenBulkImportHandled={()=>setAutoOpenBulkImport(false)}
+        onRequestBulkImport={()=>setAutoOpenBulkImport(true)}
       />
     );
   }
