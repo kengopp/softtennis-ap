@@ -1524,17 +1524,28 @@ async function updateDrawEntryNo(entryId, entryNo) {
 //   既に別の人が埋めていた場合は上書きせず、現在入っている値を返す。
 async function setDrawMatchSideSafe(drawMatchId, side, entryId) {
   const col = side === "A" ? "side_a_entry_id" : "side_b_entry_id";
-  const { data, error } = await supabase
-    .from("draw_matches")
-    .update({ [col]: entryId, updated_at: new Date().toISOString() })
-    .eq("id", drawMatchId)
-    .is(col, null)
-    .select(`id, ${col}`);
+  // ★現在この枠に入っているエントリーを確認する。
+  //   NULL（未設定）だけでなく、選手名・学校名が未入力の「空の仮エントリー」が入っている場合も
+  //   実質未定として上書きを許可する（ブラケット作成時に空のエントリー行が先に紐付いているケースがあるため）。
+  const { data: current, error: fetchErr } = await supabase.from("draw_matches").select(`id, ${col}`).eq("id", drawMatchId).single();
+  if (fetchErr) throw fetchErr;
+  const currentEntryId = current[col];
+  let allowOverwrite = !currentEntryId;
+  if (currentEntryId && currentEntryId !== entryId) {
+    const { data: currentEntry } = await supabase.from("draw_entries").select("player1_name, school_name").eq("id", currentEntryId).single();
+    allowOverwrite = !!(currentEntry && !currentEntry.player1_name?.trim() && !currentEntry.school_name?.trim());
+  }
+  if (!allowOverwrite) {
+    return { ok: false, currentEntryId };
+  }
+  let q = supabase.from("draw_matches").update({ [col]: entryId, updated_at: new Date().toISOString() }).eq("id", drawMatchId);
+  q = currentEntryId ? q.eq(col, currentEntryId) : q.is(col, null);
+  const { data, error } = await q.select(`id, ${col}`);
   if (error) throw error;
   if (data && data.length > 0) return { ok: true };
-  const { data: current, error: fetchErr } = await supabase.from("draw_matches").select(col).eq("id", drawMatchId).single();
-  if (fetchErr) throw fetchErr;
-  return { ok: false, currentEntryId: current[col] };
+  const { data: recheck, error: recheckErr } = await supabase.from("draw_matches").select(col).eq("id", drawMatchId).single();
+  if (recheckErr) throw recheckErr;
+  return { ok: false, currentEntryId: recheck[col] };
 }
 
 // 試合を削除したときに、紐づいているドロー枠のmatch_idもクリアして
@@ -5455,10 +5466,13 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                   <div style={{ fontSize: 10, color: C.textSec, textAlign: "center", padding: "4px 0", background: C.gray }}>第{slot.slot_no}試合</div>
                   {["A", "B"].map(side => {
                     const cur = side === "A" ? slot.sideA : slot.sideB;
+                    // ★curが存在していても、選手名・学校名が未入力の「空の仮エントリー」の場合は
+                    //   実質「未定」の枠として扱い、進出ボタンを出せるようにする
+                    const curIsEmpty = !isPlayableEntry(cur);
                     return (
                       <div key={side} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 10px", borderTop: side === "B" ? "1px solid " + C.border : "none" }}>
-                        <span style={{ fontSize: 12.5, color: cur ? C.text : C.textSec }}>{cur ? entryLabel(cur) : "未定"}</span>
-                        {!cur && (
+                        <span style={{ fontSize: 12.5, color: curIsEmpty ? C.textSec : C.text }}>{curIsEmpty ? "未定" : entryLabel(cur)}</span>
+                        {curIsEmpty && (
                           <button
                             style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 99, border: "none", background: C.accent, color: C.white, cursor: "pointer", opacity: advancingId === slot.id ? 0.7 : 1 }}
                             disabled={advancingId === slot.id}
