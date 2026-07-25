@@ -3403,7 +3403,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
-  const [teamListMode, setTeamListMode] = useState("card"); // card | pair（団体戦タブ内：試合カード or ペア別一覧の切り替え）
+  const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
   const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
@@ -3433,6 +3433,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   }, [tournament.name, tournament.id]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // ★団体戦にドローが無い場合は「ドロー表」ボタン自体を出さないため、
+  //   デフォルトの表示を自動で「試合カード」に切り替える
+  useEffect(() => {
+    if (!loading && teamListMode === "draw" && drawSummary.team === 0) setTeamListMode("card");
+  }, [loading, drawSummary.team]);
 
   // ★団体戦の中の1試合（1番手・2番手…）としてteam_match_gamesに紐づいているmatchesは、
   //   本来「個人戦」ではないため、個人戦タブの一覧・成績からは除外する。
@@ -3518,14 +3524,33 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
         {!loading && seg==="team" && (
           <div style={{ display:"flex", background:C.white, borderRadius:10, border:"1px solid "+C.border, overflow:"hidden", marginBottom:12 }}>
+            {drawSummary.team > 0 && (
+              <button
+                style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="draw" ? C.accentL : "none", color: teamListMode==="draw" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
+                onClick={()=>setTeamListMode("draw")}
+              >🗂 ドロー表</button>
+            )}
             <button
               style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="card" ? C.accentL : "none", color: teamListMode==="card" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
               onClick={()=>setTeamListMode("card")}
-            >🗂 試合カード</button>
+            >🏆 試合カード</button>
             <button
               style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="pair" ? C.accentL : "none", color: teamListMode==="pair" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
               onClick={()=>setTeamListMode("pair")}
             >📋 ペア別一覧</button>
+          </div>
+        )}
+
+        {!loading && seg==="team" && teamListMode==="draw" && drawSummary.team > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <DrawBracket
+              tournament={tournament}
+              category="team"
+              mySchoolName={mySchoolName}
+              onOpenMatch={onOpenTeamMatch}
+              autoOpenBulkImport={!!autoOpenBulkImport}
+              onAutoOpened={onAutoOpenBulkImportHandled}
+            />
           </div>
         )}
 
@@ -3562,7 +3587,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           ));
         })()}
 
-        {!loading && (seg!=="team" || teamListMode==="card") && drawSummary[seg] > 0 && (
+        {!loading && seg==="individual" && drawSummary[seg] > 0 && (
           <>
             <div style={{ display:"flex", background:C.white, borderRadius:10, border:"1px solid "+C.border, overflow:"hidden", marginBottom:12 }}>
               <button
@@ -3578,10 +3603,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <div style={{ marginBottom: 12 }}>
                 <DrawBracket
                   tournament={tournament}
-                  category={seg}
+                  category="individual"
                   mySchoolName={mySchoolName}
-                  onOpenMatch={(id)=>{ if (seg==="individual") onOpenMatch(id); else onOpenTeamMatch(id); }}
-                  onCopyMatch={seg==="individual" ? onCopyMatch : undefined}
+                  onOpenMatch={onOpenMatch}
+                  onCopyMatch={onCopyMatch}
                   autoOpenBulkImport={!!autoOpenBulkImport}
                   onAutoOpened={onAutoOpenBulkImportHandled}
                 />
@@ -3590,8 +3615,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           </>
         )}
 
-        {!loading && seg==="team" && teamListMode==="card" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
-        {!loading && seg==="team" && teamListMode==="card" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.map(tm => {
+        {!loading && seg==="team" && teamListMode==="card" && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
+        {!loading && seg==="team" && teamListMode==="card" && teamMatches.map(tm => {
           const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
