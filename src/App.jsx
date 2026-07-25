@@ -4215,7 +4215,7 @@ function DrawSetup({ tournament, category, onBack }) {
 
   // 「この内容でドローを作成」：ブロックが1つでもあれば全ブロックをまとめて保存する。
   // ブロック分けが確定した場合は、旧「すべて（ブロックなし）」のドローが残っていれば片付ける。
-  const handleCreate = async () => {
+  const handleCreate = async (openBulkDirectly = false) => {
     setSaving(true);
     try {
       const scopesToSave = blockLabels.length > 0 ? blockLabels : ["ALL"];
@@ -4269,9 +4269,14 @@ function DrawSetup({ tournament, category, onBack }) {
           msg += `\n※「すべて（ブロックなし）」側に対戦情報が入った枠が${unblockedRemaining}件残っているため、そちらは削除していません。`;
         }
         if (unblockedRemaining === 0) {
-          // ★作成した直後に、続けて出場チーム・選手をまとめて登録できるようにする
-          const continueToBulk = window.confirm(`${msg}\n\n続けて出場チーム・選手をまとめて登録しますか？\n（あとから行うこともできます）`);
-          onBack({ openBulkImport: continueToBulk });
+          if (openBulkDirectly) {
+            // ★「一覧から一括登録へ」ボタンから来た場合は、確認ダイアログを挟まず直接遷移する
+            onBack({ openBulkImport: true });
+          } else {
+            // ★作成した直後に、続けて出場チーム・選手をまとめて登録できるようにする
+            const continueToBulk = window.confirm(`${msg}\n\n続けて出場チーム・選手をまとめて登録しますか？\n（あとから行うこともできます）`);
+            onBack({ openBulkImport: continueToBulk });
+          }
         } else {
           alert(msg);
         }
@@ -4375,8 +4380,13 @@ function DrawSetup({ tournament, category, onBack }) {
           <button
             style={{ width: "100%", padding: 13, background: `linear-gradient(135deg,${C.accent},#00a066)`, color: C.white, border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.7 : 1 }}
             disabled={saving}
-            onClick={handleCreate}
+            onClick={()=>handleCreate(false)}
           >{saving ? "作成中..." : "この内容でドローを作成"}</button>
+          <button
+            style={{ width: "100%", padding: 12, marginTop: 8, background: C.white, color: C.navy, border: "1px solid " + C.navy, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.7 : 1 }}
+            disabled={saving}
+            onClick={()=>handleCreate(true)}
+          >📋 この内容で作成して、一覧から一括登録へ</button>
           <div style={{ fontSize: 11, color: C.textSec, textAlign: "center", marginTop: 10 }}>
             作成すると「未定 vs 未定・予定」の空枠が各回戦に設定した試合数ぶん自動生成されます。棄権・不戦勝は、枠をタップして開く対戦情報入力画面から個別に設定できます。
           </div>
