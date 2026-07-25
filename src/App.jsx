@@ -3403,6 +3403,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
+  const [teamListMode, setTeamListMode] = useState("card"); // card | pair（団体戦タブ内：試合カード or ペア別一覧の切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
   const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
@@ -3515,7 +3516,53 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       <div style={{ padding:"10px 14px", paddingBottom:90 }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
 
-        {!loading && drawSummary[seg] > 0 && (
+        {!loading && seg==="team" && (
+          <div style={{ display:"flex", background:C.white, borderRadius:10, border:"1px solid "+C.border, overflow:"hidden", marginBottom:12 }}>
+            <button
+              style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="card" ? C.accentL : "none", color: teamListMode==="card" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
+              onClick={()=>setTeamListMode("card")}
+            >🗂 試合カード</button>
+            <button
+              style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="pair" ? C.accentL : "none", color: teamListMode==="pair" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
+              onClick={()=>setTeamListMode("pair")}
+            >📋 ペア別一覧</button>
+          </div>
+        )}
+
+        {!loading && seg==="team" && teamListMode==="pair" && (() => {
+          // ★団体戦タブの「ペア別一覧」：大会内の全団体戦から1番手・2番手…を横断してフラットに一覧表示。
+          //   team_match_gamesにはmatch_idしか無いため、実際の選手名・スコアは対応するmatchesレコードから取得する。
+          //   色はその団体戦全体の勝敗ではなく、そのペア自身の勝敗で決める。
+          const matchById = {};
+          matches.forEach(m => { matchById[m.id] = m; });
+          const rows = [];
+          teamMatches.forEach(tm => {
+            const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
+            const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("") || "相手";
+            (tm.games || []).forEach(g => {
+              const m = g.match_id ? matchById[g.match_id] : null;
+              if (!m || m.status !== "finished") return; // 記録済みの試合のみ対象
+              const aNames = (m.players || []).filter(p => p.team === "A").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
+              const bNames = (m.players || []).filter(p => p.team === "B").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
+              rows.push({ key: g.id, roundLabel: tm.round || "団体戦", orderNum: g.order_num, myClub: myFullLabel, oppClub: oppLabel, myNames: aNames, oppNames: bNames, scoreA: m.match_score_a, scoreB: m.match_score_b, win: m.match_score_a > m.match_score_b });
+            });
+          });
+          if (rows.length === 0) return <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>記録済みのペア試合がありません</div>;
+          return rows.map(r => (
+            <div key={r.key} style={{ background:C.white, borderRadius:12, padding:"11px 12px", marginBottom:8, border:"1px solid "+C.border, borderLeft:`4px solid ${r.win?C.accent:C.orange}` }}>
+              <div style={{ fontSize:9.5, color:C.textSec, marginBottom:5 }}>{r.roundLabel}{r.orderNum ? `・${r.orderNum}番手` : ""}</div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ fontSize:11.5, lineHeight:1.5 }}>
+                  <div><b>{r.myClub}</b> {r.myNames}</div>
+                  <div><b>{r.oppClub}</b> {r.oppNames}</div>
+                </div>
+                <div style={{ fontSize:15, fontWeight:800, color:r.win?C.accent:C.orange }}>{r.scoreA}-{r.scoreB}</div>
+              </div>
+            </div>
+          ));
+        })()}
+
+        {!loading && (seg!=="team" || teamListMode==="card") && drawSummary[seg] > 0 && (
           <>
             <div style={{ display:"flex", background:C.white, borderRadius:10, border:"1px solid "+C.border, overflow:"hidden", marginBottom:12 }}>
               <button
@@ -3543,8 +3590,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           </>
         )}
 
-        {!loading && seg==="team" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
-        {!loading && seg==="team" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.map(tm => {
+        {!loading && seg==="team" && teamListMode==="card" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
+        {!loading && seg==="team" && teamListMode==="card" && (drawSummary[seg]===0 || drawViewMode==="list") && teamMatches.map(tm => {
           const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
