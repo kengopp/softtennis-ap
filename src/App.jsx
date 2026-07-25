@@ -8874,7 +8874,7 @@ function SchoolIdSearchField({ value, onChange, schools, prefFilter, placeholder
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate }) {
+function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -8906,10 +8906,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} />;
+  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} tournamentParticipantIds={tournamentParticipantIds} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate }) {
+function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -9151,7 +9151,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 
   // ★自チーム(A)の選手候補チップ：選択中の「チーム名/学校名」(aClub)と一致する選手のみ表示する。
   //   aClubを東福岡から別のチームに変えたら候補もそのチームの選手に切り替わるようにする。
-  const ownRosterForA = roster.filter(p => aClub ? p.team_name === aClub : p.is_own_team !== false);
+  //   さらに、大会側で「出場選手」が設定されている場合は、そのメンバーのみに絞り込む
+  //   （選手が多いと候補が多すぎて選びにくいため）。設定が無い/空の大会では従来通り全員を表示する。
+  const ownRosterForAAll = roster.filter(p => aClub ? p.team_name === aClub : p.is_own_team !== false);
+  const ownRosterForA = (tournamentParticipantIds && tournamentParticipantIds.length > 0)
+    ? ownRosterForAAll.filter(p => tournamentParticipantIds.includes(p.id))
+    : ownRosterForAAll;
 
   return (
     <div style={S.page}>
@@ -13375,6 +13380,7 @@ export default function App() {
         lockTournament={creatingFromTournament && !!tournamentContext}
         tournamentStartDate={creatingFromTournament && tournamentContext ? tournamentContext.start_date : undefined}
         tournamentEndDate={creatingFromTournament && tournamentContext ? tournamentContext.end_date : undefined}
+        tournamentParticipantIds={creatingFromTournament && tournamentContext ? tournamentContext.participant_player_ids : undefined}
         onScheduled={()=>{
           setInitMatchType(null);
           const fromTournament = creatingFromTournament && tournamentContext;
