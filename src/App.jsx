@@ -10768,24 +10768,6 @@ function MatchSummaryPanel({ match }) {
           </div>
         )}
 
-        {highlights.good.length>0 && (
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11, fontWeight:800, color:C.accent, marginBottom:6, display:"flex", alignItems:"center", gap:5 }}>👍 良かった点</div>
-            {highlights.good.map((t,i)=>(
-              <div key={i} style={{ fontSize:12.5, color:C.text, lineHeight:1.5, padding:"8px 10px", background:C.gray, borderRadius:8, marginBottom:6 }}>{t}</div>
-            ))}
-          </div>
-        )}
-
-        {highlights.bad.length>0 && (
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11, fontWeight:800, color:"#e08a2e", marginBottom:6, display:"flex", alignItems:"center", gap:5 }}>📝 改善ポイント</div>
-            {highlights.bad.map((t,i)=>(
-              <div key={i} style={{ fontSize:12.5, color:C.text, lineHeight:1.5, padding:"8px 10px", background:C.gray, borderRadius:8, marginBottom:6 }}>{t}</div>
-            ))}
-          </div>
-        )}
-
         {(sum.decisionRate!=null || sum.topScorer) && (
           <div style={{ display:"flex", gap:10, marginTop:14 }}>
             {sum.decisionRate!=null && (
