@@ -9735,6 +9735,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [scoreStep, setScoreStep] = useState(1); // 1|2|3
   const [pendingTeam, setPendingTeam] = useState(null); // ①で選んだ得点チーム
   const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
+  // ★個人戦でもポイントを付けずゲームカウントだけで結果を記録できるようにする（団体戦の「結果だけ記録」と同様）
+  const [showSimpleResult, setShowSimpleResult] = useState(false);
+  const [simpleScoreA, setSimpleScoreA] = useState("");
+  const [simpleScoreB, setSimpleScoreB] = useState("");
+  const [simpleResultSaving2, setSimpleResultSaving2] = useState(false);
   const [editingPoint, setEditingPoint] = useState(null); // 修正中のポイント { gameId, point }
   const [addingPoint, setAddingPoint] = useState(null); // 追加位置 { gameId, atIndex }
   const [memoDraft, setMemoDraft] = useState(initialMatch.memo || ""); // 試合メモ（下書き）
@@ -10200,6 +10205,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 <p style={{ fontSize:13,color:C.textSec,marginBottom:20 }}>最初のサーブは次の画面で選択します</p>
               )}
               <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>startNewGame()}>第1ゲーム開始</button>
+              <button
+                style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy, marginTop:10 }}
+                onClick={()=>{ setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true); }}
+              >📝 結果だけ記録</button>
               {match.status==="scheduled" && (
                 <button
                   style={{ ...S.btn(`linear-gradient(135deg,#7b1fa2,${C.purple})`), marginTop:10 }}
@@ -10635,6 +10644,42 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setUndoConfirm(false)}>キャンセル</button>
               <button style={{ padding:11, background:C.navy, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>{ setUndoConfirm(false); undo(); }}>はい</button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {showSimpleResult && (
+        <Modal onClose={()=>setShowSimpleResult(false)}>
+          <div>
+            <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>結果だけ記録</div>
+            <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>ポイントを記録せず、ゲームカウントだけ入力します</div>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+              <div style={{ flex:1, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6 }}>{teamALabel}</div>
+                <input type="number" inputMode="numeric" value={simpleScoreA} onChange={e=>setSimpleScoreA(e.target.value)}
+                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamA}`, color:C.teamA }} />
+              </div>
+              <div style={{ fontSize:18, color:C.textSec, marginTop:24 }}>-</div>
+              <div style={{ flex:1, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamB, marginBottom:6 }}>{teamBLabel}</div>
+                <input type="number" inputMode="numeric" value={simpleScoreB} onChange={e=>setSimpleScoreB(e.target.value)}
+                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB }} />
+              </div>
+            </div>
+            <button
+              style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:14 }}
+              disabled={simpleResultSaving2 || simpleScoreA==="" || simpleScoreB==="" || simpleScoreA===simpleScoreB}
+              onClick={()=>{
+                const a = parseInt(simpleScoreA,10), b = parseInt(simpleScoreB,10);
+                if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいゲームカウントを入力してください"); return; }
+                if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                setSimpleResultSaving2(true);
+                persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished" });
+                setSimpleResultSaving2(false);
+                setShowSimpleResult(false);
+              }}
+            >{simpleResultSaving2 ? "保存中..." : "この結果で確定する"}</button>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setShowSimpleResult(false)}>キャンセル</button>
           </div>
         </Modal>
       )}
