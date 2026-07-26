@@ -124,6 +124,10 @@ const daysUntil = (iso) => {
 };
 // ★一覧等で試合の状態を短く表示するための共通ヘルパー（中断した試合を「進行中」と誤表示しないようにする）
 const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
+// ★選手選択チップの並び順をバラバラ（登録順）ではなく五十音順に揃えるための比較関数。
+//   読み仮名（ふりがな）は選手マスターに保存していないため完全な厳密さではないが、
+//   日本語ロケールでの文字列比較（Intl collation）により実用上ほぼ五十音順になる。
+const byPlayerNameKana = (a, b) => (a.player_name || "").localeCompare(b.player_name || "", "ja");
 // ★試合レコードのどちらの選手たちが「自チーム」かを判定する共通ヘルパー。
 //   通常の試合記録は「自チーム＝Aチーム」の前提で保存されるが、ドロー表の「結果だけ記録」機能は
 //   ブラケット上のA/Bどちらが自チームかが一定しないため、club_nameで判定する。一致しない場合は
@@ -9349,7 +9353,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   //   aClubを東福岡から別のチームに変えたら候補もそのチームの選手に切り替わるようにする。
   //   さらに、大会側で「出場選手」が設定されている場合は、そのメンバーのみに絞り込む
   //   （選手が多いと候補が多すぎて選びにくいため）。設定が無い/空の大会では従来通り全員を表示する。
-  const ownRosterForAAll = roster.filter(p => aClub ? p.team_name === aClub : p.is_own_team !== false);
+  const ownRosterForAAll = roster.filter(p => aClub ? p.team_name === aClub : p.is_own_team !== false).sort(byPlayerNameKana);
   const ownRosterForA = (tournamentParticipantIds && tournamentParticipantIds.length > 0)
     ? ownRosterForAAll.filter(p => tournamentParticipantIds.includes(p.id))
     : ownRosterForAAll;
@@ -9509,7 +9513,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             <input style={S.inp} placeholder="選手名（不明な場合は空欄でOK）" value={bP1} onChange={e => setBP1(e.target.value)}/>
             {bClub && oppRoster.filter(p => p.team_name === bClub).length>0 && (
               <div style={{ marginTop:6 }}>
-                {oppRoster.filter(p => p.team_name === bClub).map(p=>(
+                {oppRoster.filter(p => p.team_name === bClub).sort(byPlayerNameKana).map(p=>(
                   <span key={p.id} style={S.chip(bP1===p.player_name)} onClick={()=>setBP1(p.player_name)}>{p.player_name}</span>
                 ))}
               </div>
@@ -9520,7 +9524,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               <input style={S.inp} placeholder="選手名（不明な場合は空欄でOK）" value={bP2} onChange={e => setBP2(e.target.value)}/>
               {bClub && oppRoster.filter(p => p.team_name === bClub).length>0 && (
                 <div style={{ marginTop:6 }}>
-                  {oppRoster.filter(p => p.team_name === bClub).map(p=>(
+                  {oppRoster.filter(p => p.team_name === bClub).sort(byPlayerNameKana).map(p=>(
                     <span key={p.id} style={S.chip(bP2===p.player_name)} onClick={()=>setBP2(p.player_name)}>{p.player_name}</span>
                   ))}
                 </div>
