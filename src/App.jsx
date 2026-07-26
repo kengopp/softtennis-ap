@@ -10323,6 +10323,21 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   </div>
                 </div>
               ))}
+              <div style={{ textAlign:"center", marginBottom:10 }}>
+                <button
+                  style={{ background:"none",border:`1px dashed ${C.accent}`,borderRadius:8,color:C.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:"8px 14px",width:"100%" }}
+                  onClick={()=>{
+                    // ★「これで試合終了」と判定されていたが、実はまだ続きがあった場合に
+                    //   新しいゲームを追加できるようにする。試合は自動的に進行中(active)に戻る。
+                    const num = match.games.length + 1;
+                    const isFin = isFinalGame(match.game_format, match.match_score_a, match.match_score_b);
+                    const srv = gameServer(match.first_server || "A", num);
+                    const g = { id:uid(), match_id:match.id, game_number:num, server_team:srv, is_final:isFin, score_a:0, score_b:0, winner_team:null, points:[], faults:[] };
+                    persist({ ...match, status:"active", games:[...match.games, g] });
+                    setCorrectMode(false);
+                  }}
+                >＋ 第{match.games.length+1}ゲームを追加（試合を再開する）</button>
+              </div>
               <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:4 }} onClick={()=>setCorrectMode(false)}>修正を完了</button>
             </div>
           )}
