@@ -8279,11 +8279,14 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   pairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   // 相手チームのペア別成績（対戦相手Bのペア名で集計。勝敗は相手側から見た勝敗）
+  // ★部内戦（B側の所属校が自チームと同じ＝東福岡 対 東福岡など）は「対戦相手」として
+  // 　不自然になるため集計から除外する
   const byOppPair = {};
   finished.forEach(m => {
     const bPlayers = m.players.filter(p => p.team === "B").sort((a,b) => a.order_num - b.order_num);
-    const pairKey = bPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
     const club = bPlayers[0]?.club_name || "";
+    if (mySchoolName && club && club.trim() === mySchoolName.trim()) return;
+    const pairKey = bPlayers.map(p => p.player_name).filter(Boolean).join("／") || "（不明）";
     const key = club ? `${pairKey}（${club}）` : pairKey;
     (byOppPair[key] ??= []).push(m);
   });
@@ -8305,9 +8308,13 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   playerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   // 対戦相手（学校）別成績
+  // ★部内戦（B側の所属校が自チームと同じ＝東福岡 対 東福岡など）は
+  // 　「対戦相手チーム」として不自然になるため集計から除外する
   const byOpponent = {};
   finished.forEach(m=>{
-    const name = m.players.find(p=>p.team==="B")?.club_name || "（相手不明）";
+    const club = m.players.find(p=>p.team==="B")?.club_name || "";
+    if (mySchoolName && club && club.trim() === mySchoolName.trim()) return;
+    const name = club || "（相手不明）";
     (byOpponent[name] ??= []).push(m);
   });
   const opponentRows = Object.entries(byOpponent).map(([name,list])=>({
