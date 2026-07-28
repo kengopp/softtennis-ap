@@ -1972,8 +1972,8 @@ function calcMatchSummary(match) {
   const playRates = Object.entries(playAgg)
     .map(([k,v])=>({ key:k, label:getPlayLabel(k), total:v.win+v.err, win:v.win, err:v.err, rate:(v.win+v.err)>0?Math.round(v.win/(v.win+v.err)*100):0, isRef:(v.win+v.err)<2 }))
     .filter(p=>p.total>=1);
-  const bestPlays  = playRates.slice().sort((a,b)=>b.rate-a.rate).slice(0,4);
-  const worstPlays = playRates.slice().sort((a,b)=>a.rate-b.rate).slice(0,4);
+  const bestPlays  = playRates.filter(p=>p.rate>0).sort((a,b)=>b.rate-a.rate).slice(0,4);
+  const worstPlays = playRates.filter(p=>p.rate<100).sort((a,b)=>a.rate-b.rate).slice(0,4);
 
   // 今日の得点源・失点源（プレー種類別に「決めた数」「ミス数」の実数が多い順）
   const pointSources = Object.entries(playAgg)
