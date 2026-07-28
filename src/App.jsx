@@ -62,6 +62,14 @@ const SIDE_TYPES = [
 const buildShotKey = (play, result) => play && result ? `${play}_${result}` : play ?? result ?? null;
 
 const getPlayLabel   = (key) => PLAY_TYPES.find(p => p.key === key)?.label ?? key ?? "—";
+// 成功率を5段階の色に変換（90%〜緑／70-89%黄緑／50-69%黄／30-49%橙／〜29%赤）
+const getRateTierColor = (rate) => {
+  if (rate>=90) return C.accent;
+  if (rate>=70) return "#8bc34a";
+  if (rate>=50) return "#eab308";
+  if (rate>=30) return C.orange;
+  return C.red;
+};
 const getResultLabel = (key) => RESULT_LABELS[key] ?? key ?? "";
 const getSideLabel   = (key) => SIDE_TYPES.find(s => s.key === key)?.label ?? key ?? "";
 const isWinnerResult = (result) => RESULT_IS_WINNER[result] ?? null;
@@ -1953,17 +1961,27 @@ function calcMatchSummary(match) {
     if (s && posStats[key]) { posStats[key].win += s.winners; posStats[key].err += s.errors; }
   });
 
-  // プレイ別成功率（チーム全体で合算。fault除く。サンプル2回未満は信頼性が低いため除外）
+  // プレイ別成功率（チーム＝ペア2人で合算。fault除く）
+  // ★使用回数が少ないプレー（2回未満）は信頼性が低いため除外はせず、
+  // 　isRef フラグを立てて「参考」として表示できるようにする
   const playAgg = {};
   teamAStats.forEach(s=>{
     Object.entries(s.playsWin).forEach(([k,n])=>{ playAgg[k]=playAgg[k]||{win:0,err:0}; playAgg[k].win+=n; });
     Object.entries(s.playsErr).forEach(([k,n])=>{ if(k==="fault") return; playAgg[k]=playAgg[k]||{win:0,err:0}; playAgg[k].err+=n; });
   });
   const playRates = Object.entries(playAgg)
-    .map(([k,v])=>({ key:k, label:getPlayLabel(k), total:v.win+v.err, win:v.win, err:v.err, rate:(v.win+v.err)>0?Math.round(v.win/(v.win+v.err)*100):0 }))
-    .filter(p=>p.total>=2);
-  const bestPlays  = playRates.slice().sort((a,b)=>b.rate-a.rate).slice(0,3);
-  const worstPlays = playRates.slice().sort((a,b)=>a.rate-b.rate).slice(0,3);
+    .map(([k,v])=>({ key:k, label:getPlayLabel(k), total:v.win+v.err, win:v.win, err:v.err, rate:(v.win+v.err)>0?Math.round(v.win/(v.win+v.err)*100):0, isRef:(v.win+v.err)<2 }))
+    .filter(p=>p.total>=1);
+  const bestPlays  = playRates.slice().sort((a,b)=>b.rate-a.rate).slice(0,4);
+  const worstPlays = playRates.slice().sort((a,b)=>a.rate-b.rate).slice(0,4);
+
+  // 今日の得点源・失点源（プレー種類別に「決めた数」「ミス数」の実数が多い順）
+  const pointSources = Object.entries(playAgg)
+    .map(([k,v])=>({ key:k, label:getPlayLabel(k), count:v.win }))
+    .filter(p=>p.count>0).sort((a,b)=>b.count-a.count).slice(0,3);
+  const missSources = Object.entries(playAgg)
+    .map(([k,v])=>({ key:k, label:getPlayLabel(k), count:v.err }))
+    .filter(p=>p.count>0).sort((a,b)=>b.count-a.count).slice(0,3);
 
   // サーブ分析（自チームのサーブのみ。fault_count: 0=1stイン/1=2ndイン/2=ダブルフォルト）
   let serve1st=0, serve2nd=0, serveDf=0, serveTotal=0;
@@ -1996,7 +2014,7 @@ function calcMatchSummary(match) {
 
   return {
     totalA, totalB, attackA, oppMissA, selfMissA, oppAttackA, decisionRate,
-    topScorer, scoreRanking, missRanking, posStats, bestPlays, worstPlays,
+    topScorer, scoreRanking, missRanking, posStats, bestPlays, worstPlays, pointSources, missSources,
     serve1st, serve2nd, serveDf, serveTotal, firstServeWin, firstServeTotal, secondServeWin, secondServeTotal,
     maxWinStreak, maxLoseStreak, timeline,
   };
@@ -10813,9 +10831,12 @@ function MatchSummaryPanel({ match }) {
 
   return (
     <div style={{ marginBottom:14 }}>
-      {/* ①試合サマリー（試合結果／良かった点／改善ポイント／決定率・最多得点） */}
+      {/* ①試合サマリー（試合結果／決定率・総得点・決めた数・自分のミス／最多得点） */}
       <div style={{ ...detailBox, padding:14 }}>
-        <div style={{ fontSize:13, fontWeight:800, marginBottom:12 }}>📋 試合サマリー</div>
+        <div style={{ fontSize:13, fontWeight:800, marginBottom:12, display:"flex", alignItems:"center", gap:6 }}>
+          📋 試合サマリー
+          <span style={{ marginLeft:"auto", fontSize:9.5, fontWeight:800, color:C.purple, background:"#eef0fe", borderRadius:6, padding:"2px 6px" }}>ペア合計</span>
+        </div>
 
         {isFinished && (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10, background:C.gray, borderRadius:10, padding:14, marginBottom:14 }}>
@@ -10824,20 +10845,43 @@ function MatchSummaryPanel({ match }) {
           </div>
         )}
 
-        {(sum.decisionRate!=null || sum.topScorer) && (
-          <div style={{ display:"flex", gap:10, marginTop:14 }}>
-            {sum.decisionRate!=null && (
-              <div style={{ flex:1, background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
-                <div style={{ fontSize:20, fontWeight:900, color:C.navy }}>{sum.decisionRate}%</div>
-                <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>決定率</div>
-              </div>
-            )}
-            {sum.topScorer && (
-              <div style={{ flex:1, background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
-                <div style={{ fontSize:13, fontWeight:800, color:C.navy }}>{sum.topScorer.player_name}</div>
-                <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>最多得点（{sum.topScorer.winners}点）</div>
-              </div>
-            )}
+        {sum.decisionRate!=null && (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+            <div style={{ background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+              <div style={{ fontSize:20, fontWeight:900, color:C.navy }}>{sum.decisionRate}%</div>
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>決定率</div>
+            </div>
+            <div style={{ background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+              <div style={{ fontSize:20, fontWeight:900, color:C.navy }}>{sum.totalA}</div>
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>総得点</div>
+            </div>
+            <div style={{ background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+              <div style={{ fontSize:20, fontWeight:900, color:C.navy }}>{sum.attackA}</div>
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>決めた数</div>
+            </div>
+            <div style={{ background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+              <div style={{ fontSize:20, fontWeight:900, color:C.navy }}>{sum.selfMissA}</div>
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>自分のミス</div>
+            </div>
+          </div>
+        )}
+
+        {sum.topScorer && (
+          <div style={{ background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+            <div style={{ fontSize:15, fontWeight:800, color:C.text }}>{sum.topScorer.player_name}</div>
+            <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>最多得点（{sum.topScorer.winners}点）</div>
+          </div>
+        )}
+
+        {sum.decisionRate!=null && (
+          <div style={{ marginTop:10, background:C.gray, borderRadius:10, padding:"12px 14px" }}>
+            <div style={{ fontSize:10.5, color:C.textSec, fontWeight:700, marginBottom:6 }}>決定率の内訳</div>
+            <div style={{ fontSize:12.5, fontWeight:800, color:C.text, lineHeight:1.7 }}>
+              決めた数 {sum.attackA} ÷（決めた数 {sum.attackA} ＋ 自分のミス {sum.selfMissA}）＝ {sum.decisionRate}%
+            </div>
+            <div style={{ marginTop:8, fontSize:10.5, color:C.textSec, lineHeight:1.5 }}>
+              ※相手のミスでもらった得点／相手の好プレーで取られた失点は含みません。「決めた数」と「自分のミス」だけで比べた割合です。
+            </div>
           </div>
         )}
       </div>
@@ -10847,7 +10891,10 @@ function MatchSummaryPanel({ match }) {
 
       {(sum.posStats.front.name || sum.posStats.back.name) && (
         <details style={detailBox}>
-          <summary style={summaryBtn}>📍 前衛・後衛分析</summary>
+          <summary style={summaryBtn}>
+            📍 前衛・後衛分析
+            <span style={{ marginLeft:"auto", fontSize:9.5, fontWeight:800, color:C.navy, background:"#eaeef7", borderRadius:6, padding:"2px 6px" }}>個人別</span>
+          </summary>
           <div style={{ padding:"0 14px 14px" }}>
             {["front","back"].map(key=>{
               const p = sum.posStats[key];
@@ -10856,13 +10903,14 @@ function MatchSummaryPanel({ match }) {
               const rate = total>0 ? Math.round(p.win/total*100) : 0;
               return (
                 <div key={key} style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:12, fontWeight:700, marginBottom:4 }}>{p.label}（{p.name}）</div>
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <div style={{ flex:1, height:10, background:C.gray, borderRadius:5, overflow:"hidden" }}>
-                      <div style={{ width:`${rate}%`, height:"100%", background:C.accent }}/>
-                    </div>
-                    <span style={{ fontSize:11, color:C.textSec, whiteSpace:"nowrap" }}>決定率{rate}%（決{p.win}／ミス{p.err}）</span>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:4 }}>
+                    <span style={{ fontSize:12, fontWeight:700 }}>{p.label}（{p.name}）</span>
+                    <span style={{ fontSize:15, fontWeight:900, color:C.text }}>{rate}%</span>
                   </div>
+                  <div style={{ height:5, background:C.gray, borderRadius:3, overflow:"hidden" }}>
+                    <div style={{ width:`${rate}%`, height:"100%", background:getRateTierColor(rate) }}/>
+                  </div>
+                  <div style={{ fontSize:11.5, color:C.textSec, marginTop:5, fontWeight:600 }}>決めた{p.win}／ミス{p.err}</div>
                 </div>
               );
             })}
@@ -10870,32 +10918,108 @@ function MatchSummaryPanel({ match }) {
         </details>
       )}
 
-      {(sum.bestPlays.length>0 || sum.worstPlays.length>0) && (
+      {(sum.pointSources.length>0 || sum.missSources.length>0) && (
         <details style={detailBox}>
-          <summary style={summaryBtn}>🏸 プレー別ランキング</summary>
+          <summary style={summaryBtn}>
+            🎯 得点源・失点源
+            <span style={{ marginLeft:"auto", fontSize:9.5, fontWeight:800, color:C.purple, background:"#eef0fe", borderRadius:6, padding:"2px 6px" }}>ペア合計</span>
+          </summary>
+          <div style={{ padding:"0 14px 14px", display:"flex", gap:10 }}>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:11.5, fontWeight:800, color:C.accent, marginBottom:8 }}>🟢 今日の得点源</div>
+              {sum.pointSources.map((p,i)=>(
+                <div key={p.key} style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ fontSize:11, fontWeight:800, color:C.textSec, width:14 }}>{i+1}</span>
+                  <span style={{ flex:1, fontSize:12, fontWeight:700 }}>{p.label}</span>
+                  <span style={{ fontSize:13, fontWeight:900, color:C.accent }}>{p.count}点</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:11.5, fontWeight:800, color:C.red, marginBottom:8 }}>🔴 今日の失点源</div>
+              {sum.missSources.map((p,i)=>(
+                <div key={p.key} style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ fontSize:11, fontWeight:800, color:C.textSec, width:14 }}>{i+1}</span>
+                  <span style={{ flex:1, fontSize:12, fontWeight:700 }}>{p.label}</span>
+                  <span style={{ fontSize:13, fontWeight:900, color:C.red }}>{p.count}点</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </details>
+      )}
+
+      {sum.bestPlays.length>0 && (
+        <details style={detailBox}>
+          <summary style={summaryBtn}>
+            🏆 今日の武器
+            <span style={{ marginLeft:"auto", fontSize:9.5, fontWeight:800, color:C.purple, background:"#eef0fe", borderRadius:6, padding:"2px 6px" }}>ペア合計</span>
+          </summary>
           <div style={{ padding:"0 14px 14px" }}>
-            {sum.bestPlays.length>0 && (
-              <div style={{ marginBottom:10 }}>
-                <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:6 }}>🏆 今日の武器</div>
-                {sum.bestPlays.map((p,i)=>(
-                  <div key={p.key} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"4px 0" }}>
-                    <span>{["🥇","🥈","🥉"][i]} {p.label}</span>
-                    <span style={{ fontWeight:700, color:C.accent }}>{p.rate}%（{p.win}/{p.total}）</span>
-                  </div>
-                ))}
+            <div style={{ background:C.gray, borderRadius:10, padding:"10px 12px", marginBottom:10, fontSize:11, color:C.textSec, lineHeight:1.6 }}>
+              「使用回数」＝そのプレーを使った合計回数。「成功率」＝決めた数÷使用回数。使用回数が少ないプレーには「参考」タグが付きます。
+            </div>
+            {sum.bestPlays.map((p,i)=>(
+              <div key={p.key} style={{ padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:12, fontWeight:800, color:C.textSec, width:16 }}>{p.isRef?"-":i+1}</span>
+                  <span style={{ fontSize:13, fontWeight:800 }}>{p.label}</span>
+                  <span style={{ marginLeft:"auto", fontSize:15, fontWeight:900, color:getRateTierColor(p.rate) }}>{p.rate}%</span>
+                </div>
+                <div style={{ height:5, background:C.gray, borderRadius:3, overflow:"hidden", marginTop:5 }}>
+                  <div style={{ width:`${p.rate}%`, height:"100%", background:p.isRef?C.border:getRateTierColor(p.rate) }}/>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5 }}>
+                  {p.isRef ? (
+                    <>
+                      <span style={{ fontSize:10, fontWeight:800, color:C.textSec, background:C.border, borderRadius:6, padding:"2px 7px" }}>参考</span>
+                      <span style={{ fontSize:10.5, color:C.textSec }}>使用{p.total}回（決め{p.win}／ミス{p.err}）</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize:11, fontWeight:800, color:C.navy, background:C.gray, borderRadius:6, padding:"2px 8px" }}>使用{p.total}回</span>
+                      <span style={{ marginLeft:"auto", fontSize:10.5, color:C.textSec }}>決め{p.win}／ミス{p.err}</span>
+                    </>
+                  )}
+                </div>
               </div>
-            )}
-            {sum.worstPlays.length>0 && (
-              <div>
-                <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:6 }}>📉 改善ポイント</div>
-                {sum.worstPlays.map((p,i)=>(
-                  <div key={p.key} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"4px 0" }}>
-                    <span>{i+1}. {p.label}</span>
-                    <span style={{ fontWeight:700, color:C.red }}>{p.rate}%（{p.win}/{p.total}）</span>
-                  </div>
-                ))}
+            ))}
+          </div>
+        </details>
+      )}
+
+      {sum.worstPlays.length>0 && (
+        <details style={detailBox}>
+          <summary style={summaryBtn}>
+            📉 改善ポイント
+            <span style={{ marginLeft:"auto", fontSize:9.5, fontWeight:800, color:C.purple, background:"#eef0fe", borderRadius:6, padding:"2px 6px" }}>ペア合計</span>
+          </summary>
+          <div style={{ padding:"0 14px 14px" }}>
+            {sum.worstPlays.map((p,i)=>(
+              <div key={p.key} style={{ padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:12, fontWeight:800, color:C.textSec, width:16 }}>{p.isRef?"-":i+1}</span>
+                  <span style={{ fontSize:13, fontWeight:800 }}>{p.label}</span>
+                  <span style={{ marginLeft:"auto", fontSize:15, fontWeight:900, color:getRateTierColor(p.rate) }}>{p.rate}%</span>
+                </div>
+                <div style={{ height:5, background:C.gray, borderRadius:3, overflow:"hidden", marginTop:5 }}>
+                  <div style={{ width:`${p.rate}%`, height:"100%", background:p.isRef?C.border:getRateTierColor(p.rate) }}/>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:5 }}>
+                  {p.isRef ? (
+                    <>
+                      <span style={{ fontSize:10, fontWeight:800, color:C.textSec, background:C.border, borderRadius:6, padding:"2px 7px" }}>参考</span>
+                      <span style={{ fontSize:10.5, color:C.textSec }}>使用{p.total}回（決め{p.win}／ミス{p.err}）</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize:11, fontWeight:800, color:C.navy, background:C.gray, borderRadius:6, padding:"2px 8px" }}>使用{p.total}回</span>
+                      <span style={{ marginLeft:"auto", fontSize:10.5, color:C.textSec }}>決め{p.win}／ミス{p.err}</span>
+                    </>
+                  )}
+                </div>
               </div>
-            )}
+            ))}
           </div>
         </details>
       )}
