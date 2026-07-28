@@ -10896,7 +10896,7 @@ function MatchSummaryPanel({ match }) {
             <span style={{ marginLeft:"auto", fontSize:9.5, fontWeight:800, color:C.navy, background:"#eaeef7", borderRadius:6, padding:"2px 6px" }}>個人別</span>
           </summary>
           <div style={{ padding:"0 14px 14px" }}>
-            {["front","back"].map(key=>{
+            {["back","front"].map(key=>{
               const p = sum.posStats[key];
               if (!p.name) return null;
               const total = p.win+p.err;
