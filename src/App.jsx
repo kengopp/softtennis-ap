@@ -10861,7 +10861,7 @@ function MatchSummaryPanel({ match }) {
             </div>
             <div style={{ background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
               <div style={{ fontSize:20, fontWeight:900, color:C.navy }}>{sum.selfMissA}</div>
-              <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>自分のミス</div>
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>自分達のミス</div>
             </div>
           </div>
         )}
@@ -10877,10 +10877,10 @@ function MatchSummaryPanel({ match }) {
           <div style={{ marginTop:10, background:C.gray, borderRadius:10, padding:"12px 14px" }}>
             <div style={{ fontSize:10.5, color:C.textSec, fontWeight:700, marginBottom:6 }}>決定率の内訳</div>
             <div style={{ fontSize:12.5, fontWeight:800, color:C.text, lineHeight:1.7 }}>
-              決めた数 {sum.attackA} ÷（決めた数 {sum.attackA} ＋ 自分のミス {sum.selfMissA}）＝ {sum.decisionRate}%
+              決めた数 {sum.attackA} ÷（決めた数 {sum.attackA} ＋ 自分達のミス {sum.selfMissA}）＝ {sum.decisionRate}%
             </div>
             <div style={{ marginTop:8, fontSize:10.5, color:C.textSec, lineHeight:1.5 }}>
-              ※相手のミスでもらった得点／相手の好プレーで取られた失点は含みません。「決めた数」と「自分のミス」だけで比べた割合です。
+              ※相手のミスでもらった得点／相手の好プレーで取られた失点は含みません。「決めた数」と「自分達のミス」だけで比べた割合です。
             </div>
           </div>
         )}
@@ -10892,7 +10892,7 @@ function MatchSummaryPanel({ match }) {
       {(sum.posStats.front.name || sum.posStats.back.name) && (
         <details style={detailBox}>
           <summary style={summaryBtn}>
-            📍 前衛・後衛分析
+            📍 決定率の内訳
             <span style={{ marginLeft:"auto", fontSize:9.5, fontWeight:800, color:C.navy, background:"#eaeef7", borderRadius:6, padding:"2px 6px" }}>個人別</span>
           </summary>
           <div style={{ padding:"0 14px 14px" }}>
