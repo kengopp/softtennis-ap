@@ -9887,18 +9887,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     addPoint(pendingTeam, selResult, null);
   }
 
-  function handleFault(){
-    if(!currentGame) return;
-    if(fault===0){
-      const cg=currentGame;
-      const f={id:uid(),game_id:cg.id,match_id:match.id,fault_number:(cg.faults?.length??0)+1,server_team:curServer,player_name:curServerIndividual??null,score_a_at:cg.score_a,score_b_at:cg.score_b};
-      persist({...match,games:match.games.map(g=>g.id===cg.id?{...cg,faults:[...(cg.faults??[]),f]}:g)});
-      setFault(1);
-    } else {
-      setFault(0);
-      addPoint(curServer==="A"?"B":"A");
-    }
-  }
+  // ★handleFault（トグル式フォルト記録の旧実装）は使われていないため削除済み。
+  //   サーブのフォルト記録は handleServeRadio（1st/2nd/df 選択方式）に統一されている。
 
   function handleServeRadio(v){
     if(!currentGame) return;
