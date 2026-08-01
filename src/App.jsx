@@ -3501,6 +3501,20 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const teamLinkedMatchIds = new Set(teamMatches.flatMap(tm => (tm.games || []).map(g => g.match_id).filter(Boolean)));
   const individualMatches = matches.filter(m => !teamLinkedMatchIds.has(m.id));
 
+  // ★大会に入った直後、選択中のタブ（前回訪れた大会で使っていたタブが引き継がれる）に
+  //   この大会の記録が1件もない場合は、記録がある方のタブへ自動で切り替える。
+  //   これにより「この大会の団体戦記録がありません」のような空の画面が先に開くことを防ぐ。
+  const autoSegRef = useRef(null);
+  useEffect(() => {
+    if (loading) return;
+    if (autoSegRef.current === tournament.id) return; // この大会では判定済み（以降はユーザーの手動切り替えを尊重）
+    autoSegRef.current = tournament.id;
+    const teamHasData = teamMatches.length > 0;
+    const indivHasData = individualMatches.length > 0;
+    if (seg === "team" && !teamHasData && indivHasData) setSeg("individual");
+    else if (seg === "individual" && !indivHasData && teamHasData) setSeg("team");
+  }, [loading, tournament.id, teamMatches.length, individualMatches.length]);
+
   return (
     <div style={S.page}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
