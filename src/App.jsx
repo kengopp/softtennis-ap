@@ -2854,7 +2854,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
               return (
-                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", opacity: isPast ? 0.65 : 1 }}>
+                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", background: isPast ? C.gray : C.white }}>
                   <div style={{ height:4, background: isPast ? C.textSec : C.navy }}/>
                   <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
                     <div style={{ fontSize:16, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
