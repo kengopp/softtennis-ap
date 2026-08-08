@@ -2854,46 +2854,53 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
               return (
-                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", background: isPast ? C.gray : C.white }}>
-                  <div style={{ height:4, background: isPast ? C.textSec : C.navy }}/>
+                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: isPast ? `6px solid ${C.textSec}` : `1px solid ${C.border}` }}>
+                  <div style={{ height:4, background: isPast ? "transparent" : C.navy }}/>
                   <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
-                    <div style={{ fontSize:16, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
+                      <div style={{ fontSize:16, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
+                      {isPast && <span style={{ flexShrink:0, fontSize:11, fontWeight:800, color:C.textSec, background:C.border, borderRadius:20, padding:"3px 10px" }}>終了</span>}
+                    </div>
                     <div style={{ marginTop:8 }}>
-                      <span style={{ fontSize:11, color:C.textSec }}>📅 {fmtDateRange(t.start_date, t.end_date)}</span>
-                      {t.venue && <span style={{ fontSize:11, color:C.textSec, marginLeft:8 }}>📍 {t.venue}</span>}
+                      <span style={{ fontSize:11, color:C.textSec, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📅</span>
+                      <span style={{ fontSize:11, color:C.textSec }}> {fmtDateRange(t.start_date, t.end_date)}</span>
+                      {t.venue && <>
+                        <span style={{ fontSize:11, color:C.textSec, marginLeft:8, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</span>
+                        <span style={{ fontSize:11, color:C.textSec }}> {t.venue}</span>
+                      </>}
                     </div>
                     {(teamRecord.win+teamRecord.loss>0 || individualRecord.win+individualRecord.loss>0) && (
                       <div style={{ display:"flex", flexDirection:"column", gap:2, marginTop:6 }}>
-                        {teamRecord.win+teamRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color:C.text }}>🏆 団体戦：{teamRecord.win}勝{teamRecord.loss}敗</span>}
-                        {individualRecord.win+individualRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color:C.text }}>🎾 個人戦：{individualRecord.win}勝{individualRecord.loss}敗</span>}
+                        {teamRecord.win+teamRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}>🏆 団体戦：{teamRecord.win}勝{teamRecord.loss}敗</span>}
+                        {individualRecord.win+individualRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}>🎾 個人戦：{individualRecord.win}勝{individualRecord.loss}敗</span>}
                       </div>
                     )}
                     <div
-                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background:"#f7f9fc", borderRadius:10 }}
+                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background: isPast ? "#f0f1f4" : "#f7f9fc", borderRadius:10 }}
                     >
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}>
-                        <div style={{ fontSize:12 }}>👥</div>
-                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.participantCount}人</div>
+                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>👥</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.participantCount}人</div>
                         <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
                       </div>
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setBreakdownModalFor(t); }}>
-                        <div style={{ fontSize:12 }}>🎾</div>
-                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.totalMatches}試合</div>
+                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>🎾</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.totalMatches}試合</div>
                         <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>試合数</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:12 }}>✅</div>
-                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.registeredMatches}試合</div>
+                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>✅</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.registeredMatches}試合</div>
                         <div style={{ fontSize:9.5, color:C.textSec }}>終了</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:12 }}>📍</div>
-                        <div style={{ fontSize:13, fontWeight:800, color:C.text }}>{stats.venueCount}か所</div>
+                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.venueCount}か所</div>
                         <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
                       </div>
                     </div>
                     <button
-                      style={{ width:"100%", marginTop:10, padding:"13px 10px", border:"1px solid #BFD5FF", borderRadius:14, background:"#EEF4FF", color:"#1E3A8A", fontSize:15, fontWeight:700, cursor:"pointer" }}
+                      style={{ width:"100%", marginTop:10, padding:"13px 10px", border: isPast ? `1px solid ${C.border}` : "1px solid #BFD5FF", borderRadius:14, background: isPast ? "#f0f1f4" : "#EEF4FF", color: isPast ? C.textSec : "#1E3A8A", fontSize:15, fontWeight:700, cursor:"pointer" }}
                       onClick={e=>{ e.stopPropagation(); onOpenTournament && onOpenTournament(t); }}
                     >▶ 試合一覧へ</button>
                   </div>
