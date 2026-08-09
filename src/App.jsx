@@ -2027,18 +2027,19 @@ function calcMatchSummary(match) {
   });
 
   // プレイ別成功率（チーム＝ペア2人で合算。fault除く）
-  // ★使用回数が少ないプレー（2回未満）は信頼性が低いため除外はせず、
-  // 　isRef フラグを立てて「参考」として表示できるようにする
+  // ★使用回数が少ないプレー（3回未満）は信頼性が低いため除外はせず、
+  // 　isRef フラグを立てて「参考」として一覧の下に表示する
   const playAgg = {};
   teamAStats.forEach(s=>{
     Object.entries(s.playsWin).forEach(([k,n])=>{ playAgg[k]=playAgg[k]||{win:0,err:0}; playAgg[k].win+=n; });
     Object.entries(s.playsErr).forEach(([k,n])=>{ if(k==="fault") return; playAgg[k]=playAgg[k]||{win:0,err:0}; playAgg[k].err+=n; });
   });
   const playRates = Object.entries(playAgg)
-    .map(([k,v])=>({ key:k, label:getPlayLabel(k), total:v.win+v.err, win:v.win, err:v.err, rate:(v.win+v.err)>0?Math.round(v.win/(v.win+v.err)*100):0, isRef:(v.win+v.err)<2 }))
+    .map(([k,v])=>({ key:k, label:getPlayLabel(k), total:v.win+v.err, win:v.win, err:v.err, rate:(v.win+v.err)>0?Math.round(v.win/(v.win+v.err)*100):0, isRef:(v.win+v.err)<3 }))
     .filter(p=>p.total>=1);
-  const bestPlays  = playRates.filter(p=>p.rate>0).sort((a,b)=>b.rate-a.rate).slice(0,4);
-  const worstPlays = playRates.filter(p=>p.rate<100).sort((a,b)=>a.rate-b.rate).slice(0,4);
+  // ★参考（サンプル数が少ない）プレーは、決め率に関係なく必ず一覧の下に来るようにする
+  const bestPlays  = playRates.filter(p=>p.rate>0).sort((a,b)=> (a.isRef===b.isRef) ? b.rate-a.rate : (a.isRef?1:-1)).slice(0,4);
+  const worstPlays = playRates.filter(p=>p.rate<100).sort((a,b)=> (a.isRef===b.isRef) ? a.rate-b.rate : (a.isRef?1:-1)).slice(0,4);
 
   // 今日の得点源・失点源（プレー種類別に「決めた数」「ミス数」の実数が多い順）
   const pointSources = Object.entries(playAgg)
