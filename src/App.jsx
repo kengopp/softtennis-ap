@@ -2315,12 +2315,13 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   const [side,   setSide]   = useState(point.side_type);
   const [result, setResult] = useState(point.result_type);
   const [playerName, setPlayerName] = useState(point.player_name);
-  // ★サーブの本数（0=1stイン／1=2ndイン／2=ダブルフォルト）。プレイ内容が「サーブ」の時だけ使う。
+  // ★サーブの本数（0=1stイン／1=2ndイン／2=ダブルフォルト）。ラリーの開始状況を示すものなので、
+  //   プレイ内容の種類に関わらず常に編集できるようにする。
   const [fault, setFault] = useState(point.fault_count ?? 0);
 
   function handleSave(){
     const isWin = result ? isWinnerResult(result) : null;
-    onSave({ scoring_team:team, play_type:play, side_type:side, result_type:result, player_name:playerName, is_winner:isWin, fault_count: play==="serve" ? fault : null });
+    onSave({ scoring_team:team, play_type:play, side_type:side, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
   }
 
   return (
@@ -2345,17 +2346,16 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           </div>
         </div>
 
-        {play==="serve" && (
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>サーブ本数</div>
-            <div style={{ display:"flex",gap:8 }}>
-              <button style={{ ...S.togBtn(fault===0),flex:1,fontSize:12 }} onClick={()=>setFault(0)}>1stイン</button>
-              <button style={{ ...S.togBtn(fault===1),flex:1,fontSize:12 }} onClick={()=>setFault(1)}>2ndイン</button>
-              <button style={{ ...S.togBtn(fault===2),flex:1,fontSize:12,color:fault===2?undefined:C.red }} onClick={()=>setFault(2)}>ダブルフォルト</button>
-            </div>
-            {fault===2 && <div style={{ fontSize:10,color:C.red,marginTop:6 }}>※ダブルフォルトは相手側の得点になります。「得点チーム」を相手側に設定してください。</div>}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>サーブ本数</div>
+          <div style={{ display:"flex",gap:8 }}>
+            <button style={{ ...S.togBtn(fault===0),flex:1,fontSize:12 }} onClick={()=>setFault(0)}>1stイン</button>
+            <button style={{ ...S.togBtn(fault===1),flex:1,fontSize:12 }} onClick={()=>setFault(1)}>2ndイン</button>
+            <button style={{ ...S.togBtn(fault===2),flex:1,fontSize:12,color:fault===2?undefined:C.red }} onClick={()=>setFault(2)}>ダブルフォルト</button>
           </div>
-        )}
+          <div style={{ fontSize:10,color:C.textSec,marginTop:6 }}>※このラリーの1本目のサーブが入ったかどうかです。プレイ内容が「サーブ」以外でも設定できます。</div>
+          {fault===2 && <div style={{ fontSize:10,color:C.red,marginTop:4 }}>※ダブルフォルトは相手側の得点になります。「得点チーム」を相手側に設定してください。</div>}
+        </div>
 
         <div style={{ marginBottom:12 }}>
           <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック</div>
