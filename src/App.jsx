@@ -1258,6 +1258,71 @@ async function recalcTeamMatchScore(teamMatchId) {
 }
 
 // ============================================================
+// 練習メニュー（practice_drills / practice_logs）
+// ★新規機能：既存のテーブル・画面には手を加えず、完全に独立したテーブルとして追加。
+//   もし今後この機能を削除する場合は、下部ナビの「練習」項目とこのセクションの
+//   コードを外し、practice_drills / practice_logs テーブルを削除するだけで
+//   元の状態に戻せる。
+// ============================================================
+async function getPracticeDrills() {
+  const { data, error } = await supabase
+    .from("practice_drills")
+    .select("*")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: true });
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+
+async function savePracticeDrill(drill) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const row = {
+    id: drill.id || uid(),
+    created_by: user.id,
+    category: drill.category,
+    detail: drill.detail,
+    courses: drill.courses || [],
+    name: drill.name,
+    total_target: drill.totalTarget,
+    miss_allowance: drill.missAllowance,
+  };
+  const { error } = await supabase.from("practice_drills").upsert(row);
+  if (error) throw error;
+  return row.id;
+}
+
+async function deletePracticeDrill(id) {
+  const { error } = await supabase.from("practice_drills").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+
+// fromDate/toDateは "YYYY-MM-DD" 文字列（省略可）
+async function getPracticeLogs(fromDate, toDate) {
+  let q = supabase.from("practice_logs").select("*");
+  if (fromDate) q = q.gte("log_date", fromDate);
+  if (toDate) q = q.lte("log_date", toDate);
+  const { data, error } = await q.order("log_date", { ascending: true });
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+
+async function savePracticeLog(log) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const row = {
+    id: uid(),
+    drill_id: log.drillId,
+    created_by: user.id,
+    log_date: log.date,
+    success_count: log.success,
+    fail_count: log.fail,
+  };
+  const { error } = await supabase.from("practice_logs").insert(row);
+  if (error) throw error;
+}
+
+// ============================================================
 // 大会マスター
 // ============================================================
 async function getTournaments() {
@@ -2199,6 +2264,7 @@ function NavBar({ active, onNavigate }) {
   const items = [
     ["home",   "🏠", "ホーム"],
     ["list",   "📋", "試合"],
+    ["practice","🎯", "練習"],
     ["stats",  "📊", "分析"],
     ["master", "🗂",  "設定"],
   ];
@@ -2907,16 +2973,16 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
                     <button
                       disabled={!t.venue_link}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.venue_link ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
-                    ><span style={{ color: t.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
+                    ><span style={{ color: isPast ? C.textSec : (t.venue_link ? "#e53935" : "#c3c9d4") }}>📍</span> 地図</button>
                     <button
                       disabled={!t.guideline_url}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.guideline_url ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
-                    ><span style={{ color: t.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
+                    ><span style={{ color: isPast ? C.textSec : (t.guideline_url ? "#1976d2" : "#c3c9d4") }}>📄</span> 要項</button>
                     <button
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
                       onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(v => v===t.id ? null : t.id); }}
                     >⋯ その他</button>
                   </div>
@@ -5948,6 +6014,513 @@ function GroupMembersScreen({ onBack }) {
             </div>
           </div>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 練習メニュー画面（新規機能）
+// ============================================================
+const PRACTICE_CATEGORY_OPTIONS = ["サーブ","レシーブ","ストローク","シュート","スマッシュ","ボレー","ポーチボレー"];
+const PRACTICE_DETAIL_DEFAULT = { "サーブ":["正クロ","逆クロ"], "レシーブ":["フォア","バック"] };
+const PRACTICE_COURSE_OPTIONS = { "サーブ":["センター","ワイド"], "レシーブ":["ストレート","センター","クロス"] };
+function practiceDetailOptions(cat){ return PRACTICE_DETAIL_DEFAULT[cat] || ["フォア","バック"]; }
+function practiceCourseOptions(cat){ return PRACTICE_COURSE_OPTIONS[cat] || null; }
+function practiceAutoName(cat, detail, courses){
+  const courseText = courses && courses.length ? courses.join("・")+"を狙う" : "";
+  return `${cat}（${detail}）${courseText}`;
+}
+function practiceRate(total, miss){
+  if (!total) return null;
+  return Math.round(((total-miss)/total)*100);
+}
+function practiceTierColor(rate){
+  if (rate==null) return C.textSec;
+  if (rate>=90) return C.accent;
+  if (rate>=70) return "#8bc34a";
+  if (rate>=50) return "#eab308";
+  if (rate>=30) return C.orange;
+  return C.red;
+}
+
+// ★項目追加用のチップ選択欄。＋を押すとその場にテキスト入力が出てくる（ブラウザのprompt等は使わない）
+function PracticeChipSelect({ options, value, onChange, multi, onAddCustom }){
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  function commit(){
+    const label = draft.trim();
+    if (label) onAddCustom(label);
+    setDraft(""); setAdding(false);
+  }
+  return (
+    <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+      {options.map(opt=>{
+        const sel = multi ? value.includes(opt) : value===opt;
+        return (
+          <div key={opt} onClick={()=>{ if (multi) onChange(sel ? value.filter(v=>v!==opt) : [...value, opt]); else onChange(opt); }}
+            style={{ padding:"9px 13px", borderRadius:20, border:`1px solid ${sel?C.navy:C.border}`, fontSize:12, fontWeight:700, color:sel?"#fff":C.textSec, background:sel?C.navy:"#fff", cursor:"pointer" }}
+          >{opt}</div>
+        );
+      })}
+      {adding ? (
+        <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+          <input autoFocus value={draft} onChange={e=>setDraft(e.target.value)}
+            onKeyDown={e=>{ if (e.key==="Enter") commit(); if (e.key==="Escape"){ setAdding(false); setDraft(""); } }}
+            placeholder="項目名" style={{ width:100, padding:"8px 10px", borderRadius:20, border:`1px solid ${C.navy}`, fontSize:12 }} />
+          <div onClick={commit} style={{ width:30,height:30,borderRadius:"50%",background:C.navy,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,cursor:"pointer",flexShrink:0 }}>✓</div>
+          <div onClick={()=>{ setAdding(false); setDraft(""); }} style={{ width:30,height:30,borderRadius:"50%",border:`1px solid ${C.border}`,color:C.textSec,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:800,cursor:"pointer",flexShrink:0 }}>✕</div>
+        </div>
+      ) : (
+        <div onClick={()=>setAdding(true)} style={{ width:34,height:34,borderRadius:"50%",border:`1.5px dashed ${C.textSec}`,color:C.textSec,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,cursor:"pointer" }}>＋</div>
+      )}
+    </div>
+  );
+}
+
+function PracticeScreen({ onNavigate }) {
+  const [tab, setTab] = useState("list"); // list | calendar
+  const [drills, setDrills] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingDrill, setEditingDrill] = useState(null);
+  const [formCat, setFormCat] = useState("サーブ");
+  const [formDetail, setFormDetail] = useState("正クロ");
+  const [formCourses, setFormCourses] = useState([]);
+  const [formName, setFormName] = useState("");
+  const [formTotal, setFormTotal] = useState(20);
+  const [formMiss, setFormMiss] = useState(6);
+  const [customCats, setCustomCats] = useState([]);
+  const [customDetails, setCustomDetails] = useState({});
+  const [customCourses, setCustomCourses] = useState({});
+
+  const [showSelect, setShowSelect] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+
+  const [session, setSession] = useState(null); // { order:[ids], idx, counts:{id:{success,fail}}, results:[] }
+  const [showSummary, setShowSummary] = useState(false);
+  const [summaryResults, setShowSummaryResults] = useState([]);
+
+  const [calMonth, setCalMonth] = useState(()=>{ const d=new Date(); return { y:d.getFullYear(), m:d.getMonth() }; });
+  const [openDay, setOpenDay] = useState(null);
+
+  async function reload(){
+    setLoading(true);
+    const [ds, ls] = await Promise.all([getPracticeDrills(), getPracticeLogs()]);
+    setDrills(ds);
+    setLogs(ls);
+    setLoading(false);
+  }
+  useEffect(()=>{ reload(); }, []);
+
+  function cumFor(drillId){
+    const rows = logs.filter(l=>l.drill_id===drillId);
+    const total = rows.reduce((s,r)=>s+r.success_count+r.fail_count, 0);
+    const miss = rows.reduce((s,r)=>s+r.fail_count, 0);
+    const lastRow = rows[rows.length-1];
+    return { total, miss, lastDate: lastRow ? lastRow.log_date : null };
+  }
+
+  function openCreate(){
+    setEditingDrill(null);
+    setFormCat("サーブ"); setFormDetail("正クロ"); setFormCourses([]);
+    setFormName(""); setFormTotal(20); setFormMiss(6);
+    setShowForm(true);
+  }
+  function openEdit(d){
+    setEditingDrill(d);
+    setFormCat(d.category); setFormDetail(d.detail); setFormCourses(d.courses||[]);
+    setFormName(d.name); setFormTotal(d.total_target); setFormMiss(d.miss_allowance);
+    setOpenMenuId(null);
+    setShowForm(true);
+  }
+  async function saveForm(){
+    const name = formName || practiceAutoName(formCat, formDetail, formCourses);
+    await savePracticeDrill({
+      id: editingDrill?.id, category:formCat, detail:formDetail, courses:formCourses,
+      name, totalTarget:Number(formTotal)||0, missAllowance:Number(formMiss)||0,
+    });
+    setShowForm(false);
+    await reload();
+  }
+  async function copyDrill(d){
+    setOpenMenuId(null);
+    await savePracticeDrill({
+      category:d.category, detail:d.detail, courses:d.courses||[],
+      name: d.name+"（コピー）", totalTarget:d.total_target, missAllowance:d.miss_allowance,
+    });
+    await reload();
+  }
+  async function removeDrill(id){
+    setOpenMenuId(null);
+    if (!window.confirm("このメニューを削除しますか？（過去の記録も見られなくなります）")) return;
+    await deletePracticeDrill(id);
+    await reload();
+  }
+
+  function toggleSelect(id){
+    setSelectedIds(ids=> ids.includes(id) ? ids.filter(x=>x!==id) : [...ids, id]);
+  }
+  function startSession(){
+    if (!selectedIds.length) return;
+    setSession({ order:selectedIds, idx:0, counts:{}, results:[] });
+    setShowSelect(false);
+  }
+  function tapCount(drillId, kind){
+    setSession(s=>{
+      const cur = s.counts[drillId] || { success:0, fail:0 };
+      return { ...s, counts:{ ...s.counts, [drillId]:{ ...cur, [kind]: cur[kind]+1 } } };
+    });
+  }
+  async function nextDrill(){
+    const drill = drills.find(d=>d.id===session.order[session.idx]);
+    const counts = session.counts[drill.id] || { success:0, fail:0 };
+    const total = counts.success+counts.fail;
+    const rate = practiceRate(total, counts.fail);
+    const result = { name:drill.name, success:counts.success, fail:counts.fail, total, rate };
+
+    await savePracticeLog({ drillId:drill.id, date: todayDateStr(), success:counts.success, fail:counts.fail });
+
+    const newResults = [...session.results, result];
+    if (session.idx+1 < session.order.length) {
+      setSession(s=>({ ...s, idx:s.idx+1, results:newResults }));
+    } else {
+      setSession(null);
+      await reload();
+      setShowSummaryResults(newResults);
+      setShowSummary(true);
+    }
+  }
+  function todayDateStr(){
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+
+  // ---------- render ----------
+
+  function DrillCard({ d }){
+    const { total, miss, lastDate } = cumFor(d.id);
+    const rate = practiceRate(total, miss);
+    const color = practiceTierColor(rate);
+    return (
+      <div style={{ border:`1px solid ${C.border}`, borderRadius:12, marginBottom:10, overflow:"hidden" }}>
+        <div style={{ padding:13, cursor:"pointer" }} onClick={()=>openEdit(d)}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+            <div>
+              <span style={{ fontSize:13, fontWeight:800, color:C.purple, background:C.purpleL, borderRadius:6, padding:"3px 8px" }}>{d.category}・{d.detail}</span>
+              <div style={{ fontSize:15, fontWeight:800, marginTop:6 }}>{d.name}</div>
+              <div style={{ fontSize:13, fontWeight:800, color:C.navy, background:C.gray, borderRadius:8, padding:"6px 10px", marginTop:6, display:"inline-block" }}>
+                目標：{d.total_target}本中ミス{d.miss_allowance}本以内
+              </div>
+            </div>
+            <div style={{ display:"flex", alignItems:"flex-start" }} onClick={e=>e.stopPropagation()}>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:16, fontWeight:900 }}>{total}<span style={{ fontSize:10, color:C.textSec, fontWeight:700 }}>本</span></div>
+                <div style={{ fontSize:9.5, color:C.textSec }}>累計実施</div>
+                <div style={{ fontSize:14, fontWeight:900, color: miss>0?C.red:C.textSec, marginTop:3 }}>{miss}<span style={{ fontSize:10, color:C.textSec, fontWeight:700 }}>回</span></div>
+                <div style={{ fontSize:9.5, color:C.textSec }}>累計ミス</div>
+              </div>
+              <div onClick={()=>setOpenMenuId(openMenuId===d.id?null:d.id)}
+                style={{ width:26,height:26,borderRadius:8,border:`1px solid ${C.border}`,color:C.textSec,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,background:"#fff",flexShrink:0,marginLeft:8,cursor:"pointer",position:"relative" }}
+              >⋯
+                {openMenuId===d.id && (
+                  <>
+                    <div style={{ position:"fixed", inset:0, zIndex:9 }} onClick={ev=>{ ev.stopPropagation(); setOpenMenuId(null); }} />
+                    <div style={{ position:"absolute", right:0, top:30, width:170, background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", overflow:"hidden", zIndex:10 }}>
+                      <button style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", background:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }} onClick={ev=>{ ev.stopPropagation(); openEdit(d); }}>✏️ 編集する</button>
+                      <button style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:`1px solid ${C.border}`, background:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }} onClick={ev=>{ ev.stopPropagation(); copyDrill(d); }}>📋 コピーして新規作成</button>
+                      <button style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:`1px solid ${C.border}`, background:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", color:C.red }} onClick={ev=>{ ev.stopPropagation(); removeDrill(d.id); }}>🗑 削除する</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <div style={{ height:7, background:C.gray, borderRadius:4, overflow:"hidden" }}>
+            <div style={{ width:`${rate ?? 0}%`, height:"100%", background:color }} />
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:6, fontSize:11 }}>
+            <span style={{ color:C.textSec }}>{lastDate ? `最終実施：${fmtDate(lastDate)}` : "まだ記録がありません"}</span>
+            <span style={{ color, fontWeight:800 }}>{rate!=null ? `平均${rate}%` : "記録する →"}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function FormBody(){
+    const detailOpts = [...practiceDetailOptions(formCat), ...(customDetails[formCat]||[])];
+    const catOpts = [...PRACTICE_CATEGORY_OPTIONS, ...customCats];
+    const baseCourseOpts = practiceCourseOptions(formCat);
+    const courseOpts = baseCourseOpts ? [...baseCourseOpts, ...(customCourses[formCat]||[])] : null;
+    const missTooHigh = Number(formMiss) > Number(formTotal);
+    const computedRate = formTotal>0 && !missTooHigh ? Math.round(((formTotal-formMiss)/formTotal)*100) : null;
+    return (
+      <>
+        <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"4px 0 6px" }}>① 種類を選ぶ</div>
+        <PracticeChipSelect options={catOpts} value={formCat}
+          onChange={c=>{ setFormCat(c); setFormDetail(practiceDetailOptions(c)[0]); setFormCourses([]); }}
+          onAddCustom={label=>{ setCustomCats(cs=>cs.includes(label)?cs:[...cs,label]); setFormCat(label); setFormDetail(""); setFormCourses([]); }}
+        />
+
+        <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"14px 0 6px" }}>② 詳細</div>
+        <PracticeChipSelect options={detailOpts} value={formDetail} onChange={setFormDetail}
+          onAddCustom={label=>{ setCustomDetails(cd=>({ ...cd, [formCat]:[...(cd[formCat]||[]), label] })); setFormDetail(label); }}
+        />
+
+        {courseOpts && (
+          <>
+            <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"14px 0 6px" }}>③ 狙うコース（複数選択可）</div>
+            <PracticeChipSelect options={courseOpts} value={formCourses} onChange={setFormCourses} multi
+              onAddCustom={label=>{ setCustomCourses(cc=>({ ...cc, [formCat]:[...(cc[formCat]||[]), label] })); setFormCourses(fc=>[...fc,label]); }}
+            />
+          </>
+        )}
+
+        <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"14px 0 6px" }}>④ メニュー名（自動生成・編集可）</div>
+        <input value={formName || practiceAutoName(formCat, formDetail, formCourses)} onChange={e=>setFormName(e.target.value)}
+          style={{ width:"100%", padding:12, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14 }} />
+
+        <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"14px 0 6px" }}>⑤ 目標を設定</div>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:10.5, color:C.textSec, marginBottom:4 }}>総回数</div>
+            <input type="number" value={formTotal} onChange={e=>setFormTotal(e.target.value)}
+              style={{ width:"100%", padding:12, border:`1px solid ${missTooHigh?C.red:C.border}`, borderRadius:10, fontSize:14 }} />
+          </div>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:10.5, color:C.textSec, marginBottom:4 }}>ミス許容回数</div>
+            <input type="number" value={formMiss} onChange={e=>setFormMiss(e.target.value)}
+              style={{ width:"100%", padding:12, border:`1px solid ${missTooHigh?C.red:C.border}`, borderRadius:10, fontSize:14 }} />
+          </div>
+        </div>
+        {missTooHigh ? (
+          <div style={{ background:C.redL, borderRadius:10, padding:12, marginTop:10, fontSize:12, color:C.red, fontWeight:700 }}>⚠ ミス許容回数は総回数以下にしてください</div>
+        ) : (
+          <div style={{ background:C.gray, borderRadius:10, padding:12, marginTop:10, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <span style={{ fontSize:11.5, color:C.textSec }}>目標成功率（自動計算）</span>
+            <span style={{ fontSize:20, fontWeight:900, color:C.accent }}>{computedRate}%</span>
+          </div>
+        )}
+
+        <button disabled={missTooHigh} onClick={saveForm}
+          style={{ width:"100%", padding:14, background:missTooHigh?C.border:C.navy, color:missTooHigh?C.textSec:"#fff", borderRadius:12, textAlign:"center", fontWeight:800, fontSize:15, marginTop:20, border:"none", cursor:missTooHigh?"not-allowed":"pointer" }}
+        >この内容で保存する</button>
+      </>
+    );
+  }
+
+  function SelectBody(){
+    return (
+      <>
+        <div style={{ fontSize:11, color:C.textSec, marginBottom:12 }}>やる練習にチェックを入れてください（複数選択可）</div>
+        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+          <div onClick={()=>setSelectedIds(drills.map(d=>d.id))} style={{ flex:1, textAlign:"center", padding:"10px 0", borderRadius:9, border:`1px solid ${C.border}`, fontSize:12.5, fontWeight:700, color:C.navy, cursor:"pointer" }}>✓ すべて選択</div>
+          <div onClick={()=>setSelectedIds([])} style={{ flex:1, textAlign:"center", padding:"10px 0", borderRadius:9, border:`1px solid ${C.border}`, fontSize:12.5, fontWeight:700, color:C.textSec, cursor:"pointer" }}>✕ クリア</div>
+        </div>
+        {drills.map(d=>{
+          const sel = selectedIds.includes(d.id);
+          return (
+            <div key={d.id} onClick={()=>toggleSelect(d.id)} style={{ display:"flex", alignItems:"center", gap:12, border:`1.5px solid ${sel?C.navy:C.border}`, background:sel?C.purpleL:"#fff", borderRadius:12, padding:14, marginBottom:10, cursor:"pointer" }}>
+              <div style={{ width:22,height:22,borderRadius:6,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,background:sel?C.navy:"#fff",color:sel?"#fff":"transparent",border:sel?"none":`1.5px solid ${C.border}` }}>{sel?"✓":""}</div>
+              <div>
+                <span style={{ fontSize:15, fontWeight:800, color:C.purple, background:C.purpleL, borderRadius:6, padding:"2px 7px" }}>{d.category}・{d.detail}</span>
+                <div style={{ fontSize:15, fontWeight:800, marginTop:6 }}>{d.name}</div>
+              </div>
+            </div>
+          );
+        })}
+        <button onClick={startSession} disabled={!selectedIds.length}
+          style={{ width:"100%", padding:14, background:selectedIds.length?C.navy:C.border, color:"#fff", borderRadius:12, textAlign:"center", fontWeight:800, fontSize:15, marginTop:8, border:"none", cursor:selectedIds.length?"pointer":"not-allowed" }}
+        >選択した{selectedIds.length}件を開始する →</button>
+      </>
+    );
+  }
+
+  function RecordBody(){
+    const drill = drills.find(d=>d.id===session.order[session.idx]);
+    if (!drill) return null;
+    const counts = session.counts[drill.id] || { success:0, fail:0 };
+    const total = counts.success+counts.fail;
+    const rate = practiceRate(total, counts.fail);
+    const goalRate = drill.total_target>0 ? Math.round(((drill.total_target-drill.miss_allowance)/drill.total_target)*100) : 0;
+    const achieved = rate!=null && rate>=goalRate;
+    return (
+      <>
+        <div style={{ fontSize:12, color:C.textSec, marginBottom:4 }}>{session.idx+1} / {session.order.length}件目</div>
+        <div style={{ fontSize:17, fontWeight:800, marginBottom:14 }}>{drill.name}</div>
+        <div style={{ border:`1px solid ${C.border}`, borderRadius:10, padding:12, textAlign:"center", marginBottom:10 }}>
+          <span style={{ fontSize:11, color:C.textSec }}>目標：{drill.total_target}本中ミス{drill.miss_allowance}本以内</span>
+        </div>
+        <div style={{ textAlign:"center", fontSize:12, color:C.textSec, marginBottom:10 }}>タップして記録</div>
+        <div style={{ display:"flex", gap:12, marginBottom:16 }}>
+          <button onClick={()=>tapCount(drill.id,"success")} style={{ flex:1, height:70, borderRadius:14, border:"none", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2, color:"#fff", background:C.accent, boxShadow:"0 3px 10px rgba(0,194,122,0.35)", cursor:"pointer" }}>
+            <span style={{ fontSize:22, fontWeight:900, lineHeight:1 }}>○</span>
+            <span style={{ fontSize:19, fontWeight:800 }}>{counts.success}</span>
+            <span style={{ fontSize:10.5, opacity:0.85 }}>成功（タップで+1）</span>
+          </button>
+          <button onClick={()=>tapCount(drill.id,"fail")} style={{ flex:1, height:70, borderRadius:14, border:"none", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:2, color:"#fff", background:C.red, boxShadow:"0 3px 10px rgba(229,57,53,0.35)", cursor:"pointer" }}>
+            <span style={{ fontSize:22, fontWeight:900, lineHeight:1 }}>×</span>
+            <span style={{ fontSize:19, fontWeight:800 }}>{counts.fail}</span>
+            <span style={{ fontSize:10.5, opacity:0.85 }}>失敗（タップで+1）</span>
+          </button>
+        </div>
+        <div style={{ background:C.gray, borderRadius:12, padding:16, textAlign:"center" }}>
+          <div style={{ fontSize:30, fontWeight:900, color: rate!=null?practiceTierColor(rate):C.textSec }}>{rate!=null?`${rate}%`:"—"}</div>
+          <div style={{ fontSize:11, color:C.textSec }}>現在の成功率（{total}本中{counts.success}本）</div>
+          <div style={{ display:"flex", justifyContent:"center", gap:16, marginTop:8, fontSize:11.5, color:C.textSec }}>
+            <span>目標 {goalRate}%</span>
+            {total>0 && <span style={{ color:achieved?C.accent:C.orange, fontWeight:800 }}>{achieved?"○ 目標達成！":"× 目標未達"}</span>}
+          </div>
+        </div>
+        <button onClick={nextDrill} style={{ width:"100%", padding:14, background:C.navy, color:"#fff", borderRadius:12, textAlign:"center", fontWeight:800, fontSize:15, marginTop:20, border:"none", cursor:"pointer" }}>
+          {session.idx+1 < session.order.length ? `保存して次へ（${session.idx+2}/${session.order.length}）→` : "保存して完了する"}
+        </button>
+      </>
+    );
+  }
+
+  function CalendarBody(){
+    const { y, m } = calMonth;
+    const first = new Date(y, m, 1);
+    const startOffset = first.getDay();
+    const daysInMonth = new Date(y, m+1, 0).getDate();
+    const todayS = todayDateStr();
+    const cells = [];
+    for (let i=0;i<startOffset;i++) cells.push(null);
+    for (let d=1;d<=daysInMonth;d++) cells.push(d);
+
+    function dayInfo(d){
+      const ds = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const rows = logs.filter(l=>l.log_date===ds);
+      if (!rows.length) return { rows:null, ok:null, ds };
+      const ok = rows.every(r=>{
+        const drill = drills.find(dr=>dr.id===r.drill_id);
+        if (!drill) return true;
+        const goal = drill.total_target>0 ? Math.round(((drill.total_target-drill.miss_allowance)/drill.total_target)*100) : 0;
+        const total = r.success_count+r.fail_count;
+        const rate = practiceRate(total, r.fail_count);
+        return rate!=null && rate>=goal;
+      });
+      return { rows, ok, ds };
+    }
+
+    const openInfo = openDay ? dayInfo(Number(openDay.slice(-2))) : null;
+
+    return (
+      <>
+        <div style={{ border:`1px solid ${C.border}`, borderRadius:12, padding:14 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <span onClick={()=>setCalMonth(({y,m})=> m===0?{y:y-1,m:11}:{y,m:m-1})} style={{ fontSize:16, cursor:"pointer", padding:"0 8px" }}>‹</span>
+            <span style={{ fontSize:14, fontWeight:800 }}>{y}年{m+1}月</span>
+            <span onClick={()=>setCalMonth(({y,m})=> m===11?{y:y+1,m:0}:{y,m:m+1})} style={{ fontSize:16, cursor:"pointer", padding:"0 8px" }}>›</span>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, textAlign:"center" }}>
+            {["日","月","火","水","木","金","土"].map(w=><div key={w} style={{ fontSize:10, color:C.textSec, fontWeight:700, paddingBottom:4 }}>{w}</div>)}
+            {cells.map((d,i)=>{
+              if (d==null) return <div key={i} />;
+              const { ok, ds } = dayInfo(d);
+              const isToday = ds===todayS;
+              let bg="transparent", color=C.text, fontWeight=400;
+              if (ok===true){ bg=C.accentL; color=C.accent; fontWeight=800; }
+              else if (ok===false){ bg=C.redL; color=C.red; fontWeight=800; }
+              return (
+                <div key={i} onClick={()=> ok!==null && setOpenDay(ds)} style={{ aspectRatio:"1", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, background:bg, color, fontWeight, border:isToday?`2px solid ${C.navy}`:"none", cursor: ok!==null?"pointer":"default" }}>{d}</div>
+              );
+            })}
+          </div>
+          <div style={{ display:"flex", gap:14, marginTop:10, fontSize:10, color:C.textSec }}>
+            <span>🟢 目標達成</span><span>🔴 目標未達</span>
+          </div>
+        </div>
+
+        {openDay && (
+          <div style={{ border:`1px solid ${C.border}`, borderRadius:12, padding:14, marginTop:12 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>📅 {fmtDate(openDay)} の練習記録</div>
+            {logs.filter(l=>l.log_date===openDay).map((l,i)=>{
+              const drill = drills.find(dr=>dr.id===l.drill_id);
+              const total = l.success_count+l.fail_count;
+              const rate = practiceRate(total, l.fail_count);
+              return (
+                <div key={l.id} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${C.border}`, fontSize:12.5 }}>
+                  <span>{drill?drill.name:"（削除済みメニュー）"}</span>
+                  <span style={{ color:practiceTierColor(rate), fontWeight:800 }}>{rate!=null?`${rate}%（${total}本中${l.success_count}本）`:"—"}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80 }}>
+      <div style={{ background:C.navy, color:"#fff", padding:"18px 16px 14px", fontSize:20, fontWeight:800 }}>練習</div>
+      <div style={{ padding:14 }}>
+        <div style={{ display:"flex", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12 }}>
+          {[["list","📋 一覧"],["calendar","📅 カレンダー"]].map(([k,l])=>(
+            <div key={k} onClick={()=>setTab(k)} style={{ flex:1, textAlign:"center", padding:"12px 0", fontSize:13, fontWeight:700, cursor:"pointer", background:tab===k?C.navy:"#fff", color:tab===k?"#fff":C.textSec }}>{l}</div>
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:60 }}>読み込み中...</div>
+        ) : tab==="list" ? (
+          <>
+            <div style={{ fontSize:10.5, color:C.textSec, marginBottom:10 }}>※カードをタップすると編集画面が開きます</div>
+            <div onClick={()=>{ setSelectedIds(drills.map(d=>d.id)); setShowSelect(true); }} style={{ background:C.navy, color:"#fff", borderRadius:12, padding:14, marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
+              <span style={{ fontSize:13, fontWeight:800 }}>▶ 今日の練習を選んで始める</span>
+              <span style={{ fontSize:16 }}>›</span>
+            </div>
+            {drills.length===0 && <div style={{ textAlign:"center", color:C.textSec, marginTop:40 }}><div style={{ fontSize:32, marginBottom:8 }}>🎯</div>まだ練習メニューがありません<br/>右下の＋から追加してください</div>}
+            {drills.map(d=><DrillCard key={d.id} d={d} />)}
+          </>
+        ) : (
+          <CalendarBody />
+        )}
+      </div>
+
+      {tab==="list" && !loading && (
+        <button onClick={openCreate} style={{ position:"fixed", right:20, bottom:80, width:52, height:52, borderRadius:"50%", background:C.navy, color:"#fff", border:"none", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, boxShadow:"0 4px 14px rgba(0,0,0,0.25)", cursor:"pointer", zIndex:10 }}>＋</button>
+      )}
+
+      <NavBar active="practice" onNavigate={onNavigate} />
+
+      {showForm && (
+        <FullScreenSheet title={editingDrill ? "練習メニューを編集" : "＋ 練習メニューを追加"} onClose={()=>setShowForm(false)}>
+          <FormBody />
+        </FullScreenSheet>
+      )}
+      {showSelect && (
+        <FullScreenSheet title="今日の練習を選ぶ" onClose={()=>setShowSelect(false)}>
+          <SelectBody />
+        </FullScreenSheet>
+      )}
+      {session && (
+        <FullScreenSheet title="練習結果を記録" onClose={()=>{ if (window.confirm("記録を中断しますか？途中までの記録は保存されません")) setSession(null); }}>
+          <RecordBody />
+        </FullScreenSheet>
+      )}
+      {showSummary && (
+        <FullScreenSheet title="練習完了" onClose={()=>setShowSummary(false)}>
+          <div style={{ fontSize:17, fontWeight:800, marginBottom:14 }}>お疲れさまでした！</div>
+          <div style={{ border:`1px solid ${C.border}`, borderRadius:12, padding:14 }}>
+            <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>📋 今日の練習結果（{summaryResults.length}件）</div>
+            {summaryResults.map((r,i)=>(
+              <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom: i<summaryResults.length-1?`1px solid ${C.border}`:"none", fontSize:12.5 }}>
+                <span>{r.name}</span>
+                <span style={{ color:practiceTierColor(r.rate), fontWeight:800 }}>{r.rate!=null?`${r.rate}%（${r.total}本中${r.success}本）`:"—"}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={()=>{ setShowSummary(false); setTab("list"); }} style={{ width:"100%", padding:14, background:C.accent, color:"#fff", borderRadius:12, textAlign:"center", fontWeight:800, fontSize:15, marginTop:20, border:"none", cursor:"pointer" }}>
+            練習メニュー一覧に戻る
+          </button>
+        </FullScreenSheet>
       )}
     </div>
   );
@@ -13797,7 +14370,7 @@ export default function App() {
   // ★下部ナビゲーション（ホーム/履歴/分析/マスター）の共通遷移ハンドラ
   function goNav(key) {
     // 現在表示中の画面と同じタブを押しても何もしない
-    const screenMap = { home:"home", list:"list", video:"video", stats:"personalAnalysis", master:"master" };
+    const screenMap = { home:"home", list:"list", video:"video", stats:"personalAnalysis", master:"master", practice:"practice" };
     if (screen === screenMap[key]) return;
     setTournamentContext(null); // ボトムナビでの移動時は大会の文脈から抜ける
     if (key==="home") setScreen("home");
@@ -13805,6 +14378,7 @@ export default function App() {
     else if (key==="video") setScreen("video");
     else if (key==="stats") setScreen("personalAnalysis");
     else if (key==="master") setScreen("master");
+    else if (key==="practice") setScreen("practice");
   }
 
   if (screen==="home") {
@@ -13828,6 +14402,9 @@ export default function App() {
       pickedFile={vrPickedFile} setPickedFile={setVrPickedFile}
       videoObjectUrl={vrVideoObjectUrl} setVideoObjectUrl={setVrVideoObjectUrl}
     />;
+  }
+  if (screen==="practice") {
+    return <PracticeScreen onNavigate={goNav} />;
   }
   if (screen==="master") {
     return (
