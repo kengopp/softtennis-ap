@@ -1543,7 +1543,35 @@ async function clearAllBlocksDraw(tournamentId, category) {
   return { cleared: remaining === 0, remaining };
 }
 
-// draw_matches に、それぞれの側（サイドA/B）のエントリー情報（学校名・選手名）を付けて取得する
+// ★ドローを完全に削除する（対戦の枠・選手の割り当て・記録済みの勝敗を含めて全て削除）。
+//   ドローの枠から実際の試合（matches）が作られていた場合、その試合データ自体は削除せず、
+//   ドローとの紐付けだけを外す（matches.tournament_id等は変更しない。試合は「試合一覧」に残る）。
+async function deleteEntireDraw(tournamentId, category) {
+  const { data: rows, error: fetchErr } = await supabase
+    .from("draw_matches")
+    .select("id")
+    .eq("tournament_id", tournamentId)
+    .eq("category", category);
+  if (fetchErr) throw fetchErr;
+
+  const { error: delMatchesErr } = await supabase
+    .from("draw_matches")
+    .delete()
+    .eq("tournament_id", tournamentId)
+    .eq("category", category);
+  if (delMatchesErr) throw delMatchesErr;
+
+  const { error: delEntriesErr } = await supabase
+    .from("draw_entries")
+    .delete()
+    .eq("tournament_id", tournamentId)
+    .eq("category", category);
+  if (delEntriesErr) throw delEntriesErr;
+
+  return { deletedDrawMatches: rows?.length ?? 0 };
+}
+
+
 // （大会詳細のトーナメント表表示用）
 async function getDrawMatchesWithEntries(tournamentId, category, blockLabel) {
   const matches = await getDrawMatches(tournamentId, category, blockLabel);
@@ -4442,7 +4470,30 @@ function DrawSetup({ tournament, category, onBack }) {
     }
   };
 
-  // 「この内容でドローを作成」：ブロックが1つでもあれば全ブロックをまとめて保存する。
+  // ★ドローを完全に削除する（対戦情報・記録済み結果を含めて全て削除。作られた試合自体は削除せず一覧に残す）
+  const handleDeleteEntireDraw = async () => {
+    if (!window.confirm(
+      "このドローを完全に削除しますか？\n\n選手の割り当てや記録済みの勝敗を含め、対戦の枠が全て削除されます。\n（すでに記録した試合データ自体は削除されず、試合一覧には残ります）\n\nこの操作は取り消せません。"
+    )) return;
+    setSaving(true);
+    try {
+      await deleteEntireDraw(tournament.id, catMode);
+      setBlockLabels([]);
+      setCurrentScope("ALL");
+      const allData = await fetchScopeData(catMode, "ALL");
+      setLoadedScopes({ ALL: true });
+      setScopeMatchCounts({ ALL: allData.matchCounts });
+      setScopeDirty({ ALL: allData.matchCounts.map(() => false) });
+      setScopeRoundInput({ ALL: allData.roundInput });
+      alert("ドローを削除しました。");
+    } catch (e) {
+      alert("削除エラー: " + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+
   // ブロック分けが確定した場合は、旧「すべて（ブロックなし）」のドローが残っていれば片付ける。
   const handleCreate = async (openBulkDirectly = false) => {
     setSaving(true);
@@ -4618,6 +4669,14 @@ function DrawSetup({ tournament, category, onBack }) {
           >📋 この内容で作成して、一覧から一括登録へ</button>
           <div style={{ fontSize: 11, color: C.textSec, textAlign: "center", marginTop: 10 }}>
             作成すると「未定 vs 未定・予定」の空枠が各回戦に設定した試合数ぶん自動生成されます。棄権・不戦勝は、枠をタップして開く対戦情報入力画面から個別に設定できます。
+          </div>
+
+          <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid " + C.border, textAlign: "center" }}>
+            <button
+              disabled={saving}
+              style={{ background: "none", border: "none", color: C.red, fontSize: 12, fontWeight: 700, textDecoration: "underline", cursor: "pointer", opacity: saving ? 0.6 : 1 }}
+              onClick={handleDeleteEntireDraw}
+            >🗑 このドローを完全に削除する</button>
           </div>
         </div>
       )}
