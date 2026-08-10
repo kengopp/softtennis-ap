@@ -7597,7 +7597,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
     }
   }, [editId]);
 
-  const canSave = opponentName.trim() && isYounger !== null;
+  const canSave = isYounger !== null;
 
   async function handleSave() {
     setSaving(true);
@@ -7695,8 +7695,8 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           <FormRow label="自チーム区分（任意）">
             <VenueField value={myTeamDivision} onChange={setMyTeamDivision} venues={pastDivisions} placeholder="例：Aチーム"/>
           </FormRow>
-          <FormRow label="相手校名（必須）" labelRight={<PrefMiniFilter value={oppPrefFilter} onChange={setOppPrefFilter} options={knownPrefsFrom(schools)} />}>
-            <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業" prefFilter={oppPrefFilter}/>
+          <FormRow label="相手校名（任意）" labelRight={<PrefMiniFilter value={oppPrefFilter} onChange={setOppPrefFilter} options={knownPrefsFrom(schools)} />}>
+            <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業（未定なら空欄でOK）" prefFilter={oppPrefFilter}/>
           </FormRow>
           <FormRow label="相手チーム区分（任意）">
             <input style={S.inp} placeholder="例：Bチーム" value={opponentDivision} onChange={e=>setOpponentDivision(e.target.value)}/>
