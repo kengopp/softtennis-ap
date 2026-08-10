@@ -10553,6 +10553,12 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
 
 function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
+  // ★観戦モード（閲覧のみ）では、親から渡されるinitialMatchが「最新に更新」で
+  // 　差し替わった時にこの内部stateへ反映されないと画面が更新されない。
+  // 　（useState(initialMatch)は初回マウント時の値しか使わないため）
+  useEffect(() => {
+    if (viewOnly) setMatch(initialMatch);
+  }, [initialMatch, viewOnly]);
   const [tab,    setTab]    = useState("record");
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
