@@ -1995,7 +1995,12 @@ function calcPlayerStats(match) {
       if (receiverPlayer) {
         const r = ensure(receiveTeam, receiverPlayer);
         r.receiveTotal++;
-        if (pt.play_type==="receive" && pt.result_type==="error" && pt.player_name===receiverPlayer) r.receiveMiss++;
+      }
+      // ★分子（ミス数）は実際にそのポイントで記録された選手名をそのまま使う（ローテーション推定に頼らない）。
+      // 　分母（レシーブ機会数）は上のreceiveTotalの通りローテーションからの推定値のまま。
+      if (pt.play_type==="receive" && pt.result_type==="error" && pt.player_name && teamOf[pt.player_name]===receiveTeam) {
+        const rMiss = ensure(receiveTeam, pt.player_name);
+        rMiss.receiveMiss++;
       }
 
       if (serverTeam==="A") serveTurnA++; else serveTurnB++;
@@ -6614,7 +6619,7 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         >
           <div>
             <div style={{ fontSize:14,fontWeight:700 }}>🎯 目標設定</div>
-            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・レシーブミス率などチーム共通の目標<br/>（編集は管理者専用）</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・決めたプレイ回数などチーム共通の目標<br/>（編集は管理者専用）</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
@@ -7173,10 +7178,9 @@ function GoalSettingsScreen({ onBack }) {
             <div style={{ fontSize:11,color:C.textSec,marginBottom:14 }}>ここで設定した目標は、チーム全選手のスタッツ画面に共通で適用されます</div>
             <div style={{ ...S.card, padding:14, display:"grid", gridTemplateColumns:"1fr 68px 56px", columnGap:8, rowGap:14, alignItems:"center" }}>
               {row("①", "1stサーブ確率", firstServe, setFirstServe, "%以上")}
-              {row("②", "レシーブミス率", receiveMiss, setReceiveMiss, "%以下")}
-              {row("③", "決めたプレイ回数", winnerCount, setWinnerCount, "回以上")}
-              {row("④", "ミスしたプレイ回数", errorCount, setErrorCount, "回以下")}
-              {row("⑤", "得点差（決めた−ミス）", pointDiff, setPointDiff, "以上")}
+              {row("②", "決めたプレイ回数", winnerCount, setWinnerCount, "回以上")}
+              {row("③", "ミスしたプレイ回数", errorCount, setErrorCount, "回以下")}
+              {row("④", "得点差（決めた−ミス）", pointDiff, setPointDiff, "以上")}
             </div>
             {canEditNow && (
               <>
@@ -8024,7 +8028,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 ) : (
                   <div style={{ fontSize:12,color:C.textSec,marginBottom:8 }}>ペア未登録</div>
                 )}
-                {canOperateGame(game) && (
+                {canOperateGame(game) ? (
                   <>
                     {/* ペア登録済みで未開始 → 試合開始ボタン（選び直しではなく直接開始） */}
                     {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
@@ -8074,6 +8078,26 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                       </button>
                     )}
                   </>
+                ) : (
+                  // ★ロック（recorder_id）が残っているのに進行中でもない＝操作不能になっている状態。
+                  //   本来は中断・終了時にrecorder_idが自動で外れるが、通信断や画面を閉じただけで
+                  //   ロックだけ残ってしまうことがあるため、手動で解除できる手段を用意する。
+                  !isRecording && (
+                    <button
+                      style={{ ...S.btn("#fdecea"), color:C.red, fontSize:12, marginTop:8, border:`1px solid #f5c6c0` }}
+                      onClick={async ()=>{
+                        if (!window.confirm("この番手の操作ロックを解除しますか？\n（他の人が今まさに記録中でないことを確認してください）")) return;
+                        try {
+                          await updateTeamMatchGame(game.id, { recorder_id:null, recorder_name:null });
+                          await loadData({ markAsChanged:true });
+                        } catch(e) {
+                          alert("エラー: " + (e.message || e));
+                        }
+                      }}
+                    >
+                      🔓 操作できないためロックを解除する
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -8183,13 +8207,26 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
 // ============================================================
 function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOnly, onCancel }) {
   const [tm, setTm] = useState(null);
+  const [participantIds, setParticipantIds] = useState(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    getTeamMatch(teamMatchId).then(data => {
+    (async () => {
+      const data = await getTeamMatch(teamMatchId);
       setTm(data);
+      // ★このチーム戦がどの大会に属しているかは団体戦側にtournament_idの列がないため、
+      //   大会名＋日付（大会の開催期間内かどうか）で該当する大会を探し、
+      //   その大会の「参加選手」リストがあればペア選択の候補をそこだけに絞り込む。
+      if (data?.tournament_name) {
+        const tournaments = await getTournaments();
+        const match = tournaments.find(t =>
+          t.name === data.tournament_name &&
+          (!data.match_date || !t.start_date || (data.match_date >= t.start_date && data.match_date <= (t.end_date || t.start_date)))
+        ) || tournaments.find(t => t.name === data.tournament_name);
+        if (match?.participant_player_ids?.length) setParticipantIds(match.participant_player_ids);
+      }
       setReady(true);
-    });
+    })();
   }, [teamMatchId]);
 
   if (!ready) return <div style={S.page}><div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div></div>;
@@ -8212,6 +8249,7 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOn
       teamMatchMyDivision={tm?.my_team_division || ""}
       teamMatchOppDivision={tm?.opponent_division || ""}
       teamMatchMySchoolId={tm?.my_school_id || null}
+      tournamentParticipantIds={participantIds || undefined}
       onScheduled={null}
       onSave={onSave}
       onSavePairOnly={onSavePairOnly}
@@ -8684,7 +8722,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const oldestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([oldestM], selectedPlayer, effectiveSchoolName)) : null;
   const newestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([newestM], selectedPlayer, effectiveSchoolName)) : null;
 
-  const metricLabel = { serveRate:"1stサーブ成功率", receiveMissRate:"レシーブミス率", decisionRate:"決定率" };
+  // ★レシーブミス率は算出方法が複雑で誤差が出やすいため、比較表からは外す（内部計算・keyRatesFromAggは維持）
+  const metricLabel = { serveRate:"1stサーブ成功率", decisionRate:"決定率" };
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
@@ -11961,21 +12000,13 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                       </div>
                     );
                   })()}
-                  {p.receiveTotal>0&&(()=>{
-                    const rate=Math.round(p.receiveMiss/p.receiveTotal*100);
-                    const good = hasGoals && goals.goal_receive_miss_pct!=null ? rate<=goals.goal_receive_miss_pct : null;
-                    const barColor = good===null?C.red:(good?C.accent:C.red);
-                    return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
-                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス率</span>
-                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
-                          {p.receiveMiss}/{p.receiveTotal}・{rate}%
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
-                        </span>
-                        <div style={{ flex:1,maxWidth:"50%",height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
-                      </div>
-                    );
-                  })()}
+                  {/* ★レシーブミス率（%）は算出方法が複雑で誤差が出やすいため、実際に記録された回数のみ表示する */}
+                  {(p.playsErr["receive"]||0)>0&&(
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
+                      <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス</span>
+                      <span style={{ fontSize:11,fontWeight:700,color:C.red,whiteSpace:"nowrap",flexShrink:0 }}>{p.playsErr["receive"]}回</span>
+                    </div>
+                  )}
                 </>
               )}
 
