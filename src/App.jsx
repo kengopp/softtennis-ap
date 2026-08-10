@@ -9713,9 +9713,9 @@ function PrefMiniFilter({ value, onChange, options }) {
 // 会場名入力＋候補サジェストコンポーネント
 // 何回戦の選択肢（決め打ちリスト＋自由入力）
 const ROUND_OPTIONS = [
-  "1回戦","2回戦","3回戦","4回戦","5回戦","6回戦","7回戦","8回戦","9回戦",
+  "リーグ","トーナメント",
+  "1回戦","2回戦","3回戦","4回戦","5回戦",
   "準々決勝","準決勝","3位決定戦","決勝",
-  "敗者復活1回戦","敗者復活2回戦","敗者復活3回戦","敗者復活4回戦","敗者復活5回戦",
 ];
 function RoundField({ value, onChange, placeholder }) {
   const isPreset = ROUND_OPTIONS.includes(value);
@@ -9731,8 +9731,8 @@ function RoundField({ value, onChange, placeholder }) {
         }}
       >
         <option value="">リストから選択</option>
-        {ROUND_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
         <option value="__custom__">✏️ 自由入力する</option>
+        {ROUND_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
       </select>
       {customMode && (
         <input
