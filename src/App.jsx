@@ -3562,6 +3562,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
   const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
+  const [showPairSummary, setShowPairSummary] = useState(true); // ★団体戦タブの「ペア成績」開閉
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
 
@@ -3696,6 +3697,50 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"10px 14px 0", background:"#f7f9fc", borderRadius:10, padding:"11px 14px" }}>
             <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec }}>{seg==="team" ? "🏆 団体戦成績" : "🎾 個人戦成績"}</span>
             <span style={{ fontSize:17, fontWeight:800, color:C.text }}>{total>0 ? `${win}勝${lose}敗` : "ー"}</span>
+          </div>
+        );
+      })()}
+
+      {!loading && seg==="team" && (() => {
+        // ★団体戦タブ：大会内の自チームの各ペア（1番手・2番手…に入った選手の組み合わせ）を
+        //   横断して合計勝敗を集計し、勝率が高い順（同率なら勝ち数が多い順）に表示する。
+        const matchById = {};
+        matches.forEach(m => { matchById[m.id] = m; });
+        const pairMap = {};
+        teamMatches.forEach(tm => {
+          (tm.games || []).forEach(g => {
+            const m = g.match_id ? matchById[g.match_id] : null;
+            if (!m || m.status !== "finished") return;
+            const names = (m.players || []).filter(p => p.team === "A").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
+            if (!names) return;
+            if (!pairMap[names]) pairMap[names] = { names, win:0, lose:0 };
+            if (m.match_score_a > m.match_score_b) pairMap[names].win++;
+            else if (m.match_score_a < m.match_score_b) pairMap[names].lose++;
+          });
+        });
+        const pairRows = Object.values(pairMap).sort((a,b) => {
+          const totalA = a.win + a.lose, totalB = b.win + b.lose;
+          const rateA = totalA ? a.win/totalA : 0, rateB = totalB ? b.win/totalB : 0;
+          if (rateB !== rateA) return rateB - rateA;
+          return b.win - a.win;
+        });
+        if (pairRows.length === 0) return null;
+        return (
+          <div style={{ margin:"8px 14px 0", background:C.white, borderRadius:10, border:"1px solid "+C.border, overflow:"hidden" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background:"#fafbfc", cursor:"pointer" }} onClick={()=>setShowPairSummary(v=>!v)}>
+              <span style={{ fontSize:12, fontWeight:700, color:C.navy }}>📋 ペア成績</span>
+              <span style={{ fontSize:12, color:C.textSec }}>{showPairSummary ? "▲" : "▼"}</span>
+            </div>
+            {showPairSummary && pairRows.map(r => {
+              const total = r.win + r.lose;
+              const mixed = r.win>0 && r.lose>0;
+              return (
+                <div key={r.names} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"9px 14px", borderTop:"1px solid "+C.border }}>
+                  <span style={{ fontSize:12.5, fontWeight:700, color:C.text }}>{r.names}</span>
+                  <span style={{ fontSize:13, fontWeight:800, color: r.lose===0 ? C.accent : mixed ? C.orange : C.teamB }}>{r.win}勝{r.lose}敗</span>
+                </div>
+              );
+            })}
           </div>
         );
       })()}
