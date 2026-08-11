@@ -3558,6 +3558,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
   const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
   const [showPairSummary, setShowPairSummary] = useState(false); // ★団体戦タブの「ペア成績」開閉
+  const [simpleTeamResultFor, setSimpleTeamResultFor] = useState(null); // ★団体戦の「結果だけ記録」モーダル対象
+  const [simpleTeamScoreA, setSimpleTeamScoreA] = useState("");
+  const [simpleTeamScoreB, setSimpleTeamScoreB] = useState("");
+  const [simpleTeamResultSaving, setSimpleTeamResultSaving] = useState(false);
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
 
@@ -3875,6 +3879,17 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピーして新規作成</button>
                 <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>
               </div>
+              {notStarted && (
+                <div style={{ borderTop:"1px solid "+C.border }}>
+                  <button
+                    style={{ width:"100%", padding:"9px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11.5, fontWeight:700, cursor:"pointer" }}
+                    onClick={()=>{
+                      setSimpleTeamResultFor(tm);
+                      setSimpleTeamScoreA(""); setSimpleTeamScoreB("");
+                    }}
+                  >📝 団体戦の結果だけ記録</button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -3994,6 +4009,58 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           </div>
         </Modal>
       )}
+      {simpleTeamResultFor && (() => {
+        const winTarget = simpleTeamResultFor.format === "best2" ? 2 : 3;
+        const myFullLabel = [(simpleTeamResultFor.my_school_id ? schoolMap[simpleTeamResultFor.my_school_id] : null) || mySchoolName || "自チーム", simpleTeamResultFor.my_team_division].filter(Boolean).join("");
+        const oppLabel = [simpleTeamResultFor.opponent_name, simpleTeamResultFor.opponent_division].filter(Boolean).join("") || "相手";
+        return (
+          <Modal onClose={()=>setSimpleTeamResultFor(null)}>
+            <div>
+              <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>🏆 団体戦の結果だけ記録</div>
+              <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>各番手を記録せず、団体戦の最終スコアだけ入力します</div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+                <div style={{ flex:1, textAlign:"center" }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6 }}>{myFullLabel}</div>
+                  <input type="number" inputMode="numeric" value={simpleTeamScoreA} onChange={e=>setSimpleTeamScoreA(e.target.value)}
+                    style={{ width:"100%", textAlign:"center", fontSize:26, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamA}`, color:C.teamA, boxSizing:"border-box" }} />
+                </div>
+                <div style={{ fontSize:18, color:C.textSec, marginTop:22 }}>-</div>
+                <div style={{ flex:1, textAlign:"center" }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:C.teamB, marginBottom:6 }}>{oppLabel}</div>
+                  <input type="number" inputMode="numeric" value={simpleTeamScoreB} onChange={e=>setSimpleTeamScoreB(e.target.value)}
+                    style={{ width:"100%", textAlign:"center", fontSize:26, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB, boxSizing:"border-box" }} />
+                </div>
+              </div>
+              <div style={{ fontSize:11, color:C.textSec, margin:"8px 0 14px" }}>{winTarget}勝先取（3試合中{winTarget}つ勝った方が勝利）</div>
+              <button
+                style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:4 }}
+                disabled={simpleTeamResultSaving || simpleTeamScoreA==="" || simpleTeamScoreB==="" || simpleTeamScoreA===simpleTeamScoreB}
+                onClick={async ()=>{
+                  const a = parseInt(simpleTeamScoreA,10), b = parseInt(simpleTeamScoreB,10);
+                  if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいスコアを入力してください"); return; }
+                  if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                  if (a>3 || b>3) { alert("3試合中の勝利数なので3以下で入力してください"); return; }
+                  if (Math.max(a,b) < winTarget) { alert(`${winTarget}勝先取が必要です。まだ団体戦は終了できません。`); return; }
+                  setSimpleTeamResultSaving(true);
+                  try {
+                    const { error } = await supabase.from("team_matches").update({
+                      my_score: a, opponent_score: b, status: "finished",
+                    }).eq("id", simpleTeamResultFor.id);
+                    if (error) throw error;
+                    setSimpleTeamResultFor(null);
+                    reload();
+                  } catch(e) {
+                    alert("保存エラー: " + (e.message || e));
+                  } finally {
+                    setSimpleTeamResultSaving(false);
+                  }
+                }}
+              >{simpleTeamResultSaving ? "保存中..." : "この結果で確定する"}</button>
+              <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setSimpleTeamResultFor(null)}>キャンセル</button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
@@ -8104,7 +8171,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                           onClick={()=>{
                             const aP = (match?.match_players||[]).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
                             const bP = (match?.match_players||[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
-                            setSimpleResultFor({ orderNum, game, aLabel:aPlayers||"自チーム", bLabel:bPlayers||"相手", aPlayers:aP, bPlayers:bP });
+                            setSimpleResultFor({ orderNum, game, aLabel:aPlayers||"自チーム", bLabel:bPlayers||"相手", aPlayers:aP, bPlayers:bP, gameFormat: match?.game_format ?? 7 });
                             setSimpleResultScoreA(""); setSimpleResultScoreB("");
                             setSimpleResultNamesA(aP.map(p=>p.player_name));
                             setSimpleResultNamesB(bP.map(p=>p.player_name));
@@ -8230,6 +8297,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 const a = parseInt(simpleResultScoreA,10), b = parseInt(simpleResultScoreB,10);
                 if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいゲームカウントを入力してください"); return; }
                 if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                // ★試合形式（〇Gマッチ）に必要な勝利ゲーム数に達していないスコアでは
+                //   誤って「終了」扱いにできないようにする（例：7Gマッチなのに3-1で確定してしまう不具合対策）
+                const requiredWins = calcWinGames(simpleResultFor.gameFormat ?? 7);
+                if (Math.max(a,b) < requiredWins) { alert(`${simpleResultFor.gameFormat ?? 7}Gマッチは${requiredWins}ゲーム先取が必要です。まだ試合は終了できません。`); return; }
                 setSimpleResultSaving(true);
                 try {
                   // ★選手名が編集されていれば、スコア保存の前に反映する
@@ -11554,6 +11625,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const a = parseInt(simpleScoreA,10), b = parseInt(simpleScoreB,10);
                 if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいゲームカウントを入力してください"); return; }
                 if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                const requiredWins = calcWinGames(match.game_format);
+                if (Math.max(a,b) < requiredWins) { alert(`${match.game_format}Gマッチは${requiredWins}ゲーム先取が必要です。まだ試合は終了できません。`); return; }
                 setSimpleResultSaving2(true);
                 persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished" });
                 setSimpleResultSaving2(false);
