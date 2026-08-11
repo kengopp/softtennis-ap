@@ -384,18 +384,19 @@ async function getMatches() {
   if (data.length === 0) return [];
 
   const matchIds = data.map(m => m.id);
+  // ★パフォーマンス改善：一覧表示（ホーム／試合一覧／大会詳細／各種成績画面）では
+  //   ポイント（1点ごとの記録）までは使っておらず、必要な画面は個別にgetMatch()で
+  //   詳細取得している。そのため一覧取得時はpointsを取得しないようにして、
+  //   試合数・ポイント数が増えるほど遅くなっていた問題を解消する。
   const [
     { data: playersData, error: playersErr },
     { data: gamesData,   error: gamesErr },
-    { data: pointsData,  error: pointsErr },
   ] = await Promise.all([
     supabase.from("match_players").select("*").in("match_id", matchIds).order("team").order("order_num"),
     supabase.from("games").select("*").in("match_id", matchIds).order("game_number"),
-    supabase.from("points").select("match_id,game_id,scoring_team,score_a_after,score_b_after,point_number").in("match_id", matchIds),
   ]);
   if (playersErr) console.error(playersErr);
   if (gamesErr)   console.error(gamesErr);
-  if (pointsErr)  console.error(pointsErr);
 
   const playersByMatch = {};
   (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
@@ -403,14 +404,8 @@ async function getMatches() {
   const gamesByMatch = {};
   (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
 
-  const pointsByGame = {};
-  (pointsData ?? []).forEach(pt => { (pointsByGame[pt.game_id] ??= []).push(pt); });
-
   return data.map(m => {
-    const games = (gamesByMatch[m.id] ?? []).map(g => ({
-      ...g,
-      points: (pointsByGame[g.id] ?? []).sort((a,b) => a.point_number - b.point_number),
-    }));
+    const games = (gamesByMatch[m.id] ?? []).map(g => ({ ...g, points: [] }));
     return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
   });
 }
@@ -1995,7 +1990,12 @@ function calcPlayerStats(match) {
       if (receiverPlayer) {
         const r = ensure(receiveTeam, receiverPlayer);
         r.receiveTotal++;
-        if (pt.play_type==="receive" && pt.result_type==="error" && pt.player_name===receiverPlayer) r.receiveMiss++;
+      }
+      // ★分子（ミス数）は実際にそのポイントで記録された選手名をそのまま使う（ローテーション推定に頼らない）。
+      // 　分母（レシーブ機会数）は上のreceiveTotalの通りローテーションからの推定値のまま。
+      if (pt.play_type==="receive" && pt.result_type==="error" && pt.player_name && teamOf[pt.player_name]===receiveTeam) {
+        const rMiss = ensure(receiveTeam, pt.player_name);
+        rMiss.receiveMiss++;
       }
 
       if (serverTeam==="A") serveTurnA++; else serveTurnB++;
@@ -3557,6 +3557,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
   const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
+  const [showPairSummary, setShowPairSummary] = useState(false); // ★団体戦タブの「ペア成績」開閉
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
 
@@ -3695,6 +3696,58 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         );
       })()}
 
+      {!loading && seg==="team" && (() => {
+        // ★団体戦タブ：大会内の自チームの各ペア（1番手・2番手…に入った選手の組み合わせ）を
+        //   横断して合計勝敗を集計し、勝率が高い順（同率なら勝ち数が多い順）に表示する。
+        // 　同校対決（東福岡A vs 東福岡Bなど）では両サイドとも自チームの選手なので、
+        // 　team B側もclub_nameが自校名と一致する場合はそれぞれの視点で集計に含める。
+        const matchById = {};
+        matches.forEach(m => { matchById[m.id] = m; });
+        const pairMap = {};
+        teamMatches.forEach(tm => {
+          (tm.games || []).forEach(g => {
+            const m = g.match_id ? matchById[g.match_id] : null;
+            if (!m || m.status !== "finished") return;
+            const sides = ["A"];
+            if (mySchoolName && (m.players || []).some(p => p.team === "B" && p.club_name && p.club_name.trim() === mySchoolName.trim())) {
+              sides.push("B");
+            }
+            sides.forEach(side => {
+              const names = (m.players || []).filter(p => p.team === side).sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
+              if (!names) return;
+              if (!pairMap[names]) pairMap[names] = { names, win:0, lose:0 };
+              const myScore = side === "A" ? m.match_score_a : m.match_score_b;
+              const oppScore = side === "A" ? m.match_score_b : m.match_score_a;
+              if (myScore > oppScore) pairMap[names].win++;
+              else if (myScore < oppScore) pairMap[names].lose++;
+            });
+          });
+        });
+        const pairRows = Object.values(pairMap).sort((a,b) => {
+          const totalA = a.win + a.lose, totalB = b.win + b.lose;
+          const rateA = totalA ? a.win/totalA : 0, rateB = totalB ? b.win/totalB : 0;
+          if (rateB !== rateA) return rateB - rateA;
+          return b.win - a.win;
+        });
+        if (pairRows.length === 0) return null;
+        return (
+          <div style={{ margin:"8px 14px 0", background:C.white, borderRadius:10, border:"1px solid "+C.border, overflow:"hidden" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background:"#fafbfc", cursor:"pointer" }} onClick={()=>setShowPairSummary(v=>!v)}>
+              <span style={{ fontSize:12, fontWeight:700, color:C.navy }}>📋 ペア成績</span>
+              <span style={{ fontSize:12, color:C.textSec }}>{showPairSummary ? "▲" : "▼"}</span>
+            </div>
+            {showPairSummary && pairRows.map(r => {
+              return (
+                <div key={r.names} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"9px 14px", borderTop:"1px solid "+C.border }}>
+                  <span style={{ fontSize:12.5, fontWeight:700, color:C.text }}>{r.names}</span>
+                  <span style={{ fontSize:13, fontWeight:800, color:C.text }}>{r.win}勝{r.lose}敗</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       <div style={{ padding:"10px 14px", paddingBottom:90 }}>
         {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
 
@@ -3796,7 +3849,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
-          const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
+          const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "予定";
+          const notStarted = tm.status !== "finished" && tm.status !== "active";
           return (
             <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
               <div style={{ height:4, background:statusColor }}/>
@@ -3807,7 +3861,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:6 }}>
                   <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1, textAlign:"right" }}>{myFullLabel}</span>
-                  <span style={{ fontSize:20, fontWeight:900, color:statusColor, minWidth:48, textAlign:"center" }}>{tm.my_score??0}-{tm.opponent_score??0}</span>
+                  {notStarted ? (
+                    <span style={{ fontSize:14, fontWeight:800, color:C.accent, minWidth:48, textAlign:"center" }}>予定</span>
+                  ) : (
+                    <span style={{ fontSize:20, fontWeight:900, color:statusColor, minWidth:48, textAlign:"center" }}>{tm.my_score??0}-{tm.opponent_score??0}</span>
+                  )}
                   <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1 }}>{oppLabel || "相手"}</span>
                 </div>
                 <span style={{ fontSize:11, padding:"2px 10px", borderRadius:20, background:statusColor+"22", color:statusColor, fontWeight:700 }}>{statusLabel}</span>
@@ -6614,7 +6672,7 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         >
           <div>
             <div style={{ fontSize:14,fontWeight:700 }}>🎯 目標設定</div>
-            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・レシーブミス率などチーム共通の目標<br/>（編集は管理者専用）</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・決めたプレイ回数などチーム共通の目標<br/>（編集は管理者専用）</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
@@ -7173,10 +7231,9 @@ function GoalSettingsScreen({ onBack }) {
             <div style={{ fontSize:11,color:C.textSec,marginBottom:14 }}>ここで設定した目標は、チーム全選手のスタッツ画面に共通で適用されます</div>
             <div style={{ ...S.card, padding:14, display:"grid", gridTemplateColumns:"1fr 68px 56px", columnGap:8, rowGap:14, alignItems:"center" }}>
               {row("①", "1stサーブ確率", firstServe, setFirstServe, "%以上")}
-              {row("②", "レシーブミス率", receiveMiss, setReceiveMiss, "%以下")}
-              {row("③", "決めたプレイ回数", winnerCount, setWinnerCount, "回以上")}
-              {row("④", "ミスしたプレイ回数", errorCount, setErrorCount, "回以下")}
-              {row("⑤", "得点差（決めた−ミス）", pointDiff, setPointDiff, "以上")}
+              {row("②", "決めたプレイ回数", winnerCount, setWinnerCount, "回以上")}
+              {row("③", "ミスしたプレイ回数", errorCount, setErrorCount, "回以下")}
+              {row("④", "得点差（決めた−ミス）", pointDiff, setPointDiff, "以上")}
             </div>
             {canEditNow && (
               <>
@@ -7588,7 +7645,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
     }
   }, [editId]);
 
-  const canSave = opponentName.trim() && isYounger !== null;
+  const canSave = isYounger !== null;
 
   async function handleSave() {
     setSaving(true);
@@ -7686,8 +7743,8 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           <FormRow label="自チーム区分（任意）">
             <VenueField value={myTeamDivision} onChange={setMyTeamDivision} venues={pastDivisions} placeholder="例：Aチーム"/>
           </FormRow>
-          <FormRow label="相手校名（必須）" labelRight={<PrefMiniFilter value={oppPrefFilter} onChange={setOppPrefFilter} options={knownPrefsFrom(schools)} />}>
-            <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業" prefFilter={oppPrefFilter}/>
+          <FormRow label="相手校名（任意）" labelRight={<PrefMiniFilter value={oppPrefFilter} onChange={setOppPrefFilter} options={knownPrefsFrom(schools)} />}>
+            <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業（未定なら空欄でOK）" prefFilter={oppPrefFilter}/>
           </FormRow>
           <FormRow label="相手チーム区分（任意）">
             <input style={S.inp} placeholder="例：Bチーム" value={opponentDivision} onChange={e=>setOpponentDivision(e.target.value)}/>
@@ -7916,7 +7973,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
           <span style={{ fontSize:17,fontWeight:800,color:C.white,flex:1 }}>{myLabel||"自チーム"} vs {oppLabel||"相手"}</span>
-          {isCreator && <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(tm.id)}>✏️</button>}
+          {/* ★団体戦情報はチーム全員で共有・記録するデータのため、作成者以外も編集できるようにする */}
+          <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(tm.id)}>✏️</button>
         </div>
       </div>
 
@@ -8024,7 +8082,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 ) : (
                   <div style={{ fontSize:12,color:C.textSec,marginBottom:8 }}>ペア未登録</div>
                 )}
-                {canOperateGame(game) && (
+                {/* ★終了済み・途中終了の番手は、そもそも「操作ロック」の対象外。
+                      recorder_idは記録者の履歴として残るだけなので、他の人が見ても
+                      「ロック解除」ボタンは出さない（まだ進行中に見えてしまうバグ対策）。 */}
+                {(!isFinished && !isAbandoned && canOperateGame(game)) ? (
                   <>
                     {/* ペア登録済みで未開始 → 試合開始ボタン（選び直しではなく直接開始） */}
                     {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
@@ -8043,7 +8104,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                           onClick={()=>{
                             const aP = (match?.match_players||[]).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
                             const bP = (match?.match_players||[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
-                            setSimpleResultFor({ orderNum, game, aLabel:aPlayers||"自チーム", bLabel:bPlayers||"相手", aPlayers:aP, bPlayers:bP });
+                            setSimpleResultFor({ orderNum, game, aLabel:aPlayers||"自チーム", bLabel:bPlayers||"相手", aPlayers:aP, bPlayers:bP, gameFormat: match?.game_format ?? 7 });
                             setSimpleResultScoreA(""); setSimpleResultScoreB("");
                             setSimpleResultNamesA(aP.map(p=>p.player_name));
                             setSimpleResultNamesB(bP.map(p=>p.player_name));
@@ -8074,6 +8135,27 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                       </button>
                     )}
                   </>
+                ) : (
+                  // ★ロック（recorder_id）が残っているのに進行中でもない＝操作不能になっている状態。
+                  //   本来は中断・終了時にrecorder_idが自動で外れるが、通信断や画面を閉じただけで
+                  //   ロックだけ残ってしまうことがあるため、手動で解除できる手段を用意する。
+                  //   （終了済み・途中終了の番手はそもそも対象外）
+                  (!isFinished && !isAbandoned && !isRecording) && (
+                    <button
+                      style={{ ...S.btn("#fdecea"), color:C.red, fontSize:12, marginTop:8, border:`1px solid #f5c6c0` }}
+                      onClick={async ()=>{
+                        if (!window.confirm("この番手の操作ロックを解除しますか？\n（他の人が今まさに記録中でないことを確認してください）")) return;
+                        try {
+                          await updateTeamMatchGame(game.id, { recorder_id:null, recorder_name:null });
+                          await loadData({ markAsChanged:true });
+                        } catch(e) {
+                          alert("エラー: " + (e.message || e));
+                        }
+                      }}
+                    >
+                      🔓 操作できないためロックを解除する
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -8148,6 +8230,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 const a = parseInt(simpleResultScoreA,10), b = parseInt(simpleResultScoreB,10);
                 if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいゲームカウントを入力してください"); return; }
                 if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                // ★試合形式（〇Gマッチ）に必要な勝利ゲーム数に達していないスコアでは
+                //   誤って「終了」扱いにできないようにする（例：7Gマッチなのに3-1で確定してしまう不具合対策）
+                const requiredWins = calcWinGames(simpleResultFor.gameFormat ?? 7);
+                if (Math.max(a,b) < requiredWins) { alert(`${simpleResultFor.gameFormat ?? 7}Gマッチは${requiredWins}ゲーム先取が必要です。まだ試合は終了できません。`); return; }
                 setSimpleResultSaving(true);
                 try {
                   // ★選手名が編集されていれば、スコア保存の前に反映する
@@ -8183,13 +8269,26 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
 // ============================================================
 function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOnly, onCancel }) {
   const [tm, setTm] = useState(null);
+  const [participantIds, setParticipantIds] = useState(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    getTeamMatch(teamMatchId).then(data => {
+    (async () => {
+      const data = await getTeamMatch(teamMatchId);
       setTm(data);
+      // ★このチーム戦がどの大会に属しているかは団体戦側にtournament_idの列がないため、
+      //   大会名＋日付（大会の開催期間内かどうか）で該当する大会を探し、
+      //   その大会の「参加選手」リストがあればペア選択の候補をそこだけに絞り込む。
+      if (data?.tournament_name) {
+        const tournaments = await getTournaments();
+        const match = tournaments.find(t =>
+          t.name === data.tournament_name &&
+          (!data.match_date || !t.start_date || (data.match_date >= t.start_date && data.match_date <= (t.end_date || t.start_date)))
+        ) || tournaments.find(t => t.name === data.tournament_name);
+        if (match?.participant_player_ids?.length) setParticipantIds(match.participant_player_ids);
+      }
       setReady(true);
-    });
+    })();
   }, [teamMatchId]);
 
   if (!ready) return <div style={S.page}><div style={S.hdr}><span style={{ fontSize:18,fontWeight:800,color:C.white }}>読み込み中...</span></div></div>;
@@ -8212,6 +8311,7 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOn
       teamMatchMyDivision={tm?.my_team_division || ""}
       teamMatchOppDivision={tm?.opponent_division || ""}
       teamMatchMySchoolId={tm?.my_school_id || null}
+      tournamentParticipantIds={participantIds || undefined}
       onScheduled={null}
       onSave={onSave}
       onSavePairOnly={onSavePairOnly}
@@ -8684,7 +8784,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const oldestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([oldestM], selectedPlayer, effectiveSchoolName)) : null;
   const newestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([newestM], selectedPlayer, effectiveSchoolName)) : null;
 
-  const metricLabel = { serveRate:"1stサーブ成功率", receiveMissRate:"レシーブミス率", decisionRate:"決定率" };
+  // ★レシーブミス率は算出方法が複雑で誤差が出やすいため、比較表からは外す（内部計算・keyRatesFromAggは維持）
+  const metricLabel = { serveRate:"1stサーブ成功率", decisionRate:"決定率" };
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
@@ -9669,9 +9770,9 @@ function PrefMiniFilter({ value, onChange, options }) {
 // 会場名入力＋候補サジェストコンポーネント
 // 何回戦の選択肢（決め打ちリスト＋自由入力）
 const ROUND_OPTIONS = [
-  "1回戦","2回戦","3回戦","4回戦","5回戦","6回戦","7回戦","8回戦","9回戦",
+  "リーグ","トーナメント",
+  "1回戦","2回戦","3回戦","4回戦","5回戦",
   "準々決勝","準決勝","3位決定戦","決勝",
-  "敗者復活1回戦","敗者復活2回戦","敗者復活3回戦","敗者復活4回戦","敗者復活5回戦",
 ];
 function RoundField({ value, onChange, placeholder }) {
   const isPreset = ROUND_OPTIONS.includes(value);
@@ -9687,8 +9788,8 @@ function RoundField({ value, onChange, placeholder }) {
         }}
       >
         <option value="">リストから選択</option>
-        {ROUND_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
         <option value="__custom__">✏️ 自由入力する</option>
+        {ROUND_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
       </select>
       {customMode && (
         <input
@@ -10509,6 +10610,12 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
 
 function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
   const [match,  setMatch]  = useState(initialMatch);
+  // ★観戦モード（閲覧のみ）では、親から渡されるinitialMatchが「最新に更新」で
+  // 　差し替わった時にこの内部stateへ反映されないと画面が更新されない。
+  // 　（useState(initialMatch)は初回マウント時の値しか使わないため）
+  useEffect(() => {
+    if (viewOnly) setMatch(initialMatch);
+  }, [initialMatch, viewOnly]);
   const [tab,    setTab]    = useState("record");
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
@@ -11451,6 +11558,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const a = parseInt(simpleScoreA,10), b = parseInt(simpleScoreB,10);
                 if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいゲームカウントを入力してください"); return; }
                 if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                const requiredWins = calcWinGames(match.game_format);
+                if (Math.max(a,b) < requiredWins) { alert(`${match.game_format}Gマッチは${requiredWins}ゲーム先取が必要です。まだ試合は終了できません。`); return; }
                 setSimpleResultSaving2(true);
                 persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished" });
                 setSimpleResultSaving2(false);
@@ -11961,21 +12070,13 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                       </div>
                     );
                   })()}
-                  {p.receiveTotal>0&&(()=>{
-                    const rate=Math.round(p.receiveMiss/p.receiveTotal*100);
-                    const good = hasGoals && goals.goal_receive_miss_pct!=null ? rate<=goals.goal_receive_miss_pct : null;
-                    const barColor = good===null?C.red:(good?C.accent:C.red);
-                    return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
-                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス率</span>
-                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
-                          {p.receiveMiss}/{p.receiveTotal}・{rate}%
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
-                        </span>
-                        <div style={{ flex:1,maxWidth:"50%",height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
-                      </div>
-                    );
-                  })()}
+                  {/* ★レシーブミス率（%）は算出方法が複雑で誤差が出やすいため、実際に記録された回数のみ表示する */}
+                  {(p.playsErr["receive"]||0)>0&&(
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
+                      <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス</span>
+                      <span style={{ fontSize:11,fontWeight:700,color:C.red,whiteSpace:"nowrap",flexShrink:0 }}>{p.playsErr["receive"]}回</span>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -14446,7 +14547,7 @@ export default function App() {
       <HomeScreen
         onNew={()=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPrevScreen("home"); setScreen("setup"); }}
         onNewTeamMatch={()=>{ setTournamentContext(null); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
-        onOpen={id=>openMatchSmart(id)}
+        onOpen={id=>openMatchSmart(id, { prevScreen:"home", listMatchMode:"individual" })}
         onNavigate={goNav}
         onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
         onProfile={()=>setScreen("profile")}
