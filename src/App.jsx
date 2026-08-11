@@ -7973,7 +7973,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
           <span style={{ fontSize:17,fontWeight:800,color:C.white,flex:1 }}>{myLabel||"自チーム"} vs {oppLabel||"相手"}</span>
-          {isCreator && <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(tm.id)}>✏️</button>}
+          {/* ★団体戦情報はチーム全員で共有・記録するデータのため、作成者以外も編集できるようにする */}
+          <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(tm.id)}>✏️</button>
         </div>
       </div>
 
