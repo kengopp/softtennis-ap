@@ -3742,12 +3742,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <span style={{ fontSize:12, color:C.textSec }}>{showPairSummary ? "▲" : "▼"}</span>
             </div>
             {showPairSummary && pairRows.map(r => {
-              const total = r.win + r.lose;
-              const mixed = r.win>0 && r.lose>0;
               return (
                 <div key={r.names} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"9px 14px", borderTop:"1px solid "+C.border }}>
                   <span style={{ fontSize:12.5, fontWeight:700, color:C.text }}>{r.names}</span>
-                  <span style={{ fontSize:13, fontWeight:800, color: r.lose===0 ? C.accent : mixed ? C.orange : C.teamB }}>{r.win}勝{r.lose}敗</span>
+                  <span style={{ fontSize:13, fontWeight:800, color:C.text }}>{r.win}勝{r.lose}敗</span>
                 </div>
               );
             })}
