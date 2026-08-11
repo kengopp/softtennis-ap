@@ -3562,7 +3562,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
   const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
-  const [showPairSummary, setShowPairSummary] = useState(true); // ★団体戦タブの「ペア成績」開閉
+  const [showPairSummary, setShowPairSummary] = useState(false); // ★団体戦タブの「ペア成績」開閉
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
 
