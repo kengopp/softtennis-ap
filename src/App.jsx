@@ -3876,20 +3876,18 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <span style={{ fontSize:10, color:C.textSec, marginLeft:8 }}>{tm.is_younger===false ? "遅番" : tm.is_younger===true ? "若番" : "若番/遅番未設定"}</span>
               </div>
               <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピーして新規作成</button>
-                <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>
-              </div>
-              {notStarted && (
-                <div style={{ borderTop:"1px solid "+C.border }}>
+                <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピー</button>
+                {notStarted && (
                   <button
-                    style={{ width:"100%", padding:"9px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11.5, fontWeight:700, cursor:"pointer" }}
+                    style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
                     onClick={()=>{
                       setSimpleTeamResultFor(tm);
                       setSimpleTeamScoreA(""); setSimpleTeamScoreB("");
                     }}
-                  >📝 団体戦の結果だけ記録</button>
-                </div>
-              )}
+                  >📝 結果だけ記録</button>
+                )}
+                <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>
+              </div>
             </div>
           );
         })}
