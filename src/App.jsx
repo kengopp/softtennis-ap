@@ -3704,6 +3704,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       {!loading && seg==="team" && (() => {
         // ★団体戦タブ：大会内の自チームの各ペア（1番手・2番手…に入った選手の組み合わせ）を
         //   横断して合計勝敗を集計し、勝率が高い順（同率なら勝ち数が多い順）に表示する。
+        // 　同校対決（東福岡A vs 東福岡Bなど）では両サイドとも自チームの選手なので、
+        // 　team B側もclub_nameが自校名と一致する場合はそれぞれの視点で集計に含める。
         const matchById = {};
         matches.forEach(m => { matchById[m.id] = m; });
         const pairMap = {};
@@ -3711,11 +3713,19 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           (tm.games || []).forEach(g => {
             const m = g.match_id ? matchById[g.match_id] : null;
             if (!m || m.status !== "finished") return;
-            const names = (m.players || []).filter(p => p.team === "A").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
-            if (!names) return;
-            if (!pairMap[names]) pairMap[names] = { names, win:0, lose:0 };
-            if (m.match_score_a > m.match_score_b) pairMap[names].win++;
-            else if (m.match_score_a < m.match_score_b) pairMap[names].lose++;
+            const sides = ["A"];
+            if (mySchoolName && (m.players || []).some(p => p.team === "B" && p.club_name && p.club_name.trim() === mySchoolName.trim())) {
+              sides.push("B");
+            }
+            sides.forEach(side => {
+              const names = (m.players || []).filter(p => p.team === side).sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
+              if (!names) return;
+              if (!pairMap[names]) pairMap[names] = { names, win:0, lose:0 };
+              const myScore = side === "A" ? m.match_score_a : m.match_score_b;
+              const oppScore = side === "A" ? m.match_score_b : m.match_score_a;
+              if (myScore > oppScore) pairMap[names].win++;
+              else if (myScore < oppScore) pairMap[names].lose++;
+            });
           });
         });
         const pairRows = Object.values(pairMap).sort((a,b) => {
