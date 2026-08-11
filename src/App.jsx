@@ -384,18 +384,19 @@ async function getMatches() {
   if (data.length === 0) return [];
 
   const matchIds = data.map(m => m.id);
+  // ★パフォーマンス改善：一覧表示（ホーム／試合一覧／大会詳細／各種成績画面）では
+  //   ポイント（1点ごとの記録）までは使っておらず、必要な画面は個別にgetMatch()で
+  //   詳細取得している。そのため一覧取得時はpointsを取得しないようにして、
+  //   試合数・ポイント数が増えるほど遅くなっていた問題を解消する。
   const [
     { data: playersData, error: playersErr },
     { data: gamesData,   error: gamesErr },
-    { data: pointsData,  error: pointsErr },
   ] = await Promise.all([
     supabase.from("match_players").select("*").in("match_id", matchIds).order("team").order("order_num"),
     supabase.from("games").select("*").in("match_id", matchIds).order("game_number"),
-    supabase.from("points").select("match_id,game_id,scoring_team,score_a_after,score_b_after,point_number").in("match_id", matchIds),
   ]);
   if (playersErr) console.error(playersErr);
   if (gamesErr)   console.error(gamesErr);
-  if (pointsErr)  console.error(pointsErr);
 
   const playersByMatch = {};
   (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
@@ -403,14 +404,8 @@ async function getMatches() {
   const gamesByMatch = {};
   (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
 
-  const pointsByGame = {};
-  (pointsData ?? []).forEach(pt => { (pointsByGame[pt.game_id] ??= []).push(pt); });
-
   return data.map(m => {
-    const games = (gamesByMatch[m.id] ?? []).map(g => ({
-      ...g,
-      points: (pointsByGame[g.id] ?? []).sort((a,b) => a.point_number - b.point_number),
-    }));
+    const games = (gamesByMatch[m.id] ?? []).map(g => ({ ...g, points: [] }));
     return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
   });
 }
