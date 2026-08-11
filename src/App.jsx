@@ -8078,7 +8078,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 ) : (
                   <div style={{ fontSize:12,color:C.textSec,marginBottom:8 }}>ペア未登録</div>
                 )}
-                {canOperateGame(game) ? (
+                {/* ★終了済み・途中終了の番手は、そもそも「操作ロック」の対象外。
+                      recorder_idは記録者の履歴として残るだけなので、他の人が見ても
+                      「ロック解除」ボタンは出さない（まだ進行中に見えてしまうバグ対策）。 */}
+                {(!isFinished && !isAbandoned && canOperateGame(game)) ? (
                   <>
                     {/* ペア登録済みで未開始 → 試合開始ボタン（選び直しではなく直接開始） */}
                     {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
@@ -8132,7 +8135,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   // ★ロック（recorder_id）が残っているのに進行中でもない＝操作不能になっている状態。
                   //   本来は中断・終了時にrecorder_idが自動で外れるが、通信断や画面を閉じただけで
                   //   ロックだけ残ってしまうことがあるため、手動で解除できる手段を用意する。
-                  !isRecording && (
+                  //   （終了済み・途中終了の番手はそもそも対象外）
+                  (!isFinished && !isAbandoned && !isRecording) && (
                     <button
                       style={{ ...S.btn("#fdecea"), color:C.red, fontSize:12, marginTop:8, border:`1px solid #f5c6c0` }}
                       onClick={async ()=>{
