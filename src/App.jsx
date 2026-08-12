@@ -4067,7 +4067,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 // 日別 選手ランキング（大会×日付を指定し、その日に出場した自チーム選手を
 // 「勝敗／1stサーブ率／レシーブミス／得点／ミス／得失点差」でランキング表示）
 // ============================================================
-function DailyPlayerRankingScreen({ tournament, onBack }) {
+function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   const [loading, setLoading] = useState(true);
   const [dateGroups, setDateGroups] = useState({}); // { "YYYY-MM-DD": [match, match, ...] }
   const [selectedDate, setSelectedDate] = useState(null);
@@ -5725,7 +5725,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                         if (startingId) return; // ★作成処理中は他の操作を無視（連打対策）
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
                         if (filled) {
-                          openSimpleResultModal(dm);
+                          startMatch(dm);
                           return;
                         }
                         openEditingSlot(dm);
@@ -5765,16 +5765,15 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       {winnerSide && !alreadyAdvanced && !rounds[rn + 1] && (
                         <div style={{ textAlign: "center", fontSize: 10.5, color: C.navy, fontWeight: 700, padding: "6px 0", background: C.accentL }}>🏁 大会終了（{entryLabel(winnerEntry)} 優勝）</div>
                       )}
-                      {filled && !dm.match_id && (
+                      {filled && !dm.match_id && category !== "individual" && (
                         <button
                           style={{ display: "block", width: "100%", border: "none", borderTop: "1px solid " + C.border, background: C.gray, color: C.textSec, fontSize: 10, fontWeight: 600, padding: "6px 0", cursor: "pointer" }}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (startingId) return;
-                            if (category === "individual") { startMatch(dm); return; }
                             alert("個々の試合（1複・2複など）を作って詳しくスコアを記録したい場合は、大会画面の「＋」から通常の団体戦試合登録をしてください。");
                           }}
-                        >{category === "individual" ? "1点ずつスコアを入力する場合はこちら" : "詳しい試合を作成する場合はこちら"}</button>
+                        >詳しい試合を作成する場合はこちら</button>
                       )}
                     </div>
                   </div>
@@ -14776,6 +14775,7 @@ export default function App() {
         <DailyPlayerRankingScreen
           tournament={tournamentContext}
           onBack={()=>setScreen("tournamentDetail")}
+          mySchoolName={mySchoolName}
         />
       </ErrorBoundary>
     );
