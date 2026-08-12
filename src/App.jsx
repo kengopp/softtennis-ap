@@ -11165,7 +11165,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 >⏳ 待機中にする</button>
               )}
               {match.status==="waiting" && (
-                <div style={{ marginTop:10, fontSize:12, color:C.purple, fontWeight:700, background:"#eef0fe", display:"inline-block", padding:"4px 14px", borderRadius:20 }}>⏳ 待機中</div>
+                <div style={{ marginTop:10 }}>
+                  <div style={{ fontSize:12, color:C.purple, fontWeight:700, background:"#eef0fe", display:"inline-block", padding:"4px 14px", borderRadius:20, marginBottom:8 }}>⏳ 待機中</div>
+                  <button
+                    style={{ display:"block", margin:"0 auto", border:"1px solid "+C.border, background:C.white, borderRadius:8, fontSize:11, color:C.textSec, cursor:"pointer", padding:"6px 14px", fontWeight:700 }}
+                    onClick={()=>persist({ ...match, status:"scheduled" })}
+                  >待機中を解除</button>
+                </div>
               )}
             </div>
           )}
