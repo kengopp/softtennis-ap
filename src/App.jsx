@@ -11166,7 +11166,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               )}
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                 <div style={{ display:"flex", gap:8 }}>
-                  <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), flex:1, marginTop:0 }} onClick={()=>startNewGame()}>第1ゲーム開始</button>
+                  <button style={{ flex:1, padding:"13px 16px", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:700, cursor:"pointer" }} onClick={()=>startNewGame()}>第1ゲーム開始</button>
                   <button
                     style={{ flex:"0 0 48px", width:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
                     onClick={()=>shareToLine("試合開始")}
@@ -11175,7 +11175,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 </div>
                 <div style={{ display:"flex", gap:8 }}>
                   <button
-                    style={{ ...S.btn("#fff"), flex:1, border:"1px solid "+C.border, color:C.navy, marginTop:0 }}
+                    style={{ flex:1, padding:"13px 16px", background:"#fff", border:"1px solid "+C.border, color:C.navy, borderRadius:10, fontSize:14, fontWeight:700, cursor:"pointer" }}
                     onClick={()=>{ setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true); }}
                   >📝 結果だけ記録</button>
                   <div style={{ flex:"0 0 48px", width:48 }} />
@@ -11183,7 +11183,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 {match.status==="scheduled" && (
                   <div style={{ display:"flex", gap:8 }}>
                     <button
-                      style={{ ...S.btn(`linear-gradient(135deg,#7b1fa2,${C.purple})`), flex:1, marginTop:0 }}
+                      style={{ flex:1, padding:"13px 16px", background:`linear-gradient(135deg,#7b1fa2,${C.purple})`, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:700, cursor:"pointer" }}
                       onClick={()=>persist({ ...match, status:"waiting" })}
                     >⏳ 待機中にする</button>
                     <button
