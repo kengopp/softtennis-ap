@@ -10730,6 +10730,17 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const serverLabel = curServerIndividual ?? (curServer==="A" ? match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") : match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/"));
   const teamALabel = match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
   const teamBLabel = match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+  // ★LINE共有：待機中／試合開始のタイミングで、自チームのペア名・コート番号・状況をワンタップで共有する
+  const shareToLine = (statusLabel) => {
+    const lines = [
+      `【${statusLabel}】`,
+      teamALabel ? `自チーム：${teamALabel}` : null,
+      teamBLabel ? `相手：${teamBLabel}` : null,
+      match.court_number ? `コート：${match.court_number}` : null,
+    ].filter(Boolean);
+    const text = lines.join("\n");
+    window.open("https://line.me/R/msg/text/?" + encodeURIComponent(text), "_blank");
+  };
   // 若番=自チーム左、遅番=自チーム右
   const isYounger = match.is_younger !== false;
   // left=左側表示チーム、right=右側表示チーム
@@ -11153,26 +11164,51 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               ) : (
                 <p style={{ fontSize:13,color:C.textSec,marginBottom:20 }}>最初のサーブは次の画面で選択します</p>
               )}
-              <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>startNewGame()}>第1ゲーム開始</button>
-              <button
-                style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy, marginTop:10 }}
-                onClick={()=>{ setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true); }}
-              >📝 結果だけ記録</button>
-              {match.status==="scheduled" && (
-                <button
-                  style={{ ...S.btn(`linear-gradient(135deg,#7b1fa2,${C.purple})`), marginTop:10 }}
-                  onClick={()=>persist({ ...match, status:"waiting" })}
-                >⏳ 待機中にする</button>
-              )}
-              {match.status==="waiting" && (
-                <div style={{ marginTop:10 }}>
-                  <div style={{ fontSize:12, color:C.purple, fontWeight:700, background:"#eef0fe", display:"inline-block", padding:"4px 14px", borderRadius:20, marginBottom:8 }}>⏳ 待機中</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), flex:1, marginTop:0 }} onClick={()=>startNewGame()}>第1ゲーム開始</button>
                   <button
-                    style={{ display:"block", margin:"0 auto", border:"1px solid "+C.border, background:C.white, borderRadius:8, fontSize:11, color:C.textSec, cursor:"pointer", padding:"6px 14px", fontWeight:700 }}
-                    onClick={()=>persist({ ...match, status:"scheduled" })}
-                  >待機中を解除</button>
+                    style={{ flex:"0 0 48px", width:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                    onClick={()=>shareToLine("試合開始")}
+                    aria-label="LINEで共有"
+                  ><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg></button>
                 </div>
-              )}
+                <div style={{ display:"flex", gap:8 }}>
+                  <button
+                    style={{ ...S.btn("#fff"), flex:1, border:"1px solid "+C.border, color:C.navy, marginTop:0 }}
+                    onClick={()=>{ setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true); }}
+                  >📝 結果だけ記録</button>
+                  <div style={{ flex:"0 0 48px", width:48 }} />
+                </div>
+                {match.status==="scheduled" && (
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button
+                      style={{ ...S.btn(`linear-gradient(135deg,#7b1fa2,${C.purple})`), flex:1, marginTop:0 }}
+                      onClick={()=>persist({ ...match, status:"waiting" })}
+                    >⏳ 待機中にする</button>
+                    <button
+                      style={{ flex:"0 0 48px", width:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                      onClick={()=>shareToLine("待機中")}
+                      aria-label="LINEで共有"
+                    ><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg></button>
+                  </div>
+                )}
+                {match.status==="waiting" && (
+                  <>
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+                      <span style={{ fontSize:12, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"5px 16px", borderRadius:20 }}>⏳ 待機中</span>
+                      <button
+                        style={{ fontSize:11.5, fontWeight:700, color:C.textSec, border:"1px solid "+C.border, background:C.white, borderRadius:20, padding:"5px 14px", cursor:"pointer" }}
+                        onClick={()=>persist({ ...match, status:"scheduled" })}
+                      >解除</button>
+                    </div>
+                    <button
+                      style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, border:"1px solid "+C.border, background:C.white, borderRadius:12, height:48, color:"#06C755", fontWeight:700, fontSize:14, cursor:"pointer" }}
+                      onClick={()=>shareToLine("待機中")}
+                    ><svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="#06C755"/></svg>LINEで共有</button>
+                  </>
+                )}
+              </div>
             </div>
           )}
           {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(
