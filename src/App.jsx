@@ -10995,7 +10995,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 title="最新データに更新"
               >{refreshing ? "..." : "🔄"}</button>
             )}
-            {match.status!=="scheduled" && (
+            {(match.status==="active" || match.status==="finished") && (
               <button
                 style={{ background:"#06C755",border:"none",borderRadius:8,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}
                 onClick={()=>shareToLine(match.status==="waiting" ? "待機中" : match.status==="finished" ? "試合終了" : "試合中")}
