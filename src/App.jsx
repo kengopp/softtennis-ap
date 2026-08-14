@@ -10730,13 +10730,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const serverLabel = curServerIndividual ?? (curServer==="A" ? match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") : match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/"));
   const teamALabel = match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
   const teamBLabel = match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
-  // ★LINE共有：待機中／試合開始のタイミングで、自チームのペア名・コート番号・状況をワンタップで共有する
+  // ★LINE共有：待機中／試合開始／試合中のタイミングで、自チームのペア名・コート番号・状況・スコアをワンタップで共有する
   const shareToLine = (statusLabel) => {
     const lines = [
       `【${statusLabel}】`,
       teamALabel ? `自チーム：${teamALabel}` : null,
       teamBLabel ? `相手：${teamBLabel}` : null,
       match.court_number ? `コート：${match.court_number}` : null,
+      (match.status==="active" || match.status==="finished") ? `スコア：${match.match_score_a}-${match.match_score_b}` : null,
     ].filter(Boolean);
     const text = lines.join("\n");
     window.open("https://line.me/R/msg/text/?" + encodeURIComponent(text), "_blank");
@@ -10994,6 +10995,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 title="最新データに更新"
               >{refreshing ? "..." : "🔄"}</button>
             )}
+            <button
+              style={{ background:"#06C755",border:"none",borderRadius:8,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}
+              onClick={()=>shareToLine(match.status==="waiting" ? "待機中" : match.status==="finished" ? "試合終了" : "試合中")}
+              title="LINEで共有"
+            ><svg viewBox="0 0 24 24" width="15" height="15" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg></button>
             <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(match.id)} title="試合情報を編集">✏️</button>
           </div>
         </div>
