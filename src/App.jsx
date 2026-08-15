@@ -11264,17 +11264,19 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   </div>
                 )}
                 {match.status==="waiting" && (
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
-                    <span style={{ fontSize:12, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"5px 16px", borderRadius:20 }}>⏳ 待機中</span>
+                  <div style={{ display:"flex", alignItems:"stretch", gap:8 }}>
+                    <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:10, height:48, borderRadius:12, background:"#eef0fe" }}>
+                      <span style={{ fontSize:13, color:C.purple, fontWeight:800 }}>⏳ 待機中</span>
+                      <button
+                        style={{ fontSize:12, fontWeight:700, color:C.purple, border:"1px solid #dcdffc", background:C.white, borderRadius:20, padding:"5px 14px", cursor:"pointer" }}
+                        onClick={()=>persist({ ...match, status:"scheduled" })}
+                      >解除</button>
+                    </div>
                     <button
-                      style={{ fontSize:11.5, fontWeight:700, color:C.textSec, border:"1px solid "+C.border, background:C.white, borderRadius:20, padding:"5px 14px", cursor:"pointer" }}
-                      onClick={()=>persist({ ...match, status:"scheduled" })}
-                    >解除</button>
-                    <button
-                      style={{ width:32, height:32, borderRadius:8, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                      style={{ flex:"0 0 48px", width:48, height:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
                       onClick={()=>shareToLine("待機中")}
                       aria-label="LINEで共有"
-                    ><svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg></button>
+                    ><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg></button>
                   </div>
                 )}
               </div>
