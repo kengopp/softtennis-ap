@@ -11268,7 +11268,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:10, height:48, borderRadius:12, background:"#eef0fe" }}>
                       <span style={{ fontSize:13, color:C.purple, fontWeight:800 }}>⏳ 待機中</span>
                       <button
-                        style={{ fontSize:12, fontWeight:700, color:C.purple, border:"1px solid #dcdffc", background:C.white, borderRadius:20, padding:"5px 14px", cursor:"pointer" }}
+                        style={{ fontSize:12, fontWeight:700, color:C.text, border:"1px solid #dcdffc", background:C.white, borderRadius:20, padding:"5px 14px", cursor:"pointer" }}
                         onClick={()=>persist({ ...match, status:"scheduled" })}
                       >解除</button>
                     </div>
