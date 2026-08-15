@@ -14601,15 +14601,15 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
         {rows.map(({ match, analysis }) => {
           const { a, b } = aiMatchLabel(match);
           return (
-            <div key={match.id} style={{ ...S.card, marginBottom:10, overflow:"hidden" }}>
+            <div key={match.id} onClick={()=>onOpenAnalysis(match, analysis)}
+              style={{ ...S.card, marginBottom:10, overflow:"hidden", cursor:"pointer" }}>
               <div style={{ padding:"12px 14px 0", fontSize:11, color:C.textSec }}>
                 {[match.tournament_name, match.round, fmtDate(match.match_date)].filter(Boolean).join("・")}
               </div>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"6px 14px 0" }}>
                 <span style={{ fontSize:14, fontWeight:800, color:C.text }}>{a || "自チーム"}</span>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <span onClick={()=>onOpenAnalysis(match, analysis)}
-                    style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"3px 10px", borderRadius:20, border:"1px solid #dcdffc", cursor:"pointer" }}
+                  <span style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"3px 10px", borderRadius:20, border:"1px solid #dcdffc" }}
                   >🤖 AI</span>
                   {match.status==="finished" && <span style={{ fontSize:11, color:C.accent, fontWeight:800 }}>✅ 終了</span>}
                 </div>
