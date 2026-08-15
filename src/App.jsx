@@ -8579,6 +8579,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const [resultCondLabel, setResultCondLabel] = useState("");
   const [hasLoadedDefault, setHasLoadedDefault] = useState(false);
   const [resultFilter, setResultFilter] = useState("all"); // ★勝敗フィルター：all | win | lose
+  const [resultListOpen, setResultListOpen] = useState(false); // ★勝敗内訳一覧の開閉（初期は閉じた状態）
 
   useEffect(() => {
     (async () => {
@@ -9038,7 +9039,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
               return (
                 <button
                   key={key}
-                  onClick={()=>setResultFilter(key)}
+                  onClick={()=>{ setResultFilter(key); setResultListOpen(false); }}
                   style={{ flex:1, padding:"11px 4px", borderRadius:10, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
                     border:`1px solid ${active?activeColor:C.border}`,
                     background:active?activeBg:"#fff",
@@ -9085,39 +9086,47 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
           <div style={{ ...S.card, padding:24, textAlign:"center", color:C.textSec, fontSize:12.5 }}>対象の試合がありません</div>
         ) : (
           <>
-            {/* ★負けた試合／勝った試合だけの一覧（フィルター時のみ表示） */}
-            {resultFilter!=="all" && (
-              <div style={S.card}>
-                <div style={{ padding:14 }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:10 }}>
-                    {resultFilter==="win" ? "○ 勝った試合の一覧" : "× 負けた試合の一覧"}
+            {/* ★勝敗内訳の一覧（初期は閉じた状態。▼タップで開閉） */}
+            <div style={S.card}>
+              <div style={{ padding:14 }}>
+                <button
+                  onClick={()=>setResultListOpen(v=>!v)}
+                  style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background:"none", border:"none", cursor:"pointer", padding:0 }}
+                >
+                  <span style={{ fontSize:13, fontWeight:800, color:C.navy }}>
+                    {resultFilter==="win" ? "○ 勝った試合の一覧" : resultFilter==="lose" ? "× 負けた試合の一覧" : "すべての試合の一覧"}
+                  </span>
+                  <span style={{ fontSize:12, color:C.textSec, transform:resultListOpen?"rotate(180deg)":"none", transition:"transform .15s" }}>▼</span>
+                </button>
+                {resultListOpen && (
+                  <div style={{ marginTop:10 }}>
+                    {displayedMatches.length===0 ? (
+                      <div style={{ fontSize:12, color:C.textSec }}>該当する試合がありません</div>
+                    ) : displayedMatches.map(m=>{
+                      const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
+                      const oppTeam = team==="A" ? "B" : "A";
+                      const oppClub = m.players.find(p=>p.team===oppTeam)?.club_name || "";
+                      const myScore = team==="A" ? m.match_score_a : m.match_score_b;
+                      const oppScore = team==="A" ? m.match_score_b : m.match_score_a;
+                      const win = winForPlayer(m, selectedPlayer, effectiveSchoolName);
+                      return (
+                        <div key={m.id} style={{ border:`1px solid ${C.border}`, borderRadius:10, padding:12, marginBottom:8 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                            <span style={{ fontSize:12, fontWeight:700, color:C.text }}>{m.tournament_name || "（大会外）"}{m.round ? "・"+m.round : ""}</span>
+                            <span style={{ fontSize:10.5, color:C.textSec }}>{m.match_date}</span>
+                          </div>
+                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                            <span style={{ fontSize:10.5, fontWeight:800, padding:"3px 8px", borderRadius:6, color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"勝利":"敗北"}</span>
+                            <span style={{ fontSize:15, fontWeight:900, color:win?C.accent:C.red }}>{myScore} - {oppScore}</span>
+                            {oppClub && <span style={{ marginLeft:"auto", fontSize:11, color:C.textSec }}>対 {oppClub}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {displayedMatches.length===0 ? (
-                    <div style={{ fontSize:12, color:C.textSec }}>該当する試合がありません</div>
-                  ) : displayedMatches.map(m=>{
-                    const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
-                    const oppTeam = team==="A" ? "B" : "A";
-                    const oppClub = m.players.find(p=>p.team===oppTeam)?.club_name || "";
-                    const myScore = team==="A" ? m.match_score_a : m.match_score_b;
-                    const oppScore = team==="A" ? m.match_score_b : m.match_score_a;
-                    const win = winForPlayer(m, selectedPlayer, effectiveSchoolName);
-                    return (
-                      <div key={m.id} style={{ border:`1px solid ${C.border}`, borderRadius:10, padding:12, marginBottom:8 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-                          <span style={{ fontSize:12, fontWeight:700, color:C.text }}>{m.tournament_name || "（大会外）"}{m.round ? "・"+m.round : ""}</span>
-                          <span style={{ fontSize:10.5, color:C.textSec }}>{m.match_date}</span>
-                        </div>
-                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                          <span style={{ fontSize:10.5, fontWeight:800, padding:"3px 8px", borderRadius:6, color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"勝利":"敗北"}</span>
-                          <span style={{ fontSize:15, fontWeight:900, color:win?C.accent:C.red }}>{myScore} - {oppScore}</span>
-                          {oppClub && <span style={{ marginLeft:"auto", fontSize:11, color:C.textSec }}>対 {oppClub}</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                )}
               </div>
-            )}
+            </div>
 
             {/* 得点・ミスの内訳 */}
             <div style={S.card}>
