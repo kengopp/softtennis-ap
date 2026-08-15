@@ -8142,18 +8142,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   {isRecording && recorderName && match?.status !== "finished" && (
                     <span style={{ fontSize:11,color:"#dc2626",fontWeight:700,background:"#fdecea",padding:"2px 8px",borderRadius:20 }}>🔴 {recorderName} 記録中</span>
                   )}
-                  {(isFinished || match?.status === "finished") && match?.id && (
-                    aiAnalyses[match.id] ? (
-                      <span
-                        onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
-                        style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid #dcdffc", cursor:"pointer" }}
-                      >🤖 AI</span>
-                    ) : (
-                      <span
-                        onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, null)}
-                        style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ea", color:"#8a92a3", fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid "+C.border, cursor:"pointer" }}
-                      >🤖 +AI</span>
-                    )
+                  {(isFinished || match?.status === "finished") && match?.id && aiAnalyses[match.id] && (
+                    <span
+                      onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
+                      style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid #dcdffc", cursor:"pointer" }}
+                    >🤖 AI</span>
                   )}
                   {(isFinished || match?.status === "finished") && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
                   {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>中断 {match?.match_score_a}-{match?.match_score_b}</span>}
@@ -8204,6 +8197,12 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                           </button>
                         )}
                       </div>
+                    )}
+                    {isFinished && match?.id && !aiAnalyses[match.id] && (
+                      <div
+                        onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, null)}
+                        style={{ marginTop:8, textAlign:"center", fontSize:11, color:C.textSec, cursor:"pointer" }}
+                      >🤖 AI動画分析を追加する</div>
                     )}
                   </>
                 ) : (
