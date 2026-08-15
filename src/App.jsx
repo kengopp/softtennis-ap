@@ -666,6 +666,37 @@ async function deleteMatchVideo(id) {
   if (error) throw error;
 }
 
+// ============================================================
+// AI動画分析（外部AIで分析したテキストを試合に紐づけて保存）
+// ============================================================
+// 複数試合分のAI分析をまとめて取得（一覧のバッジ表示・AI分析タブ用）
+async function getAiAnalyses(matchIds) {
+  if (!matchIds || matchIds.length === 0) return [];
+  const { data, error } = await supabase.from("ai_analyses").select("*").in("match_id", matchIds).is("deleted_at", null);
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+// 特定1試合分のAI分析を取得（バッジタップ時の詳細表示用）
+async function getAiAnalysisForMatch(matchId) {
+  const { data, error } = await supabase.from("ai_analyses").select("*").eq("match_id", matchId).is("deleted_at", null).order("created_at", { ascending:false }).limit(1);
+  if (error) { console.error(error); return null; }
+  return (data && data[0]) || null;
+}
+async function saveAiAnalysis({ id, match_id, youtube_url, comment_text }) {
+  const payload = {
+    id: id || uid(), match_id,
+    youtube_url: youtube_url ? youtube_url.trim() : null,
+    comment_text: comment_text.trim(),
+  };
+  const { error } = await supabase.from("ai_analyses").upsert(payload);
+  if (error) throw error;
+  return payload;
+}
+async function deleteAiAnalysis(id) {
+  const { error } = await supabase.from("ai_analyses").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+
 // 指定の動画に設定されている同期アンカーを取得（現状は動画1本につき1件＝1点目の位置合わせ）
 async function getSyncAnchor(matchVideoId) {
   const { data, error } = await supabase.from("video_sync_anchors").select("*").eq("match_video_id", matchVideoId).order("created_at", { ascending:false }).limit(1);
@@ -2293,7 +2324,7 @@ function NavBar({ active, onNavigate }) {
   const items = [
     ["home",   "🏠", "ホーム"],
     ["list",   "📋", "試合"],
-    ["practice","🎯", "練習"],
+    ["aiAnalysisList","🤖", "AI分析"],
     ["stats",  "📊", "分析"],
     ["master", "🗂",  "設定"],
   ];
@@ -3545,6 +3576,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [showMoreMenu, setShowMoreMenu] = useState(false); // ★ヘッダー右上「⋯」メニューの開閉
   const [matches, setMatches] = useState([]);
   const [teamMatches, setTeamMatches] = useState([]);
+  const [aiAnalyzedMatchIds, setAiAnalyzedMatchIds] = useState(new Set()); // ★AI分析が付いているmatch_idの集合（団体戦一覧のグレーAIバッジ用）
   const [schoolMap, setSchoolMap] = useState({});
   const [mySchoolName, setMySchoolName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -3584,7 +3616,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         (m.players || []).some(p => p.club_name === myName)
       );
       setMatches([...list.filter(m => m.tournament_name === tournament.name), ...simpleForThisTournament]);
-      setTeamMatches(tList.filter(tm => tm.tournament_name === tournament.name));
+      const tmForTournament = tList.filter(tm => tm.tournament_name === tournament.name);
+      setTeamMatches(tmForTournament);
+      const teamGameMatchIds = tmForTournament.flatMap(tm => (tm.games || []).filter(g => g.match_id).map(g => g.match_id));
+      if (teamGameMatchIds.length > 0) {
+        getAiAnalyses(teamGameMatchIds).then(rows => setAiAnalyzedMatchIds(new Set(rows.map(r => r.match_id))));
+      }
       const statusMap = {};
       list.forEach(m => { statusMap[m.id] = m.status; });
       setMatchStatusById(statusMap);
@@ -3859,9 +3896,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
               <div style={{ height:4, background:statusColor }}/>
               <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTeamMatch(tm.id)}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <span style={{ fontSize:12, fontWeight:700 }}>{tm.round || "団体戦"}</span>
-                  <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    {(tm.games || []).some(g => g.match_id && aiAnalyzedMatchIds.has(g.match_id)) && (
+                      <span style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ea", color:"#8a92a3", fontSize:10, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid "+C.border }}>🤖 AI</span>
+                    )}
+                    <span style={{ fontSize:11, color:C.textSec }}>{fmtDate(tm.match_date)}</span>
+                  </div>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:6 }}>
                   <span style={{ fontSize:15, fontWeight:800, color:C.text, flex:1, textAlign:"right" }}>{myFullLabel}</span>
@@ -7883,7 +7925,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
 // ============================================================
 // 団体戦 詳細画面（リアルタイム観戦含む）
 // ============================================================
-function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onNavigate }) {
+function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onNavigate, onOpenAiAnalysis }) {
   const [tm, setTm] = useState(null);
   const [notFound, setNotFound] = useState(false); // ★削除済みなどで団体戦が見つからない場合
   const [loading, setLoading] = useState(true);
@@ -7893,6 +7935,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [myUserName, setMyUserName] = useState("");
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
   const [matchDetails, setMatchDetails] = useState({});
+  const [aiAnalyses, setAiAnalyses] = useState({}); // match_id -> AI分析行（あれば）
   const [serveSelectInfo, setServeSelectInfo] = useState(null); // サーブ選択モーダル用
   const [simpleResultFor, setSimpleResultFor] = useState(null); // ★結果だけ記録モーダル用（{orderNum, game, aLabel, bLabel, aPlayers, bPlayers}）
   const [simpleResultScoreA, setSimpleResultScoreA] = useState("");
@@ -7927,6 +7970,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       const map = {};
       (matches || []).forEach(m => { map[m.id] = m; });
       setMatchDetails(map);
+      getAiAnalyses(matchIds).then(rows => {
+        const aiMap = {};
+        rows.forEach(r => { aiMap[r.match_id] = r; });
+        setAiAnalyses(aiMap);
+      });
     }
     // ★不整合データの自動修復：どの番手も実際には開始されていないのに
     // 団体戦全体のstatusだけが"active"のまま残っているケースを検知し、"scheduled"に戻す。
@@ -8090,12 +8138,27 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
             <div key={orderNum} style={{ ...S.card, marginBottom:10 }}>
               <div style={{ padding:"10px 14px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <span style={{ fontSize:13,fontWeight:700,color:C.navy }}>{orderNum}番手</span>
-                {isRecording && recorderName && match?.status !== "finished" && (
-                  <span style={{ fontSize:11,color:"#dc2626",fontWeight:700,background:"#fdecea",padding:"2px 8px",borderRadius:20 }}>🔴 {recorderName} 記録中</span>
-                )}
-                {(isFinished || match?.status === "finished") && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
-                {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>中断 {match?.match_score_a}-{match?.match_score_b}</span>}
-                {isAbandoned && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>途中終了 {match?.match_score_a}-{match?.match_score_b}</span>}
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  {isRecording && recorderName && match?.status !== "finished" && (
+                    <span style={{ fontSize:11,color:"#dc2626",fontWeight:700,background:"#fdecea",padding:"2px 8px",borderRadius:20 }}>🔴 {recorderName} 記録中</span>
+                  )}
+                  {(isFinished || match?.status === "finished") && match?.id && (
+                    aiAnalyses[match.id] ? (
+                      <span
+                        onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
+                        style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid #dcdffc", cursor:"pointer" }}
+                      >🤖 AI</span>
+                    ) : (
+                      <span
+                        onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, null)}
+                        style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ea", color:"#8a92a3", fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid "+C.border, cursor:"pointer" }}
+                      >🤖 +AI</span>
+                    )
+                  )}
+                  {(isFinished || match?.status === "finished") && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
+                  {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>中断 {match?.match_score_a}-{match?.match_score_b}</span>}
+                  {isAbandoned && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>途中終了 {match?.match_score_a}-{match?.match_score_b}</span>}
+                </div>
               </div>
               <div style={{ padding:"10px 14px" }}>
                 {aPlayers || bPlayers ? (
@@ -14239,6 +14302,282 @@ function AuthScreen({ onAuthed }) {
   );
 }
 
+// ============================================================
+// AI動画分析（外部AIで分析したテキストを試合に紐づけて閲覧・登録する）
+// ============================================================
+function aiMatchLabel(m) {
+  const players = m.players || m.match_players || [];
+  const a = players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
+  const b = players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+  return { a, b, text: `${a||"自チーム"} vs ${b||"相手"}` };
+}
+
+function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
+  const [youtubeUrl, setYoutubeUrl] = useState(existing?.youtube_url || "");
+  const [commentText, setCommentText] = useState(existing?.comment_text || "");
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const label = aiMatchLabel(match).text;
+
+  const handleSave = async () => {
+    if (!commentText.trim()) { setErrorMsg("分析結果のテキストを入力してください"); return; }
+    setSaving(true); setErrorMsg("");
+    try {
+      const row = await saveAiAnalysis({ id: existing?.id, match_id: match.id, youtube_url: youtubeUrl, comment_text: commentText });
+      onSaved && onSaved(row);
+    } catch (e) {
+      setErrorMsg("保存に失敗しました: " + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40 }}>
+      <div style={{ background:C.navy, color:C.white, padding:16, display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ cursor:"pointer", fontSize:18 }} onClick={onCancel}>←</span>
+        <div style={{ fontSize:18, fontWeight:800 }}>{existing ? "AI動画分析を編集" : "AI動画分析を追加"}</div>
+      </div>
+      <div style={{ padding:14 }}>
+        <div style={S.card}>
+          <div style={{ padding:14 }}>
+            <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, marginBottom:6 }}>対象試合</div>
+            <div style={{ background:"#f7f9fc", border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:16 }}>🎾 {label}</div>
+
+            <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, marginBottom:6 }}>YouTubeリンク（任意）</div>
+            <input style={S.inp} placeholder="https://youtu.be/..." value={youtubeUrl} onChange={e=>setYoutubeUrl(e.target.value)} />
+
+            <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"18px 0 6px" }}>AI分析結果のテキストを貼り付け</div>
+            <textarea
+              style={{ width:"100%", padding:"10px 12px", border:"1px solid "+C.border, borderRadius:8, fontSize:12.5, color:C.text, height:220, boxSizing:"border-box", fontFamily:"inherit", lineHeight:1.6 }}
+              placeholder="AI分析結果のテキストを貼り付けてください"
+              value={commentText}
+              onChange={e=>setCommentText(e.target.value)}
+            />
+
+            {errorMsg && <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>}
+
+            <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:16 }} disabled={saving} onClick={handleSave}>
+              {saving ? "保存中..." : "この内容で保存する"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
+  const label = aiMatchLabel(match).text;
+  return (
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40 }}>
+      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
+          <div>
+            <div style={{ fontSize:18, fontWeight:800 }}>🤖 AI動画分析</div>
+            <div style={{ fontSize:11, color:"#b9c2d6", marginTop:2 }}>{label}</div>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding:14 }}>
+        {analysis.youtube_url && (
+          <a href={analysis.youtube_url} target="_blank" rel="noreferrer"
+            style={{ display:"flex", alignItems:"center", gap:8, background:"#eef0ff", color:C.purple, fontWeight:700, fontSize:13, padding:"12px 14px", borderRadius:10, textDecoration:"none", marginBottom:14, wordBreak:"break-all" }}
+          >▶ {analysis.youtube_url}</a>
+        )}
+        <div style={{ background:C.white, border:"1px solid "+C.border, borderRadius:12, padding:16, fontSize:13, lineHeight:1.8, color:C.text, whiteSpace:"pre-wrap" }}>
+          {analysis.comment_text}
+        </div>
+        <div style={{ display:"flex", gap:8, marginTop:16 }}>
+          <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy }} onClick={onEdit}>✏️ 編集する</button>
+          <button style={{ ...S.btn(C.redL), color:C.red }} onClick={onDelete}>🗑 削除</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalysis, onNavigate }) {
+  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState([]);
+  const [linkedPlayerName, setLinkedPlayerName] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const p = await getMyProfile();
+      if (p?.linked_player_id) {
+        const roster = await getPlayerRoster();
+        const found = roster.find(r => r.id === p.linked_player_id);
+        setLinkedPlayerName(found?.player_name ?? null);
+      }
+    })();
+  }, []);
+
+  const effectivePlayer = selectedPlayerName || linkedPlayerName;
+  const isSelf = !selectedPlayerName;
+
+  useEffect(() => {
+    if (!effectivePlayer) { setLoading(false); setRows([]); return; }
+    setLoading(true);
+    (async () => {
+      const matches = await getMatches();
+      const matchIds = matches.map(m => m.id);
+      const analyses = await getAiAnalyses(matchIds);
+      const analysisByMatch = {};
+      analyses.forEach(a => { analysisByMatch[a.match_id] = a; });
+      const found = matches
+        .filter(m => analysisByMatch[m.id] && (m.players || []).some(p => p.player_name === effectivePlayer))
+        .map(m => ({ match: m, analysis: analysisByMatch[m.id] }));
+      found.sort((a, b) => new Date(b.match.match_date || 0) - new Date(a.match.match_date || 0));
+      setRows(found);
+      setLoading(false);
+    })();
+  }, [effectivePlayer]);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90 }}>
+      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ fontSize:20, fontWeight:800 }}>🤖 AI動画分析</div>
+        <div style={{ fontSize:11, color:"#b9c2d6", marginTop:2 }}>AI分析を追加した試合の一覧</div>
+      </div>
+      <div style={{ padding:14 }}>
+        <div onClick={onSwitchPlayer} style={{ ...S.card, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", marginBottom:12 }}>
+          <div>
+            <div style={{ fontSize:11, color:C.textSec }}>表示対象</div>
+            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginTop:2 }}>
+              {effectivePlayer ? `👤 ${effectivePlayer}${isSelf ? "（自分）" : ""}` : "未設定"}
+            </div>
+          </div>
+          <div style={{ fontSize:11, color:C.text, fontWeight:700 }}>切替 ›</div>
+        </div>
+
+        {!effectivePlayer && (
+          <div style={{ textAlign:"center", color:C.textSec, fontSize:12.5, padding:"50px 20px", lineHeight:1.8 }}>
+            表示する選手が設定されていません。「切替」から選手を選んでください。
+          </div>
+        )}
+        {effectivePlayer && loading && <div style={{ textAlign:"center", color:C.textSec, padding:40 }}>読み込み中...</div>}
+        {effectivePlayer && !loading && rows.length===0 && (
+          <div style={{ textAlign:"center", color:C.textSec, fontSize:12.5, padding:"50px 20px", lineHeight:1.8 }}>
+            🤖<br/>まだAI分析がありません<br/>
+            <span style={{ fontSize:11 }}>試合詳細画面の各対戦カードにある「🤖 +AI」から登録できます</span>
+          </div>
+        )}
+        {rows.map(({ match, analysis }) => {
+          const { a, b } = aiMatchLabel(match);
+          return (
+            <div key={match.id} style={{ ...S.card, marginBottom:10, overflow:"hidden" }}>
+              <div style={{ padding:"12px 14px 0", fontSize:11, color:C.textSec }}>
+                {[match.tournament_name, match.round, fmtDate(match.match_date)].filter(Boolean).join("・")}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"6px 14px 0" }}>
+                <span style={{ fontSize:14, fontWeight:800, color:C.text }}>{a || "自チーム"}</span>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <span onClick={()=>onOpenAnalysis(match, analysis)}
+                    style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"3px 10px", borderRadius:20, border:"1px solid #dcdffc", cursor:"pointer" }}
+                  >🤖 AI</span>
+                  {match.status==="finished" && <span style={{ fontSize:11, color:C.accent, fontWeight:800 }}>✅ 終了</span>}
+                </div>
+              </div>
+              <div style={{ padding:"6px 14px 0", fontSize:12.5, color:C.text }}>{a || "自チーム"} vs {b || "相手"}</div>
+              <div style={{ textAlign:"center", fontSize:20, fontWeight:900, padding:"8px 0 14px" }}>{match.match_score_a}-{match.match_score_b}</div>
+            </div>
+          );
+        })}
+      </div>
+      <NavBar active="aiAnalysisList" onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
+  const [roster, setRoster] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [analyses, setAnalyses] = useState([]);
+  const [linkedPlayerName, setLinkedPlayerName] = useState(null);
+  const [mySchoolName, setMySchoolName] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const [r, ms, p] = await Promise.all([getPlayerRoster(), getMatches(), getMyProfile()]);
+      setRoster(r);
+      setMatches(ms);
+      if (p?.linked_player_id) {
+        const found = r.find(x => x.id === p.linked_player_id);
+        setLinkedPlayerName(found?.player_name ?? null);
+      }
+      if (p?.school_id) {
+        const schools = await getSchools();
+        const s = schools.find(s => s.id === p.school_id);
+        setMySchoolName(s?.name ?? null);
+      }
+      const matchIds = ms.map(m => m.id);
+      const a = await getAiAnalyses(matchIds);
+      setAnalyses(a);
+      setLoading(false);
+    })();
+  }, []);
+
+  const counts = {};
+  if (!loading) {
+    const matchById = {};
+    matches.forEach(m => { matchById[m.id] = m; });
+    analyses.forEach(a => {
+      const m = matchById[a.match_id];
+      if (!m) return;
+      (m.players || []).forEach(p => {
+        counts[p.player_name] = (counts[p.player_name] || 0) + 1;
+      });
+    });
+  }
+  const candidates = roster.filter(r => counts[r.player_name] > 0);
+  const filtered = candidates.filter(r => !search.trim() || r.player_name.toLowerCase().includes(search.trim().toLowerCase()));
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40 }}>
+      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
+          <div>
+            <div style={{ fontSize:20, fontWeight:800 }}>AI分析</div>
+            <div style={{ fontSize:11, color:"#b9c2d6" }}>選手を選択</div>
+          </div>
+        </div>
+      </div>
+      <div style={{ padding:14 }}>
+        <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"9px 12px", marginBottom:10, fontSize:13, gap:6 }}>
+          🔍<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="選手名で検索" style={{ flex:1, border:"none", outline:"none", fontSize:13, background:"transparent" }} />
+        </div>
+        <div style={{ fontSize:11, color:C.textSec, margin:"0 2px 8px" }}>※AI分析が1件でもある選手だけが一覧に表示されます</div>
+        {loading && <div style={{ textAlign:"center", color:C.textSec, padding:40 }}>読み込み中...</div>}
+        {!loading && filtered.length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:40, fontSize:12.5 }}>AI分析のある選手が見つかりません</div>}
+        {!loading && filtered.length>0 && (
+          <div style={S.card}>
+            {filtered.map(p => (
+              <div key={p.id} onClick={()=>onSelect(p.player_name)}
+                style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", borderBottom:"1px solid "+C.border, cursor:"pointer", background:p.player_name===currentSelection?C.accentL:"transparent" }}
+              >
+                <div style={{ width:34,height:34,borderRadius:"50%",background:C.accentL,color:C.accent,fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{p.player_name[0]}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13.5, fontWeight:700, color:C.text }}>
+                    {p.player_name}
+                    {p.player_name===linkedPlayerName && <span style={{ fontSize:9.5,color:C.purple,background:"#eef0fe",padding:"2px 7px",borderRadius:6,marginLeft:6 }}>自分</span>}
+                  </div>
+                  <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{mySchoolName}・AI分析{counts[p.player_name]}件</div>
+                </div>
+                <div style={{ width:19,height:19,borderRadius:"50%",border:`2px solid ${p.player_name===currentSelection?C.accent:C.border}`,background:p.player_name===currentSelection?C.accent:"transparent" }}/>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // ★連打時にブラウザの「ダブルタップズーム」や「テキスト選択（Google検索バー）」が
   //   誤発動してボタンが反応しなくなる不具合対策。フォーム入力欄以外は選択不可にし、
@@ -14335,6 +14674,12 @@ export default function App() {
   const [creatingFromTournament, setCreatingFromTournament] = useState(false); // 大会の＋ボタンから試合作成に入ったかどうか
   const [tournamentSeg, setTournamentSeg] = useState("team"); // 大会詳細画面のタブ（team/individual）を試合詳細から戻った時も維持する
   const [autoOpenBulkImport, setAutoOpenBulkImport] = useState(false); // ★ドロー作成直後に続けて一括登録画面を自動で開くためのフラグ
+
+  // AI動画分析
+  const [aiAnalysisPlayer, setAiAnalysisPlayer] = useState(null); // AI分析タブで表示対象にしている選手名（nullなら自分）
+  const [aiAnalysisTargetMatch, setAiAnalysisTargetMatch] = useState(null); // 追加/詳細画面の対象試合
+  const [aiAnalysisEditRow, setAiAnalysisEditRow] = useState(null); // 既存のAI分析（詳細表示・編集用）
+  const [aiAnalysisReturnScreen, setAiAnalysisReturnScreen] = useState(null); // 追加/詳細画面から戻る先
 
   // ★大会詳細から試合を開いた後に「戻る」を押したとき、途中でアプリが再読み込みされていても
   //   元の大会・タブに戻れるよう、tournamentContext/tournamentSegをsessionStorageにも控えておく。
@@ -14587,6 +14932,12 @@ export default function App() {
         }}
         onEdit={id=>{ setTeamMatchEditId(id); setScreen("teamMatchSetup"); }}
         onNavigate={key=>{ setTeamMatchId(null); goNav(key); }}
+        onOpenAiAnalysis={(match, existing)=>{
+          setAiAnalysisTargetMatch(match);
+          setAiAnalysisEditRow(existing);
+          setAiAnalysisReturnScreen("teamMatchDetail");
+          setScreen(existing ? "aiAnalysisDetail" : "aiAnalysisAdd");
+        }}
       />
     );
   }
@@ -14644,7 +14995,7 @@ export default function App() {
   // ★下部ナビゲーション（ホーム/履歴/分析/マスター）の共通遷移ハンドラ
   function goNav(key) {
     // 現在表示中の画面と同じタブを押しても何もしない
-    const screenMap = { home:"home", list:"list", video:"video", stats:"personalAnalysis", master:"master", practice:"practice" };
+    const screenMap = { home:"home", list:"list", video:"video", stats:"personalAnalysis", master:"master", aiAnalysisList:"aiAnalysisList" };
     if (screen === screenMap[key]) return;
     setTournamentContext(null); // ボトムナビでの移動時は大会の文脈から抜ける
     if (key==="home") setScreen("home");
@@ -14652,7 +15003,7 @@ export default function App() {
     else if (key==="video") setScreen("video");
     else if (key==="stats") setScreen("personalAnalysis");
     else if (key==="master") setScreen("master");
-    else if (key==="practice") setScreen("practice");
+    else if (key==="aiAnalysisList") { setAiAnalysisPlayer(null); setScreen("aiAnalysisList"); }
   }
 
   if (screen==="home") {
@@ -14679,6 +15030,59 @@ export default function App() {
   }
   if (screen==="practice") {
     return <PracticeScreen onNavigate={goNav} />;
+  }
+  if (screen==="aiAnalysisList") {
+    return (
+      <AiAnalysisListScreen
+        selectedPlayerName={aiAnalysisPlayer}
+        onNavigate={goNav}
+        onSwitchPlayer={()=>setScreen("aiAnalysisPicker")}
+        onOpenAnalysis={(match, analysis)=>{
+          setAiAnalysisTargetMatch(match);
+          setAiAnalysisEditRow(analysis);
+          setAiAnalysisReturnScreen("aiAnalysisList");
+          setScreen("aiAnalysisDetail");
+        }}
+      />
+    );
+  }
+  if (screen==="aiAnalysisPicker") {
+    return (
+      <AiAnalysisPlayerPicker
+        currentSelection={aiAnalysisPlayer}
+        onBack={()=>setScreen("aiAnalysisList")}
+        onSelect={name=>{ setAiAnalysisPlayer(name); setScreen("aiAnalysisList"); }}
+      />
+    );
+  }
+  if (screen==="aiAnalysisAdd" && aiAnalysisTargetMatch) {
+    return (
+      <AiAnalysisAddScreen
+        match={aiAnalysisTargetMatch}
+        existing={aiAnalysisEditRow}
+        onCancel={()=>setScreen(aiAnalysisReturnScreen || "list")}
+        onSaved={(row)=>{
+          setAiAnalysisEditRow(row);
+          setScreen(aiAnalysisReturnScreen || "list");
+        }}
+      />
+    );
+  }
+  if (screen==="aiAnalysisDetail" && aiAnalysisTargetMatch && aiAnalysisEditRow) {
+    return (
+      <AiAnalysisDetailScreen
+        match={aiAnalysisTargetMatch}
+        analysis={aiAnalysisEditRow}
+        onBack={()=>setScreen(aiAnalysisReturnScreen || "list")}
+        onEdit={()=>setScreen("aiAnalysisAdd")}
+        onDelete={async ()=>{
+          if (!window.confirm("このAI分析を削除しますか？")) return;
+          await deleteAiAnalysis(aiAnalysisEditRow.id);
+          setAiAnalysisEditRow(null);
+          setScreen(aiAnalysisReturnScreen || "list");
+        }}
+      />
+    );
   }
   if (screen==="master") {
     return (
