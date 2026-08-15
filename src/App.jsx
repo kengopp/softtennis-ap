@@ -1256,7 +1256,11 @@ async function recalcTeamMatchScore(teamMatchId) {
   for (const g of games) {
     if (!g.match_id) continue;
     const m = matchMap[g.match_id];
-    if (!m || m.status !== "finished") continue;
+    // ★「途中終了」は個人の勝敗集計（選手の通算成績）からは除外する対象だが、
+    // 　団体戦としての番手の勝敗（この試合のチームスコア）は、打ち切り時点の
+    // 　スコアで決着扱いにするのが実際の運用（既に決着がついた番手を打ち切るケースが多いため）。
+    // 　そのため、ここでは finished と abandoned の両方を「決着済み」として数える。
+    if (!m || (m.status !== "finished" && m.status !== "abandoned")) continue;
     if (m.match_score_a > m.match_score_b) myScore++;
     else if (m.match_score_b > m.match_score_a) oppScore++;
   }
