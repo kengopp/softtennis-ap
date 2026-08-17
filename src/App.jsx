@@ -2364,7 +2364,7 @@ function ServeOrderModal({ aLabel, bLabel, aP1, aP2, bP1, bP2, isDoubles, onCanc
         <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
         <h3 style={{ fontSize:16, fontWeight:800, marginBottom:4 }}>最初のサーブを選択</h3>
         <p style={{ fontSize:12, color:C.textSec, marginBottom:16 }}>どちらがサーブから始めますか？</p>
-        <div style={{ display:"flex", gap:10, marginBottom:team?16:0 }}>
+        <div style={{ display:"flex", gap:10, marginBottom:16 }}>
           <button style={{ flex:1, padding:"14px 8px", borderRadius:12, cursor:"pointer",
             border:`2px solid ${C.teamA}`, background:team==="A"?C.teamA:"transparent", color:team==="A"?C.white:C.teamA, fontWeight:800, fontSize:13 }}
             onClick={()=>setTeam("A")}>{aLabel}</button>
