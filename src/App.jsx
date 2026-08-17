@@ -3631,6 +3631,18 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
           value={rosterSearch}
           onChange={e=>setRosterSearch(e.target.value)}
         />
+        {roster.length > 0 && (
+          <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+            <button
+              style={{ flex:1, padding:"7px 0", borderRadius:8, border:"1px solid "+C.navy, background:"#fff", color:C.navy, fontSize:11.5, fontWeight:700, cursor:"pointer" }}
+              onClick={()=>setParticipantIds(roster.map(p=>p.id))}
+            >全選択</button>
+            <button
+              style={{ flex:1, padding:"7px 0", borderRadius:8, border:"1px solid "+C.border, background:"#fff", color:C.textSec, fontSize:11.5, fontWeight:700, cursor:"pointer" }}
+              onClick={()=>setParticipantIds([])}
+            >全クリア</button>
+          </div>
+        )}
         <div>
           {roster.length === 0 && <div style={{ fontSize:12, color:C.textSec, padding:"6px 2px" }}>選手マスターに選手が登録されていません</div>}
           {roster.length > 0 && filteredRoster.length === 0 && <div style={{ fontSize:12, color:C.textSec, padding:"6px 2px" }}>一致する選手がいません</div>}
