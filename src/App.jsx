@@ -131,7 +131,14 @@ const daysUntil = (iso) => {
   return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
 };
 // ★一覧等で試合の状態を短く表示するための共通ヘルパー（中断した試合を「進行中」と誤表示しないようにする）
-const matchStatusShortLabel = (m) => m.status==="finished" ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
+// 　「途中終了」ボタンは手動操作なので、実際は最後まで消化してゲーム数を先取している（例：7Gマッチで4ゲーム先取済み）
+// 　スコアであれば、誤操作／本当は最後まで行われた試合とみなし、表示上は「終了」として扱う。
+const looksNaturallyFinished = (m) => {
+  const fmt = m?.game_format ?? 7;
+  const need = Math.ceil(fmt / 2);
+  return Math.max(m?.match_score_a ?? 0, m?.match_score_b ?? 0) >= need;
+};
+const matchStatusShortLabel = (m) => (m.status==="finished" || (m.status==="abandoned" && looksNaturallyFinished(m))) ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
 // ★選手選択チップの並び順をバラバラ（登録順）ではなく五十音順に揃えるための比較関数。
 //   読み仮名（ふりがな）は選手マスターに保存していないため完全な厳密さではないが、
 //   日本語ロケールでの文字列比較（Intl collation）により実用上ほぼ五十音順になる。
@@ -8217,9 +8224,12 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         {gameStatuses.map(({ orderNum, game, match }) => {
           const recorderName = game?.recorder_name;
           const isRecording = game?.status === "active";
-          const isFinished = game?.status === "finished";
-          const isAbandoned = match?.status === "abandoned";
-          const isSuspended = game?.status === "suspended" && !isAbandoned;
+          // ★スコアがそのゲーム形式の先取本数に達していれば、statusが"abandoned"でも
+          // 　実際には最後まで消化された試合とみなし「終了」表示にする（誤操作の途中終了ボタン対策）
+          const naturallyFinished = match && looksNaturallyFinished(match);
+          const isFinished = game?.status === "finished" || (match?.status === "abandoned" && naturallyFinished);
+          const isAbandoned = match?.status === "abandoned" && !naturallyFinished;
+          const isSuspended = game?.status === "suspended" && !isAbandoned && !naturallyFinished;
           const isWaiting = !game || game.status === "waiting";
 
           const aPlayers = match?.match_players?.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "";
