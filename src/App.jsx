@@ -4121,11 +4121,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:13, fontWeight:myWin?800:600, color:C.teamA }}>
-                      {myEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.white, background:C.teamA, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{myEntryNo}</span>}
+                      {myEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{myEntryNo}</span>}
                       {myClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{myClub}</span>}{myNames}
                     </div>
                     <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:2 }}>
-                      {oppEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.white, background:C.teamB, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{oppEntryNo}</span>}
+                      {oppEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{oppEntryNo}</span>}
                       {oppClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
                     </div>
                   </div>
