@@ -4102,6 +4102,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const oppNames = oppPlayers.map(p=>p.player_name).join("/");
           const myClub = myPlayers[0]?.club_name || "";
           const oppClub = oppPlayers[0]?.club_name || "";
+          const myEntryNo = mySide==="B" ? m.entry_no_b : m.entry_no_a;
+          const oppEntryNo = mySide==="B" ? m.entry_no_a : m.entry_no_b;
           const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : myWin ? C.teamA : oppWin ? C.teamB : C.border;
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
@@ -4113,8 +4115,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:myWin?800:600, color:C.teamA }}>{myClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{myClub}</span>}{myNames}</div>
-                    <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppWin?C.teamB:C.text, marginTop:2 }}>{oppClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClub}</span>}{oppNames}</div>
+                    <div style={{ fontSize:13, fontWeight:myWin?800:600, color:C.teamA }}>{myEntryNo && <span style={{ fontSize:11, color:C.textSec, marginRight:4 }}>{myEntryNo}</span>}{myClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{myClub}</span>}{myNames}</div>
+                    <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppWin?C.teamB:C.text, marginTop:2 }}>{oppEntryNo && <span style={{ fontSize:11, color:C.textSec, marginRight:4 }}>{oppEntryNo}</span>}{oppClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClub}</span>}{oppNames}</div>
                   </div>
                   {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
                 </div>
