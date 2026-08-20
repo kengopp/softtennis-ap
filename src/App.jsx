@@ -1679,16 +1679,6 @@ async function updateDrawEntryNo(entryId, entryNo) {
   if (error) throw error;
 }
 
-// ★一覧画面から「まとめて番号入力」する時に使う一括更新。
-//   同じ試合・同じチームの選手（ダブルスなら2人）の行を、まとめて同じ番号に更新する。
-async function bulkUpdateMatchEntryNo(updates) {
-  // updates: [{ match_id, team, entry_no }]
-  for (const u of updates) {
-    const { error } = await supabase.from("match_players").update({ entry_no: u.entry_no || null }).eq("match_id", u.match_id).eq("team", u.team);
-    if (error) throw error;
-  }
-}
-
 // draw_matches の指定サイドに、作成済みのエントリーを紐づける
 // ★複数人が同時に同じ枠へ入力しても上書きしないための安全版。
 //   対象の列（side_a_entry_id / side_b_entry_id）がまだ空のときだけ更新する。
@@ -3704,9 +3694,6 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
   const [individualWinOnly, setIndividualWinOnly] = useState(false); // ★勝ち残ってるペアだけ表示
   const [individualRoundFilter, setIndividualRoundFilter] = useState("all"); // ★回戦ごとの絞り込み
-  const [bulkEntryOpen, setBulkEntryOpen] = useState(false); // ★ペア出場番号のまとめて入力画面
-  const [bulkEntryValues, setBulkEntryValues] = useState({}); // { "matchId_A": "12", "matchId_B": "13" }
-  const [bulkEntrySaving, setBulkEntrySaving] = useState(false);
   const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
@@ -3769,14 +3756,16 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const individualMatches = matches.filter(m => !teamLinkedMatchIds.has(m.id));
   // ★回戦の選択肢（登録されている試合から実在するroundだけを、大会作成時の入力順ではなく出現順に抽出）
   const individualRounds = [...new Set(individualMatches.map(m => m.round).filter(Boolean))];
-  // ★「勝ち残ってるペアだけ」：自チーム側が勝っている試合のみに絞り込む（負けた試合は除外＝敗退したペア）
+  // ★「勝ち残ってるペアだけ」：まだ負けが確定していないペアを表示する（＝敗退した試合だけ除外）。
+  //   未実施・進行中の試合や、過去に勝った試合はすべて残す（勝った試合を見たいわけではなく、
+  //   あと何ペア残っているかを確認するための絞り込みのため）
   const filteredIndividualMatches = individualMatches.filter(m => {
     if (individualRoundFilter !== "all" && m.round !== individualRoundFilter) return false;
     if (individualWinOnly) {
       const mySide = mySideOf(m, mySchoolName);
       const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
       const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
-      if (!(m.status==="finished" && myScore > oppScore)) return false;
+      if (m.status==="finished" && myScore < oppScore) return false; // 負けた試合（＝敗退したペア）だけ除外
     }
     return true;
   });
@@ -4080,20 +4069,6 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   background:individualWinOnly?C.teamA:"#fff", color:individualWinOnly?"#fff":C.textSec,
                 }}
               >🏆 勝ち残りのみ</button>
-              <button
-                onClick={()=>{
-                  const seed = {};
-                  filteredIndividualMatches.forEach(m=>{
-                    const aP = m.players.filter(p=>p.team==="A")[0];
-                    const bP = m.players.filter(p=>p.team==="B")[0];
-                    if (aP) seed[`${m.id}_A`] = aP.entry_no || "";
-                    if (bP) seed[`${m.id}_B`] = bP.entry_no || "";
-                  });
-                  setBulkEntryValues(seed);
-                  setBulkEntryOpen(true);
-                }}
-                style={{ padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer", border:`1.5px solid ${C.border}`, background:"#fff", color:C.textSec }}
-              >🔢 まとめて番号入力</button>
             </div>
             {individualRounds.length>0 && (
               <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:2 }}>
