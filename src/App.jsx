@@ -1679,6 +1679,16 @@ async function updateDrawEntryNo(entryId, entryNo) {
   if (error) throw error;
 }
 
+// ★一覧画面から「まとめて番号入力」する時に使う一括更新。
+//   同じ試合・同じチームの選手（ダブルスなら2人）の行を、まとめて同じ番号に更新する。
+async function bulkUpdateMatchEntryNo(updates) {
+  // updates: [{ match_id, team, entry_no }]
+  for (const u of updates) {
+    const { error } = await supabase.from("match_players").update({ entry_no: u.entry_no || null }).eq("match_id", u.match_id).eq("team", u.team);
+    if (error) throw error;
+  }
+}
+
 // draw_matches の指定サイドに、作成済みのエントリーを紐づける
 // ★複数人が同時に同じ枠へ入力しても上書きしないための安全版。
 //   対象の列（side_a_entry_id / side_b_entry_id）がまだ空のときだけ更新する。
@@ -3694,6 +3704,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
   const [individualWinOnly, setIndividualWinOnly] = useState(false); // ★勝ち残ってるペアだけ表示
   const [individualRoundFilter, setIndividualRoundFilter] = useState("all"); // ★回戦ごとの絞り込み
+  const [bulkEntryOpen, setBulkEntryOpen] = useState(false); // ★ペア出場番号のまとめて入力画面
+  const [bulkEntryValues, setBulkEntryValues] = useState({}); // { "matchId_A": "12", "matchId_B": "13" }
+  const [bulkEntrySaving, setBulkEntrySaving] = useState(false);
   const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
@@ -4067,6 +4080,20 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   background:individualWinOnly?C.teamA:"#fff", color:individualWinOnly?"#fff":C.textSec,
                 }}
               >🏆 勝ち残りのみ</button>
+              <button
+                onClick={()=>{
+                  const seed = {};
+                  filteredIndividualMatches.forEach(m=>{
+                    const aP = m.players.filter(p=>p.team==="A")[0];
+                    const bP = m.players.filter(p=>p.team==="B")[0];
+                    if (aP) seed[`${m.id}_A`] = aP.entry_no || "";
+                    if (bP) seed[`${m.id}_B`] = bP.entry_no || "";
+                  });
+                  setBulkEntryValues(seed);
+                  setBulkEntryOpen(true);
+                }}
+                style={{ padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer", border:`1.5px solid ${C.border}`, background:"#fff", color:C.textSec }}
+              >🔢 まとめて番号入力</button>
             </div>
             {individualRounds.length>0 && (
               <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:2 }}>
@@ -15382,7 +15409,10 @@ export default function App() {
             setScreen("teamMatchRecord");
             return;
           }
-          const fromTournament = creatingFromTournament && tournamentContext;
+          // ★大会の個人戦一覧から開いた試合を、記録画面の「✏️ 編集」経由で編集した場合も
+          // 　大会の文脈を保つ（creatingFromTournamentは新規作成時のみ立つフラグなので、
+          // 　既存試合の編集ではprevScreenの方で判定する）
+          const fromTournament = (creatingFromTournament || prevScreen === "tournamentDetail") && tournamentContext;
           if (!fromTournament) setListMatchMode("individual"); // ★個人戦タブに戻れるようにする
           setPrevScreen(fromTournament ? "tournamentDetail" : "list");
           setCreatingFromTournament(false);
