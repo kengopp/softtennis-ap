@@ -3787,7 +3787,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
-  const [individualWinOnly, setIndividualWinOnly] = useState(false); // ★勝ち残ってるペアだけ表示
+  const [individualResultFilter, setIndividualResultFilter] = useState("all"); // "all" | "win" | "lose"（勝ち残り／敗退の絞り込み）
   const [individualRoundFilter, setIndividualRoundFilter] = useState("all"); // ★回戦ごとの絞り込み
   const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
@@ -3854,13 +3854,16 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   // ★「勝ち残ってるペアだけ」：まだ負けが確定していないペアを表示する（＝敗退した試合だけ除外）。
   //   未実施・進行中の試合や、過去に勝った試合はすべて残す（勝った試合を見たいわけではなく、
   //   あと何ペア残っているかを確認するための絞り込みのため）
+  //   ★「敗退ペアのみ」は逆に、負けが確定した試合だけを残す（勝ち残り確認とは対照的な用途）
   const filteredIndividualMatches = individualMatches.filter(m => {
     if (individualRoundFilter !== "all" && m.round !== individualRoundFilter) return false;
-    if (individualWinOnly) {
+    if (individualResultFilter === "win" || individualResultFilter === "lose") {
       const mySide = mySideOf(m, mySchoolName);
       const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
       const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
-      if (m.status==="finished" && myScore < oppScore) return false; // 負けた試合（＝敗退したペア）だけ除外
+      const lost = m.status==="finished" && myScore < oppScore;
+      if (individualResultFilter === "win" && lost) return false; // 負けた試合（＝敗退したペア）だけ除外
+      if (individualResultFilter === "lose" && !lost) return false; // 負けが確定していない試合は除外
     }
     return true;
   });
@@ -4185,13 +4188,21 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ margin:"0 14px 12px" }}>
             <div style={{ display:"flex", gap:8, marginBottom:individualRounds.length>0?8:0 }}>
               <button
-                onClick={()=>setIndividualWinOnly(v=>!v)}
+                onClick={()=>setIndividualResultFilter(v=>v==="win"?"all":"win")}
                 style={{
                   padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer",
-                  border:`1.5px solid ${individualWinOnly?C.teamA:C.border}`,
-                  background:individualWinOnly?C.teamA:"#fff", color:individualWinOnly?"#fff":C.textSec,
+                  border:`1.5px solid ${individualResultFilter==="win"?C.teamA:C.border}`,
+                  background:individualResultFilter==="win"?C.teamA:"#fff", color:individualResultFilter==="win"?"#fff":C.textSec,
                 }}
               >🏆 勝ち残りのみ</button>
+              <button
+                onClick={()=>setIndividualResultFilter(v=>v==="lose"?"all":"lose")}
+                style={{
+                  padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer",
+                  border:`1.5px solid ${individualResultFilter==="lose"?C.red:C.border}`,
+                  background:individualResultFilter==="lose"?C.red:"#fff", color:individualResultFilter==="lose"?"#fff":C.textSec,
+                }}
+              >💔 敗退ペアのみ</button>
             </div>
             {individualRounds.length>0 && (
               <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:2 }}>
