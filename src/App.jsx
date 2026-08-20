@@ -520,6 +520,8 @@ async function saveMatch(match) {
     memo: match.memo || null,
     court_number: match.court_number || null,
     is_younger: match.is_younger !== false,
+    entry_no_a: match.entry_no_a || null,
+    entry_no_b: match.entry_no_b || null,
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
@@ -3217,8 +3219,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     </div>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                       <div style={{ flex:1 }}>
-                        <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
-                        <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
+                        <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{m.entry_no_a && <span style={{ fontSize:11, color:C.textSec, marginRight:4 }}>{m.entry_no_a}</span>}{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
+                        <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{m.entry_no_b && <span style={{ fontSize:11, color:C.textSec, marginRight:4 }}>{m.entry_no_b}</span>}{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
                       </div>
                       {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                     </div>
@@ -10344,8 +10346,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 
   // ★この試合がドローの枠から作られたものであれば、エントリー番号もここで一緒に編集できるようにする
   const [drawLink, setDrawLink] = useState(null); // { id, side_a_entry_id, side_b_entry_id }
-  const [aEntryNo, setAEntryNo] = useState("");
-  const [bEntryNo, setBEntryNo] = useState("");
+  // ★ドロー経由でない（「試合を追加」から直接作成した）試合でも、
+  //   組み合わせ表のエントリー番号をそのままmatches.entry_no_a/bに記録できるようにする
+  const [aEntryNo, setAEntryNo] = useState(base?.entry_no_a ?? "");
+  const [bEntryNo, setBEntryNo] = useState(base?.entry_no_b ?? "");
   useEffect(() => {
     if (!editing?.id) return;
     getDrawMatchByMatchId(editing.id).then(async (link) => {
@@ -10417,6 +10421,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const swap = ownSchoolName && bClub.trim() === ownSchoolName && aClub.trim() !== ownSchoolName;
       const fAClub = swap ? bClub : aClub, fAP1 = swap ? bP1 : aP1, fAP2 = swap ? bP2 : aP2;
       const fBClub = swap ? aClub : bClub, fBP1 = swap ? aP1 : bP1, fBP2 = swap ? aP2 : bP2;
+      const fAEntryNo = swap ? bEntryNo : aEntryNo, fBEntryNo = swap ? aEntryNo : bEntryNo;
       const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
       const players = [
         { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
@@ -10428,7 +10433,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fFirstServer,
-        status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+        status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger,
+        entry_no_a: fAEntryNo.trim() || null, entry_no_b: fBEntryNo.trim() || null,
+        players, games:[],
       };
       await saveMatch(match);
       setScheduledId(mid);
@@ -10471,6 +10478,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         const updated = {
           ...editing,
           match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType, court_number:courtNumber||null,
+          entry_no_a: aEntryNo.trim() || null, entry_no_b: bEntryNo.trim() || null,
           players: updatedPlayers,
           // 予定の場合は形式設定も更新可能
           ...((editing.status === "scheduled" || editing.status === "waiting") ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
@@ -10492,6 +10500,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const swap = ownSchoolName && bClub.trim() === ownSchoolName && aClub.trim() !== ownSchoolName;
       const fAClub = swap ? bClub : aClub, fAP1 = swap ? bP1 : aP1, fAP2 = swap ? bP2 : aP2;
       const fBClub = swap ? aClub : bClub, fBP1 = swap ? aP1 : bP1, fBP2 = swap ? aP2 : bP2;
+      const fAEntryNo = swap ? bEntryNo : aEntryNo, fBEntryNo = swap ? aEntryNo : bEntryNo;
       const fServer = selectedServer;
       const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
       const players = [
@@ -10504,7 +10513,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         id:mid, created_by:"me",
         match_date:matchDate, venue, tournament_name:tournamentName, round,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fServer || fFirstServer || "A",
-        status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+        status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger,
+        entry_no_a: fAEntryNo.trim() || null, entry_no_b: fBEntryNo.trim() || null,
+        players, games:[],
       };
       await saveMatch(match);
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
@@ -10634,7 +10645,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         )}
 
         <FormSec title="自チーム (A)">
-          {drawLink && (
+          {!isTeamMatchGame && (
             <FormRow label="エントリー番号">
               <input style={S.inp} placeholder="例：12" inputMode="numeric" value={aEntryNo} onChange={e => setAEntryNo(e.target.value)}/>
             </FormRow>
@@ -10671,7 +10682,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         </FormSec>
 
         <FormSec title="相手チーム (B)">
-          {drawLink && (
+          {!isTeamMatchGame && (
             <FormRow label="エントリー番号">
               <input style={S.inp} placeholder="例：13" inputMode="numeric" value={bEntryNo} onChange={e => setBEntryNo(e.target.value)}/>
             </FormRow>
