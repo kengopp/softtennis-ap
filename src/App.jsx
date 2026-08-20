@@ -4098,7 +4098,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const myPlayers = mySide==="B" ? bPlayers : aPlayers;
           const oppPlayers = mySide==="B" ? aPlayers : bPlayers;
           const myNames = myPlayers.map(p=>p.player_name).join("/");
-          const oppNames = oppPlayers.map(p=>p.player_name).join("/");
+          // ★過去に作成された試合には、対戦相手が未入力でも「選手A」「選手B」という仮名で
+          // 　保存されているものが混在している。新規作成時は今後この仮名を作らないようにしたが、
+          // 　表示だけは既存データも含めて統一するため、仮名のみのペアは「未入力」として扱う。
+          const oppIsPlaceholderOnly = oppPlayers.length>0 && oppPlayers.every((p,i)=> p.player_name === (i===0 ? "選手A" : "選手B"));
+          const oppNames = oppIsPlaceholderOnly ? "" : oppPlayers.map(p=>p.player_name).join("/");
           const myClub = myPlayers[0]?.club_name || "";
           const oppClub = oppPlayers[0]?.club_name || "";
           const myEntryNo = myPlayers[0]?.entry_no || "";
@@ -4118,9 +4122,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                       {myEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.white, background:C.teamA, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{myEntryNo}</span>}
                       {myClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{myClub}</span>}{myNames}
                     </div>
-                    <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppWin?C.teamB:C.text, marginTop:2 }}>
+                    <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:2 }}>
                       {oppEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.white, background:C.teamB, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{oppEntryNo}</span>}
-                      {oppClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClub}</span>}{oppNames}
+                      {oppClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
                     </div>
                   </div>
                   {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
@@ -10473,11 +10477,14 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     try {
       if (editing) {
         // 既存試合の試合情報・選手情報のみ更新（スコア・ゲームは変更しない）
+        // ★対戦相手情報が何も入力されていない場合はB側の選手行自体を作らない
+        //   （新規作成・予定試合の登録と挙動を揃え、「選手A/選手B」が出たり出なかったりする不整合をなくす）
+        const bEntered = bP1.trim() || bClub.trim();
         const updatedPlayers = [
           { id: aBase?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:aBase?.position ?? null, order_num:1, entry_no: aEntryNo.trim() || null },
           ...(isDoubles && aP2.trim() ? [{ id: aBase2?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:aBase2?.position ?? null, order_num:2, entry_no: aEntryNo.trim() || null }] : []),
-          { id: bBase?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP1, "選手A"), club_name:bClub.trim(), position:bBase?.position ?? null, order_num:1, entry_no: bEntryNo.trim() || null },
-          ...(isDoubles ? [{ id: bBase2?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP2, "選手B"), club_name:bClub.trim(), position:bBase2?.position ?? null, order_num:2, entry_no: bEntryNo.trim() || null }] : []),
+          ...(bEntered ? [{ id: bBase?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP1, "選手A"), club_name:bClub.trim(), position:bBase?.position ?? null, order_num:1, entry_no: bEntryNo.trim() || null }] : []),
+          ...(isDoubles && bEntered ? [{ id: bBase2?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP2, "選手B"), club_name:bClub.trim(), position:bBase2?.position ?? null, order_num:2, entry_no: bEntryNo.trim() || null }] : []),
         ];
         const updated = {
           ...editing,
@@ -10505,11 +10512,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const fBClub = swap ? aClub : bClub, fBP1 = swap ? aP1 : bP1, fBP2 = swap ? aP2 : bP2;
       const fServer = selectedServer;
       const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
+      const fBEntered = fBP1.trim() || fBClub.trim();
       const players = [
         { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1, entry_no: (swap ? bEntryNo : aEntryNo).trim() || null },
         ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2, entry_no: (swap ? bEntryNo : aEntryNo).trim() || null }] : []),
-        { id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null },
-        ...(isDoubles ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null }] : []),
+        ...(fBEntered ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null }] : []),
+        ...(isDoubles && fBEntered ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null }] : []),
       ];
       const match = {
         id:mid, created_by:"me",
