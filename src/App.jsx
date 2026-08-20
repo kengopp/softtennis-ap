@@ -4990,7 +4990,7 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
         player2_name: p2,
       });
       setSession(s => [...s, { entry_no: currentNo.trim(), club_name: club, player1_name: p1, player2_name: p2, skipped: false }]);
-      setP1(""); setP2("");
+      setClub(""); setP1(""); setP2("");
       advanceNo();
     } catch (e) {
       alert("保存に失敗しました: " + (e.message || e));
