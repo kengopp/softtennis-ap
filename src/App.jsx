@@ -3689,6 +3689,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
+  const [individualWinOnly, setIndividualWinOnly] = useState(false); // ★勝ち残ってるペアだけ表示
+  const [individualRoundFilter, setIndividualRoundFilter] = useState("all"); // ★回戦ごとの絞り込み
   const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
@@ -3749,6 +3751,19 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   //   （団体戦タブ側の各カードから開けば、これまで通り中身を確認できる）
   const teamLinkedMatchIds = new Set(teamMatches.flatMap(tm => (tm.games || []).map(g => g.match_id).filter(Boolean)));
   const individualMatches = matches.filter(m => !teamLinkedMatchIds.has(m.id));
+  // ★回戦の選択肢（登録されている試合から実在するroundだけを、大会作成時の入力順ではなく出現順に抽出）
+  const individualRounds = [...new Set(individualMatches.map(m => m.round).filter(Boolean))];
+  // ★「勝ち残ってるペアだけ」：自チーム側が勝っている試合のみに絞り込む（負けた試合は除外＝敗退したペア）
+  const filteredIndividualMatches = individualMatches.filter(m => {
+    if (individualRoundFilter !== "all" && m.round !== individualRoundFilter) return false;
+    if (individualWinOnly) {
+      const mySide = mySideOf(m, mySchoolName);
+      const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
+      const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
+      if (!(m.status==="finished" && myScore > oppScore)) return false;
+    }
+    return true;
+  });
 
   // ★大会に入った直後、選択中のタブ（前回訪れた大会で使っていたタブが引き継がれる）に
   //   この大会の記録が1件もない場合は、記録がある方のタブへ自動で切り替える。
@@ -4038,8 +4053,40 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           );
         })}
 
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && (
+          <div style={{ margin:"0 14px 12px" }}>
+            <div style={{ display:"flex", gap:8, marginBottom:individualRounds.length>0?8:0 }}>
+              <button
+                onClick={()=>setIndividualWinOnly(v=>!v)}
+                style={{
+                  padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer",
+                  border:`1.5px solid ${individualWinOnly?C.teamA:C.border}`,
+                  background:individualWinOnly?C.teamA:"#fff", color:individualWinOnly?"#fff":C.textSec,
+                }}
+              >🏆 勝ち残りのみ</button>
+            </div>
+            {individualRounds.length>0 && (
+              <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:2 }}>
+                <button onClick={()=>setIndividualRoundFilter("all")}
+                  style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, fontSize:11.5, fontWeight:700, cursor:"pointer",
+                    border:`1.5px solid ${individualRoundFilter==="all"?C.navy:C.border}`,
+                    background:individualRoundFilter==="all"?C.navy:"#fff", color:individualRoundFilter==="all"?"#fff":C.textSec }}
+                >すべて</button>
+                {individualRounds.map(r => (
+                  <button key={r} onClick={()=>setIndividualRoundFilter(r)}
+                    style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, fontSize:11.5, fontWeight:700, cursor:"pointer",
+                      border:`1.5px solid ${individualRoundFilter===r?C.navy:C.border}`,
+                      background:individualRoundFilter===r?C.navy:"#fff", color:individualRoundFilter===r?"#fff":C.textSec }}
+                  >{r}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
-        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.map(m => {
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && filteredIndividualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40,fontSize:12 }}>条件に一致する試合がありません</div>}
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && filteredIndividualMatches.map(m => {
           const mySide = mySideOf(m, mySchoolName);
           const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
           const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
