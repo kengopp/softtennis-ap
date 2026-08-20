@@ -3865,6 +3865,30 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     return true;
   });
 
+  // ★試合一覧の並び順：①回戦が新しい（決勝に近い）ものほど上／②同じ回戦なら自チームのペア番号が若い順
+  //   ROUND_OPTIONSの並び（1回戦→…→決勝）を基準に順位付けし、リストにない自由入力の回戦名も
+  //   「N回戦」の数字から近い順位を推定する。回戦が未入力の試合は一番下に表示する。
+  function roundSortRank(round) {
+    if (!round) return -1;
+    const idx = ROUND_OPTIONS.indexOf(round);
+    if (idx !== -1) return idx;
+    const m = round.match(/(\d+)\s*回戦/);
+    if (m) return Number(m[1]) + 1; // "1回戦"のindex(2)と揃うよう+1
+    return -0.5; // ROUND_OPTIONSにもN回戦パターンにも一致しない自由入力の回戦名
+  }
+  function myEntryNoOf(m) {
+    const mySide = mySideOf(m, mySchoolName);
+    const myPlayers = m.players.filter(p => p.team === mySide).sort((a, b) => a.order_num - b.order_num);
+    const no = myPlayers[0]?.entry_no;
+    const n = Number(no);
+    return (no != null && no !== "" && !isNaN(n)) ? n : Infinity; // 番号が無い/数値でない試合は後ろへ
+  }
+  const sortedIndividualMatches = [...filteredIndividualMatches].sort((a, b) => {
+    const ra = roundSortRank(a.round), rb = roundSortRank(b.round);
+    if (ra !== rb) return rb - ra; // 回戦が新しい方を上に
+    return myEntryNoOf(a) - myEntryNoOf(b); // ペア番号が若い方を上に
+  });
+
   // ★大会に入った直後、選択中のタブ（前回訪れた大会で使っていたタブが引き継がれる）に
   //   この大会の記録が1件もない場合は、記録がある方のタブへ自動で切り替える。
   //   これにより「この大会の団体戦記録がありません」のような空の画面が先に開くことを防ぐ。
@@ -4190,7 +4214,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && filteredIndividualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40,fontSize:12 }}>条件に一致する試合がありません</div>}
-        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && filteredIndividualMatches.map(m => {
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && sortedIndividualMatches.map(m => {
           const mySide = mySideOf(m, mySchoolName);
           const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
           const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
