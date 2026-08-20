@@ -460,6 +460,7 @@ function rowToMatchSummary(m, players=[], games=[]) {
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
+      entry_no: p.entry_no ?? null,
     })),
     games: games.map(g => ({
       id: g.id, game_number: g.game_number, is_final: g.is_final,
@@ -484,6 +485,7 @@ function rowToMatchFull(m, players, games, points, faults) {
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
+      entry_no: p.entry_no ?? null,
     })),
     games: games.map(g => ({
       id: g.id, match_id: m.id, game_number: g.game_number, server_team: g.server_team,
