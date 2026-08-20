@@ -4719,6 +4719,10 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
   const [view, setView] = useState("list"); // "list" | "bulk"
   const [saving, setSaving] = useState(false);
 
+  // ★他の試合作成画面と同様、学校マスター（＋過去に入力されたチーム名）を候補として出す
+  const [schools, setSchools] = useState([]);
+  useEffect(() => { getKnownSchools().then(setSchools); }, []);
+
   const reload = useCallback(() => {
     setLoading(true);
     getTournamentPairs(tournament.id).then(rows => { setPairs(rows); setLoading(false); });
@@ -4753,6 +4757,7 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
       <TournamentPairBulkAddScreen
         tournament={tournament}
         existingPairs={pairs}
+        schools={schools}
         onBack={() => { setView("list"); reload(); }}
       />
     );
@@ -4851,6 +4856,7 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
             saving={saving}
             existingPairs={pairs}
             excludeId={editingPair.id || null}
+            schools={schools}
             onCancel={() => setEditingPair(null)}
             onDelete={editingPair.id ? () => { handleDelete(editingPair); setEditingPair(null); } : null}
             onSave={async (vals) => {
@@ -4894,7 +4900,7 @@ function entryNoMatches(a, b) {
 // ペア登録・編集の共通フォーム（単発登録・連番登録モードどちらからも使う）
 // ★existingPairsが渡されている場合、同じ出場番号が既に登録されていないかその場でチェックし、
 //   既存の登録内容を表示して重複登録を防ぐ（excludeIdは編集中の自分自身を除外するため）
-function PairEditForm({ initial, saving, onCancel, onDelete, onSave, existingPairs, excludeId }) {
+function PairEditForm({ initial, saving, onCancel, onDelete, onSave, existingPairs, excludeId, schools }) {
   const [entryNo, setEntryNo] = useState(initial.entry_no ?? "");
   const [club, setClub] = useState(initial.club_name ?? "");
   const [p1, setP1] = useState(initial.player1_name ?? "");
@@ -4922,7 +4928,7 @@ function PairEditForm({ initial, saving, onCancel, onDelete, onSave, existingPai
         )}
       </FormRow>
       <FormRow label="チーム名 / 学校名">
-        <input style={S.inp} placeholder="例：玄界" value={club} onChange={e => setClub(e.target.value)} />
+        <SchoolField value={club} onChange={setClub} schools={schools || []} placeholder="例：玄界" />
       </FormRow>
       <FormRow label="選手1">
         <input style={S.inp} placeholder="選手名（未定なら空欄でOK）" value={p1} onChange={e => setP1(e.target.value)} />
@@ -4944,7 +4950,7 @@ function PairEditForm({ initial, saving, onCancel, onDelete, onSave, existingPai
 }
 
 // 「1番から連番でまとめて登録」モード：番号を自動で+1しながらテンポよく連続入力する
-function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
+function TournamentPairBulkAddScreen({ tournament, existingPairs, schools, onBack }) {
   const nextFreeNo = (() => {
     const nums = existingPairs.map(p => Number(p.entry_no)).filter(n => !isNaN(n) && n > 0);
     return nums.length ? Math.max(...nums) + 1 : 1;
@@ -5037,7 +5043,7 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
             )}
           </FormRow>
           <FormRow label="チーム名 / 学校名">
-            <input style={S.inp} placeholder="例：玄界" value={club} onChange={e => setClub(e.target.value)} />
+            <SchoolField value={club} onChange={setClub} schools={schools || []} placeholder="例：玄界" />
           </FormRow>
           <FormRow label="選手1">
             <input style={S.inp} placeholder="選手名（未定なら空欄でOK）" value={p1} onChange={e => setP1(e.target.value)} />
