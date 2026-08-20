@@ -4218,6 +4218,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
                   {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}{m.match_number ? `(${m.match_number}試合目)` : ""}
                   {m.is_simple_draw_result && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#f1efff", color:C.purple, border:"1px solid "+C.purple }}>簡易記録</span>}
+                  <span style={{ marginLeft:"auto", fontSize:10.5, fontWeight:700, border:`1px solid ${C.border}`, borderRadius:99, padding:"2px 9px", whiteSpace:"nowrap" }}>
+                    {m.status==="waiting" ? "待機中" : m.status==="scheduled" ? "予定" : m.status==="active" ? "試合中" : m.status==="finished" ? "終了" : m.status==="abandoned" ? "途中終了" : m.status==="suspended" ? "中断" : m.status}
+                  </span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
