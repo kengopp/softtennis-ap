@@ -1420,12 +1420,14 @@ async function renameTournamentCascade(oldName, newName) {
   const oldTrimmed = (oldName || "").trim();
   const newTrimmed = (newName || "").trim();
   if (!oldTrimmed || !newTrimmed || oldTrimmed === newTrimmed) return;
-  const [r1, r2] = await Promise.all([
+  const [r1, r2, r3] = await Promise.all([
     supabase.from("matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
     supabase.from("team_matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+    supabase.from("tournament_pairs").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
   ]);
   if (r1.error) console.error("個人戦の大会名追従に失敗:", r1.error);
   if (r2.error) console.error("団体戦の大会名追従に失敗:", r2.error);
+  if (r3.error) console.error("ペアマスターの大会名追従に失敗:", r3.error);
 }
 
 // ★大会の削除は誤操作対策のため即時完全削除ではなくゴミ箱行き（論理削除）にする
@@ -1756,6 +1758,96 @@ async function checkDuplicateEntryNo(tournamentId, category, blockLabel, entryNo
   const { data, error } = await query;
   if (error) { console.error(error); return false; }
   return (data || []).some(row => !(excludeEntryIds || []).includes(row.id));
+}
+
+// ★同じ大会名の中で、指定したペア出場番号(entry_no)がこれまでに使われている試合を探し、
+//   そのチーム名/学校名・選手名を返す（次の回戦の試合を作るとき、番号だけ入力すれば
+//   チーム名・選手名を自動入力できるようにするため）。
+//   同じ番号の行が複数見つかった場合は、直近に作成された試合のものを優先する。
+async function findPairByEntryNo(tournamentName, entryNo) {
+  const t = (tournamentName || "").trim();
+  const n = (entryNo || "").trim();
+  if (!t || !n) return null;
+
+  // ①まずペアマスター（事前登録リスト）を探す。ここに登録があれば最優先で使う。
+  const { data: master, error: masterErr } = await supabase
+    .from("tournament_pairs").select("*").eq("tournament_name", t).eq("entry_no", n)
+    .order("created_at", { ascending: false }).limit(1);
+  if (!masterErr && master && master.length > 0) {
+    const row = master[0];
+    return {
+      club_name: row.club_name || "",
+      player1: row.player1_name || "",
+      player2: row.player2_name || "",
+    };
+  }
+
+  // ②ペアマスターに無ければ、過去に作成済みの試合から探す（従来通り）
+  const { data: matches, error: mErr } = await supabase
+    .from("matches").select("id, created_at")
+    .eq("tournament_name", t).is("deleted_at", null)
+    .order("created_at", { ascending: false });
+  if (mErr || !matches || matches.length === 0) return null;
+  const orderByRecency = {};
+  matches.forEach((m, i) => { orderByRecency[m.id] = i; });
+  const matchIds = matches.map(m => m.id);
+  const { data: players, error: pErr } = await supabase
+    .from("match_players").select("*").in("match_id", matchIds).eq("entry_no", n);
+  if (pErr || !players || players.length === 0) return null;
+  // 最も新しい試合のものを優先
+  players.sort((a, b) => (orderByRecency[a.match_id] ?? 999999) - (orderByRecency[b.match_id] ?? 999999));
+  const bestMatchId = players[0].match_id;
+  const pair = players.filter(p => p.match_id === bestMatchId).sort((a, b) => a.order_num - b.order_num);
+  if (pair.length === 0) return null;
+  const cleanName = (n, ph) => (n && n !== ph) ? n : "";
+  return {
+    club_name: pair[0].club_name || "",
+    player1: cleanName(pair.find(p => p.order_num === 1)?.player_name, "選手A"),
+    player2: cleanName(pair.find(p => p.order_num === 2)?.player_name, "選手B"),
+  };
+}
+
+// ============================================================
+// ペアマスター（大会ごとに事前登録しておくペア一覧：tournament_pairs）
+// ============================================================
+async function getTournamentPairs(tournamentId) {
+  const { data, error } = await supabase
+    .from("tournament_pairs").select("*").eq("tournament_id", tournamentId)
+    .order("created_at", { ascending: true });
+  if (error) { console.error(error); return []; }
+  // 出場番号は数値として扱えるものは数値順、それ以外は末尾に文字列順で並べる
+  return (data ?? []).slice().sort((a, b) => {
+    const na = Number(a.entry_no), nb = Number(b.entry_no);
+    const aNum = a.entry_no !== "" && a.entry_no != null && !isNaN(na);
+    const bNum = b.entry_no !== "" && b.entry_no != null && !isNaN(nb);
+    if (aNum && bNum) return na - nb;
+    if (aNum) return -1;
+    if (bNum) return 1;
+    return (a.entry_no || "").localeCompare(b.entry_no || "", "ja");
+  });
+}
+
+async function saveTournamentPair(p) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("ログインしていません");
+  const row = {
+    id: p.id || uid(),
+    created_by: p.created_by || user.id,
+    tournament_id: p.tournament_id,
+    tournament_name: (p.tournament_name || "").trim(),
+    entry_no: (p.entry_no || "").trim(),
+    club_name: (p.club_name || "").trim() || null,
+    player1_name: (p.player1_name || "").trim() || null,
+    player2_name: (p.player2_name || "").trim() || null,
+  };
+  const { error } = await supabase.from("tournament_pairs").upsert(row);
+  if (error) throw error;
+  return row;
+}
+
+async function deleteTournamentPair(id) {
+  const { error } = await supabase.from("tournament_pairs").delete().eq("id", id);
+  if (error) throw error;
 }
 
 // ドローの枠（両サイドとも埋まっている状態）から、実際にスコアを付けられる試合(matches)を作成し、
@@ -3680,7 +3772,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport }) {
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, onOpenPairMaster, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [showMoreMenu, setShowMoreMenu] = useState(false); // ★ヘッダー右上「⋯」メニューの開閉
@@ -3816,6 +3908,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                   onClick={()=>{ setShowMoreMenu(false); onOpenDailyRanking && onOpenDailyRanking(tournament); }}
                 >📊 日別選手ランキング</button>
+                <button
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                  onClick={()=>{ setShowMoreMenu(false); onOpenPairMaster && onOpenPairMaster(tournament); }}
+                >👥 ペアマスター</button>
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                   onClick={()=>{ setShowMoreMenu(false); setDrawViewMode("draw"); onRequestBulkImport && onRequestBulkImport(); }}
@@ -4610,6 +4706,311 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   );
 }
 
+
+// ============================================================
+// ペアマスター（大会ごとに事前登録しておくペア一覧）
+// ============================================================
+function TournamentPairMasterScreen({ tournament, onBack }) {
+  const [pairs, setPairs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [editingPair, setEditingPair] = useState(null); // null=非表示 / {}=新規 / pair=編集
+  const [showAddChoice, setShowAddChoice] = useState(false);
+  const [view, setView] = useState("list"); // "list" | "bulk"
+  const [saving, setSaving] = useState(false);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    getTournamentPairs(tournament.id).then(rows => { setPairs(rows); setLoading(false); });
+  }, [tournament.id]);
+  useEffect(() => { reload(); }, [reload]);
+
+  const filtered = pairs.filter(p => {
+    if (!search.trim()) return true;
+    const q = search.trim();
+    return [p.entry_no, p.club_name, p.player1_name, p.player2_name].some(v => (v || "").includes(q));
+  });
+
+  async function handleDelete(p) {
+    if (!window.confirm(`${p.entry_no ? p.entry_no + "番　" : ""}${p.club_name || ""} を削除しますか？`)) return;
+    try {
+      await deleteTournamentPair(p.id);
+      reload();
+    } catch (e) {
+      alert("削除に失敗しました: " + (e.message || e));
+    }
+  }
+
+  if (view === "bulk") {
+    return (
+      <TournamentPairBulkAddScreen
+        tournament={tournament}
+        existingPairs={pairs}
+        onBack={() => { setView("list"); reload(); }}
+      />
+    );
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>ペアマスター</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 14px 0" }}>
+        <div style={{ fontSize:11.5, color:C.navy, background:"#eef0ff", border:"1px solid #dcdffc", borderRadius:10, padding:"10px 12px", lineHeight:1.6 }}>
+          💡 事前にペア出場番号・チーム名・選手名を登録しておくと、試合を作るときに番号を入力するだけでチーム名や選手名が自動で入力されます。
+        </div>
+      </div>
+
+      <div style={{ padding:"10px 14px" }}>
+        <input
+          style={{ width:"100%", padding:"9px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13, color:C.text, boxSizing:"border-box" }}
+          placeholder="🔍 番号・チーム名・選手名で検索"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+
+      <div style={{ padding:"0 14px" }}>
+        {loading ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:40, fontSize:12 }}>読み込み中...</div>
+        ) : pairs.length === 0 ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:50, fontSize:12.5, lineHeight:1.8 }}>
+            <div style={{ fontSize:40, marginBottom:12 }}>👥</div>
+            まだペアが登録されていません<br/>
+            <span style={{ fontSize:11 }}>右下の「＋」から登録できます</span>
+            <div style={{ marginTop:16 }}>
+              <button
+                style={{ padding:"10px 18px", borderRadius:20, border:`1px solid ${C.navy}`, background:C.white, color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
+                onClick={() => setView("bulk")}
+              >🔢 1番から連番でまとめて登録する</button>
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:40, fontSize:12 }}>該当するペアがありません</div>
+        ) : (
+          <>
+            <div style={{ fontSize:11, fontWeight:700, color:C.navy, margin:"6px 2px" }}>登録済みペア（{pairs.length}件）</div>
+            <div style={S.card}>
+              {filtered.map(p => (
+                <div key={p.id} style={{ padding:"12px 14px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10, cursor:"pointer" }} onClick={() => setEditingPair(p)}>
+                  <div style={{ fontSize:11, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 8px", flexShrink:0, minWidth:30, textAlign:"center" }}>{p.entry_no || "-"}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:10.5, color:C.textSec, marginBottom:2 }}>{p.club_name || "（チーム名未入力）"}</div>
+                    <div style={{ fontSize:13.5, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {[p.player1_name, p.player2_name].filter(Boolean).join(" / ") || "（選手未入力）"}
+                    </div>
+                  </div>
+                  <div style={{ fontSize:11, color:C.navy, fontWeight:700, flexShrink:0 }}>編集 ›</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <button
+        style={{ position:"fixed", right:16, bottom:24, width:52, height:52, borderRadius:26, background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:26, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 6px 16px rgba(0,194,122,0.4)", border:"none", cursor:"pointer" }}
+        onClick={() => setShowAddChoice(true)}
+      >＋</button>
+
+      {showAddChoice && (
+        <Modal onClose={() => setShowAddChoice(false)}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:14 }}>登録方法を選んでください</h3>
+          <div style={{ fontSize:12, color:C.textSec, marginBottom:14, lineHeight:1.6 }}>
+            出場番号がバラバラな場合は「1件ずつ登録」、1番から順番に並んでいる場合は「連番でまとめて登録」が便利です。
+          </div>
+          <button
+            style={{ width:"100%", padding:13, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.text, fontSize:13.5, fontWeight:700, marginBottom:8, textAlign:"left", cursor:"pointer" }}
+            onClick={() => { setShowAddChoice(false); setEditingPair({}); }}
+          >🔢 1件ずつ登録（番号を毎回指定）</button>
+          <button
+            style={{ width:"100%", padding:13, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:C.white, fontSize:13.5, fontWeight:700, textAlign:"left", cursor:"pointer" }}
+            onClick={() => { setShowAddChoice(false); setView("bulk"); }}
+          >🔢 連番でまとめて登録（1→2→3…）</button>
+        </Modal>
+      )}
+
+      {editingPair !== null && (
+        <Modal onClose={() => setEditingPair(null)}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:14 }}>{editingPair.id ? "ペアを編集" : "ペアを登録"}</h3>
+          <PairEditForm
+            initial={editingPair}
+            saving={saving}
+            onCancel={() => setEditingPair(null)}
+            onDelete={editingPair.id ? () => { handleDelete(editingPair); setEditingPair(null); } : null}
+            onSave={async (vals) => {
+              setSaving(true);
+              try {
+                await saveTournamentPair({
+                  id: editingPair.id,
+                  tournament_id: tournament.id,
+                  tournament_name: tournament.name,
+                  entry_no: vals.entryNo,
+                  club_name: vals.club,
+                  player1_name: vals.p1,
+                  player2_name: vals.p2,
+                });
+                setEditingPair(null);
+                reload();
+              } catch (e) {
+                alert("保存に失敗しました: " + (e.message || e));
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ペア登録・編集の共通フォーム（単発登録・連番登録モードどちらからも使う）
+function PairEditForm({ initial, saving, onCancel, onDelete, onSave }) {
+  const [entryNo, setEntryNo] = useState(initial.entry_no ?? "");
+  const [club, setClub] = useState(initial.club_name ?? "");
+  const [p1, setP1] = useState(initial.player1_name ?? "");
+  const [p2, setP2] = useState(initial.player2_name ?? "");
+  return (
+    <div>
+      <FormRow label="ペア出場番号">
+        <input style={S.inp} placeholder="例：262" inputMode="numeric" value={entryNo} onChange={e => setEntryNo(e.target.value)} />
+      </FormRow>
+      <FormRow label="チーム名 / 学校名">
+        <input style={S.inp} placeholder="例：玄界" value={club} onChange={e => setClub(e.target.value)} />
+      </FormRow>
+      <FormRow label="選手1">
+        <input style={S.inp} placeholder="選手名（未定なら空欄でOK）" value={p1} onChange={e => setP1(e.target.value)} />
+      </FormRow>
+      <FormRow label="選手2（ペア）">
+        <input style={S.inp} placeholder="選手名（未定なら空欄でOK）" value={p2} onChange={e => setP2(e.target.value)} />
+      </FormRow>
+      <button
+        style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white), marginTop:16 }}
+        disabled={saving}
+        onClick={() => onSave({ entryNo, club, p1, p2 })}
+      >{saving ? "保存中..." : "💾 保存する"}</button>
+      {onDelete && (
+        <button style={{ ...S.btn(C.white, C.red), marginTop:8, border:`1px solid ${C.red}` }} disabled={saving} onClick={onDelete}>🗑️ 削除する</button>
+      )}
+      <button style={{ ...S.btn("transparent", C.textSec), marginTop:4 }} disabled={saving} onClick={onCancel}>キャンセル</button>
+    </div>
+  );
+}
+
+// 「1番から連番でまとめて登録」モード：番号を自動で+1しながらテンポよく連続入力する
+function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
+  const nextFreeNo = (() => {
+    const nums = existingPairs.map(p => Number(p.entry_no)).filter(n => !isNaN(n) && n > 0);
+    return nums.length ? Math.max(...nums) + 1 : 1;
+  })();
+  const [currentNo, setCurrentNo] = useState(String(nextFreeNo));
+  const [club, setClub] = useState("");
+  const [p1, setP1] = useState("");
+  const [p2, setP2] = useState("");
+  const [session, setSession] = useState([]); // { entry_no, club_name, player1_name, player2_name, skipped }
+  const [saving, setSaving] = useState(false);
+
+  function advanceNo() {
+    const n = Number(currentNo);
+    setCurrentNo(!isNaN(n) && currentNo.trim() !== "" ? String(n + 1) : "");
+  }
+
+  async function handleRegisterNext() {
+    if (!currentNo.trim()) { alert("出場番号を入力してください"); return; }
+    setSaving(true);
+    try {
+      await saveTournamentPair({
+        tournament_id: tournament.id,
+        tournament_name: tournament.name,
+        entry_no: currentNo.trim(),
+        club_name: club,
+        player1_name: p1,
+        player2_name: p2,
+      });
+      setSession(s => [...s, { entry_no: currentNo.trim(), club_name: club, player1_name: p1, player2_name: p2, skipped: false }]);
+      setP1(""); setP2("");
+      advanceNo();
+    } catch (e) {
+      alert("保存に失敗しました: " + (e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleSkip() {
+    if (!currentNo.trim()) return;
+    setSession(s => [...s, { entry_no: currentNo.trim(), skipped: true }]);
+    advanceNo();
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>連番でまとめて登録</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 14px 0" }}>
+        <div style={{ fontSize:11.5, color:C.navy, background:"#eef0ff", border:"1px solid #dcdffc", borderRadius:10, padding:"10px 12px", lineHeight:1.6 }}>
+          💡 チーム名と選手名を入力して「登録して次へ」を押すと、番号が自動で+1され、続けて次のペアを入力できます。欠番（不戦・棄権など）は「スキップして次へ」で番号だけ進められます。番号を戻したいときは番号欄を直接編集してください。
+        </div>
+      </div>
+
+      <div style={{ padding:14 }}>
+        <div style={S.card}>
+          <FormRow label="次のペア出場番号">
+            <input style={{ ...S.inp, fontWeight:800, fontSize:18 }} inputMode="numeric" value={currentNo} onChange={e => setCurrentNo(e.target.value)} />
+          </FormRow>
+          <FormRow label="チーム名 / 学校名">
+            <input style={S.inp} placeholder="例：玄界" value={club} onChange={e => setClub(e.target.value)} />
+          </FormRow>
+          <FormRow label="選手1">
+            <input style={S.inp} placeholder="選手名（未定なら空欄でOK）" value={p1} onChange={e => setP1(e.target.value)} />
+          </FormRow>
+          <FormRow label="選手2（ペア）">
+            <input style={S.inp} placeholder="選手名（未定なら空欄でOK）" value={p2} onChange={e => setP2(e.target.value)} />
+          </FormRow>
+        </div>
+
+        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white) }} disabled={saving} onClick={handleRegisterNext}>
+          {saving ? "登録中..." : `✓ 登録して次へ（${!isNaN(Number(currentNo)) && currentNo.trim() !== "" ? Number(currentNo) + 1 : "?"}番）`}
+        </button>
+        <button style={{ ...S.btn(C.white, C.textSec), marginTop:8, border:`1px solid ${C.border}` }} disabled={saving || !currentNo.trim()} onClick={handleSkip}>
+          {`⏭ ${currentNo || "?"}番をスキップして次へ`}
+        </button>
+        <button style={{ ...S.btn("transparent", C.textSec), marginTop:4 }} disabled={saving} onClick={onBack}>これで終わる（一覧に戻る）</button>
+
+        {session.length > 0 && (
+          <div style={{ marginTop:18 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSec, marginBottom:6 }}>
+              今回のセッションで登録済み（{session.length}件・うちスキップ{session.filter(s=>s.skipped).length}件）
+            </div>
+            <div style={S.card}>
+              {session.map((s, i) => (
+                <div key={i} style={{ padding:"8px 12px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10 }}>
+                  <div style={{ fontSize:11, fontWeight:800, color: s.skipped ? "#c8ccd6" : C.textSec, border:`1px solid ${s.skipped ? "#e5e8ee" : C.border}`, borderRadius:6, padding:"3px 8px", minWidth:30, textAlign:"center" }}>{s.entry_no}</div>
+                  <div style={{ fontSize:12.5, color: s.skipped ? C.textSec : C.text }}>
+                    {s.skipped ? "（スキップ・欠番）" : `${s.club_name || ""} / ${[s.player1_name, s.player2_name].filter(Boolean).join("・") || "（選手未入力）"}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ============================================================
 // ドロー作成画面（回戦数・試合数の入力 → draw_matches を差分作成）
@@ -10386,6 +10787,46 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.id]);
 
+  // ★ペア出場番号を入力すると、同じ大会の別の試合で使われている同じ番号のチーム名・選手名を自動で探して入力する。
+  //   （前の回戦を勝ち上がった同じペアの情報を、毎回手入力しなくて済むようにするため）
+  //   既に入力済みの項目は上書きしない。見つかった/見つからなかったは小さく表示する。
+  const [aEntryLookup, setAEntryLookup] = useState(null); // "found" | "notfound" | null
+  const [bEntryLookup, setBEntryLookup] = useState(null);
+  useEffect(() => {
+    const n = aEntryNo.trim();
+    if (!n || !tournamentName.trim()) { setAEntryLookup(null); return; }
+    const timer = setTimeout(async () => {
+      const found = await findPairByEntryNo(tournamentName, n).catch(() => null);
+      if (found) {
+        setAEntryLookup("found");
+        if (!isTeamMatchGame && !aClub.trim()) setAClub(found.club_name);
+        if (!aP1.trim() && found.player1) setAP1(found.player1);
+        if (!aP2.trim() && found.player2) setAP2(found.player2);
+      } else {
+        setAEntryLookup("notfound");
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aEntryNo, tournamentName]);
+  useEffect(() => {
+    const n = bEntryNo.trim();
+    if (!n || !tournamentName.trim()) { setBEntryLookup(null); return; }
+    const timer = setTimeout(async () => {
+      const found = await findPairByEntryNo(tournamentName, n).catch(() => null);
+      if (found) {
+        setBEntryLookup("found");
+        if (!isTeamMatchGame && !bClub.trim()) setBClub(found.club_name);
+        if (!bP1.trim() && found.player1) setBP1(found.player1);
+        if (!bP2.trim() && found.player2) setBP2(found.player2);
+      } else {
+        setBEntryLookup("notfound");
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bEntryNo, tournamentName]);
+
   // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
   const [aClubPref, setAClubPref] = useState("");
   const [bClubPref, setBClubPref] = useState("");
@@ -10663,6 +11104,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         <FormSec title="自チーム (A)">
           <FormRow label="ペア出場番号（任意）">
             <input style={S.inp} placeholder="例：12" inputMode="numeric" value={aEntryNo} onChange={e => setAEntryNo(e.target.value)}/>
+            {aEntryLookup === "found" && (
+              <div style={{ fontSize:10.5, color:C.accent, marginTop:4 }}>✓ 同じ番号のペアが見つかったので自動入力しました</div>
+            )}
+            {aEntryLookup === "notfound" && (
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:4 }}>この大会でこの番号のペアはまだ見つかりません</div>
+            )}
           </FormRow>
           <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={aClubPref} onChange={setAClubPref} options={knownPrefsFrom(schools)} />}>
             {isTeamMatchGame ? (
@@ -10698,6 +11145,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         <FormSec title="相手チーム (B)">
           <FormRow label="ペア出場番号（任意）">
             <input style={S.inp} placeholder="例：13" inputMode="numeric" value={bEntryNo} onChange={e => setBEntryNo(e.target.value)}/>
+            {bEntryLookup === "found" && (
+              <div style={{ fontSize:10.5, color:C.accent, marginTop:4 }}>✓ 同じ番号のペアが見つかったので自動入力しました</div>
+            )}
+            {bEntryLookup === "notfound" && (
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:4 }}>この大会でこの番号のペアはまだ見つかりません</div>
+            )}
           </FormRow>
           <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
             {isTeamMatchGame ? (
@@ -15452,6 +15905,7 @@ export default function App() {
         onCopyTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchCopyId(id); setTeamMatchEditId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
         onOpenDrawSetup={(seg)=>{ setTournamentSeg(seg); setScreen("drawSetup"); }}
         onOpenDailyRanking={(t)=>{ setTournamentContext(t); setScreen("dailyRanking"); }}
+        onOpenPairMaster={(t)=>{ setTournamentContext(t); setScreen("pairMaster"); }}
         autoOpenBulkImport={autoOpenBulkImport}
         onAutoOpenBulkImportHandled={()=>setAutoOpenBulkImport(false)}
         onRequestBulkImport={()=>setAutoOpenBulkImport(true)}
@@ -15465,6 +15919,16 @@ export default function App() {
           tournament={tournamentContext}
           onBack={()=>setScreen("tournamentDetail")}
           mySchoolName={mySchoolName}
+        />
+      </ErrorBoundary>
+    );
+  }
+  if (screen==="pairMaster" && tournamentContext) {
+    return (
+      <ErrorBoundary>
+        <TournamentPairMasterScreen
+          tournament={tournamentContext}
+          onBack={()=>setScreen("tournamentDetail")}
         />
       </ErrorBoundary>
     );
