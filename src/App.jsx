@@ -11234,7 +11234,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer", opacity:navigatingBack?0.5:1, flex:"none" }} disabled={navigatingBack} onClick={handleBack}>{navigatingBack?"…":"←"}</button>
           <div style={{ textAlign:"center", flex:1, minWidth:0, padding:"0 6px" }}>
-            {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700,overflowWrap:"break-word" }}>{match.tournament_name}{match.round?` · ${match.round}`:""}{match.match_number?`(${match.match_number}試合目)`:""}</div>}
+            {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700,overflowWrap:"break-word" }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
             <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""}{match.court_number?` · ${match.court_number}`:""} · {match.game_format}Gマッチ</div>
           </div>
           <div style={{ display:"flex", gap:6, flex:"none" }}>
