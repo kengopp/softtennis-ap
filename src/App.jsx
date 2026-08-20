@@ -10352,9 +10352,11 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   useEffect(() => { getKnownVenues().then(setVenues); }, []);
 
   // ★この試合がドローの枠から作られたものであれば、エントリー番号もここで一緒に編集できるようにする
+  //   ドローと紐づいていない通常の試合でも、ペアの出場番号を直接入力できるようにする
+  //   （その場合はmatch_players.entry_noに直接保存する）
   const [drawLink, setDrawLink] = useState(null); // { id, side_a_entry_id, side_b_entry_id }
-  const [aEntryNo, setAEntryNo] = useState("");
-  const [bEntryNo, setBEntryNo] = useState("");
+  const [aEntryNo, setAEntryNo] = useState(aBase?.entry_no ?? "");
+  const [bEntryNo, setBEntryNo] = useState(bBase?.entry_no ?? "");
   useEffect(() => {
     if (!editing?.id) return;
     getDrawMatchByMatchId(editing.id).then(async (link) => {
@@ -10428,10 +10430,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const fBClub = swap ? aClub : bClub, fBP1 = swap ? aP1 : bP1, fBP2 = swap ? aP2 : bP2;
       const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
       const players = [
-        { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
-        ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2 }] : []),
-        ...(fBP1.trim() || fBClub.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1 }] : []),
-        ...(isDoubles && (fBP1.trim() || fBClub.trim()) ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
+        { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1, entry_no: (swap ? bEntryNo : aEntryNo).trim() || null },
+        ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2, entry_no: (swap ? bEntryNo : aEntryNo).trim() || null }] : []),
+        ...(fBP1.trim() || fBClub.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null }] : []),
+        ...(isDoubles && (fBP1.trim() || fBClub.trim()) ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null }] : []),
       ];
       const match = {
         id:mid, created_by:"me",
@@ -10472,10 +10474,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       if (editing) {
         // 既存試合の試合情報・選手情報のみ更新（スコア・ゲームは変更しない）
         const updatedPlayers = [
-          { id: aBase?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:aBase?.position ?? null, order_num:1 },
-          ...(isDoubles && aP2.trim() ? [{ id: aBase2?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:aBase2?.position ?? null, order_num:2 }] : []),
-          { id: bBase?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP1, "選手A"), club_name:bClub.trim(), position:bBase?.position ?? null, order_num:1 },
-          ...(isDoubles ? [{ id: bBase2?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP2, "選手B"), club_name:bClub.trim(), position:bBase2?.position ?? null, order_num:2 }] : []),
+          { id: aBase?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:aBase?.position ?? null, order_num:1, entry_no: aEntryNo.trim() || null },
+          ...(isDoubles && aP2.trim() ? [{ id: aBase2?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:aBase2?.position ?? null, order_num:2, entry_no: aEntryNo.trim() || null }] : []),
+          { id: bBase?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP1, "選手A"), club_name:bClub.trim(), position:bBase?.position ?? null, order_num:1, entry_no: bEntryNo.trim() || null },
+          ...(isDoubles ? [{ id: bBase2?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP2, "選手B"), club_name:bClub.trim(), position:bBase2?.position ?? null, order_num:2, entry_no: bEntryNo.trim() || null }] : []),
         ];
         const updated = {
           ...editing,
@@ -10504,10 +10506,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const fServer = selectedServer;
       const fFirstServer = swap ? (firstServer === "A" ? "B" : firstServer === "B" ? "A" : firstServer) : firstServer;
       const players = [
-        { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1 },
-        ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2 }] : []),
-        { id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1 },
-        ...(isDoubles ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2 }] : []),
+        { id:uid(), match_id:mid, team:"A", player_name:fAP1.trim(), club_name:fAClub.trim(), position:null, order_num:1, entry_no: (swap ? bEntryNo : aEntryNo).trim() || null },
+        ...(isDoubles && fAP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:fAP2.trim(), club_name:fAClub.trim(), position:null, order_num:2, entry_no: (swap ? bEntryNo : aEntryNo).trim() || null }] : []),
+        { id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP1, "選手A"), club_name:fBClub.trim(), position:null, order_num:1, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null },
+        ...(isDoubles ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(fBP2, "選手B"), club_name:fBClub.trim(), position:null, order_num:2, entry_no: (swap ? aEntryNo : bEntryNo).trim() || null }] : []),
       ];
       const match = {
         id:mid, created_by:"me",
@@ -10643,11 +10645,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         )}
 
         <FormSec title="自チーム (A)">
-          {drawLink && (
-            <FormRow label="エントリー番号">
-              <input style={S.inp} placeholder="例：12" inputMode="numeric" value={aEntryNo} onChange={e => setAEntryNo(e.target.value)}/>
-            </FormRow>
-          )}
+          <FormRow label="ペア出場番号（任意）">
+            <input style={S.inp} placeholder="例：12" inputMode="numeric" value={aEntryNo} onChange={e => setAEntryNo(e.target.value)}/>
+          </FormRow>
           <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={aClubPref} onChange={setAClubPref} options={knownPrefsFrom(schools)} />}>
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{aClub || "（自チーム）"}</div>
@@ -10680,11 +10680,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         </FormSec>
 
         <FormSec title="相手チーム (B)">
-          {drawLink && (
-            <FormRow label="エントリー番号">
-              <input style={S.inp} placeholder="例：13" inputMode="numeric" value={bEntryNo} onChange={e => setBEntryNo(e.target.value)}/>
-            </FormRow>
-          )}
+          <FormRow label="ペア出場番号（任意）">
+            <input style={S.inp} placeholder="例：13" inputMode="numeric" value={bEntryNo} onChange={e => setBEntryNo(e.target.value)}/>
+          </FormRow>
           <FormRow label="チーム名 / 学校名" labelRight={isTeamMatchGame ? null : <PrefMiniFilter value={bClubPref} onChange={setBClubPref} options={knownPrefsFrom(schools)} />}>
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{bClub || prefillOpponent || "（相手チーム）"}</div>
