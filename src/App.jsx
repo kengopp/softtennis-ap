@@ -4725,6 +4725,13 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
   }, [tournament.id]);
   useEffect(() => { reload(); }, [reload]);
 
+  // ★「1件ずつ登録」を新規で開いたとき、次に使えそうな番号をあらかじめ入れておく
+  //   （空欄のまま重複チェックが働かない状態を避け、開いた時点で番号の状況がわかるようにする）
+  const nextFreeNo = (() => {
+    const nums = pairs.map(p => Number(p.entry_no)).filter(n => !isNaN(n) && n > 0);
+    return nums.length ? Math.max(...nums) + 1 : 1;
+  })();
+
   const filtered = pairs.filter(p => {
     if (!search.trim()) return true;
     const q = search.trim();
@@ -4827,7 +4834,7 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
           </div>
           <button
             style={{ width:"100%", padding:13, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.text, fontSize:13.5, fontWeight:700, marginBottom:8, textAlign:"left", cursor:"pointer" }}
-            onClick={() => { setShowAddChoice(false); setEditingPair({}); }}
+            onClick={() => { setShowAddChoice(false); setEditingPair({ entry_no: String(nextFreeNo) }); }}
           >🔢 1件ずつ登録（番号を毎回指定）</button>
           <button
             style={{ width:"100%", padding:13, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:C.white, fontSize:13.5, fontWeight:700, textAlign:"left", cursor:"pointer" }}
@@ -4873,6 +4880,17 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
   );
 }
 
+// ★出場番号の一致判定：「1」と「01」のような表記ゆれでも同じ番号として検出できるよう、
+//   両方とも数値として解釈できる場合は数値で比較し、それ以外は文字列として比較する
+function entryNoMatches(a, b) {
+  const ta = (a ?? "").toString().trim();
+  const tb = (b ?? "").toString().trim();
+  if (!ta || !tb) return false;
+  const na = Number(ta), nb = Number(tb);
+  if (!isNaN(na) && !isNaN(nb)) return na === nb;
+  return ta === tb;
+}
+
 // ペア登録・編集の共通フォーム（単発登録・連番登録モードどちらからも使う）
 // ★existingPairsが渡されている場合、同じ出場番号が既に登録されていないかその場でチェックし、
 //   既存の登録内容を表示して重複登録を防ぐ（excludeIdは編集中の自分自身を除外するため）
@@ -4882,7 +4900,7 @@ function PairEditForm({ initial, saving, onCancel, onDelete, onSave, existingPai
   const [p1, setP1] = useState(initial.player1_name ?? "");
   const [p2, setP2] = useState(initial.player2_name ?? "");
 
-  const dup = (existingPairs || []).find(p => p.id !== excludeId && (p.entry_no || "").trim() === entryNo.trim() && entryNo.trim() !== "");
+  const dup = (existingPairs || []).find(p => p.id !== excludeId && entryNoMatches(p.entry_no, entryNo));
 
   function handleSaveClick() {
     if (dup) {
@@ -4939,12 +4957,13 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
   const [saving, setSaving] = useState(false);
 
   // ★既に登録済みの番号（元からのペアマスター＋今回のセッションで登録・スキップした分）と重複していないかチェック
+  //   「1」と「01」のような表記ゆれも同じ番号として検出する（entryNoMatches）
   const dup = (() => {
     const n = currentNo.trim();
     if (!n) return null;
-    const fromMaster = existingPairs.find(p => (p.entry_no || "").trim() === n);
+    const fromMaster = existingPairs.find(p => entryNoMatches(p.entry_no, n));
     if (fromMaster) return { entry_no: n, club_name: fromMaster.club_name, player1_name: fromMaster.player1_name, player2_name: fromMaster.player2_name, skipped: false };
-    const fromSession = session.find(s => s.entry_no === n);
+    const fromSession = session.find(s => entryNoMatches(s.entry_no, n));
     if (fromSession) return fromSession;
     return null;
   })();
