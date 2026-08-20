@@ -4842,6 +4842,8 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
           <PairEditForm
             initial={editingPair}
             saving={saving}
+            existingPairs={pairs}
+            excludeId={editingPair.id || null}
             onCancel={() => setEditingPair(null)}
             onDelete={editingPair.id ? () => { handleDelete(editingPair); setEditingPair(null); } : null}
             onSave={async (vals) => {
@@ -4872,15 +4874,34 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
 }
 
 // ペア登録・編集の共通フォーム（単発登録・連番登録モードどちらからも使う）
-function PairEditForm({ initial, saving, onCancel, onDelete, onSave }) {
+// ★existingPairsが渡されている場合、同じ出場番号が既に登録されていないかその場でチェックし、
+//   既存の登録内容を表示して重複登録を防ぐ（excludeIdは編集中の自分自身を除外するため）
+function PairEditForm({ initial, saving, onCancel, onDelete, onSave, existingPairs, excludeId }) {
   const [entryNo, setEntryNo] = useState(initial.entry_no ?? "");
   const [club, setClub] = useState(initial.club_name ?? "");
   const [p1, setP1] = useState(initial.player1_name ?? "");
   const [p2, setP2] = useState(initial.player2_name ?? "");
+
+  const dup = (existingPairs || []).find(p => p.id !== excludeId && (p.entry_no || "").trim() === entryNo.trim() && entryNo.trim() !== "");
+
+  function handleSaveClick() {
+    if (dup) {
+      const info = `${dup.club_name || "（チーム名未入力）"} / ${[dup.player1_name, dup.player2_name].filter(Boolean).join("・") || "（選手未入力）"}`;
+      if (!window.confirm(`${entryNo}番は既に「${info}」として登録されています。\nこのまま重複して登録しますか？\n（キャンセルすると番号を修正できます）`)) return;
+    }
+    onSave({ entryNo, club, p1, p2 });
+  }
+
   return (
     <div>
       <FormRow label="ペア出場番号">
         <input style={S.inp} placeholder="例：262" inputMode="numeric" value={entryNo} onChange={e => setEntryNo(e.target.value)} />
+        {dup && (
+          <div style={{ fontSize:10.5, color:C.orange, marginTop:6, background:"#fff3e8", border:"1px solid #ffd9b3", borderRadius:8, padding:"7px 9px", lineHeight:1.5 }}>
+            ⚠️ {entryNo}番は既に登録されています<br/>
+            <b>{dup.club_name || "（チーム名未入力）"}</b>　{[dup.player1_name, dup.player2_name].filter(Boolean).join(" / ") || "（選手未入力）"}
+          </div>
+        )}
       </FormRow>
       <FormRow label="チーム名 / 学校名">
         <input style={S.inp} placeholder="例：玄界" value={club} onChange={e => setClub(e.target.value)} />
@@ -4894,7 +4915,7 @@ function PairEditForm({ initial, saving, onCancel, onDelete, onSave }) {
       <button
         style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white), marginTop:16 }}
         disabled={saving}
-        onClick={() => onSave({ entryNo, club, p1, p2 })}
+        onClick={handleSaveClick}
       >{saving ? "保存中..." : "💾 保存する"}</button>
       {onDelete && (
         <button style={{ ...S.btn(C.white, C.red), marginTop:8, border:`1px solid ${C.red}` }} disabled={saving} onClick={onDelete}>🗑️ 削除する</button>
@@ -4917,6 +4938,17 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
   const [session, setSession] = useState([]); // { entry_no, club_name, player1_name, player2_name, skipped }
   const [saving, setSaving] = useState(false);
 
+  // ★既に登録済みの番号（元からのペアマスター＋今回のセッションで登録・スキップした分）と重複していないかチェック
+  const dup = (() => {
+    const n = currentNo.trim();
+    if (!n) return null;
+    const fromMaster = existingPairs.find(p => (p.entry_no || "").trim() === n);
+    if (fromMaster) return { entry_no: n, club_name: fromMaster.club_name, player1_name: fromMaster.player1_name, player2_name: fromMaster.player2_name, skipped: false };
+    const fromSession = session.find(s => s.entry_no === n);
+    if (fromSession) return fromSession;
+    return null;
+  })();
+
   function advanceNo() {
     const n = Number(currentNo);
     setCurrentNo(!isNaN(n) && currentNo.trim() !== "" ? String(n + 1) : "");
@@ -4924,6 +4956,10 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
 
   async function handleRegisterNext() {
     if (!currentNo.trim()) { alert("出場番号を入力してください"); return; }
+    if (dup) {
+      const info = dup.skipped ? "（スキップ・欠番）" : `${dup.club_name || "（チーム名未入力）"} / ${[dup.player1_name, dup.player2_name].filter(Boolean).join("・") || "（選手未入力）"}`;
+      if (!window.confirm(`${currentNo}番は既に「${info}」として登録されています。\nこのまま重複して登録しますか？\n（キャンセルすると番号を修正できます）`)) return;
+    }
     setSaving(true);
     try {
       await saveTournamentPair({
@@ -4970,6 +5006,16 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, onBack }) {
         <div style={S.card}>
           <FormRow label="次のペア出場番号">
             <input style={{ ...S.inp, fontWeight:800, fontSize:18 }} inputMode="numeric" value={currentNo} onChange={e => setCurrentNo(e.target.value)} />
+            {dup && (
+              <div style={{ fontSize:10.5, color:C.orange, marginTop:6, background:"#fff3e8", border:"1px solid #ffd9b3", borderRadius:8, padding:"7px 9px", lineHeight:1.5 }}>
+                ⚠️ {currentNo}番は既に登録されています<br/>
+                {dup.skipped ? (
+                  <span>（スキップ・欠番として記録済み）</span>
+                ) : (
+                  <><b>{dup.club_name || "（チーム名未入力）"}</b>　{[dup.player1_name, dup.player2_name].filter(Boolean).join(" / ") || "（選手未入力）"}</>
+                )}
+              </div>
+            )}
           </FormRow>
           <FormRow label="チーム名 / 学校名">
             <input style={S.inp} placeholder="例：玄界" value={club} onChange={e => setClub(e.target.value)} />
