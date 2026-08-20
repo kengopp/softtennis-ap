@@ -450,6 +450,7 @@ function rowToMatchSummary(m, players=[], games=[]) {
     id: m.id, created_by: m.created_by,
     match_date: m.match_date, venue: m.venue ?? "",
     tournament_name: m.tournament_name ?? "", round: m.round ?? "",
+    match_number: m.match_number ?? "",
     match_type: m.match_type, game_format: m.game_format,
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
@@ -475,6 +476,7 @@ function rowToMatchFull(m, players, games, points, faults) {
     id: m.id, created_by: m.created_by,
     match_date: m.match_date, venue: m.venue ?? "",
     tournament_name: m.tournament_name ?? "", round: m.round ?? "",
+    match_number: m.match_number ?? "",
     match_type: m.match_type, game_format: m.game_format,
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
@@ -515,6 +517,7 @@ async function saveMatch(match) {
     id: match.id, created_by: (match.created_by && match.created_by !== "me") ? match.created_by : user.id,
     match_date: match.match_date, venue: match.venue || null,
     tournament_name: match.tournament_name || null, round: match.round || null,
+    match_number: match.match_number || null,
     match_type: match.match_type, game_format: match.game_format,
     is_doubles: match.is_doubles, first_server: match.first_server, status: match.status,
     order_a: match.order_a === "p2" ? "p2" : "p1", order_b: match.order_b === "p2" ? "p2" : "p1",
@@ -4117,7 +4120,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <div style={{ height:4, background:borderColor }}/>
               <div style={{ padding:"10px 14px", cursor:m.is_simple_draw_result?"default":"pointer" }} onClick={()=>{ if (!m.is_simple_draw_result) onOpenMatch(m.id); }}>
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
-                  {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}
+                  {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}{m.match_number ? `(${m.match_number}試合目)` : ""}
                   {m.is_simple_draw_result && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#f1efff", color:C.purple, border:"1px solid "+C.purple }}>簡易記録</span>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
@@ -10313,6 +10316,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [venue,          setVenue]          = useState(base?.venue ?? prefillVenue ?? "");
   const [tournamentName, setTournamentName] = useState(base?.tournament_name ?? prefillTournament ?? "");
   const [round,          setRound]          = useState(base?.round ?? prefillRound ?? "");
+  const [matchNumber,    setMatchNumber]    = useState(base?.match_number ?? "");
   const [matchType,      setMatchType]      = useState(base?.match_type ?? initialMatchType ?? "tournament");
   const [courtNumber,    setCourtNumber]    = useState(base?.court_number ?? "");
   const [isYounger,      setIsYounger]      = useState(base ? (base?.is_younger !== false ? true : false) : (prefillIsYounger !== undefined ? prefillIsYounger : null));
@@ -10445,7 +10449,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       ];
       const match = {
         id:mid, created_by:"me",
-        match_date:matchDate, venue, tournament_name:tournamentName, round,
+        match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fFirstServer,
         status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
       };
@@ -10492,7 +10496,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         ];
         const updated = {
           ...editing,
-          match_date:matchDate, venue, tournament_name:tournamentName, round, match_type:matchType, court_number:courtNumber||null,
+          match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null, match_type:matchType, court_number:courtNumber||null,
           players: updatedPlayers,
           // 予定の場合は形式設定も更新可能
           ...((editing.status === "scheduled" || editing.status === "waiting") ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
@@ -10525,7 +10529,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       ];
       const match = {
         id:mid, created_by:"me",
-        match_date:matchDate, venue, tournament_name:tournamentName, round,
+        match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fServer || fFirstServer || "A",
         status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
       };
@@ -10735,6 +10739,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <FormRow label="何回戦（任意）">
             <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
           </FormRow>
+          <FormRow label="何試合目（任意）">
+            <input style={S.inp} placeholder="例：1" inputMode="numeric" value={matchNumber} onChange={e => setMatchNumber(e.target.value)}/>
+          </FormRow>
           <FormRow label="コート番号（任意）">
             <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
           </FormRow>
@@ -10773,7 +10780,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
                 ];
                 const match = {
                   id:mid, created_by:"me",
-                  match_date:matchDate, venue, tournament_name:tournamentName, round,
+                  match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null,
                   match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server: "A",
                   status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
                 };
@@ -11227,7 +11234,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer", opacity:navigatingBack?0.5:1, flex:"none" }} disabled={navigatingBack} onClick={handleBack}>{navigatingBack?"…":"←"}</button>
           <div style={{ textAlign:"center", flex:1, minWidth:0, padding:"0 6px" }}>
-            {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700,overflowWrap:"break-word" }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
+            {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700,overflowWrap:"break-word" }}>{match.tournament_name}{match.round?` · ${match.round}`:""}{match.match_number?`(${match.match_number}試合目)`:""}</div>}
             <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""}{match.court_number?` · ${match.court_number}`:""} · {match.game_format}Gマッチ</div>
           </div>
           <div style={{ display:"flex", gap:6, flex:"none" }}>
