@@ -1160,6 +1160,8 @@ async function saveTeamMatch(tm) {
     my_team_division: tm.my_team_division || null,
     opponent_name: tm.opponent_name || null,
     opponent_division: tm.opponent_division || null,
+    my_entry_no: tm.my_entry_no || null,
+    opponent_entry_no: tm.opponent_entry_no || null,
     format: tm.format || "best2",
     status: tm.status || "scheduled",
     my_score: tm.my_score ?? 0,
@@ -8487,6 +8489,8 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
   const [myTeamDivision, setMyTeamDivision] = useState("");
   const [opponentName, setOpponentName] = useState("");
   const [opponentDivision, setOpponentDivision] = useState("");
+  const [myEntryNo, setMyEntryNo] = useState(""); // ★自チームの出場番号（任意・若番/遅番の自動判定に使う）
+  const [opponentEntryNo, setOpponentEntryNo] = useState(""); // ★相手チームの出場番号（任意）
   const [format, setFormat] = useState("best2");
   const [courtNumber, setCourtNumber] = useState("");
   const [isYounger, setIsYounger] = useState(null); // ★デフォルトは未選択（必ず選んでもらう）
@@ -8541,6 +8545,8 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
         setMyTeamDivision(tm.my_team_division || "");
         setOpponentName(tm.opponent_name || "");
         setOpponentDivision(tm.opponent_division || "");
+        setMyEntryNo(tm.my_entry_no || "");
+        setOpponentEntryNo(tm.opponent_entry_no || "");
         setFormat(tm.format || "best2");
         setCourtNumber(tm.court_number || "");
         setIsYounger(tm.is_younger !== false);
@@ -8566,6 +8572,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
         setMyTeamDivision(tm.my_team_division || "");
         setOpponentName(tm.opponent_name || "");
         setOpponentDivision(tm.opponent_division || "");
+        // ★出場番号は回戦ごとに変わるため、コピー時は引き継がず空欄にする
         setFormat(tm.format || "best2");
         setCourtNumber(tm.court_number || "");
         setIsYounger(tm.is_younger !== false);
@@ -8573,6 +8580,16 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
       });
     }
   }, [editId]);
+
+  // ★若番／遅番の自動判定：自チーム・相手チーム両方の出場番号が数値であれば、
+  //   番号が小さい方＝若番として自動的に決める。
+  const myEntryNoNum = Number(myEntryNo.trim());
+  const oppEntryNoNum = Number(opponentEntryNo.trim());
+  const teamBothEntryNosNumeric = myEntryNo.trim() !== "" && opponentEntryNo.trim() !== "" && !isNaN(myEntryNoNum) && !isNaN(oppEntryNoNum);
+  useEffect(() => {
+    if (teamBothEntryNosNumeric) setIsYounger(myEntryNoNum < oppEntryNoNum);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamBothEntryNosNumeric, myEntryNoNum, oppEntryNoNum]);
 
   const canSave = isYounger !== null;
 
@@ -8584,6 +8601,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
         id, match_date: matchDate, venue, tournament_name: tournamentName,
         round, my_school_id: mySchoolId, my_team_division: myTeamDivision,
         opponent_name: opponentName.trim(), opponent_division: opponentDivision,
+        my_entry_no: myEntryNo.trim() || null, opponent_entry_no: opponentEntryNo.trim() || null,
         format, status: existingId ? undefined : "scheduled",
         court_number: courtNumber, is_younger: isYounger,
       };
@@ -8672,11 +8690,17 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           <FormRow label="自チーム区分（任意）">
             <VenueField value={myTeamDivision} onChange={setMyTeamDivision} venues={pastDivisions} placeholder="例：Aチーム"/>
           </FormRow>
+          <FormRow label="自チームの出場番号（任意）">
+            <input style={S.inp} placeholder="例：12" inputMode="numeric" value={myEntryNo} onChange={e=>setMyEntryNo(e.target.value)}/>
+          </FormRow>
           <FormRow label="相手校名（任意）" labelRight={<PrefMiniFilter value={oppPrefFilter} onChange={setOppPrefFilter} options={knownPrefsFrom(schools)} />}>
             <SchoolField value={opponentName} onChange={setOpponentName} schools={schools} placeholder="例：鹿児島実業（未定なら空欄でOK）" prefFilter={oppPrefFilter}/>
           </FormRow>
           <FormRow label="相手チーム区分（任意）">
             <input style={S.inp} placeholder="例：Bチーム" value={opponentDivision} onChange={e=>setOpponentDivision(e.target.value)}/>
+          </FormRow>
+          <FormRow label="相手チームの出場番号（任意）">
+            <input style={S.inp} placeholder="例：13" inputMode="numeric" value={opponentEntryNo} onChange={e=>setOpponentEntryNo(e.target.value)}/>
           </FormRow>
         </FormSec>
 
@@ -8688,11 +8712,20 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
             <VenueField value={courtNumber} onChange={setCourtNumber} venues={pastCourtNumbers} placeholder="例：3番コート"/>
           </FormRow>
           <FormRow label="若番 / 遅番（必須）">
-            <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
-              <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
-            </div>
+            {teamBothEntryNosNumeric ? (
+              <div style={{ fontSize:11.5, color:C.textSec, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
+                ✓ 出場番号（{myEntryNo} と {opponentEntryNo}）から自動判定：<b style={{ color:C.navy }}>{isYounger ? "若番" : "遅番"}</b>
+                <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>変更したい場合は番号欄を空欄にしてください</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+                  <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
+                </div>
+              </>
+            )}
           </FormRow>
         </FormSec>
 
@@ -11081,6 +11114,17 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bEntryNo, tournamentName]);
 
+  // ★若番／遅番の自動判定：自チーム・相手チームの両方にペア出場番号が入っていれば、
+  //   番号が小さい方＝若番として自動的に決める（毎回手動で選ばなくてよいように）。
+  //   どちらかの番号が空欄／数値でない場合は、従来通り手動で選んでもらう。
+  const aEntryNoNum = Number(aEntryNo.trim());
+  const bEntryNoNum = Number(bEntryNo.trim());
+  const bothEntryNosNumeric = aEntryNo.trim() !== "" && bEntryNo.trim() !== "" && !isNaN(aEntryNoNum) && !isNaN(bEntryNoNum);
+  useEffect(() => {
+    if (bothEntryNosNumeric) setIsYounger(aEntryNoNum < bEntryNoNum);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bothEntryNosNumeric, aEntryNoNum, bEntryNoNum]);
+
   // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
   const [aClubPref, setAClubPref] = useState("");
   const [bClubPref, setBClubPref] = useState("");
@@ -11454,11 +11498,20 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           </FormRow>
           {!isTeamMatchGame && (
             <FormRow label="若番 / 遅番（必須）">
-              <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
-                <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
-              </div>
+              {bothEntryNosNumeric ? (
+                <div style={{ fontSize:11.5, color:C.textSec, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
+                  ✓ ペア出場番号（{aEntryNo} と {bEntryNo}）から自動判定：<b style={{ color:C.navy }}>{isYounger ? "若番" : "遅番"}</b>
+                  <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>変更したい場合は番号欄を空欄にしてください</div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+                    <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
+                  </div>
+                </>
+              )}
             </FormRow>
           )}
         </FormSec>
@@ -11685,14 +11738,23 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     : nonFaultPts.length) : 0;
   const curServerIndividual = curServerPlayers.length<=1 ? (curServerPlayers[0]??null) : (Math.floor(curServeTurn/2)%2===0 ? curServerPlayers[0] : curServerPlayers[1]);
   const serverLabel = curServerIndividual ?? (curServer==="A" ? match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/") : match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/"));
-  const teamALabel = match.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
-  const teamBLabel = match.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+  const teamAPlayers = match.players.filter(p=>p.team==="A");
+  const teamBPlayers = match.players.filter(p=>p.team==="B");
+  const teamALabel = teamAPlayers.map(p=>p.player_name).join("/");
+  const teamBLabel = teamBPlayers.map(p=>p.player_name).join("/");
   // ★LINE共有：待機中／試合開始／試合中のタイミングで、自チームのペア名・コート番号・状況・スコアをワンタップで共有する
+  //   「自チーム／相手」ではなく学校名を見出しにし、ペア出場番号が入っていれば併記する
+  const teamASchool = teamAPlayers[0]?.club_name || "";
+  const teamBSchool = teamBPlayers[0]?.club_name || "";
+  const teamAEntryNo = teamAPlayers[0]?.entry_no || "";
+  const teamBEntryNo = teamBPlayers[0]?.entry_no || "";
   const shareToLine = (statusLabel) => {
+    const aHeading = teamASchool || "自チーム";
+    const bHeading = teamBSchool || "相手";
     const lines = [
       `【${statusLabel}】`,
-      teamALabel ? `自チーム：${teamALabel}` : null,
-      teamBLabel ? `相手：${teamBLabel}` : null,
+      teamALabel ? `${teamAEntryNo ? `${teamAEntryNo} ` : ""}${aHeading}：${teamALabel}` : null,
+      teamBLabel ? `${teamBEntryNo ? `${teamBEntryNo} ` : ""}${bHeading}：${teamBLabel}` : null,
       match.court_number ? `コート：${match.court_number}` : null,
       (match.status==="active" || match.status==="finished") ? `スコア：${match.match_score_a}-${match.match_score_b}` : null,
     ].filter(Boolean);
