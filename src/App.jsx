@@ -4806,6 +4806,16 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
     );
   }
 
+  if (view === "import") {
+    return (
+      <TournamentPairBulkImportScreen
+        tournament={tournament}
+        existingPairs={pairs}
+        onBack={() => { setView("list"); reload(); }}
+      />
+    );
+  }
+
   return (
     <div style={S.page}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
@@ -4839,11 +4849,15 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
             <div style={{ fontSize:40, marginBottom:12 }}>👥</div>
             まだペアが登録されていません<br/>
             <span style={{ fontSize:11 }}>右下の「＋」から登録できます</span>
-            <div style={{ marginTop:16 }}>
+            <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8, alignItems:"center" }}>
               <button
                 style={{ padding:"10px 18px", borderRadius:20, border:`1px solid ${C.navy}`, background:C.white, color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
                 onClick={() => setView("bulk")}
               >🔢 1番から連番でまとめて登録する</button>
+              <button
+                style={{ padding:"10px 18px", borderRadius:20, border:`1px solid ${C.navy}`, background:C.white, color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
+                onClick={() => setView("import")}
+              >📋 一覧から一括登録する</button>
             </div>
           </div>
         ) : filtered.length === 0 ? (
@@ -4878,16 +4892,20 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
         <Modal onClose={() => setShowAddChoice(false)}>
           <h3 style={{ fontSize:15, fontWeight:800, marginBottom:14 }}>登録方法を選んでください</h3>
           <div style={{ fontSize:12, color:C.textSec, marginBottom:14, lineHeight:1.6 }}>
-            出場番号がバラバラな場合は「1件ずつ登録」、1番から順番に並んでいる場合は「連番でまとめて登録」が便利です。
+            出場番号がバラバラな場合は「1件ずつ登録」、1番から順番に並んでいる場合は「連番でまとめて登録」、対戦表など一覧のデータがあるなら「一覧から一括登録」が便利です。
           </div>
           <button
             style={{ width:"100%", padding:13, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.text, fontSize:13.5, fontWeight:700, marginBottom:8, textAlign:"left", cursor:"pointer" }}
             onClick={() => { setShowAddChoice(false); setEditingPair({ entry_no: String(nextFreeNo) }); }}
           >🔢 1件ずつ登録（番号を毎回指定）</button>
           <button
-            style={{ width:"100%", padding:13, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:C.white, fontSize:13.5, fontWeight:700, textAlign:"left", cursor:"pointer" }}
+            style={{ width:"100%", padding:13, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.text, fontSize:13.5, fontWeight:700, marginBottom:8, textAlign:"left", cursor:"pointer" }}
             onClick={() => { setShowAddChoice(false); setView("bulk"); }}
           >🔢 連番でまとめて登録（1→2→3…）</button>
+          <button
+            style={{ width:"100%", padding:13, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:C.white, fontSize:13.5, fontWeight:700, textAlign:"left", cursor:"pointer" }}
+            onClick={() => { setShowAddChoice(false); setView("import"); }}
+          >📋 一覧から一括登録（複数行まとめて貼り付け）</button>
         </Modal>
       )}
 
@@ -5121,6 +5139,125 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, schools, onBac
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ★一覧（対戦表・エントリー表など）のテキストを貼り付けて、1行1ペアとしてまとめて取り込む。
+//   ドロー機能の一括登録と同じ区切り方式（タブ／カンマ／全角スペース／連続半角スペース）に対応。
+//   1行の中身：出場番号　チーム名/学校名　選手1　選手2（選手名は空欄でもOK）
+function parseBulkPairLines(text) {
+  return text.split("\n").map(l => l.trim()).filter(Boolean).map(line => {
+    const cols = line.includes("\t") ? line.split("\t") : line.split(/,|　| {2,}/);
+    const [entryNo, school, player1, player2] = cols.map(c => (c || "").trim());
+    return { entryNo: entryNo || "", school: school || "", player1: player1 || "", player2: player2 || "" };
+  });
+}
+
+function TournamentPairBulkImportScreen({ tournament, existingPairs, onBack }) {
+  const [text, setText] = useState("");
+  const [importing, setImporting] = useState(false);
+
+  const preview = parseBulkPairLines(text);
+
+  async function handleImport() {
+    if (preview.length === 0) { alert("入力内容がありません。"); return; }
+    const noEntryNo = preview.filter(e => !e.entryNo).length;
+    if (noEntryNo > 0) {
+      if (!window.confirm(`出場番号が無い行が${noEntryNo}件あります。これらの行は登録されずスキップされますが、続けますか？`)) return;
+    }
+    setImporting(true);
+    let registered = 0, skippedDup = 0, skippedNoNo = 0, errors = 0;
+    const seenThisBatch = new Set();
+    try {
+      for (const e of preview) {
+        if (!e.entryNo) { skippedNoNo++; continue; }
+        const isDup = existingPairs.some(p => entryNoMatches(p.entry_no, e.entryNo)) || seenThisBatch.has(e.entryNo.trim());
+        if (isDup) { skippedDup++; continue; }
+        try {
+          await saveTournamentPair({
+            tournament_id: tournament.id,
+            tournament_name: tournament.name,
+            entry_no: e.entryNo,
+            club_name: e.school,
+            player1_name: e.player1,
+            player2_name: e.player2,
+          });
+          seenThisBatch.add(e.entryNo.trim());
+          registered++;
+        } catch (err) {
+          errors++;
+        }
+      }
+      alert(`登録完了：${registered}件登録しました。${skippedDup ? `\n重複する番号：${skippedDup}件はスキップ` : ""}${skippedNoNo ? `\n番号が無い行：${skippedNoNo}件はスキップ` : ""}${errors ? `\nエラー：${errors}件` : ""}`);
+      onBack();
+    } catch (err) {
+      alert("一括登録エラー: " + (err.message || err));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack} disabled={importing}>←</button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>一覧から一括登録</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 14px 0" }}>
+        <div style={{ fontSize:11.5, color:C.navy, background:"#eef0ff", border:"1px solid #dcdffc", borderRadius:10, padding:"10px 12px", lineHeight:1.6 }}>
+          💡 対戦表やエントリー表をコピーして貼り付けてください。1行につき1ペアで、「出場番号　チーム名　選手1　選手2」の順に、タブ・カンマ・全角スペースのいずれかで区切ります。選手名は空欄でも構いません。
+          <div style={{ marginTop:8, fontFamily:"monospace", fontSize:10.5, background:"#fff", border:"1px solid #dcdffc", borderRadius:6, padding:"6px 8px", color:C.text, whiteSpace:"pre-wrap" }}>
+            {"262　玄界　和多 湊音　堺 壮太郎\n263　玄界　田中 陸　山本 蓮\n264　福工大城東"}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding:14 }}>
+        <textarea
+          style={{ width:"100%", minHeight:160, padding:12, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13, color:C.text, boxSizing:"border-box", fontFamily:"monospace", lineHeight:1.6 }}
+          placeholder={"262　玄界　和多 湊音　堺 壮太郎\n263　玄界　田中 陸　山本 蓮"}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          disabled={importing}
+        />
+
+        {preview.length > 0 && (
+          <div style={{ marginTop:14 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:C.textSec, marginBottom:6 }}>
+              プレビュー（{preview.length}行・うち番号なし{preview.filter(e=>!e.entryNo).length}件）
+            </div>
+            <div style={S.card}>
+              {preview.slice(0, 50).map((e, i) => {
+                const dup = e.entryNo && existingPairs.some(p => entryNoMatches(p.entry_no, e.entryNo));
+                return (
+                  <div key={i} style={{ padding:"8px 12px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10 }}>
+                    <div style={{ fontSize:11, fontWeight:800, color: e.entryNo ? C.textSec : C.red, border:`1px solid ${e.entryNo ? C.border : C.red}`, borderRadius:6, padding:"3px 8px", minWidth:30, textAlign:"center" }}>{e.entryNo || "?"}</div>
+                    <div style={{ fontSize:12.5, color:C.text, flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {e.school || "（チーム名未入力）"} / {[e.player1, e.player2].filter(Boolean).join("・") || "（選手未入力）"}
+                    </div>
+                    {dup && <div style={{ fontSize:10, color:C.orange, fontWeight:700, flexShrink:0 }}>重複</div>}
+                  </div>
+                );
+              })}
+              {preview.length > 50 && (
+                <div style={{ padding:"8px 12px", fontSize:11, color:C.textSec, textAlign:"center" }}>他{preview.length - 50}行…</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <button
+          style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white), marginTop:16 }}
+          disabled={importing || preview.length === 0}
+          onClick={handleImport}
+        >{importing ? "登録中..." : `この内容で登録する（${preview.length}件）`}</button>
+        <button style={{ ...S.btn("transparent", C.textSec), marginTop:4 }} disabled={importing} onClick={onBack}>キャンセル</button>
       </div>
     </div>
   );
