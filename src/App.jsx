@@ -15392,9 +15392,10 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
           {analysis.comment_text}
         </div>
         <div style={{ display:"flex", gap:8, marginTop:16 }}>
-          <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy }} onClick={onEdit}>✏️ 編集する</button>
           <button style={{ ...S.btn(C.redL), color:C.red }} onClick={onDelete}>🗑 削除</button>
+          <button style={{ ...S.btn(C.navy), color:C.white }} onClick={onEdit}>✏️ 編集する</button>
         </div>
+        <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.textSec, marginTop:8 }} onClick={onBack}>← 戻る</button>
       </div>
     </div>
   );
