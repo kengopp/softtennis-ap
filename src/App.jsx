@@ -11716,14 +11716,79 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [undoConfirm, setUndoConfirm] = useState(false); // 1点前に戻す確認ダイアログ
   const [resetConfirm, setResetConfirm] = useState(false); // スコアリセット確認ダイアログ
 
-  // ★保存処理を1件ずつ順番に実行するためのキュー（連打しても保存が衝突しないように）
-  const saveQueueRef = useRef(Promise.resolve());
-  const persist = useCallback((m)=>{
+  // ★オフライン対応：保存処理
+  //   ・入力するたびに、まず端末のローカル(localStorage)に控えを保存する（電波が無くても記録が消えないように）
+  //   ・サーバーへの保存はバックグラウンドで試み、失敗してもポップアップは出さず静かにリトライし続ける
+  //   ・保存中に次の更新が来た場合は、常に「最新の状態」だけを送ればよい（1つ前の途中経過は送らなくてよい）ので、
+  //     最新のもの1つだけを保持して送信する
+  const LOCAL_DRAFT_KEY = `offline_match_draft_${initialMatch.id}`;
+  const [syncStatus, setSyncStatus] = useState("synced"); // "synced" | "pending" | "error"
+  const [restoredNotice, setRestoredNotice] = useState(false);
+  const latestUnsavedRef = useRef(null);
+  const savingRef = useRef(false);
+
+  const attemptSave = useCallback(() => {
+    if (savingRef.current) return;
+    const toSave = latestUnsavedRef.current;
+    if (!toSave) return;
+    savingRef.current = true;
+    saveMatch(toSave)
+      .then(() => {
+        if (latestUnsavedRef.current === toSave) {
+          latestUnsavedRef.current = null;
+          try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch(e) {}
+          setSyncStatus("synced");
+        }
+      })
+      .catch(() => {
+        setSyncStatus("error"); // 通信エラー等。ポップアップは出さず、画面のバッジで知らせるだけにする
+      })
+      .finally(() => {
+        savingRef.current = false;
+        if (latestUnsavedRef.current) setTimeout(attemptSave, 1500); // 未保存分が残っていれば少し待って再試行
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const persist = useCallback((m) => {
     setMatch({...m});
-    saveQueueRef.current = saveQueueRef.current
-      .then(()=>saveMatch(m))
-      .catch(e=>alert("保存に失敗しました: "+(e.message||e)));
-  },[]);
+    try { localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(m)); } catch(e) {}
+    latestUnsavedRef.current = m;
+    setSyncStatus("pending");
+    attemptSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attemptSave]);
+
+  // ★電波が復活した瞬間（オンラインイベント）に、すぐ再送を試みる
+  useEffect(() => {
+    const onOnline = () => attemptSave();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [attemptSave]);
+
+  // ★画面を開いた直後：前回、同期できないまま終了してしまった記録がローカルに残っていれば、
+  //   それを復元して改めて保存を試みる（アプリを閉じても記録が消えないようにするための仕組み）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LOCAL_DRAFT_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        const draftPointCount = (draft.games || []).reduce((n,g)=>n+(g.points?.length||0), 0);
+        const initialPointCount = (initialMatch.games || []).reduce((n,g)=>n+(g.points?.length||0), 0);
+        if (draftPointCount >= initialPointCount && JSON.stringify(draft) !== JSON.stringify(initialMatch)) {
+          setMatch(draft);
+          latestUnsavedRef.current = draft;
+          setSyncStatus("pending");
+          setRestoredNotice(true);
+          attemptSave();
+        } else {
+          localStorage.removeItem(LOCAL_DRAFT_KEY);
+        }
+      }
+    } catch(e) {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const winGames = calcWinGames(match.game_format);
   const currentGame = match.games.length>0&&!match.games[match.games.length-1].winner_team ? match.games[match.games.length-1] : null;
   const currentGameIsFinal = currentGame ? currentGame.is_final : isFinalGame(match.game_format,match.match_score_a,match.match_score_b);
@@ -11987,17 +12052,25 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
   const [navigatingBack, setNavigatingBack] = useState(false);
   async function handleBack() {
-    setNavigatingBack(true);
-    try {
-      await saveQueueRef.current;
-    } catch(e) {
-      // 保存失敗はpersist側でalert済み
+    // ★未同期のデータが残っている状態でこの画面を離れると、自動リトライが止まってしまうため、
+    //   一度確認する（オフラインで記録を続けている最中に誤って戻るのを防ぐ）
+    if (syncStatus !== "synced") {
+      if (!window.confirm("まだサーバーに保存できていない記録があります（電波待ち）。\nこのまま戻ると自動での再送が止まります。\n記録自体は端末に残っているので、この画面をもう一度開けば再送は再開されます。\n\n戻りますか？")) {
+        return;
+      }
     }
+    setNavigatingBack(true);
     onBack();
   }
 
   return (
     <div style={S.page}>
+      {restoredNotice && (
+        <div style={{ background:"#fff3e0", borderBottom:"1px solid #ffd9b3", padding:"8px 14px", fontSize:11.5, color:"#8a5a00", display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ flex:1 }}>⚠️ 前回、同期できないまま終了した記録を復元しました。電波が戻り次第、自動で保存されます。</span>
+          <button style={{ background:"none", border:"none", color:"#8a5a00", fontWeight:700, fontSize:13, cursor:"pointer" }} onClick={()=>setRestoredNotice(false)}>✕</button>
+        </div>
+      )}
       {/* スコアボードヘッダー */}
       <div style={{ background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, padding:"10px 14px" }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
@@ -12005,6 +12078,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ textAlign:"center", flex:1, minWidth:0, padding:"0 6px" }}>
             {match.tournament_name&&<div style={{ fontSize:11,color:"rgba(255,255,255,0.8)",fontWeight:700,overflowWrap:"break-word" }}>{match.tournament_name}{match.round?` · ${match.round}`:""}</div>}
             <div style={{ fontSize:10,color:"rgba(255,255,255,0.5)" }}>{fmtDate(match.match_date)}{match.venue?` · ${match.venue}`:""}{match.court_number?` · ${match.court_number}`:""} · {match.game_format}Gマッチ</div>
+            {!viewOnly && (match.status==="active" || match.status==="waiting" || match.status==="scheduled") && (
+              <div style={{ marginTop:3, display:"inline-flex", alignItems:"center", gap:4, fontSize:9.5, fontWeight:700, borderRadius:99, padding:"1px 8px",
+                background: syncStatus==="synced" ? "rgba(46,204,113,0.2)" : syncStatus==="error" ? "rgba(255,255,255,0.15)" : "rgba(249,115,22,0.2)",
+                color: syncStatus==="synced" ? "#7CF0B0" : syncStatus==="error" ? "#ffb199" : "#ffcf8f" }}>
+                {syncStatus==="synced" ? "🟢 同期済み" : syncStatus==="error" ? "🔴 未同期（電波待ち・記録は端末に保存済み）" : "🟡 保存中…"}
+              </div>
+            )}
           </div>
           <div style={{ display:"flex", gap:6, flex:"none" }}>
             {match.status==="active" && (
@@ -15392,10 +15472,9 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
           {analysis.comment_text}
         </div>
         <div style={{ display:"flex", gap:8, marginTop:16 }}>
+          <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy }} onClick={onEdit}>✏️ 編集する</button>
           <button style={{ ...S.btn(C.redL), color:C.red }} onClick={onDelete}>🗑 削除</button>
-          <button style={{ ...S.btn(C.navy), color:C.white }} onClick={onEdit}>✏️ 編集する</button>
         </div>
-        <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.textSec, marginTop:8 }} onClick={onBack}>← 戻る</button>
       </div>
     </div>
   );
