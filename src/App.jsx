@@ -11084,12 +11084,12 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const found = await findPairByEntryNo(tournamentName, n).catch(() => null);
       if (found) {
         setAEntryLookup("found");
-        // ★チーム名は「未入力のときだけ」ではなく、番号入力で見つかった時点で常に反映する。
-        //   自チーム欄はプロフィールの学校名があらかじめ入っていることが多く、
-        //   その状態のままだと見つかった相手チームの情報で上書きされず選手名だけズレてしまうため。
+        // ★チーム名・選手名ともに「未入力のときだけ」ではなく、番号入力で見つかった時点で常に反映する。
+        //   「コピーして新規作成」した試合では前の回戦の選手名がすでに入っているため、
+        //   未入力チェックのままだと番号を書き換えても古い選手名が残ってしまうため。
         if (!isTeamMatchGame && found.club_name) setAClub(found.club_name);
-        if (!aP1.trim() && found.player1) setAP1(found.player1);
-        if (!aP2.trim() && found.player2) setAP2(found.player2);
+        if (found.player1) setAP1(found.player1);
+        if (found.player2) setAP2(found.player2);
       } else {
         setAEntryLookup("notfound");
       }
@@ -11105,8 +11105,8 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       if (found) {
         setBEntryLookup("found");
         if (!isTeamMatchGame && found.club_name) setBClub(found.club_name);
-        if (!bP1.trim() && found.player1) setBP1(found.player1);
-        if (!bP2.trim() && found.player2) setBP2(found.player2);
+        if (found.player1) setBP1(found.player1);
+        if (found.player2) setBP2(found.player2);
       } else {
         setBEntryLookup("notfound");
       }
