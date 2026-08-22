@@ -3969,7 +3969,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             }
           });
         } else {
-          individualMatches.forEach(m => {
+          // ★下のチップ（回戦・勝ち残り/敗退の絞り込み）に連動させるため、絞り込み後のリストを使う
+          filteredIndividualMatches.forEach(m => {
             if (m.status !== "finished") return;
             // ★通常の試合記録は「自チーム＝Aチーム」の前提で保存されるが、ドロー表の簡易記録は
             //   ブラケット上のA/Bがどちらか一定しないため、選手のclub_nameで自チーム側を判定する。
