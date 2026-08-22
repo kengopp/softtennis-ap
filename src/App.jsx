@@ -7593,7 +7593,7 @@ function PracticeScreen({ onNavigate }) {
 
 // マスター管理ハブ画面（選手マスター・学校マスターへの入口）
 // ============================================================
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onTrash, onProfile, onLogout }) {
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onTrash, onProfile, onLogout, textScale, onChangeTextScale }) {
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
@@ -7613,6 +7613,23 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         </div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
+        <div style={{ ...S.card, padding:"16px 14px", marginBottom:10 }}>
+          <div style={{ fontSize:14,fontWeight:700, marginBottom:2 }}>🔤 文字の大きさ</div>
+          <div style={{ fontSize:11,color:C.textSec,marginBottom:10 }}>画面が見えにくいときはここで大きくできます</div>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+            {[["100","標準"],["115","大"],["130","特大"],["150","超特大"]].map(([v,l])=>(
+              <button
+                key={v}
+                onClick={()=>onChangeTextScale && onChangeTextScale(v)}
+                style={{
+                  flex:1, minWidth:70, padding:"9px 6px", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer",
+                  border:`1.5px solid ${textScale===v?C.navy:C.border}`,
+                  background:textScale===v?C.navy:"#fff", color:textScale===v?"#fff":C.textSec,
+                }}
+              >{l}</button>
+            ))}
+          </div>
+        </div>
         <div
           style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
           onClick={onGoalSettings}
@@ -15700,6 +15717,18 @@ export default function App() {
     return () => { document.head.removeChild(style); };
   }, []);
 
+  // ★文字が見えにくいという声への対応：文字サイズ設定（標準/大/特大/超特大）。
+  //   このアプリはfontSizeをpx直書きしている箇所が非常に多いため、個別に直すのではなく
+  //   画面全体をCSSのzoomで拡大縮小することで、一括かつ安全に文字を大きくする。
+  //   （zoomはAndroid/Chromeでは問題なく効くが、iOS Safariでは効かない場合がある）
+  const [textScale, setTextScale] = useState(() => {
+    try { return localStorage.getItem("textScale") || "100"; } catch(e) { return "100"; }
+  });
+  useEffect(() => {
+    document.documentElement.style.zoom = `${textScale}%`;
+    try { localStorage.setItem("textScale", textScale); } catch(e) {}
+  }, [textScale]);
+
   // ログイン状態の確認
   const [authChecked, setAuthChecked] = useState(false);
   const [user,        setUser]        = useState(null);
@@ -16193,6 +16222,8 @@ export default function App() {
         onProfile={()=>setScreen("profile")}
         onTrash={()=>{ setPendingOpenTrash(true); setListMatchMode("tournament"); setScreen("list"); }}
         onLogout={performLogout}
+        textScale={textScale}
+        onChangeTextScale={setTextScale}
       />
     );
   }
