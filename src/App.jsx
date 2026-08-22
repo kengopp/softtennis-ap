@@ -4253,7 +4253,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <div style={{ height:4, background:borderColor }}/>
               <div style={{ padding:"10px 14px", cursor:m.is_simple_draw_result?"default":"pointer" }} onClick={()=>{ if (!m.is_simple_draw_result) onOpenMatch(m.id); }}>
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
-                  {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}{m.match_number ? `(${m.match_number}試合目)` : ""}
+                  {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}{m.match_number ? `(${m.match_number}試合目)` : ""}{m.court_number ? `(${m.court_number})` : ""}
                   {m.is_simple_draw_result && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#f1efff", color:C.purple, border:"1px solid "+C.purple }}>簡易記録</span>}
                   <span style={{
                     marginLeft:"auto", fontSize:10.5, fontWeight:700, borderRadius:99, padding:"2px 9px", whiteSpace:"nowrap",
