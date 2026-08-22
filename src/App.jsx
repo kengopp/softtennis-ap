@@ -3790,6 +3790,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
   const [individualResultFilter, setIndividualResultFilter] = useState("all"); // "all" | "win" | "lose"（勝ち残り／敗退の絞り込み）
+  const [individualSearch, setIndividualSearch] = useState(""); // ★選手名・チーム名でのペア絞り込み
   const [individualRoundFilter, setIndividualRoundFilter] = useState("all"); // ★回戦ごとの絞り込み
   const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
@@ -3866,6 +3867,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       const lost = m.status==="finished" && myScore < oppScore;
       if (individualResultFilter === "win" && lost) return false; // 負けた試合（＝敗退したペア）だけ除外
       if (individualResultFilter === "lose" && !lost) return false; // 負けが確定していない試合は除外
+    }
+    if (individualSearch.trim()) {
+      const q = individualSearch.trim();
+      const haystack = [
+        ...m.players.map(p => p.player_name),
+        ...m.players.map(p => p.club_name),
+      ].filter(Boolean).join(" ");
+      if (!haystack.includes(q)) return false;
     }
     return true;
   });
@@ -4206,6 +4215,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   background:individualResultFilter==="lose"?C.red:"#fff", color:individualResultFilter==="lose"?"#fff":C.textSec,
                 }}
               >💔 敗退ペアのみ</button>
+              <input
+                value={individualSearch}
+                onChange={e=>setIndividualSearch(e.target.value)}
+                placeholder="🔍 選手名・チーム名で検索"
+                style={{ flex:1, minWidth:0, padding:"7px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:12.5, color:C.text, boxSizing:"border-box" }}
+              />
             </div>
             {individualRounds.length>0 && (
               <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:2 }}>
