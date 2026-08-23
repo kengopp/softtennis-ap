@@ -11740,6 +11740,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [simpleScoreA, setSimpleScoreA] = useState("");
   const [simpleScoreB, setSimpleScoreB] = useState("");
   const [simpleResultSaving2, setSimpleResultSaving2] = useState(false);
+  const [isWithdrawalResult, setIsWithdrawalResult] = useState(false); // ★棄権による試合終了（ゲームカウントの大小に関わらず終了できる）
+  const [withdrawalWinner, setWithdrawalWinner] = useState(null); // "A" | "B"（棄権時は数字だけでは勝者が決まらないため明示的に選ぶ）
   const [editingPoint, setEditingPoint] = useState(null); // 修正中のポイント { gameId, point }
   const [addingPoint, setAddingPoint] = useState(null); // 追加位置 { gameId, atIndex }
   const [memoDraft, setMemoDraft] = useState(initialMatch.memo || ""); // 試合メモ（下書き）
@@ -12842,22 +12844,63 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB }} />
               </div>
             </div>
+
+            <label style={{ display:"flex", alignItems:"center", gap:8, marginTop:14, padding:"10px 12px", borderRadius:10, background: isWithdrawalResult ? "#fff3e0" : C.gray, border:`1px solid ${isWithdrawalResult ? "#ffd9b3" : C.border}`, cursor:"pointer" }}>
+              <input type="checkbox" checked={isWithdrawalResult} onChange={e=>{ setIsWithdrawalResult(e.target.checked); setWithdrawalWinner(null); }} style={{ width:18, height:18 }} />
+              <div>
+                <div style={{ fontSize:12.5, fontWeight:700, color:isWithdrawalResult?"#8a5a00":C.text }}>🚩 棄権による試合終了</div>
+                <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>ゲームカウントに関係なく終了でき、勝者を直接選べます</div>
+              </div>
+            </label>
+
+            {isWithdrawalResult && (
+              <div style={{ marginTop:10 }}>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>どちらが勝ちましたか？（棄権していない方）</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button
+                    onClick={()=>setWithdrawalWinner("A")}
+                    style={{ flex:1, padding:"10px 6px", borderRadius:10, fontSize:12.5, fontWeight:700, cursor:"pointer",
+                      border:`2px solid ${C.teamA}`, background: withdrawalWinner==="A" ? C.teamA : "#fff", color: withdrawalWinner==="A" ? "#fff" : C.teamA }}
+                  >{teamALabel} の勝ち</button>
+                  <button
+                    onClick={()=>setWithdrawalWinner("B")}
+                    style={{ flex:1, padding:"10px 6px", borderRadius:10, fontSize:12.5, fontWeight:700, cursor:"pointer",
+                      border:`2px solid ${C.teamB}`, background: withdrawalWinner==="B" ? C.teamB : "#fff", color: withdrawalWinner==="B" ? "#fff" : C.teamB }}
+                  >{teamBLabel} の勝ち</button>
+                </div>
+              </div>
+            )}
+
             <button
               style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:14 }}
-              disabled={simpleResultSaving2 || simpleScoreA==="" || simpleScoreB==="" || simpleScoreA===simpleScoreB}
+              disabled={
+                simpleResultSaving2 || simpleScoreA==="" || simpleScoreB==="" ||
+                (!isWithdrawalResult && simpleScoreA===simpleScoreB) ||
+                (isWithdrawalResult && !withdrawalWinner)
+              }
               onClick={()=>{
                 const a = parseInt(simpleScoreA,10), b = parseInt(simpleScoreB,10);
                 if (isNaN(a) || isNaN(b) || a<0 || b<0) { alert("正しいゲームカウントを入力してください"); return; }
-                if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
-                const requiredWins = calcWinGames(match.game_format);
-                if (Math.max(a,b) < requiredWins) { alert(`${match.game_format}Gマッチは${requiredWins}ゲーム先取が必要です。まだ試合は終了できません。`); return; }
+                if (!isWithdrawalResult) {
+                  if (a===b) { alert("同点にはできません（勝敗がつく数字を入力してください）"); return; }
+                  const requiredWins = calcWinGames(match.game_format);
+                  if (Math.max(a,b) < requiredWins) { alert(`${match.game_format}Gマッチは${requiredWins}ゲーム先取が必要です。まだ試合は終了できません。`); return; }
+                }
                 setSimpleResultSaving2(true);
-                persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished" });
+                const withdrawalMemo = isWithdrawalResult
+                  ? `棄権による試合終了（${withdrawalWinner==="A" ? teamALabel : teamBLabel} の勝利）`
+                  : "";
+                const newMemo = withdrawalMemo
+                  ? [match.memo, withdrawalMemo].filter(Boolean).join("\n")
+                  : match.memo;
+                persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished", memo:newMemo });
                 setSimpleResultSaving2(false);
                 setShowSimpleResult(false);
+                setIsWithdrawalResult(false);
+                setWithdrawalWinner(null);
               }}
             >{simpleResultSaving2 ? "保存中..." : "この結果で確定する"}</button>
-            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setShowSimpleResult(false)}>キャンセル</button>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>{ setShowSimpleResult(false); setIsWithdrawalResult(false); setWithdrawalWinner(null); }}>キャンセル</button>
           </div>
         </Modal>
       )}
