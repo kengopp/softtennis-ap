@@ -4523,16 +4523,18 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
           })(),
         };
 
-        // ★集計に必要なplayer_name/play_type/faultsなどを含む「詳細データ」を1件ずつ取得する
+        // ★集計に必要なplayer_name/play_type/faultsなどを含む「詳細データ」をまとめて取得する
         //   （getMatches()の一覧データはポイントの一部項目のみで、選手別集計には使えないため）
-        const detailedMatches = await Promise.all(
-          uniqueRows.map(async row => {
-            const full = await getMatch(row.matchId);
-            return full ? { ...full, ranking_date: row.date || full.match_date } : null;
-          })
+        // ★以前はgetMatch()を1件ずつ呼んでいたが、試合数が多い大会だと通信が大量に同時発生し
+        //   スマホがフリーズ／真っ白になる原因になっていたため、まとめて取得するgetFullMatchesByIds()に変更
+        const dateByMatchId = {};
+        uniqueRows.forEach(row => { dateByMatchId[row.matchId] = row.date; });
+        const fullMatches = await getFullMatchesByIds(uniqueRows.map(row => row.matchId));
+        const detailedMatches = fullMatches.map(full =>
+          full ? { ...full, ranking_date: dateByMatchId[full.id] || full.match_date } : null
         );
         dedupDiag.detailedMatchesCount = detailedMatches.length;
-        dedupDiag.nullDetailCount = detailedMatches.filter(x => !x).length;
+        dedupDiag.nullDetailCount = uniqueRows.length - detailedMatches.length;
         setDedupDiag(dedupDiag);
 
         const groups = {};
