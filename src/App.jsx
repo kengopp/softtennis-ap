@@ -154,6 +154,16 @@ const mySideOf = (m, mySchoolName) => {
   if (bIsMine && !aIsMine) return "B";
   return "A";
 };
+// ★試合の勝者側（"A" | "B" | null）を判定する共通関数。
+//   通常はゲームカウントの大小で決まるが、「棄権による試合終了」ではゲームカウントの数字だけでは
+//   勝敗が決まらない（棄権した側の方が数字上多いこともある）ため、その場合はmatch.walkover_winnerを
+//   最優先で使う。勝敗が関わるすべての箇所は、直接スコアを比較せず必ずこの関数を使うこと。
+const winnerSideOf = (m) => {
+  if (m.walkover_winner === "A" || m.walkover_winner === "B") return m.walkover_winner;
+  if (m.match_score_a > m.match_score_b) return "A";
+  if (m.match_score_a < m.match_score_b) return "B";
+  return null; // 同点かつ棄権情報も無い（本来起こらないはずのデータ）
+};
 // ★品質改善：「清見 祐吾」「清見祐吾」のように空白の有無だけが違う同一人物を
 // 別選手として重複登録してしまわないよう、選手名の比較は空白を除去してから行う
 const normalizePlayerName = (name) => (name || "").replace(/\s+/g, "");
@@ -187,7 +197,7 @@ function winForPlayer(m, playerName, mySchoolName) {
   const team = ownSideFor(m, playerName, mySchoolName)
             ?? m.players.find(p=>p.player_name===playerName)?.team;
   if (!team) return null;
-  return team==="A" ? m.match_score_a>m.match_score_b : m.match_score_b>m.match_score_a;
+  return team==="A" ? winnerSideOf(m)==="A" : winnerSideOf(m)==="B";
 }
 // 指定選手の、その試合での相方（ペア）名を取得
 function partnerOf(m, playerName, mySchoolName) {
@@ -458,6 +468,7 @@ function rowToMatchSummary(m, players=[], games=[]) {
     memo: m.memo ?? "",
     court_number: m.court_number ?? "",
     is_younger: m.is_younger === true,
+    walkover_winner: m.walkover_winner ?? null,
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
@@ -484,6 +495,7 @@ function rowToMatchFull(m, players, games, points, faults) {
     memo: m.memo ?? "",
     court_number: m.court_number ?? "",
     is_younger: m.is_younger === false ? false : true,
+    walkover_winner: m.walkover_winner ?? null,
     players: players.map(p => ({
       id: p.id, team: p.team, player_name: p.player_name,
       club_name: p.club_name ?? "", position: p.position ?? "", order_num: p.order_num,
@@ -525,6 +537,7 @@ async function saveMatch(match) {
     memo: match.memo || null,
     court_number: match.court_number || null,
     is_younger: match.is_younger !== false,
+    walkover_winner: match.walkover_winner || null,
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
@@ -1243,7 +1256,7 @@ async function recalcTeamMatchScore(teamMatchId) {
   if (matchIds.length === 0) return null;
 
   const [{ data: matches, error: matchesErr }, { data: tm, error: tmErr }] = await Promise.all([
-    supabase.from("matches").select("id,match_score_a,match_score_b,status").in("id", matchIds),
+    supabase.from("matches").select("id,match_score_a,match_score_b,status,walkover_winner").in("id", matchIds),
     supabase.from("team_matches").select("format,my_score,opponent_score,status").eq("id", teamMatchId).single(),
   ]);
   if (matchesErr) { console.error(matchesErr); return null; }
@@ -1276,8 +1289,9 @@ async function recalcTeamMatchScore(teamMatchId) {
     // 　スコアで決着扱いにするのが実際の運用（既に決着がついた番手を打ち切るケースが多いため）。
     // 　そのため、ここでは finished と abandoned の両方を「決着済み」として数える。
     if (!m || (m.status !== "finished" && m.status !== "abandoned")) continue;
-    if (m.match_score_a > m.match_score_b) myScore++;
-    else if (m.match_score_b > m.match_score_a) oppScore++;
+    const w = winnerSideOf(m);
+    if (w === "A") myScore++;
+    else if (w === "B") oppScore++;
   }
 
   const winTarget = tm.format === "best2" ? 2 : 3;
@@ -2339,7 +2353,7 @@ function buildLineText(match) {
   var bP = match.players.filter(function(p){return p.team==="B";}).map(function(p){return p.player_name;}).join("/");
   var aC = (match.players.find(function(p){return p.team==="A";}) || {}).club_name || "";
   var bC = (match.players.find(function(p){return p.team==="B";}) || {}).club_name || "";
-  var aWin = match.match_score_a > match.match_score_b;
+  var aWin = winnerSideOf(match)==="A";
   var t = "\u{1F3BE} \u8A66\u5408\u7D50\u679C\n";
   if (match.tournament_name) t += match.tournament_name + (match.round ? " " + match.round : "") + "\n";
   t += fmtDate(match.match_date) + (match.venue ? " @" + match.venue : "") + "\n\n";
@@ -2867,8 +2881,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       return acc;
     }, { win: 0, loss: 0 });
     const individualRecord = individualForT.filter(m => isDoneStatus(m.status)).reduce((acc, m) => {
-      if (m.match_score_a > m.match_score_b) acc.win++;
-      else if (m.match_score_a < m.match_score_b) acc.loss++;
+      const w = winnerSideOf(m);
+      if (w === "A") acc.win++;
+      else if (w === "B") acc.loss++;
       return acc;
     }, { win: 0, loss: 0 });
     return { teamRecord, individualRecord };
@@ -3290,8 +3305,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {!loading && allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>試合記録がありません</div>}
             {!loading && allMatches.length>0 && filteredMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う試合がありません</div>}
             {!loading && filteredMatches.map(m => {
-              const aWin = m.status==="finished" && m.match_score_a > m.match_score_b;
-              const bWin = m.status==="finished" && m.match_score_b > m.match_score_a;
+              const aWin = m.status==="finished" && winnerSideOf(m)==="A";
+              const bWin = m.status==="finished" && winnerSideOf(m)==="B";
               const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
               const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
               const aNames = aPlayers.map(p=>p.player_name).join("/");
@@ -3862,9 +3877,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     if (individualRoundFilter !== "all" && m.round !== individualRoundFilter) return false;
     if (individualResultFilter === "win" || individualResultFilter === "lose") {
       const mySide = mySideOf(m, mySchoolName);
-      const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
-      const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
-      const lost = m.status==="finished" && myScore < oppScore;
+      const lost = m.status==="finished" && winnerSideOf(m) !== null && winnerSideOf(m) !== mySide;
       if (individualResultFilter === "win" && lost) return false; // 負けた試合（＝敗退したペア）だけ除外
       if (individualResultFilter === "lose" && !lost) return false; // 負けが確定していない試合は除外
     }
@@ -3984,10 +3997,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             // ★通常の試合記録は「自チーム＝Aチーム」の前提で保存されるが、ドロー表の簡易記録は
             //   ブラケット上のA/Bがどちらか一定しないため、選手のclub_nameで自チーム側を判定する。
             const side = mySideOf(m, mySchoolName);
-            const myScore = side === "B" ? m.match_score_b : m.match_score_a;
-            const oppScore = side === "B" ? m.match_score_a : m.match_score_b;
-            if (myScore > oppScore) win++;
-            else if (myScore < oppScore) lose++;
+            const w = winnerSideOf(m);
+            if (w === side) win++;
+            else if (w !== null) lose++;
           });
         }
         const total = win + lose;
@@ -4019,10 +4031,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               const names = (m.players || []).filter(p => p.team === side).sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
               if (!names) return;
               if (!pairMap[names]) pairMap[names] = { names, win:0, lose:0 };
-              const myScore = side === "A" ? m.match_score_a : m.match_score_b;
-              const oppScore = side === "A" ? m.match_score_b : m.match_score_a;
-              if (myScore > oppScore) pairMap[names].win++;
-              else if (myScore < oppScore) pairMap[names].lose++;
+              const w = winnerSideOf(m);
+              if (w === side) pairMap[names].win++;
+              else if (w !== null) pairMap[names].lose++;
             });
           });
         });
@@ -4101,7 +4112,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               if (!m || m.status !== "finished") return; // 記録済みの試合のみ対象
               const aNames = (m.players || []).filter(p => p.team === "A").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
               const bNames = (m.players || []).filter(p => p.team === "B").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
-              rows.push({ key: g.id, roundLabel: tm.round || "団体戦", orderNum: g.order_num, myClub: myFullLabel, oppClub: oppLabel, myNames: aNames, oppNames: bNames, scoreA: m.match_score_a, scoreB: m.match_score_b, win: m.match_score_a > m.match_score_b });
+              rows.push({ key: g.id, roundLabel: tm.round || "団体戦", orderNum: g.order_num, myClub: myFullLabel, oppClub: oppLabel, myNames: aNames, oppNames: bNames, scoreA: m.match_score_a, scoreB: m.match_score_b, win: winnerSideOf(m)==="A" });
             });
           });
           if (rows.length === 0) return <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>記録済みのペア試合がありません</div>;
@@ -4247,8 +4258,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const mySide = mySideOf(m, mySchoolName);
           const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
           const oppScore = mySide==="B" ? m.match_score_a : m.match_score_b;
-          const myWin = m.status==="finished" && myScore > oppScore;
-          const oppWin = m.status==="finished" && oppScore > myScore;
+          const myWin = m.status==="finished" && winnerSideOf(m)===mySide;
+          const oppWin = m.status==="finished" && winnerSideOf(m)!==null && winnerSideOf(m)!==mySide;
           const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
           const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
           const myPlayers = mySide==="B" ? bPlayers : aPlayers;
@@ -4554,7 +4565,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
     const ensure = (name) => (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0 });
     matchesOfDay.forEach(m => {
       const stats = calcPlayerStats(m).filter(s => s.team === "A" && !PLACEHOLDER_NAMES.has(s.player_name));
-      const isWin = m.match_score_a > m.match_score_b;
+      const isWin = winnerSideOf(m)==="A";
       const isFinished = m.status === "finished";
       const seenThisMatch = new Set();
       stats.forEach(s => {
@@ -6327,7 +6338,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   //   「結果だけ記録」は、実試合が作られていない枠にだけ意味を持つ簡易的な記録のため。
   const getWinnerEntry = (dm) => {
     const mi = dm.matchInfo;
-    if (mi && mi.status === "finished") return mi.match_score_a > mi.match_score_b ? dm.sideA : dm.sideB;
+    if (mi && mi.status === "finished") return winnerSideOf(mi)==="A" ? dm.sideA : dm.sideB;
     if (dm.simple_result_winner) return dm.simple_result_winner === "A" ? dm.sideA : dm.sideB;
     return null;
   };
@@ -6543,7 +6554,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 //   「結果だけ記録」は、実試合が作られていない/終了していない枠にだけ意味を持つ。
                 const realFinished = mi && mi.status === "finished";
                 const hasSimpleResult = !realFinished && !!dm.simple_result_winner;
-                const winnerSide = realFinished ? (mi.match_score_a > mi.match_score_b ? "A" : "B")
+                const winnerSide = realFinished ? winnerSideOf(mi)
                   : hasSimpleResult ? dm.simple_result_winner
                   : null;
                 const borderColor = mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.border;
@@ -8253,7 +8264,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   }, []);
 
   const finished = allMatches.filter(m=>m.status==="finished");
-  const wins = finished.filter(m=>m.match_score_a>m.match_score_b).length;
+  const wins = finished.filter(m=>winnerSideOf(m)==="A").length;
   const recent = allMatches.slice(0,3);
 
   // ★進行中の試合（記録再開の導線）
@@ -8277,7 +8288,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const STATS_MIN = 5;
   const isStatsReady = finished.length >= STATS_MIN;
   // ★直近5試合の調子（新しい順）
-  const last5 = finished.slice(0, 5).map(m => m.match_score_a > m.match_score_b);
+  const last5 = finished.slice(0, 5).map(m => winnerSideOf(m)==="A");
 
   // ★紐づけ選手（お子さん/自分）の戦績を、この画面で直接計算する
   const linkedMatches = linkedPlayerName ? allMatches.filter(m => ownSideFor(m, linkedPlayerName, mySchoolName)) : [];
@@ -8479,7 +8490,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
             <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>最近の試合</div>
             {allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
             {recent.map(m=>{
-              const aWin = m.match_score_a>m.match_score_b;
+              const aWin = winnerSideOf(m)==="A";
               const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
               const bP = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
               const bC = m.players.find(p=>p.team==="B")?.club_name??"";
@@ -9021,7 +9032,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           const bPlayers = match?.match_players?.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/") || "";
 
           const resultColor = match?.status === "finished"
-            ? (match.match_score_a > match.match_score_b ? C.teamA : C.teamB)
+            ? (winnerSideOf(match)==="A" ? C.teamA : C.teamB)
             : C.textSec;
 
           const canStart = isWaiting || (isSuspended && !isRecording);
@@ -9056,9 +9067,9 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                     )}
                     {match && !isWaiting && (
                       <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, marginBottom:8 }}>
-                        <span style={{ fontSize:22,fontWeight:900,color:match.match_score_a>match.match_score_b?C.teamA:C.textSec }}>{match.match_score_a}</span>
+                        <span style={{ fontSize:22,fontWeight:900,color:winnerSideOf(match)==="A"?C.teamA:C.textSec }}>{match.match_score_a}</span>
                         <span style={{ fontSize:14,color:C.textSec }}>-</span>
-                        <span style={{ fontSize:22,fontWeight:900,color:match.match_score_b>match.match_score_a?C.teamB:C.textSec }}>{match.match_score_b}</span>
+                        <span style={{ fontSize:22,fontWeight:900,color:winnerSideOf(match)==="B"?C.teamB:C.textSec }}>{match.match_score_b}</span>
                       </div>
                     )}
                     {(isFinished || isSuspended || isAbandoned || isRecording) && game?.match_id && (
@@ -10127,7 +10138,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     : period==="month3" ? withinLastDays(categoryMatches, 90)
     : categoryMatches;
   const finished = periodMatches.filter(m=>m.status==="finished");
-  const teamRecord = recordOf(finished, m=>m.match_score_a>m.match_score_b);
+  const teamRecord = recordOf(finished, m=>winnerSideOf(m)==="A");
 
   // ペア別成績（自チームAのペア名を「選手1／選手2」形式で集計）
   // ★相手チームが同じ学校（練習試合）の場合は、B側のペアも自チームのペアとして含める
@@ -10141,7 +10152,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const aNames = aPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
     if (aNames.length && aNames.every(n => ownNameSet.has(n))) {
       const pairKey = aNames.join("／") || "（不明）";
-      (byPair[pairKey] ??= []).push({ match: m, win: m.match_score_a > m.match_score_b });
+      (byPair[pairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="A" });
     }
     const bPlayers = m.players.filter(p => p.team === "B").sort((a,b) => a.order_num - b.order_num);
     const bClub = bPlayers[0]?.club_name;
@@ -10149,7 +10160,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
       const bNames = bPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
       if (bNames.length && bNames.every(n => ownNameSet.has(n))) {
         const bPairKey = bNames.join("／") || "（不明）";
-        (byPair[bPairKey] ??= []).push({ match: m, win: m.match_score_b > m.match_score_a });
+        (byPair[bPairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="B" });
       }
     }
   });
@@ -10171,7 +10182,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     (byOppPair[key] ??= []).push(m);
   });
   const oppPairRows = Object.entries(byOppPair).map(([name, list]) => ({
-    name, ...recordOf(list, m => m.match_score_b > m.match_score_a),
+    name, ...recordOf(list, m => winnerSideOf(m)==="B"),
   }));
   oppPairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
@@ -10198,7 +10209,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     (byOpponent[name] ??= []).push(m);
   });
   const opponentRows = Object.entries(byOpponent).map(([name,list])=>({
-    name, ...recordOf(list, m=>m.match_score_a>m.match_score_b),
+    name, ...recordOf(list, m=>winnerSideOf(m)==="A"),
   }));
   opponentRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
@@ -10335,7 +10346,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 ))}
               </div>
             </div>
-            <MonthlyTrendCard finishedMatches={finished} winFn={m=>m.match_score_a>m.match_score_b} />
+            <MonthlyTrendCard finishedMatches={finished} winFn={m=>winnerSideOf(m)==="A"} />
 
             {tab==="players" && (
               <>
@@ -10421,9 +10432,9 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
               })}
             </div>
             {finished
-              .filter(m => breakdownFilter==="all" ? true : breakdownFilter==="win" ? m.match_score_a>m.match_score_b : m.match_score_a<m.match_score_b)
+              .filter(m => breakdownFilter==="all" ? true : breakdownFilter==="win" ? winnerSideOf(m)==="A" : winnerSideOf(m)==="B")
               .slice().sort((a,b)=> sort==="desc" ? new Date(b.match_date)-new Date(a.match_date) : new Date(a.match_date)-new Date(b.match_date)).map(m=>{
-              const aWin = m.match_score_a > m.match_score_b;
+              const aWin = winnerSideOf(m)==="A";
               const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
               const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
               const aNames = aPlayers.map(p=>p.player_name).join("/");
@@ -10444,7 +10455,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 </div>
               );
             })}
-            {finished.filter(m => breakdownFilter==="all" ? true : breakdownFilter==="win" ? m.match_score_a>m.match_score_b : m.match_score_a<m.match_score_b).length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>この条件の試合記録がありません</div>}
+            {finished.filter(m => breakdownFilter==="all" ? true : breakdownFilter==="win" ? winnerSideOf(m)==="A" : winnerSideOf(m)==="B").length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>この条件の試合記録がありません</div>}
           </div>
         </Modal>
       )}
@@ -10639,7 +10650,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const periodMatches = period==="month1" ? withinLastDays(matches, 30) : matches;
   const vsMatches = periodMatches.filter(m => oppOf(m)===schoolName);
   const finished = vsMatches.filter(m => m.status==="finished");
-  const rec = recordOf(finished, m=>m.match_score_a>m.match_score_b);
+  const rec = recordOf(finished, m=>winnerSideOf(m)==="A");
 
   // 相手選手別・相手ペア別（こちらの勝率で集計）
   const byOppPlayer = {};
@@ -10650,9 +10661,9 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
     const pairKey = bNames.slice().sort().join(" / ");
     if (pairKey) (byOppPair[pairKey] ??= []).push(m);
   });
-  const oppPlayerRows = Object.entries(byOppPlayer).map(([name,list])=>({ name, ...recordOf(list, mm=>mm.match_score_a>mm.match_score_b) }));
+  const oppPlayerRows = Object.entries(byOppPlayer).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
   oppPlayerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
-  const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>mm.match_score_a>mm.match_score_b) }));
+  const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
   oppPairRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
 
   const allFinishedForTrend = matches.filter(m => m.status==="finished" && oppOf(m)===schoolName);
@@ -10713,11 +10724,11 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                   ))}
                 </div>
 
-                <MonthlyTrendCard finishedMatches={allFinishedForTrend} winFn={m=>m.match_score_a>m.match_score_b} />
+                <MonthlyTrendCard finishedMatches={allFinishedForTrend} winFn={m=>winnerSideOf(m)==="A"} />
 
                 <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>試合一覧</div>
                 {vsMatches.map(m=>{
-                  const win = m.status==="finished" ? m.match_score_a>m.match_score_b : null;
+                  const win = m.status==="finished" ? winnerSideOf(m)==="A" : null;
                   const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
                   const bP = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
                   return (
@@ -12387,7 +12398,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 <div style={{ fontSize:52 }}>🏆</div>
                 <p style={{ fontSize:18,fontWeight:800,color:C.accent,marginTop:8 }}>試合終了</p>
                 <p style={{ fontSize:14,fontWeight:700,color:C.white,marginTop:4,background:C.navy,display:"inline-block",padding:"4px 16px",borderRadius:20 }}>
-                  {match.match_score_a>match.match_score_b?teamALabel:teamBLabel} の勝利！
+                  {winnerSideOf(match)==="A"?teamALabel:teamBLabel} の勝利！
                 </p>
               </div>
               {/* ゲーム別スコア一覧（両チームの選手名を表示） */}
@@ -12893,7 +12904,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const newMemo = withdrawalMemo
                   ? [match.memo, withdrawalMemo].filter(Boolean).join("\n")
                   : match.memo;
-                persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished", memo:newMemo });
+                persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished", memo:newMemo, walkover_winner: isWithdrawalResult ? withdrawalWinner : null });
                 setSimpleResultSaving2(false);
                 setShowSimpleResult(false);
                 setIsWithdrawalResult(false);
@@ -12919,7 +12930,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   setResetConfirm(false);
                   // ★意図的な全削除はsaveMatch()の安全装置に阻まれないよう、
                   // 　ここで直接削除してから、リセット後の状態をDBに反映する
-                  const updated = { ...match, games:[], match_score_a:0, match_score_b:0, status:"scheduled", first_server:null };
+                  const updated = { ...match, games:[], match_score_a:0, match_score_b:0, status:"scheduled", first_server:null, walkover_winner:null };
                   setMatch({...updated});
                   try {
                     const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", match.id);
@@ -12930,7 +12941,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       await supabase.from("games").delete().in("id", gameIds);
                     }
                     await supabase.from("matches").update({
-                      match_score_a:0, match_score_b:0, status:"scheduled", first_server:null,
+                      match_score_a:0, match_score_b:0, status:"scheduled", first_server:null, walkover_winner:null,
                     }).eq("id", match.id);
                   } catch(e) { alert("リセットに失敗しました: "+(e.message||e)); }
                 }}
@@ -13010,7 +13021,7 @@ function MatchSummaryPanel({ match }) {
   const teamALabel = match.players.find(p=>p.team==="A")?.club_name || "自チーム";
   const teamBLabel = match.players.find(p=>p.team==="B")?.club_name || "相手チーム";
   const isFinished = match.status==="finished";
-  const aWin = match.match_score_a > match.match_score_b;
+  const aWin = winnerSideOf(match)==="A";
 
   const detailBox = { background:C.white, border:`1px solid ${C.border}`, borderRadius:12, marginBottom:10, overflow:"hidden" };
   const summaryBtn = { fontSize:12, fontWeight:700, color:C.text, padding:"12px 14px", cursor:"pointer", listStyle:"none", display:"flex", alignItems:"center", gap:6 };
