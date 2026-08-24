@@ -3992,14 +3992,24 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           });
         } else {
           // ★下のチップ（回戦・勝ち残り/敗退の絞り込み）に連動させるため、絞り込み後のリストを使う
+          // ★同校対決（東福岡 vs 東福岡など）は、A側・B側どちらも自チームのペアのため、
+          // 　片方だけでなく両方の勝敗を数える（＝1試合で「1勝1敗」を加算する）
           filteredIndividualMatches.forEach(m => {
             if (m.status !== "finished") return;
-            // ★通常の試合記録は「自チーム＝Aチーム」の前提で保存されるが、ドロー表の簡易記録は
-            //   ブラケット上のA/Bがどちらか一定しないため、選手のclub_nameで自チーム側を判定する。
-            const side = mySideOf(m, mySchoolName);
             const w = winnerSideOf(m);
-            if (w === side) win++;
-            else if (w !== null) lose++;
+            if (w === null) return; // 同点かつ勝者情報も無い試合は集計に含めない
+            const aIsMine = (m.players || []).some(p => p.team === "A" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+            const bIsMine = (m.players || []).some(p => p.team === "B" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+            if (aIsMine && bIsMine) {
+              // 同校対決：勝った方のペアも負けた方のペアも自チームなので両方数える
+              win++; lose++;
+            } else {
+              // ★通常の試合記録は「自チーム＝Aチーム」の前提で保存されるが、ドロー表の簡易記録は
+              //   ブラケット上のA/Bがどちらか一定しないため、選手のclub_nameで自チーム側を判定する。
+              const side = mySideOf(m, mySchoolName);
+              if (w === side) win++;
+              else lose++;
+            }
           });
         }
         const total = win + lose;
