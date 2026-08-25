@@ -327,24 +327,45 @@ async function getSimpleRecordedDrawMatches() {
 async function getFullMatchesByIds(ids) {
   const uniqueIds = Array.from(new Set((ids ?? []).filter(Boolean)));
   if (uniqueIds.length === 0) return [];
-  const [
-    { data: ms, error: mErr },
-    { data: playersData },
-    { data: gamesData },
-    { data: pointsData },
-    { data: faultsData },
-  ] = await Promise.all([
-    supabase.from("matches").select("*").in("id", uniqueIds),
-    supabase.from("match_players").select("*").in("match_id", uniqueIds),
-    supabase.from("games").select("*").in("match_id", uniqueIds),
-    supabase.from("points").select("*").in("match_id", uniqueIds),
-    supabase.from("faults").select("*").in("match_id", uniqueIds),
-  ]);
-  if (mErr || !ms) { console.error(mErr); return []; }
-  const playersByMatch = {}; (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
-  const gamesByMatch = {}; (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
-  const pointsByMatch = {}; (pointsData ?? []).forEach(pt => { (pointsByMatch[pt.match_id] ??= []).push(pt); });
-  const faultsByMatch = {}; (faultsData ?? []).forEach(f => { (faultsByMatch[f.match_id] ??= []).push(f); });
+
+  // ★試合数が多い大会だと、.in()に渡すID一覧が長くなりすぎて
+  //   リクエストが失敗したり、スマホの通信・メモリ負荷が大きくなり画面が固まる
+  //   （真っ白になる）ことがあったため、一定件数ごとに分割して取得する。
+  const CHUNK_SIZE = 40;
+  const chunks = [];
+  for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+    chunks.push(uniqueIds.slice(i, i + CHUNK_SIZE));
+  }
+
+  const ms = [];
+  const playersByMatch = {};
+  const gamesByMatch = {};
+  const pointsByMatch = {};
+  const faultsByMatch = {};
+
+  for (const chunkIds of chunks) {
+    const [
+      { data: msChunk, error: mErr },
+      { data: playersData, error: pErr },
+      { data: gamesData, error: gErr },
+      { data: pointsData, error: ptErr },
+      { data: faultsData, error: fErr },
+    ] = await Promise.all([
+      supabase.from("matches").select("*").in("id", chunkIds),
+      supabase.from("match_players").select("*").in("match_id", chunkIds),
+      supabase.from("games").select("*").in("match_id", chunkIds),
+      supabase.from("points").select("*").in("match_id", chunkIds),
+      supabase.from("faults").select("*").in("match_id", chunkIds),
+    ]);
+    const chunkErr = mErr || pErr || gErr || ptErr || fErr;
+    if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
+    (msChunk ?? []).forEach(m => ms.push(m));
+    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+    (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
+    (pointsData ?? []).forEach(pt => { (pointsByMatch[pt.match_id] ??= []).push(pt); });
+    (faultsData ?? []).forEach(f => { (faultsByMatch[f.match_id] ??= []).push(f); });
+  }
+
   return ms.map(m => rowToMatchFull(
     m,
     playersByMatch[m.id] ?? [],
@@ -353,6 +374,7 @@ async function getFullMatchesByIds(ids) {
     faultsByMatch[m.id] ?? [],
   ));
 }
+
 
 // 指定選手が、この試合でどちら側（A/B）として出たかを踏まえて、その選手のスタッツを1件返す
 function playerStatsInMatch(match, playerName, mySchoolName) {
