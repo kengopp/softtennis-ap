@@ -375,8 +375,151 @@ async function getFullMatchesByIds(ids) {
   ));
 }
 
+// ============================================================
+// 日別選手ランキング専用のデータ取得（軽量版）
+// ★以前はgetMatches()/getTeamMatches()で「全試合・全団体戦」を取得してから
+// 　大会名でフィルタしていたため、チームの利用期間が長くなるほど無駄な通信・
+// 　メモリ使用量が増え、試合数の多い大会でスマホが固まる（真っ白になる）
+// 　原因になっていた。ここではDB側で最初から対象大会だけに絞り込む。
+// ============================================================
 
-// 指定選手が、この試合でどちら側（A/B）として出たかを踏まえて、その選手のスタッツを1件返す
+// ★大会に属する「集計対象の試合ID＋日付」だけを軽量に取得する（点数等のフル取得はしない）
+async function getRankingTargetRows(tournamentName) {
+  const [
+    { data: matchRows, error: mErr },
+    { data: teamRows, error: tErr },
+  ] = await Promise.all([
+    supabase.from("matches").select("id, match_date")
+      .eq("tournament_name", tournamentName).is("deleted_at", null),
+    supabase.from("team_matches").select("id, match_date, round, status, format")
+      .eq("tournament_name", tournamentName).is("deleted_at", null),
+  ]);
+  if (mErr) { console.error(mErr); throw mErr; }
+  if (tErr) { console.error(tErr); throw tErr; }
+
+  const teamMatchIds = (teamRows ?? []).map(tm => tm.id);
+  let teamGames = [];
+  if (teamMatchIds.length > 0) {
+    const { data: gamesData, error: gErr } = await supabase
+      .from("team_match_games")
+      .select("id, team_match_id, match_id, order_num, status")
+      .in("team_match_id", teamMatchIds);
+    if (gErr) { console.error(gErr); throw gErr; }
+    teamGames = gamesData ?? [];
+  }
+  const gamesByTeamMatch = {};
+  teamGames.forEach(g => { (gamesByTeamMatch[g.team_match_id] ??= []).push(g); });
+
+  // ★診断用：この大会の団体戦(ラウンド)ごとに、番手が何件あり、
+  //   うちmatch_idが入っている(＝集計対象になる)のは何件かを可視化する
+  const roundBreakdown = (teamRows ?? []).map(tm => {
+    const games = gamesByTeamMatch[tm.id] ?? [];
+    return {
+      id: tm.id, round: tm.round || "(ラウンド名なし)", date: tm.match_date,
+      status: tm.status, format: tm.format, totalGames: games.length,
+      withMatchId: games.filter(g => g.match_id).length,
+      games: games.map(g => ({ order_num: g.order_num, has_match_id: !!g.match_id, status: g.status })),
+    };
+  });
+
+  const teamBoutIds = new Set();
+  teamGames.forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); });
+  const teamMatchDateById = {};
+  (teamRows ?? []).forEach(tm => { teamMatchDateById[tm.id] = tm.match_date; });
+
+  // ★対象となる試合ID＋その日付（個人戦はmatch_date、団体戦の各番手は団体戦本体のmatch_dateを使う）
+  const targetRows = [];
+  (matchRows ?? [])
+    .filter(m => !teamBoutIds.has(m.id))
+    .forEach(m => targetRows.push({ matchId: m.id, date: m.match_date }));
+  teamGames.forEach(g => {
+    if (g.match_id) targetRows.push({ matchId: g.match_id, date: teamMatchDateById[g.team_match_id] });
+  });
+  const uniqueRows = Array.from(new Map(targetRows.map(row => [row.matchId, row])).values());
+
+  // ★診断用：targetRows→uniqueRowsで件数が減っていれば、
+  //   複数の番手が同じmatch_idを参照している（重複除去で消えている）ことになる
+  const dedupDiag = {
+    targetRowsCount: targetRows.length,
+    uniqueRowsCount: uniqueRows.length,
+    duplicateMatchIds: (() => {
+      const counts = {};
+      targetRows.forEach(r => { counts[r.matchId] = (counts[r.matchId]||0) + 1; });
+      return Object.entries(counts).filter(([,c]) => c > 1).map(([id,c]) => ({ id, count:c }));
+    })(),
+  };
+
+  return { uniqueRows, roundBreakdown, dedupDiag };
+}
+
+// ★指定した試合IDについて、選手別ランキング集計(calcPlayerStats)に必要な列だけをまとめて取得する。
+// 　select("*")だと、メモ・動画同期用時刻(scored_at)など集計に使わない列まで転送されてしまい、
+// 　pointsのようにレコード数が多いテーブルほどデータ量・処理量が膨らむ原因になっていたため、
+// 　必要な列だけに絞る。また、points/faultsはgame_id単位で事前にグルーピングしておくことで、
+// 　rowToMatchFull()で行っていた「ゲームごとにpoints/faults全体をfilterする」処理も避けられる。
+async function getRankingMatchDetails(ids) {
+  const uniqueIds = Array.from(new Set((ids ?? []).filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+
+  const CHUNK_SIZE = 40;
+  const chunks = [];
+  for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) chunks.push(uniqueIds.slice(i, i + CHUNK_SIZE));
+
+  const ms = [];
+  const playersByMatch = {};
+  const gamesByMatch = {};
+  const pointsByGame = {};
+  const faultsByGame = {};
+
+  for (const chunkIds of chunks) {
+    const [
+      { data: msChunk, error: mErr },
+      { data: playersData, error: pErr },
+      { data: gamesData, error: gErr },
+      { data: pointsData, error: ptErr },
+      { data: faultsData, error: fErr },
+    ] = await Promise.all([
+      supabase.from("matches")
+        .select("id, match_date, tournament_name, status, order_a, order_b, match_score_a, match_score_b, walkover_winner")
+        .in("id", chunkIds),
+      supabase.from("match_players")
+        .select("id, match_id, team, player_name, order_num")
+        .in("match_id", chunkIds),
+      supabase.from("games")
+        .select("id, match_id, game_number, server_team, is_final")
+        .in("match_id", chunkIds),
+      supabase.from("points")
+        .select("game_id, match_id, player_name, scoring_team, play_type, result_type, is_winner, fault_count")
+        .in("match_id", chunkIds),
+      supabase.from("faults")
+        .select("game_id, match_id, player_name, server_team")
+        .in("match_id", chunkIds),
+    ]);
+    const chunkErr = mErr || pErr || gErr || ptErr || fErr;
+    if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
+    (msChunk ?? []).forEach(m => ms.push(m));
+    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+    (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
+    (pointsData ?? []).forEach(pt => { (pointsByGame[pt.game_id] ??= []).push(pt); });
+    (faultsData ?? []).forEach(f => { (faultsByGame[f.game_id] ??= []).push(f); });
+  }
+
+  return ms.map(m => ({
+    id: m.id, match_date: m.match_date, tournament_name: m.tournament_name ?? "", status: m.status,
+    order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
+    match_score_a: m.match_score_a, match_score_b: m.match_score_b, walkover_winner: m.walkover_winner ?? null,
+    players: (playersByMatch[m.id] ?? []).map(p => ({
+      id: p.id, team: p.team, player_name: p.player_name, order_num: p.order_num,
+    })),
+    games: (gamesByMatch[m.id] ?? []).map(g => ({
+      id: g.id, match_id: m.id, game_number: g.game_number, server_team: g.server_team, is_final: g.is_final,
+      faults: faultsByGame[g.id] ?? [],
+      points: pointsByGame[g.id] ?? [],
+    })),
+  }));
+}
+
+
 function playerStatsInMatch(match, playerName, mySchoolName) {
   const side = ownSideFor(match, playerName, mySchoolName);
   if (!side) return null;
@@ -4481,8 +4624,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 // 「勝敗／1stサーブ率／レシーブミス／得点／ミス／得失点差」でランキング表示）
 // ============================================================
 function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
-  const [loading, setLoading] = useState(true);
-  const [dateGroups, setDateGroups] = useState({}); // { "YYYY-MM-DD": [match, match, ...] }
+  const [loading, setLoading] = useState(true);       // ★大会内の日付一覧を取得するまでのローディング（軽量）
+  const [dateLoading, setDateLoading] = useState(false); // ★選択中の日の詳細データを取得するまでのローディング
+  const [dateIndex, setDateIndex] = useState({});      // { "YYYY-MM-DD": [matchId, matchId, ...] }（軽量。点数などは含まない）
+  const [detailsByDate, setDetailsByDate] = useState({}); // { "YYYY-MM-DD": [match, match, ...] }（選択済みの日だけフル取得してキャッシュ）
   const [selectedDate, setSelectedDate] = useState(null);
   const [expandedMetric, setExpandedMetric] = useState(null); // 「11位以降を見る」で開く項目キー
 
@@ -4490,86 +4635,39 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   const [roundBreakdown, setRoundBreakdown] = useState([]); // ★診断用：団体戦(ラウンド)ごとのteam_match_games内訳
   const [dedupDiag, setDedupDiag] = useState(null); // ★診断用：重複除去(dedup)前後の件数
 
+  // ★大会の開催期間（start_date〜end_date）に入っていない日付は、
+  //   同じ大会名で誤って別日に記録されたデータの可能性が高いため除外する
+  const tStart = tournament.start_date;
+  const tEnd = tournament.end_date || tournament.start_date;
+
+  // フェーズ1：まず対象大会の「試合ID＋日付」だけを軽量に取得する
+  // ★以前はgetMatches()/getTeamMatches()で全試合・全団体戦を取得してから大会名で絞り込んでいたため、
+  //   チームの利用期間が長くなるほど通信量が増え、試合数の多い大会でスマホが固まる原因になっていた。
+  //   ここではDB側で最初から対象大会だけに絞り込む。
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
+    setDetailsByDate({}); // 大会が変われば詳細キャッシュもクリア
 
     (async () => {
       try {
-        const [matchSummaries, teamMatches] = await Promise.all([getMatches(), getTeamMatches()]);
-
-        // ★診断用：この大会に属する団体戦(ラウンド)ごとに、番手が何件あり、
-        //   うちmatch_idが入っている(＝集計対象になる)のは何件かを可視化する
-        const breakdown = teamMatches
-          .filter(tm => tm.tournament_name === tournament.name)
-          .map(tm => {
-            const games = tm.games || [];
-            return {
-              id: tm.id,
-              round: tm.round || "(ラウンド名なし)",
-              date: tm.match_date,
-              status: tm.status,
-              format: tm.format,
-              totalGames: games.length,
-              withMatchId: games.filter(g => g.match_id).length,
-              games: games.map(g => ({ order_num:g.order_num, has_match_id: !!g.match_id, status: g.status })),
-            };
-          });
-        setRoundBreakdown(breakdown);
-
-        const teamBoutIds = new Set();
-        teamMatches.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamBoutIds.add(g.match_id); }));
-
-        // ★対象となる試合ID＋その日付（個人戦はmatch_date、団体戦の各番手は団体戦本体のmatch_dateを使う）
-        const targetRows = [];
-        matchSummaries
-          .filter(m => m.tournament_name === tournament.name && !teamBoutIds.has(m.id))
-          .forEach(m => targetRows.push({ matchId: m.id, date: m.match_date }));
-        teamMatches
-          .filter(tm => tm.tournament_name === tournament.name)
-          .forEach(tm => (tm.games||[]).forEach(g => {
-            if (g.match_id) targetRows.push({ matchId: g.match_id, date: tm.match_date });
-          }));
-        const uniqueRows = Array.from(new Map(targetRows.map(row => [row.matchId, row])).values());
-
-        // ★診断用：targetRows→uniqueRowsで件数が減っていれば、
-        //   複数の番手が同じmatch_idを参照している（重複除去で消えている）ことになる
-        const dedupDiag = {
-          targetRowsCount: targetRows.length,
-          uniqueRowsCount: uniqueRows.length,
-          duplicateMatchIds: (() => {
-            const counts = {};
-            targetRows.forEach(r => { counts[r.matchId] = (counts[r.matchId]||0) + 1; });
-            return Object.entries(counts).filter(([,c]) => c > 1).map(([id,c]) => ({ id, count:c }));
-          })(),
-        };
-
-        // ★集計に必要なplayer_name/play_type/faultsなどを含む「詳細データ」をまとめて取得する
-        //   （getMatches()の一覧データはポイントの一部項目のみで、選手別集計には使えないため）
-        // ★以前はgetMatch()を1件ずつ呼んでいたが、試合数が多い大会だと通信が大量に同時発生し
-        //   スマホがフリーズ／真っ白になる原因になっていたため、まとめて取得するgetFullMatchesByIds()に変更
-        const dateByMatchId = {};
-        uniqueRows.forEach(row => { dateByMatchId[row.matchId] = row.date; });
-        const fullMatches = await getFullMatchesByIds(uniqueRows.map(row => row.matchId));
-        const detailedMatches = fullMatches.map(full =>
-          full ? { ...full, ranking_date: dateByMatchId[full.id] || full.match_date } : null
-        );
-        dedupDiag.detailedMatchesCount = detailedMatches.length;
-        dedupDiag.nullDetailCount = uniqueRows.length - detailedMatches.length;
+        const { uniqueRows, roundBreakdown, dedupDiag } = await getRankingTargetRows(tournament.name);
+        if (cancelled) return;
+        setRoundBreakdown(roundBreakdown);
         setDedupDiag(dedupDiag);
 
-        const groups = {};
-        detailedMatches.filter(Boolean).forEach(m => {
-          const date = m.ranking_date;
-          if (!date) return;
-          (groups[date] ??= []).push(m);
+        const index = {};
+        uniqueRows.forEach(row => {
+          if (!row.date) return;
+          (index[row.date] ??= []).push(row.matchId);
         });
+        setDateIndex(index);
 
-        if (cancelled) return;
-        setDateGroups(groups);
-        const dates = Object.keys(groups).sort();
-        setSelectedDate(prev => (prev && groups[prev]) ? prev : (dates[0] ?? null));
+        const dates = Object.keys(index)
+          .filter(d => (!tStart || d >= tStart) && (!tEnd || d <= tEnd))
+          .sort();
+        setSelectedDate(prev => (prev && index[prev]) ? prev : (dates[0] ?? null));
       } catch (e) {
         if (!cancelled) setLoadError(e);
       } finally {
@@ -4580,14 +4678,37 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
     return () => { cancelled = true; };
   }, [tournament.name]);
 
-  // ★大会の開催期間（start_date〜end_date）に入っていない日付は、
-  //   同じ大会名で誤って別日に記録されたデータの可能性が高いため除外する
-  const tStart = tournament.start_date;
-  const tEnd = tournament.end_date || tournament.start_date;
-  const availableDates = Object.keys(dateGroups)
+  const availableDates = Object.keys(dateIndex)
     .filter(d => (!tStart || d >= tStart) && (!tEnd || d <= tEnd))
     .sort();
-  const matchesOfDay = selectedDate ? (dateGroups[selectedDate] || []) : [];
+
+  // フェーズ2：選択中の日の試合だけ、選手別集計に必要なフルデータを取得する（未取得の日のみ）
+  // ★大会全体の全日程を毎回まとめて取得するのではなく、実際に見ている日だけを取得することで、
+  //   開催日数が多い大会ほど初回表示にかかるデータ量・処理量を抑える。
+  useEffect(() => {
+    if (!selectedDate) return;
+    if (detailsByDate[selectedDate]) return; // 取得済みならスキップ
+    const matchIds = dateIndex[selectedDate] || [];
+    let cancelled = false;
+    setDateLoading(true);
+
+    (async () => {
+      try {
+        const details = await getRankingMatchDetails(matchIds);
+        if (cancelled) return;
+        setDetailsByDate(prev => ({ ...prev, [selectedDate]: details }));
+      } catch (e) {
+        if (!cancelled) setLoadError(e);
+      } finally {
+        if (!cancelled) setDateLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [selectedDate, dateIndex]);
+
+  const matchesOfDay = selectedDate ? (detailsByDate[selectedDate] || []) : [];
+
 
   // ★選択中の日の自チーム(A)選手ごとの集計
   // 「前衛」「後衛」は本来ポジション名であり、選手名として誤登録された場合に紛れ込むため除外する
@@ -4721,7 +4842,6 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
                 <div style={{ fontSize:12, fontWeight:800, marginBottom:8, color:C.red }}>🔍 重複除去の診断</div>
                 <div style={{ fontSize:12, color:C.text }}>集計対象の候補（重複除去前）：{dedupDiag.targetRowsCount}件</div>
                 <div style={{ fontSize:12, color:C.text }}>重複除去後（match_idユニーク）：{dedupDiag.uniqueRowsCount}件</div>
-                <div style={{ fontSize:12, color:C.text }}>詳細データ取得件数：{dedupDiag.detailedMatchesCount}件（うち取得失敗：{dedupDiag.nullDetailCount}件）</div>
                 {dedupDiag.duplicateMatchIds.length > 0 ? (
                   <div style={{ marginTop:8 }}>
                     <div style={{ fontSize:12, fontWeight:700, color:C.red }}>⚠️ 同じmatch_idが複数の番手から参照されています：</div>
@@ -4777,7 +4897,9 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
             </div>
             )}
 
-            {metrics.map(m=>(
+            {dateLoading ? (
+              <div style={{ textAlign:"center", color:C.textSec, marginTop:30, marginBottom:30 }}>この日の試合を読み込み中...</div>
+            ) : metrics.map(m=>(
               <div key={m.key} style={{ ...S.card, padding:14, marginBottom:12 }}>
                 <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>{m.icon} {m.title}</div>
                 {m.list.length===0 ? (
