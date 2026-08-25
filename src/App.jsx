@@ -4753,7 +4753,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
       <div style={S.page}>
         <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
           <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
-          <span style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング</span>
+          <span style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング【TEST-v2】</span>
         </div>
         <div style={{ padding:20 }}>
           <div style={{ fontSize:13, fontWeight:800, color:C.red, marginBottom:8 }}>集計中にエラーが発生しました</div>
@@ -4810,7 +4810,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
         <div>
-          <div style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング</div>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング【TEST-v2】</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>{tournament.name}</div>
         </div>
       </div>
