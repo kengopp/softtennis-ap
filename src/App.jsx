@@ -4122,20 +4122,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 >🗂️ ドロー設定</button>
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                  onClick={()=>{
-                    setShowMoreMenu(false);
-                    // ★デバッグ用：日別ランキング画面で何かエラーが起きた場合に、
-                    //   画面が真っ白になっても必ず内容が見えるようにする一時的な仕掛け
-                    window.onerror = (msg, src, line, col, err) => {
-                      alert("【JSエラー検出】\n" + msg + "\n(" + line + "行目)\n\n" + (err && err.stack ? String(err.stack).slice(0,600) : ""));
-                      return true;
-                    };
-                    window.onunhandledrejection = (e) => {
-                      const r = e && e.reason;
-                      alert("【Promiseエラー検出】\n" + (r && (r.stack || r.message) ? String(r.stack || r.message).slice(0,600) : String(r)));
-                    };
-                    onOpenDailyRanking && onOpenDailyRanking(tournament);
-                  }}
+                  onClick={()=>{ setShowMoreMenu(false); onOpenDailyRanking && onOpenDailyRanking(tournament); }}
                 >📊 日別選手ランキング</button>
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
@@ -4766,7 +4753,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
       <div style={S.page}>
         <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
           <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
-          <span style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング【TEST-v2】</span>
+          <span style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング</span>
         </div>
         <div style={{ padding:20 }}>
           <div style={{ fontSize:13, fontWeight:800, color:C.red, marginBottom:8 }}>集計中にエラーが発生しました</div>
@@ -4823,7 +4810,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
         <div>
-          <div style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング【TEST-v2】</div>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white }}>日別 選手ランキング</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>{tournament.name}</div>
         </div>
       </div>
@@ -16121,6 +16108,22 @@ export default function App() {
     //   その一瞬の「読み込み中」画面で入力中の画面が丸ごと作り直されて
     //   入力内容が消えてしまっていた（団体戦フォーム等）。ユーザーIDが変わった時だけ再取得する。
   }, [user?.id]);
+
+  // ★自チームの学校名（日別選手ランキング画面など、A/B判定に自チーム名が必要な画面に渡す）
+  // ★これまでこの変数がApp内で一度も定義されておらず、日別選手ランキング画面を開いた際に
+  //   mySchoolNameを参照するJSXの評価でReferenceErrorが発生し、アプリ全体が
+  //   真っ白になる（画面が何も表示されない）原因になっていた。
+  const [mySchoolName, setMySchoolName] = useState(null);
+  useEffect(() => {
+    if (!profile?.school_id) { setMySchoolName(null); return; }
+    let cancelled = false;
+    getSchools().then(schools => {
+      if (cancelled) return;
+      const s = schools.find(sc => sc.id === profile.school_id);
+      setMySchoolName(s?.name ?? null);
+    });
+    return () => { cancelled = true; };
+  }, [profile?.school_id]);
 
   // ★メール確認が必須の設定で登録直後に保存できなかった場合、確認後の初回ログイン時に
   //   一時保存しておいた選手情報を自動で登録完了させる（お子さんが再入力しなくて済むように）
