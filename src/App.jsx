@@ -4122,7 +4122,20 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 >🗂️ ドロー設定</button>
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                  onClick={()=>{ setShowMoreMenu(false); onOpenDailyRanking && onOpenDailyRanking(tournament); }}
+                  onClick={()=>{
+                    setShowMoreMenu(false);
+                    // ★デバッグ用：日別ランキング画面で何かエラーが起きた場合に、
+                    //   画面が真っ白になっても必ず内容が見えるようにする一時的な仕掛け
+                    window.onerror = (msg, src, line, col, err) => {
+                      alert("【JSエラー検出】\n" + msg + "\n(" + line + "行目)\n\n" + (err && err.stack ? String(err.stack).slice(0,600) : ""));
+                      return true;
+                    };
+                    window.onunhandledrejection = (e) => {
+                      const r = e && e.reason;
+                      alert("【Promiseエラー検出】\n" + (r && (r.stack || r.message) ? String(r.stack || r.message).slice(0,600) : String(r)));
+                    };
+                    onOpenDailyRanking && onOpenDailyRanking(tournament);
+                  }}
                 >📊 日別選手ランキング</button>
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
