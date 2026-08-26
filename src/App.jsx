@@ -483,7 +483,7 @@ async function getRankingMatchDetails(ids) {
         .select("id, match_date, tournament_name, status, order_a, order_b, match_score_a, match_score_b, walkover_winner")
         .in("id", chunkIds),
       supabase.from("match_players")
-        .select("id, match_id, team, player_name, order_num")
+        .select("id, match_id, team, player_name, order_num, club_name")
         .in("match_id", chunkIds),
       supabase.from("games")
         .select("id, match_id, game_number, server_team, is_final")
@@ -509,7 +509,7 @@ async function getRankingMatchDetails(ids) {
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
     match_score_a: m.match_score_a, match_score_b: m.match_score_b, walkover_winner: m.walkover_winner ?? null,
     players: (playersByMatch[m.id] ?? []).map(p => ({
-      id: p.id, team: p.team, player_name: p.player_name, order_num: p.order_num,
+      id: p.id, team: p.team, player_name: p.player_name, order_num: p.order_num, club_name: p.club_name ?? null,
     })),
     games: (gamesByMatch[m.id] ?? []).map(g => ({
       id: g.id, match_id: m.id, game_number: g.game_number, server_team: g.server_team, is_final: g.is_final,
@@ -4710,7 +4710,11 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   const matchesOfDay = selectedDate ? (detailsByDate[selectedDate] || []) : [];
 
 
-  // ★選択中の日の自チーム(A)選手ごとの集計
+  // ★選手ごとの集計（自チーム側の選手が対象。東福岡 対 東福岡 のような自チーム同士の対戦では、
+  //   便宜上どちらか一方が"A"、もう一方が"B"として記録される。以前はA側の選手しか
+  //   集計対象にしていなかったため、自チーム同士の対戦でB側に割り振られた選手の
+  //   その試合の勝敗・スタッツが集計から漏れてしまっていた。club_nameが自校名と
+  //   一致する場合は、B側の選手もそれぞれの視点で集計対象に含める。）
   // 「前衛」「後衛」は本来ポジション名であり、選手名として誤登録された場合に紛れ込むため除外する
   const PLACEHOLDER_NAMES = new Set(["前衛", "後衛"]);
   let players = [];
@@ -4718,28 +4722,35 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   try {
     const playerAgg = {};
     const ensure = (name) => (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0 });
+    const isMyClub = (clubName) => !!mySchoolName && !!clubName && clubName.trim() === mySchoolName.trim();
     matchesOfDay.forEach(m => {
-      const stats = calcPlayerStats(m).filter(s => s.team === "A" && !PLACEHOLDER_NAMES.has(s.player_name));
-      const isWin = winnerSideOf(m)==="A";
+      // ★このB側が自チーム(東福岡)自身かどうか（自チーム同士の対戦のときだけtrueになる）
+      const bIsMine = (Array.isArray(m.players) ? m.players : []).some(p => p.team === "B" && isMyClub(p.club_name));
+      const targetTeams = bIsMine ? ["A", "B"] : ["A"];
+
+      const stats = calcPlayerStats(m).filter(s => targetTeams.includes(s.team) && !PLACEHOLDER_NAMES.has(s.player_name));
+      const winnerTeam = winnerSideOf(m);
       const isFinished = m.status === "finished";
-      const seenThisMatch = new Set();
+      const seenThisMatch = new Map(); // player_name -> team（勝敗判定に使うそのチーム）
       stats.forEach(s => {
         const r = ensure(s.player_name);
         r.winners += s.winners; r.errors += s.errors;
         r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
         r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
-        seenThisMatch.add(s.player_name);
+        seenThisMatch.set(s.player_name, s.team);
       });
       // ★「結果だけ記録」の試合はポイントデータが無くcalcPlayerStatsに出てこないため、
-      //   match_players（実際に出場したA側の選手）から直接、勝敗の対象に含める
+      //   match_players（実際に出場した対象チームの選手）から直接、勝敗の対象に含める
       (Array.isArray(m.players) ? m.players : []).forEach(p => {
-        if (p.team === "A" && p.player_name && !PLACEHOLDER_NAMES.has(p.player_name)) seenThisMatch.add(p.player_name);
+        if (targetTeams.includes(p.team) && p.player_name && !PLACEHOLDER_NAMES.has(p.player_name)) {
+          if (!seenThisMatch.has(p.player_name)) seenThisMatch.set(p.player_name, p.team);
+        }
       });
       if (isFinished) {
-        seenThisMatch.forEach(name => {
+        seenThisMatch.forEach((team, name) => {
           const r = ensure(name);
           r.matches++;
-          if (isWin) r.wins++; else r.losses++;
+          if (winnerTeam === team) r.wins++; else r.losses++;
         });
       }
     });
