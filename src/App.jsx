@@ -15738,14 +15738,21 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
+  // ★閲覧権限用：「表示対象（切替）」とは別に、今ログインしている本人の
+  //   連携選手名・管理者フラグを保持する。AI分析のコメントは、管理者か、
+  //   その試合に出ている本人（またはその保護者アカウント）だけが開けるようにする。
+  const [myLinkedPlayerName, setMyLinkedPlayerName] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     (async () => {
       const p = await getMyProfile();
+      setIsAdmin(!!p?.is_admin);
       if (p?.linked_player_id) {
         const roster = await getPlayerRoster();
         const found = roster.find(r => r.id === p.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
+        setMyLinkedPlayerName(found?.player_name ?? null);
       }
     })();
   }, []);
@@ -15802,17 +15809,25 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
         )}
         {rows.map(({ match, analysis }) => {
           const { a, b } = aiMatchLabel(match);
+          // ★管理者、または自分自身がこの試合に出場している選手（＝保護者アカウントも
+          //   連携先が同じ選手名になるため対象に含まれる）だけが開ける
+          const canView = isAdmin || (!!myLinkedPlayerName && (match.players || []).some(p => p.player_name === myLinkedPlayerName));
           return (
-            <div key={match.id} onClick={()=>onOpenAnalysis(match, analysis)}
-              style={{ ...S.card, marginBottom:10, overflow:"hidden", cursor:"pointer" }}>
+            <div key={match.id} onClick={canView ? ()=>onOpenAnalysis(match, analysis) : undefined}
+              style={{ ...S.card, marginBottom:10, overflow:"hidden", cursor:canView?"pointer":"default", opacity:canView?1:0.55 }}>
               <div style={{ padding:"12px 14px 0", fontSize:11, color:C.textSec }}>
                 {[match.tournament_name, match.round, fmtDate(match.match_date)].filter(Boolean).join("・")}
               </div>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"6px 14px 0" }}>
                 <span style={{ fontSize:14, fontWeight:800, color:C.text }}>{a || "自チーム"}</span>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <span style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"3px 10px", borderRadius:20, border:"1px solid #dcdffc" }}
-                  >🤖 AI</span>
+                  {canView ? (
+                    <span style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"3px 10px", borderRadius:20, border:"1px solid #dcdffc" }}
+                    >🤖 AI</span>
+                  ) : (
+                    <span style={{ display:"inline-flex", alignItems:"center", gap:3, background:C.gray, color:C.textSec, fontSize:10.5, fontWeight:800, padding:"3px 10px", borderRadius:20, border:`1px solid ${C.border}` }}
+                    >🔒 閲覧不可</span>
+                  )}
                   {match.status==="finished" && <span style={{ fontSize:11, color:C.accent, fontWeight:800 }}>✅ 終了</span>}
                 </div>
               </div>
