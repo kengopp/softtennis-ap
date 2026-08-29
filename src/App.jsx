@@ -891,6 +891,51 @@ async function deleteAiAnalysis(id) {
   if (error) throw error;
 }
 
+// ★AI分析一覧画面専用：まず「AI分析が付いている試合」だけをai_analysesテーブルから直接取得し、
+// 　その試合IDだけに絞って必要な列（試合情報・出場選手）を取得する。
+// 　以前はgetMatches()でチームの利用期間中の全試合を取得してからAI分析付きのものを
+// 　絞り込んでいたため、利用期間が長くなるほど（AI分析の有無に関わらず）表示が遅くなっていた。
+// 　sinceDateを指定すると、試合日（match_date）でさらに絞り込む（「1ヶ月以内」等の期間フィルタ用）。
+async function getAiAnalysesWithMatches(sinceDate) {
+  const { data: analyses, error: aErr } = await supabase
+    .from("ai_analyses").select("id, match_id, youtube_url, comment_text, created_at").is("deleted_at", null);
+  if (aErr) { console.error(aErr); return []; }
+
+  const matchIds = Array.from(new Set((analyses ?? []).map(a => a.match_id).filter(Boolean)));
+  if (matchIds.length === 0) return [];
+
+  const CHUNK_SIZE = 40;
+  const chunks = [];
+  for (let i = 0; i < matchIds.length; i += CHUNK_SIZE) chunks.push(matchIds.slice(i, i + CHUNK_SIZE));
+
+  const matches = [];
+  const playersByMatch = {};
+  for (const chunkIds of chunks) {
+    let matchQuery = supabase.from("matches")
+      .select("id, match_date, tournament_name, round, status, match_score_a, match_score_b")
+      .in("id", chunkIds);
+    if (sinceDate) matchQuery = matchQuery.gte("match_date", sinceDate);
+    const [
+      { data: msChunk, error: mErr },
+      { data: playersData, error: pErr },
+    ] = await Promise.all([
+      matchQuery,
+      supabase.from("match_players").select("match_id, team, player_name").in("match_id", chunkIds),
+    ]);
+    if (mErr || pErr) { console.error(mErr || pErr); continue; } // 1チャンク失敗しても他は続行する
+    (msChunk ?? []).forEach(m => matches.push(m));
+    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+  }
+
+  const analysisByMatch = {};
+  (analyses ?? []).forEach(a => { analysisByMatch[a.match_id] = a; });
+
+  return matches.map(m => ({
+    match: { ...m, players: playersByMatch[m.id] ?? [] },
+    analysis: analysisByMatch[m.id],
+  }));
+}
+
 // 指定の動画に設定されている同期アンカーを取得（現状は動画1本につき1件＝1点目の位置合わせ）
 async function getSyncAnchor(matchVideoId) {
   const { data, error } = await supabase.from("video_sync_anchors").select("*").eq("match_video_id", matchVideoId).order("created_at", { ascending:false }).limit(1);
@@ -15743,6 +15788,8 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
   //   その試合に出ている本人（またはその保護者アカウント）だけが開けるようにする。
   const [myLinkedPlayerName, setMyLinkedPlayerName] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  // ★表示が遅くなる問題への対策：登録日で絞り込めるようにする（"all"/"1m"/"3m"）
+  const [period, setPeriod] = useState("3m");
 
   useEffect(() => {
     (async () => {
@@ -15762,21 +15809,24 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
 
   useEffect(() => {
     if (!effectivePlayer) { setLoading(false); setRows([]); return; }
+    let cancelled = false;
     setLoading(true);
     (async () => {
-      const matches = await getMatches();
-      const matchIds = matches.map(m => m.id);
-      const analyses = await getAiAnalyses(matchIds);
-      const analysisByMatch = {};
-      analyses.forEach(a => { analysisByMatch[a.match_id] = a; });
-      const found = matches
-        .filter(m => analysisByMatch[m.id] && (m.players || []).some(p => p.player_name === effectivePlayer))
-        .map(m => ({ match: m, analysis: analysisByMatch[m.id] }));
+      // ★以前はgetMatches()でチームの利用期間中の全試合を取得してからAI分析付きのものを
+      //   絞り込んでいたため、利用期間が長くなるほど表示が遅くなっていた。
+      //   ai_analysesテーブル（AI分析が付いている試合のみ・件数が少ない）を起点に取得する。
+      const sinceDate = period === "1m" ? new Date(Date.now() - 30*24*60*60*1000).toISOString().slice(0,10)
+                       : period === "3m" ? new Date(Date.now() - 90*24*60*60*1000).toISOString().slice(0,10)
+                       : null;
+      const all = await getAiAnalysesWithMatches(sinceDate);
+      if (cancelled) return;
+      const found = all.filter(({ match }) => (match.players || []).some(p => p.player_name === effectivePlayer));
       found.sort((a, b) => new Date(b.match.match_date || 0) - new Date(a.match.match_date || 0));
       setRows(found);
       setLoading(false);
     })();
-  }, [effectivePlayer]);
+    return () => { cancelled = true; };
+  }, [effectivePlayer, period]);
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90 }}>
@@ -15793,6 +15843,16 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
             </div>
           </div>
           <div style={{ fontSize:11, color:C.text, fontWeight:700 }}>切替 ›</div>
+        </div>
+
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          {[["1m","1ヶ月以内"],["3m","3ヶ月以内"],["all","すべて"]].map(([key,label]) => (
+            <div key={key} onClick={()=>setPeriod(key)}
+              style={{ flex:1, textAlign:"center", padding:"8px 0", borderRadius:20, fontSize:12.5, fontWeight:700, cursor:"pointer",
+                background: period===key ? C.navy : C.white, color: period===key ? C.white : C.text,
+                border:`1px solid ${period===key ? C.navy : C.border}` }}
+            >{label}</div>
+          ))}
         </div>
 
         {!effectivePlayer && (
@@ -15844,8 +15904,7 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
 
 function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
   const [roster, setRoster] = useState([]);
-  const [matches, setMatches] = useState([]);
-  const [analyses, setAnalyses] = useState([]);
+  const [rows, setRows] = useState([]); // [{match, analysis}, ...]（AI分析が付いている試合のみ）
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
   const [mySchoolName, setMySchoolName] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -15853,9 +15912,12 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
 
   useEffect(() => {
     (async () => {
-      const [r, ms, p] = await Promise.all([getPlayerRoster(), getMatches(), getMyProfile()]);
+      // ★以前はgetMatches()でチームの利用期間中の全試合を取得していたため、
+      //   利用期間が長くなるほどこの選手選択画面も遅くなっていた。
+      //   AI分析が付いている試合だけを起点に取得するgetAiAnalysesWithMatches()に変更。
+      const [r, all, p] = await Promise.all([getPlayerRoster(), getAiAnalysesWithMatches(null), getMyProfile()]);
       setRoster(r);
-      setMatches(ms);
+      setRows(all);
       if (p?.linked_player_id) {
         const found = r.find(x => x.id === p.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
@@ -15865,21 +15927,14 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
         const s = schools.find(s => s.id === p.school_id);
         setMySchoolName(s?.name ?? null);
       }
-      const matchIds = ms.map(m => m.id);
-      const a = await getAiAnalyses(matchIds);
-      setAnalyses(a);
       setLoading(false);
     })();
   }, []);
 
   const counts = {};
   if (!loading) {
-    const matchById = {};
-    matches.forEach(m => { matchById[m.id] = m; });
-    analyses.forEach(a => {
-      const m = matchById[a.match_id];
-      if (!m) return;
-      (m.players || []).forEach(p => {
+    rows.forEach(({ match }) => {
+      (match.players || []).forEach(p => {
         counts[p.player_name] = (counts[p.player_name] || 0) + 1;
       });
     });
