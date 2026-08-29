@@ -570,26 +570,81 @@ async function getMatches() {
   //   ポイント（1点ごとの記録）までは使っておらず、必要な画面は個別にgetMatch()で
   //   詳細取得している。そのため一覧取得時はpointsを取得しないようにして、
   //   試合数・ポイント数が増えるほど遅くなっていた問題を解消する。
-  const [
-    { data: playersData, error: playersErr },
-    { data: gamesData,   error: gamesErr },
-  ] = await Promise.all([
-    supabase.from("match_players").select("*").in("match_id", matchIds).order("team").order("order_num"),
-    supabase.from("games").select("*").in("match_id", matchIds).order("game_number"),
-  ]);
-  if (playersErr) console.error(playersErr);
-  if (gamesErr)   console.error(gamesErr);
+  // ★さらに、チームの利用期間が長くなり試合数が増えると、.in()に渡すID一覧が
+  //   長くなりすぎて通信が不安定になっていたため、一定件数ごとに分割して取得する。
+  const CHUNK_SIZE = 60;
+  const chunks = [];
+  for (let i = 0; i < matchIds.length; i += CHUNK_SIZE) chunks.push(matchIds.slice(i, i + CHUNK_SIZE));
 
   const playersByMatch = {};
-  (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
-
   const gamesByMatch = {};
-  (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
+  for (const chunkIds of chunks) {
+    const [
+      { data: playersData, error: playersErr },
+      { data: gamesData,   error: gamesErr },
+    ] = await Promise.all([
+      supabase.from("match_players").select("*").in("match_id", chunkIds).order("team").order("order_num"),
+      supabase.from("games").select("*").in("match_id", chunkIds).order("game_number"),
+    ]);
+    if (playersErr) console.error(playersErr);
+    if (gamesErr)   console.error(gamesErr);
+    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+    (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
+  }
 
   return data.map(m => {
     const games = (gamesByMatch[m.id] ?? []).map(g => ({ ...g, points: [] }));
     return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
   });
+}
+
+// ★ホーム画面専用の軽量データ取得。
+// 　ホーム画面が実際に使うのは「進行中の試合」「直近数件の試合カード」
+// 　「全体の勝敗数・直近の調子」「紐づけ選手（自分／お子さん）の勝敗」だけで、
+// 　ゲームごとの得点(games)は一切使っていない。以前はgetMatches()で
+// 　チームの利用期間中の全試合をgames付きで取得していたため、試合数が
+// 　増えるほどホーム画面の表示が遅くなっていた。
+async function getHomeScreenData(linkedPlayerName) {
+  const { data: matchRows, error: mErr } = await supabase
+    .from("matches")
+    .select("id, match_date, tournament_name, status, match_score_a, match_score_b, walkover_winner, created_at")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+  if (mErr) { console.error(mErr); return { allMatchesLite: [], liveMatch: null, recent: [], linkedMatches: [] }; }
+
+  const allMatchesLite = matchRows ?? [];
+
+  // カード表示（進行中の試合／直近3件）に必要な出場選手だけ、対象を絞って取得する
+  const liveRow = allMatchesLite.find(m => m.status === "active");
+  const recentRows = allMatchesLite.slice(0, 3);
+  const cardIds = Array.from(new Set([liveRow?.id, ...recentRows.map(m => m.id)].filter(Boolean)));
+  const playersByMatch = {};
+  if (cardIds.length > 0) {
+    const { data: playersData, error: pErr } = await supabase
+      .from("match_players").select("match_id, team, player_name, club_name").in("match_id", cardIds);
+    if (pErr) console.error(pErr);
+    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+  }
+  const withPlayers = (row) => row ? { ...row, players: playersByMatch[row.id] ?? [] } : null;
+  const liveMatch = withPlayers(liveRow);
+  const recent = recentRows.map(withPlayers);
+
+  // ★紐づけ選手（自分／お子さん）の対戦履歴：match_playersを起点にその選手の
+  //   出場試合IDだけに絞り込む（全試合の選手データを経由しない）
+  let linkedMatches = [];
+  if (linkedPlayerName) {
+    const { data: linkedRows, error: lErr } = await supabase
+      .from("match_players").select("match_id, team, club_name")
+      .eq("player_name", linkedPlayerName);
+    if (lErr) console.error(lErr);
+    const rowByMatch = {};
+    (linkedRows ?? []).forEach(r => { rowByMatch[r.match_id] = r; });
+    linkedMatches = allMatchesLite
+      .filter(m => rowByMatch[m.id])
+      .map(m => ({ ...m, players: [{ player_name: linkedPlayerName, team: rowByMatch[m.id].team, club_name: rowByMatch[m.id].club_name }] }));
+  }
+
+  return { allMatchesLite, liveMatch, recent, linkedMatches };
 }
 
 // 試合1件を、関連テーブルすべて含めて取得
@@ -8442,7 +8497,10 @@ function GoalSettingsScreen({ onBack }) {
 }
 
 function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats, onProfile, onGoToTournaments, onOpenTournament }) {
-  const [allMatches, setAllMatches] = useState([]);
+  const [allMatchesLite, setAllMatchesLite] = useState([]); // ★games/players無しの軽量データ（全体の勝敗集計用）
+  const [liveMatch, setLiveMatch] = useState(null);
+  const [recent, setRecent] = useState([]);
+  const [linkedMatches, setLinkedMatches] = useState([]);
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -8453,34 +8511,39 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
-  useEffect(() => {
-    Promise.all([getMatches(), getTournaments()]).then(([matches, tns])=>{
-      setAllMatches(matches); setTournaments(tns); setLoading(false);
-    });
-  }, []);
+  // ★以前はgetMatches()でチームの利用期間中の全試合を、出場選手・ゲームごとの得点
+  //   付きで取得していたため、試合数が増えるほどホーム画面の表示が遅くなっていた。
+  //   ホーム画面が実際に使うのは「進行中の試合」「直近数件のカード」「全体の勝敗数」
+  //   「紐づけ選手の勝敗」だけなので、それに絞った軽量取得(getHomeScreenData)に変更。
+  //   紐づけ選手名を先に判定してから渡す必要があるため、プロフィール取得と統合した。
   useEffect(() => {
     (async () => {
       const p = await getMyProfile();
       setProfile(p);
+      let linkedName = null;
       if (p?.linked_player_id) {
         const roster = await getPlayerRoster();
         const found = roster.find(r => r.id === p.linked_player_id);
-        setLinkedPlayerName(found?.player_name ?? null);
+        linkedName = found?.player_name ?? null;
+        setLinkedPlayerName(linkedName);
       }
       if (p?.school_id) {
         const schools = await getSchools();
         const s = schools.find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
       }
+      const [homeData, tns] = await Promise.all([getHomeScreenData(linkedName), getTournaments()]);
+      setAllMatchesLite(homeData.allMatchesLite);
+      setLiveMatch(homeData.liveMatch);
+      setRecent(homeData.recent);
+      setLinkedMatches(homeData.linkedMatches);
+      setTournaments(tns);
+      setLoading(false);
     })();
   }, []);
 
-  const finished = allMatches.filter(m=>m.status==="finished");
+  const finished = allMatchesLite.filter(m=>m.status==="finished");
   const wins = finished.filter(m=>winnerSideOf(m)==="A").length;
-  const recent = allMatches.slice(0,3);
-
-  // ★進行中の試合（記録再開の導線）
-  const liveMatch = allMatches.find(m => m.status==="active");
 
   // ★進行中がない場合に表示する、直近の大会予定（大会単位）
   // 同じ日に複数の大会・練習試合がある場合は、すべて表示する
@@ -8502,8 +8565,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   // ★直近5試合の調子（新しい順）
   const last5 = finished.slice(0, 5).map(m => winnerSideOf(m)==="A");
 
-  // ★紐づけ選手（お子さん/自分）の戦績を、この画面で直接計算する
-  const linkedMatches = linkedPlayerName ? allMatches.filter(m => ownSideFor(m, linkedPlayerName, mySchoolName)) : [];
+  // ★紐づけ選手（お子さん/自分）の戦績（getHomeScreenDataで既にその選手の試合だけに絞込済み）
   const linkedFinished = linkedMatches.filter(m=>m.status==="finished");
   function linkedIsWin(m) {
     return winForPlayer(m, linkedPlayerName, mySchoolName);
@@ -8700,7 +8762,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
             >👥 他の選手の戦績を見る</button>
 
             <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>最近の試合</div>
-            {allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
+            {allMatchesLite.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
             {recent.map(m=>{
               const aWin = winnerSideOf(m)==="A";
               const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
@@ -8721,7 +8783,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                 </div>
               );
             })}
-            {allMatches.length>0 && (
+            {allMatchesLite.length>0 && (
               <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:13 }} onClick={()=>onNavigate("list")}>すべての試合を見る →</button>
             )}
           </>
