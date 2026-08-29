@@ -11965,7 +11965,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 // ============================================================
 // スコア記録
 // ============================================================
-function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
+function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenAiAnalysis }) {
   const [initialMatch, setInitialMatch] = useState(null);
   const [loadKey, setLoadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -12046,12 +12046,13 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId }) {
         onNavigate={onNavigate}
         viewOnly={viewOnly}
         teamMatchId={teamMatchId}
+        onOpenAiAnalysis={onOpenAiAnalysis}
       />
     </ErrorBoundary>
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId, onOpenAiAnalysis }) {
   const [match,  setMatch]  = useState(initialMatch);
   // ★観戦モード（閲覧のみ）では、親から渡されるinitialMatchが「最新に更新」で
   // 　差し替わった時にこの内部stateへ反映されないと画面が更新されない。
@@ -12074,6 +12075,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [scoreStep, setScoreStep] = useState(1); // 1|2|3
   const [pendingTeam, setPendingTeam] = useState(null); // ①で選んだ得点チーム
   const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
+  // ★個人戦の試合にもAI動画分析を追加できるようにする（団体戦の各番手と同様の機能）
+  // 　undefined=未確認、null=未登録、オブジェクト=登録済み
+  const [aiAnalysis, setAiAnalysis] = useState(undefined);
+  useEffect(() => {
+    if (!teamMatchId && match.status === "finished" && match.id) {
+      getAiAnalyses([match.id]).then(rows => setAiAnalysis(rows[0] ?? null));
+    }
+  }, [match.id, match.status, teamMatchId]);
   // ★個人戦でもポイントを付けずゲームカウントだけで結果を記録できるようにする（団体戦の「結果だけ記録」と同様）
   const [showSimpleResult, setShowSimpleResult] = useState(false);
   const [simpleScoreA, setSimpleScoreA] = useState("");
@@ -12787,6 +12796,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
                   <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「途中終了」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"abandoned" }); }}>実は途中終了だった試合として、勝敗集計から除外する</button>
                   <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
+                  {!teamMatchId && aiAnalysis !== undefined && (
+                    <button style={{ ...S.btn("#fff"),color:C.purple,border:"1px solid #dcdffc",marginBottom:8 }}
+                      onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalysis)}
+                    >🤖 {aiAnalysis ? "AI動画分析を見る" : "AI動画分析を追加する"}</button>
+                  )}
                 </>
               )}
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={handleBack}>← 試合一覧に戻る</button>
@@ -16752,6 +16766,12 @@ export default function App() {
         }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
         onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
+        onOpenAiAnalysis={(match, existing)=>{
+          setAiAnalysisTargetMatch(match);
+          setAiAnalysisEditRow(existing);
+          setAiAnalysisReturnScreen("record");
+          setScreen(existing ? "aiAnalysisDetail" : "aiAnalysisAdd");
+        }}
       />
     );
   }
