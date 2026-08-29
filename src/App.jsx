@@ -278,11 +278,13 @@ const toShotType = (play, result) => {
 // ★トーナメント表の「簡易記録」（勝敗とスコアだけを直接入力したdraw_matches）を、
 // 　選手別/ペア別の勝敗数集計に使えるよう「疑似的な試合」の形に変換して取得する。
 // 　通常の試合記録（matchesテーブル）は一切作られないため、統計画面でのみこれを使う。
-async function getSimpleRecordedDrawMatches() {
-  const { data: dms, error } = await supabase
+async function getSimpleRecordedDrawMatches(tournamentId) {
+  let q = supabase
     .from("draw_matches")
     .select("id, tournament_id, side_a_entry_id, side_b_entry_id, simple_result_winner, simple_result_score_a, simple_result_score_b")
     .not("simple_result_winner", "is", null);
+  if (tournamentId) q = q.eq("tournament_id", tournamentId);
+  const { data: dms, error } = await q;
   if (error) { console.error(error); return []; }
   if (!dms || dms.length === 0) return [];
 
@@ -1395,6 +1397,60 @@ async function getTeamMatch(id) {
   if (error || !m) { if (error) console.error(error); return null; }
   const { data: games } = await supabase.from("team_match_games").select("*").eq("team_match_id", id).order("order_num");
   return { ...m, games: games ?? [] };
+}
+
+// ★大会詳細画面専用：以前はgetMatches()/getTeamMatches()でチームの利用期間中の
+// 　全試合・全団体戦を取得してから大会名で絞り込んでいたため、利用期間が長くなる
+// 　ほど大会詳細を開くたびに表示が遅くなっていた。DB側で最初から対象大会だけに絞り込む。
+async function getTournamentMatchesAndTeamMatches(tournamentName) {
+  const [
+    { data: matchRows, error: mErr },
+    { data: teamRows, error: tErr },
+  ] = await Promise.all([
+    supabase.from("matches").select("*").eq("tournament_name", tournamentName).is("deleted_at", null).order("created_at", { ascending: false }),
+    supabase.from("team_matches").select("*").eq("tournament_name", tournamentName).is("deleted_at", null).order("match_date", { ascending: false }),
+  ]);
+  if (mErr) console.error(mErr);
+  if (tErr) console.error(tErr);
+  const matchRowsSafe = matchRows ?? [];
+  const teamRowsSafe = teamRows ?? [];
+
+  const matchIds = matchRowsSafe.map(m => m.id);
+  const CHUNK_SIZE = 60;
+  const chunks = [];
+  for (let i = 0; i < matchIds.length; i += CHUNK_SIZE) chunks.push(matchIds.slice(i, i + CHUNK_SIZE));
+  const playersByMatch = {};
+  const gamesByMatch = {};
+  for (const chunkIds of chunks) {
+    const [
+      { data: playersData, error: pErr },
+      { data: gamesData, error: gErr },
+    ] = await Promise.all([
+      supabase.from("match_players").select("*").in("match_id", chunkIds).order("team").order("order_num"),
+      supabase.from("games").select("*").in("match_id", chunkIds).order("game_number"),
+    ]);
+    if (pErr) console.error(pErr);
+    if (gErr) console.error(gErr);
+    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+    (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
+  }
+  const matches = matchRowsSafe.map(m => {
+    const games = (gamesByMatch[m.id] ?? []).map(g => ({ ...g, points: [] }));
+    return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
+  });
+
+  const teamMatchIds = teamRowsSafe.map(tm => tm.id);
+  let tmGames = [];
+  if (teamMatchIds.length > 0) {
+    const { data, error } = await supabase.from("team_match_games").select("*").in("team_match_id", teamMatchIds).order("order_num");
+    if (error) console.error(error);
+    tmGames = data ?? [];
+  }
+  const gamesByTeamMatch = {};
+  tmGames.forEach(g => { (gamesByTeamMatch[g.team_match_id] ??= []).push(g); });
+  const teamMatches = teamRowsSafe.map(tm => ({ ...tm, games: gamesByTeamMatch[tm.id] ?? [] }));
+
+  return { matches, teamMatches };
 }
 
 // ★品質改善（フェーズ2）：自動更新のたびに毎回すべてを取り直すのではなく、
@@ -4086,7 +4142,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([getMatches(), getTeamMatches(), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches()]).then(([list, tList, schools, profile, simpleList]) => {
+    Promise.all([getTournamentMatchesAndTeamMatches(tournament.name), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id)]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList]) => {
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
       setSchoolMap(smap);
@@ -4099,13 +4155,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       //   別途取得してこの大会の一覧・成績に合流させる。
       //   大会内の全試合が対象のテーブルなので、自チームが関係する試合だけに絞り込む。
       const simpleForThisTournament = simpleList.filter(m =>
-        m.tournament_name === tournament.name &&
         (m.players || []).some(p => p.club_name === myName)
       );
-      setMatches([...list.filter(m => m.tournament_name === tournament.name), ...simpleForThisTournament]);
-      const tmForTournament = tList.filter(tm => tm.tournament_name === tournament.name);
-      setTeamMatches(tmForTournament);
-      const teamGameMatchIds = tmForTournament.flatMap(tm => (tm.games || []).filter(g => g.match_id).map(g => g.match_id));
+      setMatches([...list, ...simpleForThisTournament]);
+      setTeamMatches(tList);
+      const teamGameMatchIds = tList.flatMap(tm => (tm.games || []).filter(g => g.match_id).map(g => g.match_id));
       if (teamGameMatchIds.length > 0) {
         getAiAnalyses(teamGameMatchIds).then(rows => setAiAnalyzedMatchIds(new Set(rows.map(r => r.match_id))));
       }
