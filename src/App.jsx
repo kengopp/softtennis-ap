@@ -16008,10 +16008,10 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
           return (
             <div key={match.id} onClick={canView ? ()=>onOpenAnalysis(match, analysis) : undefined}
               style={{ ...S.card, marginBottom:10, overflow:"hidden", cursor:canView?"pointer":"default", opacity:canView?1:0.55 }}>
-              <div style={{ padding:"12px 14px 0", fontSize:11, color:C.textSec }}>
+              <div style={{ padding:"12px 14px 0", fontSize:13, color:C.navy, fontWeight:800 }}>
                 {[match.tournament_name, match.round, fmtDate(match.match_date)].filter(Boolean).join("・")}
               </div>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"6px 14px 0" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 14px 0" }}>
                 <span style={{ fontSize:14, fontWeight:800, color:C.text }}>{a || "自チーム"}</span>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                   {canView ? (
@@ -16024,7 +16024,7 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
                   {match.status==="finished" && <span style={{ fontSize:11, color:C.accent, fontWeight:800 }}>✅ 終了</span>}
                 </div>
               </div>
-              <div style={{ padding:"6px 14px 0", fontSize:12.5, color:C.text }}>{a || "自チーム"} vs {b || "相手"}</div>
+              <div style={{ padding:"6px 14px 0", fontSize:12.5, color:C.text }}>vs {b || "相手"}</div>
               <div style={{ textAlign:"center", fontSize:20, fontWeight:900, padding:"8px 0 14px" }}>{match.match_score_a}-{match.match_score_b}</div>
             </div>
           );
