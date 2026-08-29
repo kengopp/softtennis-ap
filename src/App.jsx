@@ -4160,8 +4160,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       setMatches([...list, ...simpleForThisTournament]);
       setTeamMatches(tList);
       const teamGameMatchIds = tList.flatMap(tm => (tm.games || []).filter(g => g.match_id).map(g => g.match_id));
-      if (teamGameMatchIds.length > 0) {
-        getAiAnalyses(teamGameMatchIds).then(rows => setAiAnalyzedMatchIds(new Set(rows.map(r => r.match_id))));
+      const individualMatchIds = list.map(m => m.id);
+      const allMatchIdsForAiCheck = Array.from(new Set([...teamGameMatchIds, ...individualMatchIds]));
+      if (allMatchIdsForAiCheck.length > 0) {
+        getAiAnalyses(allMatchIdsForAiCheck).then(rows => setAiAnalyzedMatchIds(new Set(rows.map(r => r.match_id))));
       }
       const statusMap = {};
       list.forEach(m => { statusMap[m.id] = m.status; });
@@ -4611,6 +4613,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
                   {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}{m.match_number ? `(${m.match_number}試合目)` : ""}{m.court_number ? `(${m.court_number})` : ""}
                   {m.is_simple_draw_result && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#f1efff", color:C.purple, border:"1px solid "+C.purple }}>簡易記録</span>}
+                  {aiAnalyzedMatchIds.has(m.id) && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#eef0ff", color:C.purple, border:"1px solid #dcdffc" }}>🤖 AI</span>}
                   <span style={{
                     marginLeft:"auto", fontSize:10.5, fontWeight:700, borderRadius:99, padding:"2px 9px", whiteSpace:"nowrap",
                     border:`1px solid ${m.status==="waiting"?C.purple:m.status==="active"?C.orange:C.border}`,
@@ -16069,7 +16072,9 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
       });
     });
   }
-  const candidates = roster.filter(r => counts[r.player_name] > 0);
+  // ★players（選手マスター）には、対戦相手として一度でも入力された選手名も
+  //   自動補完用に登録されている（is_own_team:false）。自チームの選手だけに絞り込む。
+  const candidates = roster.filter(r => r.is_own_team && counts[r.player_name] > 0);
   const filtered = candidates.filter(r => !search.trim() || r.player_name.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
