@@ -607,12 +607,23 @@ async function getMatches() {
 // 　チームの利用期間中の全試合をgames付きで取得していたため、試合数が
 // 　増えるほどホーム画面の表示が遅くなっていた。
 async function getHomeScreenData(linkedPlayerName) {
-  const { data: matchRows, error: mErr } = await supabase
-    .from("matches")
-    .select("id, match_date, tournament_name, status, match_score_a, match_score_b, walkover_winner, created_at")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+  // ★紐づけ選手（自分／お子さん）の出場試合の検索は、試合一覧の取得結果に依存しないので
+  //   最初から同時に走らせる（以前は試合を取り終えてから、さらにもう1往復待っていた）。
+  const [
+    { data: matchRows, error: mErr },
+    { data: linkedRows, error: lErr },
+  ] = await Promise.all([
+    supabase
+      .from("matches")
+      .select("id, match_date, tournament_name, status, match_score_a, match_score_b, walkover_winner, created_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false }),
+    linkedPlayerName
+      ? supabase.from("match_players").select("match_id, team, club_name").eq("player_name", linkedPlayerName)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
   if (mErr) { console.error(mErr); return { allMatchesLite: [], liveMatch: null, recent: [], linkedMatches: [] }; }
+  if (lErr) console.error(lErr);
 
   const allMatchesLite = matchRows ?? [];
 
@@ -635,10 +646,6 @@ async function getHomeScreenData(linkedPlayerName) {
   //   出場試合IDだけに絞り込む（全試合の選手データを経由しない）
   let linkedMatches = [];
   if (linkedPlayerName) {
-    const { data: linkedRows, error: lErr } = await supabase
-      .from("match_players").select("match_id, team, club_name")
-      .eq("player_name", linkedPlayerName);
-    if (lErr) console.error(lErr);
     const rowByMatch = {};
     (linkedRows ?? []).forEach(r => { rowByMatch[r.match_id] = r; });
     linkedMatches = allMatchesLite
@@ -8654,40 +8661,45 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [playerRoster, setPlayerRoster] = useState([]); // ★次の試合予定カードの参加選手表示用
   const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
 
-  useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
+  // ★選手マスターは下の初期読み込みの中でも取得しているため、ここでの重複取得は廃止した。
   // ★以前はgetMatches()でチームの利用期間中の全試合を、出場選手・ゲームごとの得点
   //   付きで取得していたため、試合数が増えるほどホーム画面の表示が遅くなっていた。
   //   ホーム画面が実際に使うのは「進行中の試合」「直近数件のカード」「全体の勝敗数」
   //   「紐づけ選手の勝敗」だけなので、それに絞った軽量取得(getHomeScreenData)に変更。
   //   紐づけ選手名を先に判定してから渡す必要があるため、プロフィール取得と統合した。
+  //   ★さらに、以前は「プロフィール → 選手マスター → 学校一覧 → 試合データ」を
+  //   　1つずつ順番待ちで取得していたため、通信の往復を4回ぶん重ねて待っていた。
+  //   　互いに依存しないものは同時に取得し、待ち時間を2回ぶんに減らす。
+  //   　（選手マスターは別のuseEffectでも取得していたので、そちらは廃止して1回にまとめた）
   useEffect(() => {
     (async () => {
-      const p = await getMyProfile();
+      const [p, roster, schools, tns] = await Promise.all([
+        getMyProfile(), getPlayerRoster(), getSchools(), getTournaments(),
+      ]);
       setProfile(p);
+      setPlayerRoster(roster);
+      setTournaments(tns);
       let linkedName = null;
       if (p?.linked_player_id) {
-        const roster = await getPlayerRoster();
-        const found = roster.find(r => r.id === p.linked_player_id);
+        const found = (roster || []).find(r => r.id === p.linked_player_id);
         linkedName = found?.player_name ?? null;
         setLinkedPlayerName(linkedName);
       }
       if (p?.school_id) {
-        const schools = await getSchools();
-        const s = schools.find(s => s.id === p.school_id);
+        const s = (schools || []).find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
       }
-      const [homeData, tns] = await Promise.all([getHomeScreenData(linkedName), getTournaments()]);
+      const homeData = await getHomeScreenData(linkedName);
       setAllMatchesLite(homeData.allMatchesLite);
       setLiveMatch(homeData.liveMatch);
       setRecent(homeData.recent);
       setLinkedMatches(homeData.linkedMatches);
-      setTournaments(tns);
       setLoading(false);
     })();
   }, []);
 
-  const finished = allMatchesLite.filter(m=>m.status==="finished");
-  const wins = finished.filter(m=>winnerSideOf(m)==="A").length;
+  const finished = useMemo(() => allMatchesLite.filter(m=>m.status==="finished"), [allMatchesLite]);
+  const wins = useMemo(() => finished.filter(m=>winnerSideOf(m)==="A").length, [finished]);
 
   // ★進行中がない場合に表示する、直近の大会予定（大会単位）
   // 同じ日に複数の大会・練習試合がある場合は、すべて表示する
