@@ -115,10 +115,23 @@ const today  = () => {
 // ★ログアウトなど「意図した画面遷移」の際は、beforeunloadの確認ダイアログ（アプリを終了しますか？）
 // を出さないようにするための共有フラグ。ログアウト確認→リロードの間に二重で確認が出る不具合を防ぐ。
 let skipUnloadConfirm = false;
+// ============================================================
+// 画面共通のキャッシュ
+// ============================================================
+// ★同じ画面を開き直すたびに全部を取り直していると、そのつど「読み込み中...」で
+// 　待たされてしまう。そこで、一度取得した内容を画面ごとに覚えておき、
+// 　次に開いたときは「まず前回の内容をすぐ表示 → 裏で最新に差し替える」動きにする。
+// 　（キャッシュはページを閉じるまでの一時的なもの。保存はしていない）
+const screenCache = {};
+const readScreenCache  = (key) => screenCache[key] ?? null;
+const writeScreenCache = (key, data) => { screenCache[key] = data; };
+const clearScreenCache = () => { Object.keys(screenCache).forEach(k => { delete screenCache[k]; }); };
+
 // ★ログアウト処理を1箇所に共通化（確認ダイアログの表示 → 実際のログアウト → リロード）
 async function performLogout() {
   if (!window.confirm("ログアウトしますか？")) return;
   skipUnloadConfirm = true;
+  clearScreenCache(); // ★別のアカウントのデータが残らないように破棄する
   await supabase.auth.signOut();
   window.location.reload();
 }
@@ -2965,10 +2978,6 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-// ★試合一覧のキャッシュ。他の画面に移動して戻ってきたときに、まず前回の内容を
-// 　すぐ表示し、裏で最新データに更新する（毎回「読み込み中...」で待たされない）。
-let matchListCache = null;
-
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   // ★スマホでは一度に何百枚もカードを描画するだけで表示が重くなるため、
@@ -3063,15 +3072,16 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       // 団体戦に紐付いたmatch_idを個人戦一覧から除外
       const individual = list.filter(m => !teamMatchIds.has(m.id));
       const snapshot = { list, individual, tList, smap, tnList };
-      matchListCache = snapshot;
+      writeScreenCache("matchList", snapshot);
       applyData(snapshot);
     }).catch(e => { console.error(e); setLoading(false); });
   }, [applyData]);
 
   useEffect(() => {
-    if (matchListCache) {
-      applyData(matchListCache); // まず前回の内容を即表示
-      reload({ silent: true });  // 裏で最新化
+    const cached = readScreenCache("matchList");
+    if (cached) {
+      applyData(cached);        // まず前回の内容を即表示
+      reload({ silent: true }); // 裏で最新化
     } else {
       reload();
     }
@@ -8671,32 +8681,44 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   //   　1つずつ順番待ちで取得していたため、通信の往復を4回ぶん重ねて待っていた。
   //   　互いに依存しないものは同時に取得し、待ち時間を2回ぶんに減らす。
   //   　（選手マスターは別のuseEffectでも取得していたので、そちらは廃止して1回にまとめた）
+  //   ★他の画面から戻ってきたときも、前回の内容をキャッシュから即表示してから
+  //   　裏で最新に差し替える（毎回「読み込み中...」で待たされない）。
+  const apply = useCallback(({ p, roster, tns, schoolName, homeData }) => {
+    setProfile(p);
+    setPlayerRoster(roster);
+    setTournaments(tns);
+    setMySchoolName(schoolName);
+    setLinkedPlayerName(homeData.linkedPlayerName ?? null);
+    setAllMatchesLite(homeData.allMatchesLite);
+    setLiveMatch(homeData.liveMatch);
+    setRecent(homeData.recent);
+    setLinkedMatches(homeData.linkedMatches);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
+    const cached = readScreenCache("home");
+    if (cached) apply(cached); // まず前回の内容を即表示（裏で最新化を続ける）
     (async () => {
       const [p, roster, schools, tns] = await Promise.all([
         getMyProfile(), getPlayerRoster(), getSchools(), getTournaments(),
       ]);
-      setProfile(p);
-      setPlayerRoster(roster);
-      setTournaments(tns);
       let linkedName = null;
       if (p?.linked_player_id) {
         const found = (roster || []).find(r => r.id === p.linked_player_id);
         linkedName = found?.player_name ?? null;
-        setLinkedPlayerName(linkedName);
       }
-      if (p?.school_id) {
-        const s = (schools || []).find(s => s.id === p.school_id);
-        if (s) setMySchoolName(s.name);
-      }
+      const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
       const homeData = await getHomeScreenData(linkedName);
-      setAllMatchesLite(homeData.allMatchesLite);
-      setLiveMatch(homeData.liveMatch);
-      setRecent(homeData.recent);
-      setLinkedMatches(homeData.linkedMatches);
-      setLoading(false);
+      const snapshot = {
+        p, roster, tns,
+        schoolName: school?.name ?? "",
+        homeData: { ...homeData, linkedPlayerName: linkedName },
+      };
+      writeScreenCache("home", snapshot);
+      apply(snapshot);
     })();
-  }, []);
+  }, [apply]);
 
   const finished = useMemo(() => allMatchesLite.filter(m=>m.status==="finished"), [allMatchesLite]);
   const wins = useMemo(() => finished.filter(m=>winnerSideOf(m)==="A").length, [finished]);
@@ -9833,26 +9855,25 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const [resultFilter, setResultFilter] = useState("all"); // ★勝敗フィルター：all | win | lose
   const [resultListOpen, setResultListOpen] = useState(false); // ★勝敗内訳一覧の開閉（初期は閉じた状態）
 
-  useEffect(() => {
-    (async () => {
-      // ★以前は「プロフィール・選手マスター・全試合」を取得し終わってから、
-      //   さらに学校一覧をもう1往復かけて取りに行っていた（その分まるまる待たされていた）。
-      //   学校一覧は他の取得結果に依存しないので、最初から同時に取得する。
-      const [p, rosterList, list, schools] = await Promise.all([
-        getMyProfile(), getPlayerRoster(), getMatches(), getSchools(),
-      ]);
-      setRoster(rosterList);
-      setAllMatches(list);
-      let linked = null;
-      if (p?.linked_player_id) {
-        const found = rosterList.find(r => r.id === p.linked_player_id);
-        linked = found?.player_name ?? null;
-        setLinkedPlayerName(linked);
-      }
-      if (p?.school_id) {
-        const s = (schools || []).find(s => s.id === p.school_id);
-        if (s) setMySchoolName(s.name);
-      }
+  // ★画面を開くたびに全部を取り直して「読み込み中...」で待つのをやめ、
+  //   前回開いたときの内容をすぐ表示してから、裏で最新に差し替える。
+  //   （選手を選び直した後に裏の更新が届いても、選択が勝手に戻らないようにしている）
+  const initializedRef = useRef(false);
+  const apply = useCallback(([p, rosterList, list, schools]) => {
+    setRoster(rosterList);
+    setAllMatches(list);
+    let linked = null;
+    if (p?.linked_player_id) {
+      const found = (rosterList || []).find(r => r.id === p.linked_player_id);
+      linked = found?.player_name ?? null;
+      setLinkedPlayerName(linked);
+    }
+    if (p?.school_id) {
+      const s = (schools || []).find(s => s.id === p.school_id);
+      if (s) setMySchoolName(s.name);
+    }
+    if (!initializedRef.current) {
+      initializedRef.current = true;
       // ★linked_player_idが選手マスターの再登録などで古いID（存在しないID）を指したままになっていると、
       //   紐づく選手が見つからず、以前は「ロースター先頭の選手」が勝手にデフォルト選択されてしまい、
       //   ログインした本人とは全く違う人の分析が表示される不具合があった。
@@ -9860,13 +9881,28 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
       //   それでも見つからない場合は他の誰かを勝手に選ばず「未選択」のままにする。
       let defaultPlayer = linked;
       if (!defaultPlayer && p?.name) {
-        const nameMatch = rosterList.find(r => r.is_own_team !== false && normalizePlayerName(r.player_name) === normalizePlayerName(p.name));
+        const nameMatch = (rosterList || []).find(r => r.is_own_team !== false && normalizePlayerName(r.player_name) === normalizePlayerName(p.name));
         if (nameMatch) defaultPlayer = nameMatch.player_name;
       }
       setSelectedPlayer(defaultPlayer || null);
-      setLoading(false);
-    })();
+    }
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    const cached = readScreenCache("personalAnalysis");
+    if (cached) apply(cached); // まず前回の内容を即表示（裏で最新化を続ける）
+    (async () => {
+      // ★以前は「プロフィール・選手マスター・全試合」を取得し終わってから、
+      //   さらに学校一覧をもう1往復かけて取りに行っていた（その分まるまる待たされていた）。
+      //   学校一覧は他の取得結果に依存しないので、最初から同時に取得する。
+      const fresh = await Promise.all([
+        getMyProfile(), getPlayerRoster(), getMatches(), getSchools(),
+      ]);
+      writeScreenCache("personalAnalysis", fresh);
+      apply(fresh);
+    })();
+  }, [apply]);
 
   const effectiveSchoolName = selectedSchoolName || mySchoolName;
   const isOwnSchool = effectiveSchoolName === mySchoolName;
@@ -10514,34 +10550,45 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [deletedTournamentNames, setDeletedTournamentNames] = useState([]); // ゴミ箱に入っている大会名（絞り込み選択肢から除外用）
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
 
-  useEffect(() => {
-    Promise.all([getMatches(), getSimpleRecordedDrawMatches()]).then(([list, simpleList])=>{
-      setAllMatches([...list, ...simpleList]);
-      setLoading(false);
-    });
+  // ★以前は「試合」「選手マスター」「プロフィール→学校」「ゴミ箱の大会」「団体戦」を
+  //   別々のuseEffectでバラバラに取得していた。取得自体は同時に走るものの、
+  //   プロフィール→学校だけは順番待ちになっており、また画面を開き直すたびに
+  //   全部を取り直して「読み込み中...」で待たされていた。
+  //   ここでは①まとめて同時取得し、②前回の内容をキャッシュから即表示してから
+  //   裏で最新に差し替える、という動きにする。
+  const apply = useCallback(({ list, simpleList, rosterList, schoolName, deletedNames, teamIds }) => {
+    setAllMatches([...list, ...simpleList]);
+    setRoster(rosterList);
+    setMySchoolName(schoolName);
+    setDeletedTournamentNames(deletedNames);
+    setTeamMatchIds(new Set(teamIds));
+    setLoading(false);
   }, []);
-  useEffect(() => { getPlayerRoster().then(setRoster); }, []);
+
   useEffect(() => {
+    const cached = readScreenCache("teamStats");
+    if (cached) apply(cached); // まず前回の内容を即表示（裏で最新化を続ける）
     (async () => {
-      const p = await getMyProfile();
-      if (p?.school_id) {
-        const schools = await getSchools();
-        const s = schools.find(s => s.id === p.school_id);
-        if (s) setMySchoolName(s.name);
-      }
+      const [list, simpleList, rosterList, p, schools, deletedList, teamList] = await Promise.all([
+        getMatches(), getSimpleRecordedDrawMatches(), getPlayerRoster(),
+        getMyProfile(), getSchools(), getDeletedTournaments(), getTeamMatches(),
+      ]);
+      const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
+      // ★団体戦の一戦として作成された試合（match）のIDを集めておく（個人戦との区別に使う）
+      const teamIds = [];
+      (teamList || []).forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamIds.push(g.match_id); }));
+      const snapshot = {
+        list, simpleList, rosterList,
+        schoolName: school?.name ?? "",
+        // ★ゴミ箱に入っている大会名。試合データ自体は削除しないが、
+        //   絞り込みプルダウンには削除済みの大会名を出さないようにするため。
+        deletedNames: (deletedList || []).map(t => t.name),
+        teamIds,
+      };
+      writeScreenCache("teamStats", snapshot);
+      apply(snapshot);
     })();
-  }, []);
-  // ★ゴミ箱に入っている大会名を取得。試合データ自体は削除しないが、
-  //   絞り込みプルダウンには削除済みの大会名を出さないようにするため。
-  useEffect(() => { getDeletedTournaments().then(list => setDeletedTournamentNames(list.map(t => t.name))); }, []);
-  // ★団体戦の一戦として作成された試合（match）のIDを集めておく（個人戦との区別に使う）
-  useEffect(() => {
-    getTeamMatches().then(list => {
-      const ids = new Set();
-      list.forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) ids.add(g.match_id); }));
-      setTeamMatchIds(ids);
-    });
-  }, []);
+  }, [apply]);
 
   // ①の絞り込み条件が変わるたびに端末に保存（次回開いたときも保持される）
   useEffect(() => {
