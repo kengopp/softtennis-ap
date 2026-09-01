@@ -558,56 +558,16 @@ function keyRatesFromAgg(agg) {
 }
 
 
-async function getMatches() {
-  const { data, error } = await supabase
-    .from("matches")
-    .select("*")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-  if (error) { console.error(error); return []; }
-  if (data.length === 0) return [];
-
-  const matchIds = data.map(m => m.id);
-  // ★パフォーマンス改善：一覧表示（ホーム／試合一覧／大会詳細／各種成績画面）では
-  //   ポイント（1点ごとの記録）までは使っておらず、必要な画面は個別にgetMatch()で
-  //   詳細取得している。そのため一覧取得時はpointsを取得しないようにして、
-  //   試合数・ポイント数が増えるほど遅くなっていた問題を解消する。
-  // ★さらに、チームの利用期間が長くなり試合数が増えると、.in()に渡すID一覧が
-  //   長くなりすぎて通信が不安定になっていたため、一定件数ごとに分割して取得する。
-  const CHUNK_SIZE = 60;
-  const chunks = [];
-  for (let i = 0; i < matchIds.length; i += CHUNK_SIZE) chunks.push(matchIds.slice(i, i + CHUNK_SIZE));
-
-  const playersByMatch = {};
-  const gamesByMatch = {};
-  for (const chunkIds of chunks) {
-    const [
-      { data: playersData, error: playersErr },
-      { data: gamesData,   error: gamesErr },
-    ] = await Promise.all([
-      supabase.from("match_players").select("*").in("match_id", chunkIds).order("team").order("order_num"),
-      supabase.from("games").select("*").in("match_id", chunkIds).order("game_number"),
-    ]);
-    if (playersErr) console.error(playersErr);
-    if (gamesErr)   console.error(gamesErr);
-    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
-    (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
-  }
-
-  return data.map(m => {
-    const games = (gamesByMatch[m.id] ?? []).map(g => ({ ...g, points: [] }));
-    return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
-  });
-}
-
-// ★試合一覧画面（大会／団体戦／個人戦タブ）専用の軽量取得。
-// 　一覧のカードが使うのは「試合の基本情報」と「出場選手名」だけで、
-// 　ゲームごとの得点(games)は一切使っていない。にもかかわらず全試合分の
-// 　gamesまで取得していたため、試合数が増えるほど一覧表示が遅くなっていた。
+// ★一覧・集計用の試合取得（試合一覧／分析／選手別・対戦相手別成績／動画画面で共用）。
+// 　これらの画面が使うのは「試合の基本情報」と「出場選手名」だけで、
+// 　ゲームごとの得点(games)もポイント(points)も一切使っていない
+// 　（必要な画面は個別に getMatch() / getFullMatchesByIds() で詳細を取り直している）。
+// 　にもかかわらず全試合分の games まで取得していたため、
+// 　試合数が増えるほど、これらの画面の表示が軒並み遅くなっていた。
 // 　あわせて、以前は分割取得(チャンク)をforループ内でawaitしていたため、
 // 　チャンクの数だけ通信の往復を「順番待ち」していた（例：600試合＝10回分の
 // 　待ち時間の合計）。同時に投げることで待ち時間はほぼ1回分で済む。
-async function getMatchesLite() {
+async function getMatches() {
   const { data, error } = await supabase
     .from("matches")
     .select("*")
@@ -3067,7 +3027,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [confirmPurge, setConfirmPurge] = useState(null); // { kind, id }
 
   // ★パフォーマンス改善：
-  //   ①一覧では使っていないゲームごとの得点(games)を取得しない → getMatchesLite()
+  //   ①一覧では使っていないゲームごとの得点(games)を取得しない → getMatches()
   //   ②「団体戦に紐づく試合ID」の取得を、他の取得の後ではなく同時に行う
   //     （以前は4件の取得が終わってから、さらにもう1往復待っていた）
   const applyData = useCallback(({ list, individual, tList, smap, tnList }) => {
@@ -3084,7 +3044,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (!silent) setLoading(true);
     purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除
     Promise.all([
-      getMatchesLite(),
+      getMatches(),
       getTeamMatches(),
       getSchools(),
       getTournaments(),
@@ -9863,7 +9823,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
   useEffect(() => {
     (async () => {
-      const [p, rosterList, list] = await Promise.all([getMyProfile(), getPlayerRoster(), getMatches()]);
+      // ★以前は「プロフィール・選手マスター・全試合」を取得し終わってから、
+      //   さらに学校一覧をもう1往復かけて取りに行っていた（その分まるまる待たされていた）。
+      //   学校一覧は他の取得結果に依存しないので、最初から同時に取得する。
+      const [p, rosterList, list, schools] = await Promise.all([
+        getMyProfile(), getPlayerRoster(), getMatches(), getSchools(),
+      ]);
       setRoster(rosterList);
       setAllMatches(list);
       let linked = null;
@@ -9873,8 +9838,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
         setLinkedPlayerName(linked);
       }
       if (p?.school_id) {
-        const schools = await getSchools();
-        const s = schools.find(s => s.id === p.school_id);
+        const s = (schools || []).find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
       }
       // ★linked_player_idが選手マスターの再登録などで古いID（存在しないID）を指したままになっていると、
@@ -9894,20 +9858,25 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
 
   const effectiveSchoolName = selectedSchoolName || mySchoolName;
   const isOwnSchool = effectiveSchoolName === mySchoolName;
-  const ownRoster = roster.filter(r => r.is_own_team !== false);
+  const ownRoster = useMemo(() => roster.filter(r => r.is_own_team !== false), [roster]);
+  // ★以前は下の3つを毎回の再描画で計算し直していたため、
+  //   検索欄に1文字入力する・カレンダーを1回タップするたびに全試合を何度も走査していた。
+  //   元になるデータが変わったときだけ計算するようにする。
   // 選択中の学校に応じた選手候補（自チームなら選手マスター、それ以外は試合記録から拾った名前）
-  const rosterForSchool = isOwnSchool
+  const rosterForSchool = useMemo(() => isOwnSchool
     ? ownRoster.map(r => ({ id: r.id, player_name: r.player_name }))
     : Array.from(new Set(
         allMatches.flatMap(m => m.players.filter(p => p.club_name && p.club_name.trim() === effectiveSchoolName.trim()).map(p => p.player_name))
-      )).map(name => ({ id: name, player_name: name }));
+      )).map(name => ({ id: name, player_name: name })),
+    [isOwnSchool, ownRoster, allMatches, effectiveSchoolName]);
   // 候補となる学校名（自チーム＋これまで対戦した相手校）
-  const knownSchoolNames = Array.from(new Set(
+  const knownSchoolNames = useMemo(() => Array.from(new Set(
     [mySchoolName, ...allMatches.flatMap(m => m.players.map(p => p.club_name))].filter(Boolean)
-  ));
-  const playerMatches = selectedPlayer
+  )), [mySchoolName, allMatches]);
+  const playerMatches = useMemo(() => selectedPlayer
     ? allMatches.filter(m => m.status === "finished" && ownSideFor(m, selectedPlayer, effectiveSchoolName))
-    : [];
+    : [],
+    [allMatches, selectedPlayer, effectiveSchoolName]);
 
   async function loadResults(matchSummaries, condLabel) {
     setResultLoading(true);
@@ -10571,39 +10540,52 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     setStatsCat("all"); setStatsCatSub("allsub"); setStatsCatTournament(""); setPeriod("all");
   }
 
+  // ★以前は下記の絞り込み・集計を「毎回の再描画」で全試合ぶん計算し直していたため、
+  //   タブを切り替える・並び順を変える・内訳を開くといった操作のたびに
+  //   試合数に比例した計算が走り、試合数が増えるほど画面がもたついていた。
+  //   元になるデータや条件が変わったときだけ計算するようにする。
+
+  // 削除済みの大会名は絞り込み候補に出さない（毎回の配列検索を避けるためSetにしておく）
+  const deletedTournamentNameSet = useMemo(() => new Set(deletedTournamentNames), [deletedTournamentNames]);
+
   // 大会名の選択肢（登録されている試合から重複なく抽出。日付が新しい大会を上にする。削除済みの大会名は除外）
-  const tournamentOptions = Array.from(
+  const tournamentOptions = useMemo(() => Array.from(
     new Map(
       allMatches
-        .filter(m => m.tournament_name && !deletedTournamentNames.includes(m.tournament_name))
+        .filter(m => m.tournament_name && !deletedTournamentNameSet.has(m.tournament_name))
+        .slice()
         .sort((a,b) => new Date(b.match_date) - new Date(a.match_date))
         .map(m => [m.tournament_name, m.tournament_name])
     ).values()
-  );
+  ), [allMatches, deletedTournamentNameSet]);
 
-  // ①カテゴリによる絞り込み
-  let categoryMatches;
-  if (statsCat === "tournament") categoryMatches = allMatches.filter(m => m.tournament_name && !deletedTournamentNames.includes(m.tournament_name));
-  else if (statsCat === "team") categoryMatches = allMatches.filter(m => teamMatchIds.has(m.id));
-  else if (statsCat === "individual") categoryMatches = allMatches.filter(m => !teamMatchIds.has(m.id));
-  else categoryMatches = allMatches; // all
+  // ①カテゴリ・期間による絞り込み
+  const finished = useMemo(() => {
+    let categoryMatches;
+    if (statsCat === "tournament") categoryMatches = allMatches.filter(m => m.tournament_name && !deletedTournamentNameSet.has(m.tournament_name));
+    else if (statsCat === "team") categoryMatches = allMatches.filter(m => teamMatchIds.has(m.id));
+    else if (statsCat === "individual") categoryMatches = allMatches.filter(m => !teamMatchIds.has(m.id));
+    else categoryMatches = allMatches; // all
 
-  if (statsCat !== "all" && statsCatSub === "specific" && statsCatTournament) {
-    categoryMatches = categoryMatches.filter(m => m.tournament_name === statsCatTournament);
-  }
+    if (statsCat !== "all" && statsCatSub === "specific" && statsCatTournament) {
+      categoryMatches = categoryMatches.filter(m => m.tournament_name === statsCatTournament);
+    }
 
-  const periodMatches = period==="month1" ? withinLastDays(categoryMatches, 30)
-    : period==="month3" ? withinLastDays(categoryMatches, 90)
-    : categoryMatches;
-  const finished = periodMatches.filter(m=>m.status==="finished");
-  const teamRecord = recordOf(finished, m=>winnerSideOf(m)==="A");
+    const periodMatches = period==="month1" ? withinLastDays(categoryMatches, 30)
+      : period==="month3" ? withinLastDays(categoryMatches, 90)
+      : categoryMatches;
+    return periodMatches.filter(m=>m.status==="finished");
+  }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period]);
+
+  const teamRecord = useMemo(() => recordOf(finished, m=>winnerSideOf(m)==="A"), [finished]);
 
   // ペア別成績（自チームAのペア名を「選手1／選手2」形式で集計）
   // ★相手チームが同じ学校（練習試合）の場合は、B側のペアも自チームのペアとして含める
   // ★A側に記録されているのが本来「自チーム」のはずでも、対戦相手の学校名の入力ミスなどで
   //   実際には相手選手が紛れ込んでいるケースがあるため、選手マスターで自チーム登録されている
   //   選手同士のペアのみを「自チームのペア」として集計する（マスター未登録の名前が混ざるものは除外）
-  const ownNameSet = new Set(roster.filter(p => p.is_own_team !== false).map(p => (p.player_name||"").trim()));
+  const ownNameSet = useMemo(() => new Set(roster.filter(p => p.is_own_team !== false).map(p => (p.player_name||"").trim())), [roster]);
+  const byPair = useMemo(() => {
   const byPair = {};
   finished.forEach(m => {
     const aPlayers = m.players.filter(p => p.team === "A").sort((a,b) => a.order_num - b.order_num);
@@ -10622,14 +10604,20 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
       }
     }
   });
-  const pairRows = Object.entries(byPair).map(([name, list]) => ({
-    name, ...recordOf(list, x => x.win),
-  }));
-  pairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+  return byPair;
+  }, [finished, ownNameSet, mySchoolName]);
+  const pairRows = useMemo(() => {
+    const rows = Object.entries(byPair).map(([name, list]) => ({
+      name, ...recordOf(list, x => x.win),
+    }));
+    rows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    return rows;
+  }, [byPair, sort]);
 
   // 相手チームのペア別成績（対戦相手Bのペア名で集計。勝敗は相手側から見た勝敗）
   // ★部内戦（B側の所属校が自チームと同じ＝東福岡 対 東福岡など）は「対戦相手」として
   // 　不自然になるため集計から除外する
+  const byOppPair = useMemo(() => {
   const byOppPair = {};
   finished.forEach(m => {
     const bPlayers = m.players.filter(p => p.team === "B").sort((a,b) => a.order_num - b.order_num);
@@ -10639,37 +10627,65 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const key = club ? `${pairKey}（${club}）` : pairKey;
     (byOppPair[key] ??= []).push(m);
   });
-  const oppPairRows = Object.entries(byOppPair).map(([name, list]) => ({
-    name, ...recordOf(list, m => winnerSideOf(m)==="B"),
-  }));
-  oppPairRows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+  return byOppPair;
+  }, [finished, mySchoolName]);
+  const oppPairRows = useMemo(() => {
+    const rows = Object.entries(byOppPair).map(([name, list]) => ({
+      name, ...recordOf(list, m => winnerSideOf(m)==="B"),
+    }));
+    rows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    return rows;
+  }, [byOppPair, sort]);
 
   // 選手別成績（選手マスターの自チーム選手のみ）
   // ★重要：同姓の相手チーム選手がいる場合の取り違えを防ぐため、
   // 　自チーム(team==="A")として出場した試合だけを対象にする。
   // 　ただし相手チームが同じ学校（東福岡 対 東福岡の練習試合など）の場合は、
   // 　B側で出場した試合も自チームの成績として含める。
-  const playerRows = roster.filter(p=>p.is_own_team!==false).map(p=>{
-    const myMatches = finished.filter(m=>ownSideFor(m,p.player_name,mySchoolName));
-    const rec = recordOf(myMatches, m=>winForPlayer(m,p.player_name,mySchoolName));
-    return { name: p.player_name, ...rec };
-  }).filter(r=>r.total>0);
-  playerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+  // ★以前は「自チーム選手の人数 × 全試合数」の回数だけ判定していた（40人×500試合＝2万回）。
+  //   試合を1回だけ走査し、その試合に出ていた選手にだけ振り分ける方式にする。
+  const playerRows = useMemo(() => {
+    const byPlayer = {};
+    roster.filter(p=>p.is_own_team!==false).forEach(p => { byPlayer[p.player_name] = { total:0, wins:0 }; });
+    finished.forEach(m => {
+      // 同じ試合に同じ名前が複数行ある場合でも1試合として数える（1試合1回だけ判定する）
+      const seen = new Set();
+      m.players.forEach(mp => {
+        const rec = byPlayer[mp.player_name];
+        if (!rec || seen.has(mp.player_name)) return;
+        seen.add(mp.player_name);
+        if (!ownSideFor(m, mp.player_name, mySchoolName)) return;
+        rec.total++;
+        if (winForPlayer(m, mp.player_name, mySchoolName)) rec.wins++;
+      });
+    });
+    const rows = Object.entries(byPlayer)
+      .filter(([,r]) => r.total > 0)
+      .map(([name, r]) => ({
+        name, total: r.total, wins: r.wins, losses: r.total - r.wins,
+        rate: r.total ? Math.round(r.wins / r.total * 100) : 0,
+      }));
+    rows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    return rows;
+  }, [roster, finished, mySchoolName, sort]);
 
   // 対戦相手（学校）別成績
   // ★部内戦（B側の所属校が自チームと同じ＝東福岡 対 東福岡など）は
   // 　「対戦相手チーム」として不自然になるため集計から除外する
-  const byOpponent = {};
-  finished.forEach(m=>{
-    const club = m.players.find(p=>p.team==="B")?.club_name || "";
-    if (mySchoolName && club && club.trim() === mySchoolName.trim()) return;
-    const name = club || "（相手不明）";
-    (byOpponent[name] ??= []).push(m);
-  });
-  const opponentRows = Object.entries(byOpponent).map(([name,list])=>({
-    name, ...recordOf(list, m=>winnerSideOf(m)==="A"),
-  }));
-  opponentRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+  const opponentRows = useMemo(() => {
+    const byOpponent = {};
+    finished.forEach(m=>{
+      const club = m.players.find(p=>p.team==="B")?.club_name || "";
+      if (mySchoolName && club && club.trim() === mySchoolName.trim()) return;
+      const name = club || "（相手不明）";
+      (byOpponent[name] ??= []).push(m);
+    });
+    const rows = Object.entries(byOpponent).map(([name,list])=>({
+      name, ...recordOf(list, m=>winnerSideOf(m)==="A"),
+    }));
+    rows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    return rows;
+  }, [finished, mySchoolName, sort]);
 
   const subLabel = statsCat!=="all" ? (statsCatSub==="specific" && statsCatTournament ? `（${statsCatTournament}）` : "（すべて）") : "";
   const filterSummary = `${STATS_CAT_LABELS[statsCat]}${subLabel}・${STATS_PERIOD_LABELS[period]}`;
