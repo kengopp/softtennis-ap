@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, Component, Fragment } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, Component, Fragment } from "react";
 import { supabase } from "./supabase-client";
 import LoginScreen from "./LoginScreen";
 
@@ -598,6 +598,46 @@ async function getMatches() {
     const games = (gamesByMatch[m.id] ?? []).map(g => ({ ...g, points: [] }));
     return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
   });
+}
+
+// ★試合一覧画面（大会／団体戦／個人戦タブ）専用の軽量取得。
+// 　一覧のカードが使うのは「試合の基本情報」と「出場選手名」だけで、
+// 　ゲームごとの得点(games)は一切使っていない。にもかかわらず全試合分の
+// 　gamesまで取得していたため、試合数が増えるほど一覧表示が遅くなっていた。
+// 　あわせて、以前は分割取得(チャンク)をforループ内でawaitしていたため、
+// 　チャンクの数だけ通信の往復を「順番待ち」していた（例：600試合＝10回分の
+// 　待ち時間の合計）。同時に投げることで待ち時間はほぼ1回分で済む。
+async function getMatchesLite() {
+  const { data, error } = await supabase
+    .from("matches")
+    .select("*")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false });
+  if (error) { console.error(error); return []; }
+  if (!data || data.length === 0) return [];
+
+  const matchIds = data.map(m => m.id);
+  const CHUNK_SIZE = 100;
+  const chunks = [];
+  for (let i = 0; i < matchIds.length; i += CHUNK_SIZE) chunks.push(matchIds.slice(i, i + CHUNK_SIZE));
+
+  const results = await Promise.all(chunks.map(chunkIds =>
+    supabase.from("match_players")
+      .select("id, match_id, team, player_name, club_name, position, order_num, entry_no")
+      .in("match_id", chunkIds)
+  ));
+
+  const playersByMatch = {};
+  results.forEach(({ data: rows, error: err }) => {
+    if (err) console.error(err);
+    (rows ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+  });
+  // 並び順（A→B、番号順）はDB側ではなくここで整える（通信量・待ち時間を増やさないため）
+  Object.values(playersByMatch).forEach(list => list.sort((a, b) =>
+    a.team === b.team ? (a.order_num ?? 0) - (b.order_num ?? 0) : (a.team < b.team ? -1 : 1)
+  ));
+
+  return data.map(m => rowToMatchSummary(m, playersByMatch[m.id] ?? [], []));
 }
 
 // ★ホーム画面専用の軽量データ取得。
@@ -2958,8 +2998,16 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
+// ★試合一覧のキャッシュ。他の画面に移動して戻ってきたときに、まず前回の内容を
+// 　すぐ表示し、裏で最新データに更新する（毎回「読み込み中...」で待たされない）。
+let matchListCache = null;
+
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
+  // ★スマホでは一度に何百枚もカードを描画するだけで表示が重くなるため、
+  //   まず30件だけ描画し、「もっと見る」で追加していく（絞り込み結果の件数自体は変わらない）
+  const PAGE_SIZE = 30;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [childOnly, setChildOnly] = useState(false);
   const [allMatches, setAllMatches] = useState([]);
   const [allMatchesRaw, setAllMatchesRaw] = useState([]); // ★団体戦の番手も含む「全試合」。個人戦一覧(allMatches)からは除外されるため別途保持
@@ -2977,7 +3025,14 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [toast, setToast] = useState(initialToast || null);
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
   // 共通絞り込み（個人戦・団体戦で共有）
-  const [filterSearch, setFilterSearch] = useState("");       // フリーワード
+  const [filterSearch, setFilterSearch] = useState("");       // フリーワード（入力欄の値）
+  // ★1文字打つたびに全試合を絞り込み直すと、試合数が多いほど入力がカクついていた。
+  //   入力が落ち着いてから（0.25秒後）実際の絞り込みを走らせる。
+  const [searchQuery, setSearchQuery] = useState("");        // 実際に絞り込みに使う語
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(filterSearch.trim().toLowerCase()), 250);
+    return () => clearTimeout(t);
+  }, [filterSearch]);
   const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
   // 日付フィルタ
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
@@ -3011,33 +3066,49 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [trashLoading, setTrashLoading] = useState(false);
   const [confirmPurge, setConfirmPurge] = useState(null); // { kind, id }
 
-  const reload = useCallback(() => {
-    setLoading(true);
-    purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除
-    Promise.all([getMatches(), getTeamMatches(), getSchools(), getTournaments()]).then(async ([list, tList, schools, tnList]) => {
-      // 学校IDから名前へのマップを作成
-      const smap = {};
-      (schools || []).forEach(s => { smap[s.id] = s.name; });
-      setSchoolMap(smap);
-      setTournaments(tnList || []);
-      setAllMatchesRaw(list);
-      // 団体戦に紐付いたmatch_idを個人戦一覧から除外
-      try {
-        const { data: tmGames } = await supabase
-          .from("team_match_games")
-          .select("match_id")
-          .not("match_id", "is", null);
-        const teamMatchIds = new Set((tmGames || []).map(g => g.match_id).filter(Boolean));
-        setAllMatches(list.filter(m => !teamMatchIds.has(m.id)));
-      } catch(e) {
-        setAllMatches(list);
-      }
-      setAllTeamMatches(tList);
-      setLoading(false);
-    });
+  // ★パフォーマンス改善：
+  //   ①一覧では使っていないゲームごとの得点(games)を取得しない → getMatchesLite()
+  //   ②「団体戦に紐づく試合ID」の取得を、他の取得の後ではなく同時に行う
+  //     （以前は4件の取得が終わってから、さらにもう1往復待っていた）
+  const applyData = useCallback(({ list, individual, tList, smap, tnList }) => {
+    setSchoolMap(smap);
+    setTournaments(tnList || []);
+    setAllMatchesRaw(list);
+    setAllMatches(individual);
+    setAllTeamMatches(tList);
+    setLoading(false);
   }, []);
 
-  useEffect(() => { reload(); }, [reload]);
+  const reload = useCallback((opts) => {
+    const silent = opts === true || opts?.silent === true; // 裏での更新（画面を「読み込み中」にしない）
+    if (!silent) setLoading(true);
+    purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除
+    Promise.all([
+      getMatchesLite(),
+      getTeamMatches(),
+      getSchools(),
+      getTournaments(),
+      supabase.from("team_match_games").select("match_id").not("match_id", "is", null),
+    ]).then(([list, tList, schools, tnList, tmGamesRes]) => {
+      const smap = {};
+      (schools || []).forEach(s => { smap[s.id] = s.name; });
+      const teamMatchIds = new Set(((tmGamesRes && tmGamesRes.data) || []).map(g => g.match_id).filter(Boolean));
+      // 団体戦に紐付いたmatch_idを個人戦一覧から除外
+      const individual = list.filter(m => !teamMatchIds.has(m.id));
+      const snapshot = { list, individual, tList, smap, tnList };
+      matchListCache = snapshot;
+      applyData(snapshot);
+    }).catch(e => { console.error(e); setLoading(false); });
+  }, [applyData]);
+
+  useEffect(() => {
+    if (matchListCache) {
+      applyData(matchListCache); // まず前回の内容を即表示
+      reload({ silent: true });  // 裏で最新化
+    } else {
+      reload();
+    }
+  }, [reload, applyData]);
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []); // ★参加選手一覧ポップアップ用
   useEffect(() => {
     (async () => {
@@ -3057,6 +3128,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       }
     })();
   }, []);
+
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [timeTab, searchQuery, filterStatus, dateFilterApplied, childOnly, tmMySchoolOnly]);
 
   const todayStr = today();
 
@@ -3104,32 +3177,46 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return true;
   };
 
-  // 共通絞り込みロジック
-  const filteredMatches = allMatches.filter(m => {
-    if (filterStatus === "upcoming" && !isUpcomingMatch(m)) return false;
-    if (filterStatus === "finished" && isUpcomingMatch(m)) return false;
-    if (!matchesDateFilter(m.match_date)) return false;
-    if (childOnly && linkedPlayerName && !m.players.some(p => p.player_name === linkedPlayerName && p.team==="A")) return false;
-    if (filterSearch.trim()) {
-      const q = filterSearch.trim().toLowerCase();
-      const players = m.players.map(p => p.player_name).join(" ").toLowerCase();
-      const tour = (m.tournament_name || "").toLowerCase();
-      const opp = m.players.filter(p=>p.team==="B").map(p=>p.club_name||"").join(" ").toLowerCase();
-      if (!players.includes(q) && !tour.includes(q) && !opp.includes(q)) return false;
-    }
-    return true;
-  });
+  const isDoneStatus = (status) => status === "finished" || status === "abandoned"; // 途中終了も「登録済」に含める
 
   // ★団体戦の各番手(game)の選手名は、a_player1等の列ではなく、
   //   game.match_id が指す matches の match_players（=allMatchesRawのm.players）にある。
   //   allMatchesは団体戦の番手を除外した「個人戦のみ」の一覧なので、ここではallMatchesRawを使う。
-  const matchPlayersByMatchId = {};
-  allMatchesRaw.forEach(m => { matchPlayersByMatchId[m.id] = m.players; });
-  const teamMatchHasPlayer = (tm, name) => (tm.games || []).some(g =>
+  const matchPlayersByMatchId = useMemo(() => {
+    const map = {};
+    allMatchesRaw.forEach(m => { map[m.id] = m.players; });
+    return map;
+  }, [allMatchesRaw]);
+  const teamMatchHasPlayer = useCallback((tm, name) => (tm.games || []).some(g =>
     (matchPlayersByMatchId[g.match_id] || []).some(p => p.player_name === name && p.team==="A")
-  );
+  ), [matchPlayersByMatchId]);
 
-  const filteredTeamMatches = allTeamMatches.filter(tm => {
+  // ★検索用の文字列（選手名・大会名・相手校名）を試合ごとに1度だけ作っておく。
+  //   以前は1文字入力するたびに全試合分の文字列を作り直していたため、
+  //   試合数が増えるほど検索入力がもたついていた。
+  const searchIndex = useMemo(() => {
+    const map = {};
+    allMatches.forEach(m => {
+      map[m.id] = [
+        m.players.map(p => p.player_name).join(" "),
+        m.tournament_name || "",
+        m.players.filter(p => p.team === "B").map(p => p.club_name || "").join(" "),
+      ].join(" ").toLowerCase();
+    });
+    return map;
+  }, [allMatches]);
+
+  // 共通絞り込みロジック（★毎回の再描画ではなく、条件が変わったときだけ計算する）
+  const filteredMatches = useMemo(() => allMatches.filter(m => {
+    if (filterStatus === "upcoming" && !isUpcomingMatch(m)) return false;
+    if (filterStatus === "finished" && isUpcomingMatch(m)) return false;
+    if (!matchesDateFilter(m.match_date)) return false;
+    if (childOnly && linkedPlayerName && !m.players.some(p => p.player_name === linkedPlayerName && p.team==="A")) return false;
+    if (searchQuery && !(searchIndex[m.id] || "").includes(searchQuery)) return false;
+    return true;
+  }), [allMatches, searchIndex, filterStatus, dateFilterApplied, childOnly, linkedPlayerName, searchQuery]);
+
+  const filteredTeamMatches = useMemo(() => allTeamMatches.filter(tm => {
     if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
     if (filterStatus === "finished" && isUpcomingTeamMatch(tm)) return false;
     if (!matchesDateFilter(tm.match_date)) return false;
@@ -3139,14 +3226,70 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       const tmSchoolId = tm.my_school_id || mySchoolId;
       if (tmSchoolId !== mySchoolId) return false;
     }
-    if (filterSearch.trim()) {
-      const q = filterSearch.trim().toLowerCase();
+    if (searchQuery) {
       const opp = (tm.opponent_name || "").toLowerCase();
       const tour = (tm.tournament_name || "").toLowerCase();
-      if (!opp.includes(q) && !tour.includes(q)) return false;
+      if (!opp.includes(searchQuery) && !tour.includes(searchQuery)) return false;
     }
     return true;
-  });
+  }), [allTeamMatches, filterStatus, dateFilterApplied, childOnly, linkedPlayerName, teamMatchHasPlayer, tmMySchoolOnly, mySchoolId, searchQuery]);
+
+  // ★大会カードの集計（試合数・終了数・会場数・勝敗）を、全試合の1回の走査でまとめて作る。
+  //   以前は大会1件ごとに全試合を走査し直していたため、
+  //   「大会数 × 試合数」の計算量になり、スクロールや絞り込みのたびに重くなっていた。
+  const tournamentAgg = useMemo(() => {
+    const map = {};
+    const ensure = (name) => (map[name] ??= {
+      totalMatches: 0, registeredMatches: 0, venues: new Set(),
+      teamWin: 0, teamLoss: 0, indWin: 0, indLoss: 0,
+      hasLinkedPlayer: false,
+    });
+    const statusById = {};
+    allMatchesRaw.forEach(m => { statusById[m.id] = m.status; });
+
+    allMatches.forEach(m => {
+      const name = m.tournament_name;
+      if (!name) return;
+      const a = ensure(name);
+      a.totalMatches++;
+      if (m.venue) a.venues.add(m.venue);
+      if (isDoneStatus(m.status)) {
+        a.registeredMatches++;
+        const w = winnerSideOf(m);
+        if (w === "A") a.indWin++;
+        else if (w === "B") a.indLoss++;
+      }
+      if (linkedPlayerName && !a.hasLinkedPlayer &&
+          m.players.some(p => p.player_name === linkedPlayerName && p.team === "A")) a.hasLinkedPlayer = true;
+    });
+
+    allTeamMatches.forEach(tm => {
+      const name = tm.tournament_name;
+      if (!name) return;
+      const a = ensure(name);
+      if (tm.venue) a.venues.add(tm.venue);
+      // 団体戦のうち、実際に試合レコードが作成済みの番手のみ（枠だけの未着手番手は含めない）
+      (tm.games || []).forEach(g => {
+        if (!g.match_id) return;
+        a.totalMatches++;
+        if (isDoneStatus(statusById[g.match_id])) a.registeredMatches++;
+      });
+      if (isDoneStatus(tm.status)) {
+        if (tm.my_score > tm.opponent_score) a.teamWin++;
+        else if (tm.my_score < tm.opponent_score) a.teamLoss++;
+      }
+      if (linkedPlayerName && !a.hasLinkedPlayer && teamMatchHasPlayer(tm, linkedPlayerName)) a.hasLinkedPlayer = true;
+    });
+    return map;
+  }, [allMatches, allMatchesRaw, allTeamMatches, linkedPlayerName, teamMatchHasPlayer]);
+
+  // ★月指定カレンダーの「試合データあり」判定も、毎回の再描画で全試合を走査しないよう先に作っておく
+  const monthsWithData = useMemo(() => {
+    const set = new Set();
+    allMatches.forEach(m => { if (m.match_date) set.add(m.match_date.slice(0,7)); });
+    allTeamMatches.forEach(m => { if (m.match_date) set.add(m.match_date.slice(0,7)); });
+    return set;
+  }, [allMatches, allTeamMatches]);
 
 
 
@@ -3161,53 +3304,29 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // 大会ごとの団体戦・個人戦の件数（大会名の一致で集計）
   // ★大会カードの統計行（参加選手・試合数・終了・会場数）
   // 新しいテーブルや列は使わず、既存の matches / team_match_games / players（選手マスター）だけで集計する。
-  const isDoneStatus = (status) => status === "finished" || status === "abandoned"; // 途中終了も「登録済」に含める
   const statsForTournament = (t) => {
-    const name = t.name;
-    const individualForT = allMatches.filter(m => m.tournament_name === name);
-    const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
-    // 団体戦のうち、実際に試合レコードが作成済みの番手のみ（枠だけの未着手番手は含めない）
-    const createdTeamGames = teamMatchesForT.flatMap(tm => (tm.games || []).filter(g => g.match_id));
-
-    // 試合数：作成済みの試合レコードの総数（個人戦＋団体戦の作成済み番手）
-    const totalMatches = individualForT.length + createdTeamGames.length;
-
-    // 登録済：そのうち、試合終了まで（途中終了も含む）スコアが記録されているもの
-    const doneIndividual = individualForT.filter(m => isDoneStatus(m.status)).length;
-    const doneTeamGames = createdTeamGames.filter(g => isDoneStatus(matchPlayersByMatchId[g.match_id] ? allMatchesRaw.find(m=>m.id===g.match_id)?.status : null)).length;
-    const registeredMatches = doneIndividual + doneTeamGames;
-
+    const a = tournamentAgg[t.name];
     // 参加選手：大会作成・編集時に選択した「出場選手」の人数（試合データからの逆算ではなく、選択リストそのもの）
     const participantCount = (t.participant_player_ids || []).length;
-
     // 会場数：大会自体の会場＋個人戦・団体戦それぞれの会場を重複なしで集計
-    const venueSet = new Set();
-    if (t.venue) venueSet.add(t.venue);
-    individualForT.forEach(m => { if (m.venue) venueSet.add(m.venue); });
-    teamMatchesForT.forEach(tm => { if (tm.venue) venueSet.add(tm.venue); });
-
-    return { totalMatches, registeredMatches, participantCount, venueCount: venueSet.size };
+    const venueCount = (a ? a.venues.size : 0) + (t.venue && !(a && a.venues.has(t.venue)) ? 1 : 0);
+    return {
+      totalMatches: a ? a.totalMatches : 0,
+      registeredMatches: a ? a.registeredMatches : 0,
+      participantCount,
+      venueCount,
+    };
   };
 
   // ★大会カードの「◯勝◯敗」表示用。団体戦と個人戦は勝敗の単位が違う（団体は団体戦本体の勝敗、
   // 個人戦はペアごとの勝敗）ため、まとめず別々に算出する。終了していない試合（予定・進行中・中断中）は
   // 数字に含めない。
   const recordForTournament = (t) => {
-    const name = t.name;
-    const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
-    const individualForT = allMatches.filter(m => m.tournament_name === name);
-    const teamRecord = teamMatchesForT.filter(tm => isDoneStatus(tm.status)).reduce((acc, tm) => {
-      if (tm.my_score > tm.opponent_score) acc.win++;
-      else if (tm.my_score < tm.opponent_score) acc.loss++;
-      return acc;
-    }, { win: 0, loss: 0 });
-    const individualRecord = individualForT.filter(m => isDoneStatus(m.status)).reduce((acc, m) => {
-      const w = winnerSideOf(m);
-      if (w === "A") acc.win++;
-      else if (w === "B") acc.loss++;
-      return acc;
-    }, { win: 0, loss: 0 });
-    return { teamRecord, individualRecord };
+    const a = tournamentAgg[t.name];
+    return {
+      teamRecord:       { win: a ? a.teamWin : 0, loss: a ? a.teamLoss : 0 },
+      individualRecord: { win: a ? a.indWin  : 0, loss: a ? a.indLoss  : 0 },
+    };
   };
 
   const filteredTournaments = tournaments.filter(t => {
@@ -3215,11 +3334,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (filterStatus === "upcoming" && !isUpcomingTournament(t)) return false;
     if (filterStatus === "finished" && isUpcomingTournament(t)) return false;
     if (!tournamentMatchesDateFilter(t)) return false;
-    if (childOnly && linkedPlayerName) {
-      const hasInIndividual = allMatches.some(m => m.tournament_name===t.name && m.players.some(p=>p.player_name===linkedPlayerName && p.team==="A"));
-      const hasInTeam = allTeamMatches.some(tm => tm.tournament_name===t.name && teamMatchHasPlayer(tm, linkedPlayerName));
-      if (!hasInIndividual && !hasInTeam) return false;
-    }
+    if (childOnly && linkedPlayerName && !tournamentAgg[t.name]?.hasLinkedPlayer) return false;
     return true;
   });
 
@@ -3455,7 +3570,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     {Array.from({length:12}).map((_,i)=>{
                       const mStr=`${monthViewYear}-${String(i+1).padStart(2,"0")}`;
                       const isSel=dateFilterMonth===mStr;
-                      const hasData=[...allMatches,...allTeamMatches].some(m=>(m.match_date||"").slice(0,7)===mStr);
+                      const hasData=monthsWithData.has(mStr);
                       return (
                         <button key={i} onClick={()=>setDateFilterMonth(mStr)} style={{ padding:"10px 4px", textAlign:"center", borderRadius:8, cursor:"pointer", fontSize:14, fontWeight:700, border: isSel?"1.5px solid "+C.accent:hasData?"1.5px solid "+C.accent:"1.5px solid "+C.border, background:isSel?C.accent:"#fff", color:isSel?"#fff":hasData?"#00874f":C.text }}>{i+1}月</button>
                       );
@@ -3625,7 +3740,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {!loading && allMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>試合記録がありません</div>}
             {!loading && allMatches.length>0 && filteredMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う試合がありません</div>}
-            {!loading && filteredMatches.map(m => {
+            {!loading && filteredMatches.slice(0, visibleCount).map(m => {
               const aWin = m.status==="finished" && winnerSideOf(m)==="A";
               const bWin = m.status==="finished" && winnerSideOf(m)==="B";
               const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
@@ -3666,6 +3781,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 </div>
               );
             })}
+            {!loading && filteredMatches.length > visibleCount && (
+              <button
+                onClick={()=>setVisibleCount(c => c + PAGE_SIZE)}
+                style={{ width:"100%", padding:"12px", marginTop:4, borderRadius:12, border:"1px solid "+C.border, background:C.white, color:C.navy, fontSize:13, fontWeight:700, cursor:"pointer" }}
+              >もっと見る（残り{filteredMatches.length - visibleCount}件）</button>
+            )}
           </div>
           {/* 個人戦FAB */}
           <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>
@@ -3679,7 +3800,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {!loading && allTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>団体戦の記録がありません</div>}
             {!loading && allTeamMatches.length>0 && filteredTeamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う団体戦がありません</div>}
-            {!loading && filteredTeamMatches.map(tm => {
+            {!loading && filteredTeamMatches.slice(0, visibleCount).map(tm => {
               const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
               const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
               const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
@@ -3709,6 +3830,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 </div>
               );
             })}
+            {!loading && filteredTeamMatches.length > visibleCount && (
+              <button
+                onClick={()=>setVisibleCount(c => c + PAGE_SIZE)}
+                style={{ width:"100%", padding:"12px", marginTop:4, borderRadius:12, border:"1px solid "+C.border, background:C.white, color:C.navy, fontSize:13, fontWeight:700, cursor:"pointer" }}
+              >もっと見る（残り{filteredTeamMatches.length - visibleCount}件）</button>
+            )}
           </div>
           {/* 団体戦FAB */}
           <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch&&onNewTeamMatch()}>＋</button>
