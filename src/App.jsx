@@ -12444,6 +12444,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   // 4段階選択状態
   const [selPlay,   setSelPlay]   = useState(null);   // プレイ内容
   const [selSide,   setSelSide]   = useState(null);   // フォア / バック
+  // ★「＋どんなプレー？」は毎回開くのが手間なので、最初から開いた状態にしておく。
+  //   閉じたときはその状態を覚えて、記録が進んでも勝手に開き直さないようにする。
+  const [playDetailOpen, setPlayDetailOpen] = useState(true);
   const [selResult, setSelResult] = useState(null);   // 結果
   const [selPlayer, setSelPlayer] = useState(null);   // 選手（表示名・記録用）
   const [selPlayerId, setSelPlayerId] = useState(null); // 選手（チップ選択状態の判定用・一意ID）
@@ -13370,7 +13373,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const isMiss = lp?.result_type==="error"; // 相手ミスのときだけ③を出す
                 const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
                 return (
-                  <details style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
+                  <details
+                    open={playDetailOpen}
+                    onToggle={e=>setPlayDetailOpen(e.currentTarget.open)}
+                    style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}
+                  >
                     <summary style={{ fontSize:11,color:C.textSec,fontWeight:700,cursor:"pointer" }}>＋ どんなプレー？（任意）</summary>
                     <div style={{ marginTop:8,fontSize:10,color:"#5b8bc9" }}>対象：{detailParts.length>0?detailParts.join("・"):"（未選択）"}</div>
                     {/* ★①プレー内容 → ②フォア/バック → ③ミスの種類 の三段階。
