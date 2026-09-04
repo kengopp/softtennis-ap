@@ -9916,7 +9916,7 @@ const STATS_PERIOD_LABELS = { all: "全期間", month1: "直近1ヶ月", month3:
 // 個人分析画面：①選手選択 → ②試合選択 → ③分析結果
 // 何も設定していない時は「自分（またはお子さん）・直近5試合」をデフォルト表示する
 // ============================================================
-function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
+function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
   const [loading, setLoading] = useState(true);
   const [roster, setRoster] = useState([]);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
@@ -10530,8 +10530,13 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
                       const myScore = team==="A" ? m.match_score_a : m.match_score_b;
                       const oppScore = team==="A" ? m.match_score_b : m.match_score_a;
                       const win = winForPlayer(m, selectedPlayer, effectiveSchoolName);
+                      // ★タップでその試合の「スタッツ」タブを開く
                       return (
-                        <div key={m.id} style={{ border:`1px solid ${C.border}`, borderRadius:10, padding:12, marginBottom:8 }}>
+                        <div
+                          key={m.id}
+                          onClick={()=>onOpenMatch && onOpenMatch(m.id)}
+                          style={{ border:`1px solid ${C.border}`, borderRadius:10, padding:12, marginBottom:8, cursor:"pointer" }}
+                        >
                           <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                             <span style={{ fontSize:12, fontWeight:700, color:C.text }}>{m.tournament_name || "（大会外）"}{m.round ? "・"+m.round : ""}</span>
                             <span style={{ fontSize:10.5, color:C.textSec }}>{m.match_date}</span>
@@ -10540,6 +10545,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
                             <span style={{ fontSize:10.5, fontWeight:800, padding:"3px 8px", borderRadius:6, color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"勝利":"敗北"}</span>
                             <span style={{ fontSize:15, fontWeight:900, color:win?C.accent:C.red }}>{myScore} - {oppScore}</span>
                             {oppClub && <span style={{ marginLeft:"auto", fontSize:11, color:C.textSec }}>対 {oppClub}</span>}
+                            <span style={{ fontSize:13, color:C.textSec, marginLeft: oppClub?6:"auto" }}>›</span>
                           </div>
                         </div>
                       );
@@ -12341,7 +12347,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 // ============================================================
 // スコア記録
 // ============================================================
-function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenAiAnalysis }) {
+function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenAiAnalysis, initialTab }) {
   const [initialMatch, setInitialMatch] = useState(null);
   const [loadKey, setLoadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -12413,6 +12419,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
       <ScoreRecordInner
         key={initialMatch.id}
         initialMatch={initialMatch}
+        initialTab={initialTab}
         onBack={onBack}
         onEdit={onEdit}
         onReload={()=>setLoadKey(k=>k+1)}
@@ -12428,7 +12435,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId, onOpenAiAnalysis }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId, onOpenAiAnalysis, initialTab }) {
   const [match,  setMatch]  = useState(initialMatch);
   // ★観戦モード（閲覧のみ）では、親から渡されるinitialMatchが「最新に更新」で
   // 　差し替わった時にこの内部stateへ反映されないと画面が更新されない。
@@ -12436,7 +12443,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   useEffect(() => {
     if (viewOnly) setMatch(initialMatch);
   }, [initialMatch, viewOnly]);
-  const [tab,    setTab]    = useState("record");
+  // ★分析画面の試合一覧から開いたときなど、最初から「スタッツ」タブを表示したい場合に使う
+  const [tab,    setTab]    = useState(initialTab ?? "record");
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
   const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
@@ -16662,6 +16670,8 @@ export default function App() {
 
   const [screen,       setScreen]       = useState("home");
   const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
+  // ★試合を開いたときに最初に表示するタブ（分析の試合一覧からは「スタッツ」で開く）
+  const [recordInitialTab, setRecordInitialTab] = useState(null);
   const [initMatchType, setInitMatchType] = useState(null); // フィルター連動用
 
   // ★画面が切り替わるたびに、前の画面のスクロール位置が残らないよう先頭に戻す
@@ -16746,6 +16756,7 @@ export default function App() {
       setMatchId(id);
       if (ps) setPrevScreen(ps);
       if (lmm) setListMatchMode(lmm);
+      setRecordInitialTab(null);
       setScreen("record");
     }
   }
@@ -17147,6 +17158,7 @@ export default function App() {
       <PersonalAnalysisScreen
         onNavigate={goNav}
         onOpenTeamStats={()=>setScreen("stats")}
+        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("personalAnalysis"); setRecordInitialTab("stats"); setScreen("record"); }}
       />
     );
   }
@@ -17156,7 +17168,7 @@ export default function App() {
         onNavigate={key=>{ if (key==="stats") { setScreen("personalAnalysis"); return; } goNav(key); }}
         onOpenPlayer={name=>{ setStatsPlayerName(name); setPlayerStatsFrom("stats"); setScreen("playerStats"); }}
         onOpenOpponent={name=>{ setStatsOpponentName(name); setScreen("opponentStats"); }}
-        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("stats"); setScreen("record"); }}
+        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("stats"); setRecordInitialTab(null); setScreen("record"); }}
       />
     );
   }
@@ -17203,6 +17215,7 @@ export default function App() {
           if (!fromTournament) setListMatchMode("individual"); // ★個人戦タブに戻れるようにする
           setPrevScreen(fromTournament ? "tournamentDetail" : "list");
           setCreatingFromTournament(false);
+          setRecordInitialTab(null);
           setScreen("record");
         }}
         onCancel={()=>{
@@ -17217,6 +17230,7 @@ export default function App() {
             const back = editTargetId;
             setEditTargetId(null);
             setMatchId(back);
+            setRecordInitialTab(null);
             setScreen("record");
           } else {
             setScreen(prevScreen || "list");
@@ -17230,14 +17244,16 @@ export default function App() {
       <ScoreRecord
         key={matchId+tick}
         matchId={matchId}
+        initialTab={recordInitialTab}
         onBack={async ()=>{
-          const target = prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : "list";
+          const target = prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : prevScreen==="personalAnalysis" ? "personalAnalysis" : "list";
           // ★大会詳細に戻るはずなのに、何らかの理由でtournamentContextが失われていた場合はsessionStorageから復元を試みる
           if (target === "tournamentDetail" && !tournamentContext) restoreTournamentReturnCtx();
+          setRecordInitialTab(null); // 次に別経路で開いたときは通常どおり「記録」タブから
           setScreen(target); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1);
         }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); goNav(key); }}
+        onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); setRecordInitialTab(null); goNav(key); }}
         onOpenAiAnalysis={(match, existing)=>{
           setAiAnalysisTargetMatch(match);
           setAiAnalysisEditRow(existing);
@@ -17255,7 +17271,7 @@ export default function App() {
         onSegChange={setTournamentSeg}
         onBack={()=>{ setTournamentContext(null); setListMatchMode("tournament"); setScreen("list"); }}
         onSaved={updated=>{ setTournamentContext(updated); setTick(t=>t+1); }}
-        onOpenMatch={id=>{ setTournamentSeg("individual"); setMatchId(id); setPrevScreen("tournamentDetail"); setScreen("record"); }}
+        onOpenMatch={id=>{ setTournamentSeg("individual"); setMatchId(id); setPrevScreen("tournamentDetail"); setRecordInitialTab(null); setScreen("record"); }}
         onOpenTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchId(id); setScreen("teamMatchDetail"); }}
         onNewIndividual={()=>{ setTournamentSeg("individual"); setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
         onNewTeam={()=>{ setTournamentSeg("team"); setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
@@ -17306,7 +17322,7 @@ export default function App() {
       onNew={f=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
       onOpen={id=>openMatchSmart(id, { prevScreen:"list", listMatchMode:"individual" })}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
-      onStartScheduled={async (id, firstServer, orderA, orderB)=>{ try { await startScheduledMatch(id, firstServer, orderA, orderB); setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
+      onStartScheduled={async (id, firstServer, orderA, orderB)=>{ try { await startScheduledMatch(id, firstServer, orderA, orderB); setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setRecordInitialTab(null); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
