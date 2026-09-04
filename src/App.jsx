@@ -3270,12 +3270,37 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
 
 
+  // ★削除した試合を、通信を待たずに画面（と一覧のキャッシュ）から取り除く
+  const removeMatchFromView = useCallback((id) => {
+    setAllMatches(prev => prev.filter(m => m.id !== id));
+    setAllMatchesRaw(prev => prev.filter(m => m.id !== id));
+    const cached = readScreenCache("matchList");
+    if (cached) writeScreenCache("matchList", {
+      ...cached,
+      list: (cached.list || []).filter(m => m.id !== id),
+      individual: (cached.individual || []).filter(m => m.id !== id),
+    });
+  }, []);
+
   async function handleDelete(id) {
-    const link = await getDrawMatchByMatchId(id).catch(()=>null);
-    await deleteMatch(id);
-    if (link) await clearDrawMatchLink(link.id).catch(()=>{});
+    // ★以前は「ドロー紐付けの確認 → 削除 → 紐付け解除 → 一覧をまるごと取り直し」を
+    //   すべて順番待ちで行っていたため、削除ボタンを押してから画面が戻るまで
+    //   通信4回ぶん、しかも最後は「読み込み中...」で一覧が真っ白になって待たされていた。
+    //   削除はゴミ箱行き（あとで戻せる）なので、先に画面から消して閉じ、通信は裏で進める。
     setConfirmDelete(null);
-    reload();
+    removeMatchFromView(id);
+    try {
+      // ドロー紐付けの確認は削除の完了を待つ必要がないので同時に走らせる
+      const [link] = await Promise.all([
+        getDrawMatchByMatchId(id).catch(()=>null),
+        deleteMatch(id),
+      ]);
+      if (link) await clearDrawMatchLink(link.id).catch(()=>{});
+    } catch (e) {
+      console.error(e);
+      alert("削除に失敗しました。通信状況を確認して、もう一度お試しください。");
+    }
+    reload({ silent: true }); // 裏で最新化（失敗していた場合はここで元に戻る）
   }
 
   // 大会ごとの団体戦・個人戦の件数（大会名の一致で集計）
@@ -3344,9 +3369,16 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }
 
   async function handleDeleteTournament(id) {
-    await deleteTournament(id);
+    // ★試合の削除と同様、待たずに画面から消してから裏で通信する
     setConfirmDeleteTournament(null);
-    reload();
+    setTournaments(prev => prev.filter(t => t.id !== id));
+    try {
+      await deleteTournament(id);
+    } catch (e) {
+      console.error(e);
+      alert("削除に失敗しました。通信状況を確認して、もう一度お試しください。");
+    }
+    reload({ silent: true });
   }
 
   function openTrash() {
@@ -3858,7 +3890,15 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             <p style={{ fontSize:12,color:C.textSec,marginBottom:20 }}>ゴミ箱に移動します。24時間以内であれば元に戻せます。</p>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmDeleteTeam(null)}>キャンセル</button>
-              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ await deleteTeamMatch(confirmDeleteTeam); setConfirmDeleteTeam(null); reload(); }}>削除する</button>
+              <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{
+                const id = confirmDeleteTeam;
+                // ★試合の削除と同様、待たずに画面から消してから裏で通信する
+                setConfirmDeleteTeam(null);
+                setAllTeamMatches(prev => prev.filter(tm => tm.id !== id));
+                try { await deleteTeamMatch(id); }
+                catch(e){ console.error(e); alert("削除に失敗しました。通信状況を確認して、もう一度お試しください。"); }
+                reload({ silent: true });
+              }}>削除する</button>
             </div>
           </div>
         </Modal>
