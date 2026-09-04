@@ -13373,12 +13373,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const isMiss = lp?.result_type==="error"; // 相手ミスのときだけ③を出す
                 const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
                 return (
-                  <details
-                    open={playDetailOpen}
-                    onToggle={e=>setPlayDetailOpen(e.currentTarget.open)}
-                    style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}
-                  >
-                    <summary style={{ fontSize:11,color:C.textSec,fontWeight:700,cursor:"pointer" }}>＋ どんなプレー？（任意）</summary>
+                  <div style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
+                    {/* ★見出し行：左が説明、右が大きな開閉ボタン */}
+                    <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                      <span style={{ fontSize:12,color:C.textSec,fontWeight:700,flex:1 }}>＋ どんなプレー？（任意）</span>
+                      <button
+                        onClick={()=>setPlayDetailOpen(v=>!v)}
+                        style={{
+                          minWidth:96,minHeight:44,padding:"10px 14px",borderRadius:12,cursor:"pointer",
+                          border:`2px solid ${playDetailOpen?C.border:C.accent}`,
+                          background:playDetailOpen?"#f3f4f6":C.accent,
+                          color:playDetailOpen?C.textSec:C.white,
+                          fontSize:14,fontWeight:800,whiteSpace:"nowrap",
+                        }}
+                      >{playDetailOpen ? "▲ 閉じる" : "▼ 開く"}</button>
+                    </div>
+                    {playDetailOpen && (<>
                     <div style={{ marginTop:8,fontSize:10,color:"#5b8bc9" }}>対象：{detailParts.length>0?detailParts.join("・"):"（未選択）"}</div>
                     {/* ★①プレー内容 → ②フォア/バック → ③ミスの種類 の三段階。
                         「決めた」のときは③を表示せず、「相手ミス」のときは①からサーブを除く。 */}
@@ -13405,7 +13415,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                         })}
                       </div>
                     )}
-                  </details>
+                    </>)}
+                  </div>
                 );
               })()}
               {teamMatchId && (
