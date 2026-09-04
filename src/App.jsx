@@ -83,6 +83,11 @@ const getRateTierColor = (rate) => {
 const getResultLabel = (key) => RESULT_LABELS[key] ?? key ?? "";
 const getSideLabel   = (key) => SIDE_TYPES.find(s => s.key === key)?.label ?? key ?? "";
 const getMissLabel   = (key) => MISS_TYPES.find(m => m.key === key)?.label ?? key ?? "";
+// ★"プレー内容|フォアバック|ミスの種類" の組み合わせキーを表示用の文字列にする
+const missComboLabel = (key) => {
+  const [play, side, miss] = String(key).split("|");
+  return [play && getPlayLabel(play), side && getSideLabel(side), miss && getMissLabel(miss)].filter(Boolean).join("・");
+};
 const isWinnerResult = (result) => RESULT_IS_WINNER[result] ?? null;
 
 const C = {
@@ -558,6 +563,7 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
   const agg = {
     total: 0, winners: 0, errors: 0, plays: {}, playsWin: {}, playsErr: {},
     serveTotal: 0, serveFault: 0, receiveTotal: 0, receiveMiss: 0, matchesCounted: 0,
+    missTypes: {}, missTyped: 0, sideWin: {}, sideErr: {}, missCombos: {},
   };
   for (const m of fullMatches) {
     const s = playerStatsInMatch(m, playerName, mySchoolName);
@@ -569,6 +575,11 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
     for (const k in s.plays)    agg.plays[k]    = (agg.plays[k]    ?? 0) + s.plays[k];
     for (const k in s.playsWin) agg.playsWin[k] = (agg.playsWin[k] ?? 0) + s.playsWin[k];
     for (const k in s.playsErr) agg.playsErr[k] = (agg.playsErr[k] ?? 0) + s.playsErr[k];
+    agg.missTyped += s.missTyped ?? 0;
+    for (const k in (s.missTypes  ?? {})) agg.missTypes[k]  = (agg.missTypes[k]  ?? 0) + s.missTypes[k];
+    for (const k in (s.sideWin    ?? {})) agg.sideWin[k]    = (agg.sideWin[k]    ?? 0) + s.sideWin[k];
+    for (const k in (s.sideErr    ?? {})) agg.sideErr[k]    = (agg.sideErr[k]    ?? 0) + s.sideErr[k];
+    for (const k in (s.missCombos ?? {})) agg.missCombos[k] = (agg.missCombos[k] ?? 0) + s.missCombos[k];
   }
   return agg;
 }
@@ -2424,6 +2435,12 @@ function calcPlayerStats(match) {
       result[key] = {
         team: playerTeam, player_name: playerName, total: 0, winners: 0, errors: 0, plays: {}, results: {},
         playsWin: {}, playsErr: {}, // ★決めたプレイ／ミスしたプレイの内訳用
+        // ★ミスの種類（ネット／オーバー／チップ）と、フォア／バックの内訳。
+        //   ミスの種類は入力が任意なので、母数として missTyped（種類まで入力されたミスの件数）も持つ。
+        missTypes: {}, missTyped: 0,
+        sideWin: {}, sideErr: {},
+        // ★「プレー内容 × フォア/バック × ミスの種類」の組み合わせ（練習メニューに直結させるため）
+        missCombos: {},
         // ★1stサーブ確率・レシーブミス率用
         serveTotal: 0, serveFault: 0, receiveTotal: 0, receiveMiss: 0,
       };
@@ -2483,6 +2500,16 @@ function calcPlayerStats(match) {
       if (pt.play_type) {
         const bucket = pt.is_winner ? r.playsWin : r.playsErr;
         bucket[pt.play_type] = (bucket[pt.play_type] ?? 0) + 1;
+      }
+      if (pt.side_type) {
+        const sideBucket = pt.is_winner ? r.sideWin : r.sideErr;
+        sideBucket[pt.side_type] = (sideBucket[pt.side_type] ?? 0) + 1;
+      }
+      if (!pt.is_winner && pt.miss_type) {
+        r.missTypes[pt.miss_type] = (r.missTypes[pt.miss_type] ?? 0) + 1;
+        r.missTyped++;
+        const comboKey = [pt.play_type ?? "", pt.side_type ?? "", pt.miss_type].join("|");
+        r.missCombos[comboKey] = (r.missCombos[comboKey] ?? 0) + 1;
       }
     }
     for (const f of faults) {
@@ -10351,6 +10378,31 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
   const topPlaysErr = Object.entries(agg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,4);
   const maxPlayCount = Math.max(1, ...topPlaysWin.map(x=>x[1]), ...topPlaysErr.map(x=>x[1]));
 
+  // ★ミスの傾向（ネット／オーバー／チップ、フォア／バック、多い組み合わせ）
+  //   ミスの種類は入力が任意なので、母数は「種類まで入力されたミスの件数」を使う。
+  const missTypeRows = MISS_TYPES
+    .map(mt => [mt.label, agg.missTypes?.[mt.key] ?? 0])
+    .filter(([,n]) => n > 0);
+  const missSideRows = SIDE_TYPES
+    .map(sd => [sd.label, agg.sideErr?.[sd.key] ?? 0])
+    .filter(([,n]) => n > 0);
+  const missSideTotal = missSideRows.reduce((a,[,n]) => a + n, 0);
+  const topMissCombos = Object.entries(agg.missCombos ?? {}).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const hasMissDetail = (agg.missTyped ?? 0) > 0 || missSideTotal > 0;
+
+  // ミスの傾向カードで使う1行分の横棒
+  const MissRow = ({ label, count, total, max, color }) => (
+    <div style={{ display:"flex", alignItems:"center", fontSize:12, padding:"5px 0" }}>
+      <div style={{ width:76, color:C.text, fontWeight:700 }}>{label}</div>
+      <div style={{ flex:1, height:8, background:"#eef0f3", borderRadius:4, margin:"0 8px", overflow:"hidden" }}>
+        <div style={{ height:"100%", width:`${max>0?count/max*100:0}%`, background:color, borderRadius:4 }}/>
+      </div>
+      <div style={{ width:60, textAlign:"right", fontWeight:700, color:C.navy }}>
+        {count}回 {total>0?Math.round(count/total*100):0}%
+      </div>
+    </div>
+  );
+
   const sortedResults = [...resultMatches].sort((a,b)=> new Date(a.match_date)-new Date(b.match_date));
   const oldestM = sortedResults[0], newestM = sortedResults[sortedResults.length-1];
   const canShowGrowth = sortedResults.length >= 2 && oldestM.id !== newestM.id;
@@ -10532,6 +10584,53 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats }) {
                 ))}
               </div>
             </div>
+
+            {/* ★ミスの傾向（今回追加した「ミスの種類」と、これまで記録のみだった「フォア/バック」を集計） */}
+            {hasMissDetail && (
+              <div style={S.card}>
+                <div style={{ padding:14 }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:10 }}>⚠️ ミスの傾向</div>
+
+                  {missTypeRows.length>0 && (
+                    <>
+                      <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:4 }}>ミスの種類（全{agg.missTyped}回）</div>
+                      {missTypeRows.map(([label,count]) => (
+                        <MissRow key={label} label={label} count={count} total={agg.missTyped}
+                          max={Math.max(...missTypeRows.map(r=>r[1]))} color={C.red}/>
+                      ))}
+                    </>
+                  )}
+
+                  {missSideRows.length>0 && (
+                    <>
+                      <div style={{ fontSize:11, color:C.textSec, fontWeight:700, margin:"10px 0 4px" }}>フォア / バック</div>
+                      {missSideRows.map(([label,count]) => (
+                        <MissRow key={label} label={label} count={count} total={missSideTotal}
+                          max={Math.max(...missSideRows.map(r=>r[1]))} color="#8fb4dd"/>
+                      ))}
+                    </>
+                  )}
+
+                  {topMissCombos.length>0 && (
+                    <>
+                      <div style={{ fontSize:11, color:C.textSec, fontWeight:700, margin:"10px 0 4px" }}>多いミスの組み合わせ</div>
+                      {topMissCombos.map(([key,count],i) => (
+                        <div key={key} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, padding:"5px 0", borderBottom: i<topMissCombos.length-1?`1px solid ${C.border}`:"none" }}>
+                          <span style={{ fontSize:9, fontWeight:800, color:"#fff", background:C.navy, borderRadius:5, padding:"1px 5px" }}>{i+1}</span>
+                          <span style={{ flex:1, color:C.text }}>{missComboLabel(key)}</span>
+                          <b style={{ color:C.navy }}>{count}回</b>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {/* ★ミスの種類は入力が任意で、過去の試合には入っていないため、必ず母数を添える */}
+                  <div style={{ fontSize:9.5, color:"#9aa1ad", marginTop:8, lineHeight:1.5 }}>
+                    ※ミスの種類が入力された {agg.missTyped}/{agg.errors}件をもとに集計しています
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 変化した点 */}
             <div style={S.card}>
@@ -13953,6 +14052,33 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
   const winA   = allPts.filter(p=>p.scoring_team==="A"&&p.is_winner===true).length;
   const winB   = allPts.filter(p=>p.scoring_team==="B"&&p.is_winner===true).length;
 
+  // ★内訳を1行の横棒で表す小さな部品（ミスの種類・フォア/バック用）
+  function MiniBar({ label, count, max, total, color }) {
+    const pct = total > 0 ? Math.round(count / total * 100) : 0;
+    return (
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+        <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{label}</span>
+        <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0,width:52 }}>{count}回 {pct}%</span>
+        <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}>
+          <div style={{ width:`${max>0?Math.round(count/max*100):0}%`,height:"100%",background:color,borderRadius:3 }}/>
+        </div>
+      </div>
+    );
+  }
+  // ★内訳セクションの共通描画（ネット/オーバー/チップ、フォア/バック）
+  function Breakdown({ title, entries, total, color }) {
+    const rows = entries.filter(([,n]) => n > 0);
+    if (rows.length === 0) return null;
+    const max = Math.max(...rows.map(r => r[1]));
+    return (
+      <>
+        <div style={{ borderTop:`1px dashed ${C.border}`,margin:"8px 0" }}/>
+        <div style={{ fontSize:10,fontWeight:700,color:C.textSec,marginBottom:6 }}>{title}</div>
+        {rows.map(([label,n]) => <MiniBar key={label} label={label} count={n} max={max} total={total} color={color}/>)}
+      </>
+    );
+  }
+
   function Bar({ a, b, label }) {
     const max = Math.max(a, b, 1);
     const pctA = Math.round((a / max) * 100);
@@ -14087,6 +14213,13 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                             <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
                           </div>
                         ))}
+                        {/* ★フォア/バック別の得点（記録はしていたが今まで集計していなかった項目） */}
+                        <Breakdown
+                          title="フォア / バック別の得点"
+                          entries={SIDE_TYPES.map(sd => [sd.label, p.sideWin?.[sd.key] ?? 0])}
+                          total={Object.values(p.sideWin ?? {}).reduce((a,b)=>a+b,0)}
+                          color="#7bdba0"
+                        />
                       </div>
                     );
                   })()}
@@ -14105,6 +14238,24 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                             <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
                           </div>
                         ))}
+                        {/* ★ミスの種類（ネット／オーバー／チップ） */}
+                        <Breakdown
+                          title="ミスの種類"
+                          entries={MISS_TYPES.map(mt => [mt.label, p.missTypes?.[mt.key] ?? 0])}
+                          total={p.missTyped ?? 0}
+                          color="#f0a49c"
+                        />
+                        {/* ★フォア/バック別のミス */}
+                        <Breakdown
+                          title="フォア / バック別のミス"
+                          entries={SIDE_TYPES.map(sd => [sd.label, p.sideErr?.[sd.key] ?? 0])}
+                          total={Object.values(p.sideErr ?? {}).reduce((a,b)=>a+b,0)}
+                          color="#8fb4dd"
+                        />
+                        {/* ★ミスの種類は入力が任意なので、必ず母数を添える */}
+                        {(p.missTyped ?? 0) > 0 && (
+                          <div style={{ fontSize:9.5,color:"#9aa1ad",marginTop:6 }}>※ミスの種類が入力された {p.missTyped}/{p.errors}件をもとに集計</div>
+                        )}
                       </div>
                     );
                   })()}
