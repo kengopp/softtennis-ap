@@ -39,7 +39,7 @@ const PLAY_TYPES = [
   { key: "attack",   label: "アタック"  },
   { key: "shoot",    label: "シュート"  },
   { key: "lob",      label: "ロブ"      },
-  { key: "drop",     label: "ドロップ"  },
+  { key: "drop",     label: "ツイスト"  }, // ★旧「ドロップ」。過去データも同じキーなので表示だけ切り替わる
 ];
 
 // 結果（新規記録時の選択肢：決めた / 相手ミスの2択）
@@ -58,6 +58,16 @@ const SIDE_TYPES = [
   { key: "backhand",  label: "バック" },
 ];
 
+// ★ミスの種類（「相手ミス」のときだけ選ぶ third step）
+const MISS_TYPES = [
+  { key: "net",  label: "ネット"   },
+  { key: "over", label: "オーバー" },
+  { key: "chip", label: "チップ"   },
+];
+// ★ミス時は「サーブ」を選択肢から外す（サーブのミス＝ダブルフォルトで別に記録するため）
+const playTypesFor = (resultType) =>
+  resultType === "error" ? PLAY_TYPES.filter(p => p.key !== "serve") : PLAY_TYPES;
+
 // shot_typeキー（DB保存用：プレイ内容_結果 の組み合わせで生成）
 const buildShotKey = (play, result) => play && result ? `${play}_${result}` : play ?? result ?? null;
 
@@ -72,6 +82,7 @@ const getRateTierColor = (rate) => {
 };
 const getResultLabel = (key) => RESULT_LABELS[key] ?? key ?? "";
 const getSideLabel   = (key) => SIDE_TYPES.find(s => s.key === key)?.label ?? key ?? "";
+const getMissLabel   = (key) => MISS_TYPES.find(m => m.key === key)?.label ?? key ?? "";
 const isWinnerResult = (result) => RESULT_IS_WINNER[result] ?? null;
 
 const C = {
@@ -754,7 +765,7 @@ function rowToMatchFull(m, players, games, points, faults) {
       points: points.filter(pt => pt.game_id === g.id).map(pt => ({
         id: pt.id, game_id: pt.game_id, match_id: m.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name,
-        play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, result_type: pt.result_type ?? null,
+        play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, miss_type: pt.miss_type ?? null, result_type: pt.result_type ?? null,
         is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
         scored_at: pt.scored_at ?? null, // ★動画同期用：得点を記録した時刻
       })),
@@ -823,7 +834,7 @@ async function saveMatch(match) {
         id: pt.id, game_id: g.id, match_id: match.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name || null,
         shot_type: toShotType(pt.play_type, pt.result_type),
-        play_type: pt.play_type || null, side_type: pt.side_type || null, result_type: pt.result_type || null,
+        play_type: pt.play_type || null, side_type: pt.side_type || null, miss_type: pt.miss_type || null, result_type: pt.result_type || null,
         is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
         scored_at: pt.scored_at || null, // ★動画同期用：得点を記録した時刻
       }));
@@ -2707,7 +2718,7 @@ function buildLineText(match) {
 
 // CSV出力
 function buildCsv(match) {
-  const headers = ["試合日","大会名","何回戦","ゲーム番号","ファイナルゲーム","ポイント番号","得点チーム","チーム区分","選手名","所属","プレイ内容","フォア/バック","結果","チームA得点","チームB得点"];
+  const headers = ["試合日","大会名","何回戦","ゲーム番号","ファイナルゲーム","ポイント番号","得点チーム","チーム区分","選手名","所属","プレイ内容","フォア/バック","ミスの種類","結果","チームA得点","チームB得点"];
   const rows = [];
   for (const g of match.games) {
     for (const f of (g.faults ?? [])) {
@@ -2721,7 +2732,7 @@ function buildCsv(match) {
       const ptTeam = pt.is_winner ? pt.scoring_team : (pt.scoring_team==="A" ? "B" : pt.scoring_team==="B" ? "A" : null);
       const pl = match.players.find(p=>p.player_name===pt.player_name && p.team===ptTeam)
               ?? match.players.find(p=>p.player_name===pt.player_name);
-      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO",pt.point_number,pt.scoring_team,pt.scoring_team==="A"?"自チーム":"相手チーム",pt.player_name??"",pl?.club_name??"",pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):"",pt.score_a_after,pt.score_b_after]);
+      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO",pt.point_number,pt.scoring_team,pt.scoring_team==="A"?"自チーム":"相手チーム",pt.player_name??"",pl?.club_name??"",pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.miss_type?getMissLabel(pt.miss_type):"",pt.result_type?getResultLabel(pt.result_type):"",pt.score_a_after,pt.score_b_after]);
     }
   }
   const esc = v => { const s = String(v == null ? "" : v); if (s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0) { return '"' + s.split('"').join('""'  ) + '"'; } return s; };
@@ -2894,7 +2905,9 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   const [team,   setTeam]   = useState(point.scoring_team || "A");
   const [play,   setPlay]   = useState(point.play_type);
   const [side,   setSide]   = useState(point.side_type);
+  const [miss,   setMiss]   = useState(point.miss_type ?? null); // ★ミスの種類（相手ミスのときだけ）
   const [result, setResult] = useState(point.result_type);
+  const isMiss = result === "error";
   const [playerName, setPlayerName] = useState(point.player_name);
   // ★サーブの本数（0=1stイン／1=2ndイン／2=ダブルフォルト）。ラリーの開始状況を示すものなので、
   //   プレイ内容の種類に関わらず常に編集できるようにする。
@@ -2902,7 +2915,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 
   function handleSave(){
     const isWin = result ? isWinnerResult(result) : null;
-    onSave({ scoring_team:team, play_type:play, side_type:side, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
+    // 「決めた」に変更した場合、ミスの種類は保存しない
+    onSave({ scoring_team:team, play_type:play, side_type:side, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
   }
 
   return (
@@ -2919,9 +2933,9 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ内容</div>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>① プレイ内容</div>
           <div>
-            {PLAY_TYPES.map(p=>(
+            {playTypesFor(result).map(p=>(
               <span key={p.key} style={S.chip(play===p.key)} onClick={()=>setPlay(play===p.key?null:p.key)}>{p.label}</span>
             ))}
           </div>
@@ -2939,7 +2953,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>フォア / バック</div>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>② フォア / バック</div>
           <div>
             {SIDE_TYPES.map(s=>(
               <span key={s.key} style={S.chip(side===s.key)} onClick={()=>setSide(side===s.key?null:s.key)}>{s.label}</span>
@@ -2947,11 +2961,29 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           </div>
         </div>
 
+        {/* ★③ミスの種類は「相手ミス」を選んだときだけ表示する */}
+        {isMiss && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>③ ミスの種類</div>
+            <div>
+              {MISS_TYPES.map(m=>(
+                <span key={m.key} style={S.chip(miss===m.key)} onClick={()=>setMiss(miss===m.key?null:m.key)}>{m.label}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ marginBottom:12 }}>
           <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果</div>
           <div>
             {RESULT_TYPES.map(r=>(
-              <span key={r.key} style={S.chip(result===r.key)} onClick={()=>setResult(result===r.key?null:r.key)}>{r.label}</span>
+              <span key={r.key} style={S.chip(result===r.key)} onClick={()=>{
+                const next = result===r.key ? null : r.key;
+                setResult(next);
+                // ★表示されなくなる選択肢は解除しておく（決めた→③、ミス→サーブ）
+                if (next !== "error") setMiss(null);
+                if (next === "error" && play === "serve") setPlay(null);
+              }}>{r.label}</span>
             ))}
           </div>
         </div>
@@ -12507,6 +12539,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       player_name:playerName??null,
       play_type:selPlay??null,
       side_type:selSide??null,
+      miss_type:null, // ★ミスの種類は、得点を入れた後に「＋どんなプレー？」から追記する
       result_type:resultKey??null,
       is_winner:isWin,
       fault_count:fault, // ★このポイントの前に何回フォルトがあったか（0=1stイン、1=2ndイン、2=ダブルフォルト）
@@ -12605,7 +12638,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const g = match.games.find(gm=>gm.id===gameId);
     if(!g || g.points.length===0) return null;
     const lp = g.points[g.points.length-1];
-    const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
+    const isMiss = lp.result_type==="error"; // 相手ミスのときだけ③を出す
+    const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
     return (
       <div style={{ textAlign:"left",marginTop:14,paddingTop:14,borderTop:`1px solid ${C.border}` }}>
         <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:4 }}>最後の1点の詳細を追加（任意）</div>
@@ -12617,11 +12651,19 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           {RESULT_TYPES.map(r=>{ const isSel=lp.result_type===r.key; return <span key={r.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"result_type",r.key)}>{r.label}</span>; })}
         </div>
         <div style={{ marginBottom:8 }}>
-          {PLAY_TYPES.map(p=>{ const isSel=lp.play_type===p.key; return <span key={p.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"play_type",p.key)}>{p.label}</span>; })}
+          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>① プレー内容</div>
+          {playTypesFor(lp.result_type).map(p=>{ const isSel=lp.play_type===p.key; return <span key={p.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"play_type",p.key)}>{p.label}</span>; })}
         </div>
-        <div>
+        <div style={{ marginBottom: isMiss?8:0 }}>
+          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>② フォア / バック</div>
           {SIDE_TYPES.map(s=>{ const isSel=lp.side_type===s.key; return <span key={s.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"side_type",s.key)}>{s.label}</span>; })}
         </div>
+        {isMiss && (
+          <div>
+            <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
+            {MISS_TYPES.map(m=>{ const isSel=lp.miss_type===m.key; return <span key={m.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"miss_type",m.key)}>{m.label}</span>; })}
+          </div>
+        )}
       </div>
     );
   }
@@ -13075,7 +13117,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                             {pt.scoring_team==="A"?"A 得点":"B 得点"}
                           </span>
                           <span style={{ fontSize:11,flex:1,color:C.text }}>
-                            {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
+                            {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.miss_type?getMissLabel(pt.miss_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
                           </span>
                           <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
                           <span style={{ fontSize:14,color:C.textSec,flexShrink:0 }}>›</span>
@@ -13123,7 +13165,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           {addingPoint && (
             <PointEditModal
               mode="add"
-              point={{ scoring_team:"A", play_type:null, side_type:null, result_type:null, player_name:null }}
+              point={{ scoring_team:"A", play_type:null, side_type:null, miss_type:null, result_type:null, player_name:null }}
               players={allPlayers}
               teamALabel={teamALabel}
               teamBLabel={teamBLabel}
@@ -13226,23 +13268,37 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const hasLast = nonFaultPts.length>0;
                 if(!hasLast || scoreStep!==1) return null;
                 const lp=nonFaultPts[nonFaultPts.length-1];
-                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type)].filter(Boolean);
+                const isMiss = lp?.result_type==="error"; // 相手ミスのときだけ③を出す
+                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
                 return (
                   <details style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
                     <summary style={{ fontSize:11,color:C.textSec,fontWeight:700,cursor:"pointer" }}>＋ どんなプレー？（任意）</summary>
                     <div style={{ marginTop:8,fontSize:10,color:"#5b8bc9" }}>対象：{detailParts.length>0?detailParts.join("・"):"（未選択）"}</div>
-                    <div style={{ marginTop:8,marginBottom:4 }}>
-                      {PLAY_TYPES.map(p=>{
+                    {/* ★①プレー内容 → ②フォア/バック → ③ミスの種類 の三段階。
+                        「決めた」のときは③を表示せず、「相手ミス」のときは①からサーブを除く。 */}
+                    <div style={{ marginTop:10 }}>
+                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>① プレー内容</div>
+                      {playTypesFor(lp?.result_type).map(p=>{
                         const isSel = lp?.play_type===p.key;
                         return <span key={p.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("play_type",p.key)}>{p.label}</span>;
                       })}
                     </div>
-                    <div>
+                    <div style={{ marginTop:10 }}>
+                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>② フォア / バック</div>
                       {SIDE_TYPES.map(s=>{
                         const isSel = lp?.side_type===s.key;
                         return <span key={s.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("side_type",s.key)}>{s.label}</span>;
                       })}
                     </div>
+                    {isMiss && (
+                      <div style={{ marginTop:10 }}>
+                        <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
+                        {MISS_TYPES.map(m=>{
+                          const isSel = lp?.miss_type===m.key;
+                          return <span key={m.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("miss_type",m.key)}>{m.label}</span>;
+                        })}
+                      </div>
+                    )}
                   </details>
                 );
               })()}
@@ -13263,7 +13319,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                         {pt.scoring_team==="A"?teamALabel||"A":teamBLabel||"B"}
                       </span>
                       <span style={{ fontSize:11,flex:1,color:C.text }}>
-                        {[pt.player_name,pt.result_type?getResultLabel(pt.result_type):null,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null].filter(Boolean).join(" · ")||"—"}
+                        {[pt.player_name,pt.result_type?getResultLabel(pt.result_type):null,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.miss_type?getMissLabel(pt.miss_type):null].filter(Boolean).join(" · ")||"—"}
                       </span>
                       <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
                       <span style={{ fontSize:13,color:C.textSec }}>›</span>
@@ -13288,7 +13344,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
                   {g.points.map(pt=>(
-                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
+                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.miss_type?getMissLabel(pt.miss_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
                       <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
                     </div>
                   ))}
