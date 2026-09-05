@@ -58,6 +58,18 @@ const SIDE_TYPES = [
   { key: "backhand",  label: "バック" },
 ];
 
+// ★打球コース：立ち位置（正クロス／逆クロス）× 打ち方（引っ張り／流し）の4通り。
+//   「引っ張り」は打者から見て常に左方向、「流し」は右方向。
+//   そのため正クロスでは引っ張り＝クロス／流し＝ストレート、
+//   逆クロスでは引っ張り＝ストレート／流し＝クロスになる。
+//   from/to はボタンに描くコート図の座標（下＝自分側、上＝相手側、x: 0＝左, 100＝右）。
+const COURSE_TYPES = [
+  { key:"sei_pull",    pos:"正クロス", dir:"引っ張り", from:[74,86], to:[24,16] },
+  { key:"sei_nagashi", pos:"正クロス", dir:"流し",     from:[74,86], to:[80,16] },
+  { key:"gyaku_pull",  pos:"逆クロス", dir:"引っ張り", from:[26,86], to:[20,16] },
+  { key:"gyaku_nagashi",pos:"逆クロス",dir:"流し",     from:[26,86], to:[76,16] },
+];
+
 // ★ミスの種類（「相手ミス」のときだけ選ぶ third step）
 const MISS_TYPES = [
   { key: "net",  label: "ネット"   },
@@ -83,6 +95,10 @@ const getRateTierColor = (rate) => {
 const getResultLabel = (key) => RESULT_LABELS[key] ?? key ?? "";
 const getSideLabel   = (key) => SIDE_TYPES.find(s => s.key === key)?.label ?? key ?? "";
 const getMissLabel   = (key) => MISS_TYPES.find(m => m.key === key)?.label ?? key ?? "";
+const getCourseLabel = (key) => {
+  const c = COURSE_TYPES.find(c => c.key === key);
+  return c ? `${c.pos}・${c.dir}` : (key ?? "");
+};
 // ★"プレー内容|フォアバック|ミスの種類" の組み合わせキーを表示用の文字列にする
 const missComboLabel = (key) => {
   const [play, side, miss] = String(key).split("|");
@@ -564,6 +580,7 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
     total: 0, winners: 0, errors: 0, plays: {}, playsWin: {}, playsErr: {},
     serveTotal: 0, serveFault: 0, receiveTotal: 0, receiveMiss: 0, matchesCounted: 0,
     missTypes: {}, missTyped: 0, sideWin: {}, sideErr: {}, missCombos: {},
+    courseWin: {}, courseErr: {},
   };
   for (const m of fullMatches) {
     const s = playerStatsInMatch(m, playerName, mySchoolName);
@@ -580,6 +597,8 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
     for (const k in (s.sideWin    ?? {})) agg.sideWin[k]    = (agg.sideWin[k]    ?? 0) + s.sideWin[k];
     for (const k in (s.sideErr    ?? {})) agg.sideErr[k]    = (agg.sideErr[k]    ?? 0) + s.sideErr[k];
     for (const k in (s.missCombos ?? {})) agg.missCombos[k] = (agg.missCombos[k] ?? 0) + s.missCombos[k];
+    for (const k in (s.courseWin  ?? {})) agg.courseWin[k]  = (agg.courseWin[k]  ?? 0) + s.courseWin[k];
+    for (const k in (s.courseErr  ?? {})) agg.courseErr[k]  = (agg.courseErr[k]  ?? 0) + s.courseErr[k];
   }
   return agg;
 }
@@ -2439,6 +2458,8 @@ function calcPlayerStats(match) {
         //   ミスの種類は入力が任意なので、母数として missTyped（種類まで入力されたミスの件数）も持つ。
         missTypes: {}, missTyped: 0,
         sideWin: {}, sideErr: {},
+        // ★打球コース（正クロス／逆クロス × 引っ張り／流し）別の得点・ミス
+        courseWin: {}, courseErr: {},
         // ★「プレー内容 × フォア/バック × ミスの種類」の組み合わせ（練習メニューに直結させるため）
         missCombos: {},
         // ★1stサーブ確率・レシーブミス率用
@@ -2504,6 +2525,10 @@ function calcPlayerStats(match) {
       if (pt.side_type) {
         const sideBucket = pt.is_winner ? r.sideWin : r.sideErr;
         sideBucket[pt.side_type] = (sideBucket[pt.side_type] ?? 0) + 1;
+      }
+      if (pt.course_type) {
+        const courseBucket = pt.is_winner ? r.courseWin : r.courseErr;
+        courseBucket[pt.course_type] = (courseBucket[pt.course_type] ?? 0) + 1;
       }
       if (!pt.is_winner && pt.miss_type) {
         r.missTypes[pt.miss_type] = (r.missTypes[pt.miss_type] ?? 0) + 1;
@@ -2759,7 +2784,7 @@ function buildCsv(match) {
       const ptTeam = pt.is_winner ? pt.scoring_team : (pt.scoring_team==="A" ? "B" : pt.scoring_team==="B" ? "A" : null);
       const pl = match.players.find(p=>p.player_name===pt.player_name && p.team===ptTeam)
               ?? match.players.find(p=>p.player_name===pt.player_name);
-      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO",pt.point_number,pt.scoring_team,pt.scoring_team==="A"?"自チーム":"相手チーム",pt.player_name??"",pl?.club_name??"",pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.miss_type?getMissLabel(pt.miss_type):"",pt.result_type?getResultLabel(pt.result_type):"",pt.score_a_after,pt.score_b_after]);
+      rows.push([match.match_date,match.tournament_name??"",match.round??"",g.game_number,g.is_final?"YES":"NO",pt.point_number,pt.scoring_team,pt.scoring_team==="A"?"自チーム":"相手チーム",pt.player_name??"",pl?.club_name??"",pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.course_type?getCourseLabel(pt.course_type):"",pt.miss_type?getMissLabel(pt.miss_type):"",pt.result_type?getResultLabel(pt.result_type):"",pt.score_a_after,pt.score_b_after]);
     }
   }
   const esc = v => { const s = String(v == null ? "" : v); if (s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0) { return '"' + s.split('"').join('""'  ) + '"'; } return s; };
@@ -2933,6 +2958,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   const [play,   setPlay]   = useState(point.play_type);
   const [side,   setSide]   = useState(point.side_type);
   const [miss,   setMiss]   = useState(point.miss_type ?? null); // ★ミスの種類（相手ミスのときだけ）
+  const [course, setCourse] = useState(point.course_type ?? null); // ★打球コース
   const [result, setResult] = useState(point.result_type);
   const isMiss = result === "error";
   const [playerName, setPlayerName] = useState(point.player_name);
@@ -2943,7 +2969,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   function handleSave(){
     const isWin = result ? isWinnerResult(result) : null;
     // 「決めた」に変更した場合、ミスの種類は保存しない
-    onSave({ scoring_team:team, play_type:play, side_type:side, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
+    onSave({ scoring_team:team, play_type:play, side_type:side, course_type:course, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
   }
 
   return (
@@ -2988,10 +3014,15 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           </div>
         </div>
 
-        {/* ★③ミスの種類は「相手ミス」を選んだときだけ表示する */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>③ コース</div>
+          <CoursePicker value={course} onChange={setCourse}/>
+        </div>
+
+        {/* ★④ミスの種類は「相手ミス」を選んだときだけ表示する */}
         {isMiss && (
           <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>③ ミスの種類</div>
+            <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>④ ミスの種類</div>
             <div>
               {MISS_TYPES.map(m=>(
                 <span key={m.key} style={S.chip(miss===m.key)} onClick={()=>setMiss(miss===m.key?null:m.key)}>{m.label}</span>
@@ -10388,6 +10419,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
     .filter(([,n]) => n > 0);
   const missSideTotal = missSideRows.reduce((a,[,n]) => a + n, 0);
   const topMissCombos = Object.entries(agg.missCombos ?? {}).sort((a,b)=>b[1]-a[1]).slice(0,3);
+
+  // ★コース別の得点・ミス（正クロス／逆クロス × 引っ張り／流し）
+  const courseRows = COURSE_TYPES.map(ct => ({
+    key: ct.key, label: getCourseLabel(ct.key),
+    win: agg.courseWin?.[ct.key] ?? 0,
+    err: agg.courseErr?.[ct.key] ?? 0,
+  })).filter(r => r.win > 0 || r.err > 0);
+  const courseMax = Math.max(1, ...courseRows.map(r => Math.max(r.win, r.err)));
   const hasMissDetail = (agg.missTyped ?? 0) > 0 || missSideTotal > 0;
 
   // ミスの傾向カードで使う1行分の横棒
@@ -10590,6 +10629,39 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                 ))}
               </div>
             </div>
+
+            {/* ★コース別の得点・ミス（打った方向ごとの得意・不得意を見る） */}
+            {courseRows.length>0 && (
+              <div style={S.card}>
+                <div style={{ padding:14 }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:4 }}>🎯 コース別の得点・ミス</div>
+                  <div style={{ fontSize:10, color:C.textSec, marginBottom:8 }}>緑＝決めた／赤＝ミス</div>
+                  {courseRows.map(r => (
+                    <div key={r.key} style={{ marginBottom:8 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:11.5, fontWeight:700, color:C.text, marginBottom:3 }}>
+                        <span>{r.label}</span>
+                        <span style={{ color:C.textSec, fontWeight:400 }}>
+                          <b style={{ color:C.accent }}>{r.win}</b> / <b style={{ color:C.red }}>{r.err}</b>
+                        </span>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:4, marginBottom:2 }}>
+                        <div style={{ flex:1, height:7, background:"#eef0f3", borderRadius:4, overflow:"hidden" }}>
+                          <div style={{ width:`${r.win/courseMax*100}%`, height:"100%", background:C.accent }}/>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                        <div style={{ flex:1, height:7, background:"#eef0f3", borderRadius:4, overflow:"hidden" }}>
+                          <div style={{ width:`${r.err/courseMax*100}%`, height:"100%", background:C.red }}/>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize:9.5, color:"#9aa1ad", marginTop:6, lineHeight:1.5 }}>
+                    ※コースが入力されたポイントのみを集計しています
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ★ミスの傾向（今回追加した「ミスの種類」と、これまで記録のみだった「フォア/バック」を集計） */}
             {hasMissDetail && (
@@ -12649,7 +12721,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       player_name:playerName??null,
       play_type:selPlay??null,
       side_type:selSide??null,
-      miss_type:null, // ★ミスの種類は、得点を入れた後に「＋どんなプレー？」から追記する
+      course_type:null, // ★コース・ミスの種類は、得点を入れた後に「＋どんなプレー？」から追記する
+      miss_type:null,
       result_type:resultKey??null,
       is_winner:isWin,
       fault_count:fault, // ★このポイントの前に何回フォルトがあったか（0=1stイン、1=2ndイン、2=ダブルフォルト）
@@ -12749,7 +12822,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     if(!g || g.points.length===0) return null;
     const lp = g.points[g.points.length-1];
     const isMiss = lp.result_type==="error"; // 相手ミスのときだけ③を出す
-    const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
+    const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),lp.course_type&&getCourseLabel(lp.course_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
     return (
       <div style={{ textAlign:"left",marginTop:14,paddingTop:14,borderTop:`1px solid ${C.border}` }}>
         <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:4 }}>最後の1点の詳細を追加（任意）</div>
@@ -12764,13 +12837,17 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>① プレー内容</div>
           {playTypesFor(lp.result_type).map(p=>{ const isSel=lp.play_type===p.key; return <span key={p.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"play_type",p.key)}>{p.label}</span>; })}
         </div>
-        <div style={{ marginBottom: isMiss?8:0 }}>
+        <div style={{ marginBottom:8 }}>
           <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>② フォア / バック</div>
           {SIDE_TYPES.map(s=>{ const isSel=lp.side_type===s.key; return <span key={s.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"side_type",s.key)}>{s.label}</span>; })}
         </div>
+        <div style={{ marginBottom: isMiss?8:0 }}>
+          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ コース</div>
+          <CoursePicker value={lp.course_type ?? null} onChange={v=>updatePointDetail(gameId,"course_type",v)}/>
+        </div>
         {isMiss && (
           <div>
-            <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
+            <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>④ ミスの種類</div>
             {MISS_TYPES.map(m=>{ const isSel=lp.miss_type===m.key; return <span key={m.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"miss_type",m.key)}>{m.label}</span>; })}
           </div>
         )}
@@ -13227,7 +13304,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                             {pt.scoring_team==="A"?"A 得点":"B 得点"}
                           </span>
                           <span style={{ fontSize:11,flex:1,color:C.text }}>
-                            {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.miss_type?getMissLabel(pt.miss_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
+                            {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.course_type?getCourseLabel(pt.course_type):null,pt.miss_type?getMissLabel(pt.miss_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
                           </span>
                           <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
                           <span style={{ fontSize:14,color:C.textSec,flexShrink:0 }}>›</span>
@@ -13275,7 +13352,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           {addingPoint && (
             <PointEditModal
               mode="add"
-              point={{ scoring_team:"A", play_type:null, side_type:null, miss_type:null, result_type:null, player_name:null }}
+              point={{ scoring_team:"A", play_type:null, side_type:null, course_type:null, miss_type:null, result_type:null, player_name:null }}
               players={allPlayers}
               teamALabel={teamALabel}
               teamBLabel={teamBLabel}
@@ -13379,7 +13456,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 if(!hasLast || scoreStep!==1) return null;
                 const lp=nonFaultPts[nonFaultPts.length-1];
                 const isMiss = lp?.result_type==="error"; // 相手ミスのときだけ③を出す
-                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
+                const detailParts=[lp.player_name,lp.play_type&&getPlayLabel(lp.play_type),lp.result_type&&getResultLabel(lp.result_type),lp.side_type&&getSideLabel(lp.side_type),lp.course_type&&getCourseLabel(lp.course_type),isMiss&&lp.miss_type&&getMissLabel(lp.miss_type)].filter(Boolean);
                 return (
                   <div style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
                     {/* ★見出し行：左が説明、右が大きな開閉ボタン */}
@@ -13414,9 +13491,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                         return <span key={s.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("side_type",s.key)}>{s.label}</span>;
                       })}
                     </div>
+                    <div style={{ marginTop:10 }}>
+                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ コース</div>
+                      <CoursePicker value={lp?.course_type ?? null} onChange={v=>updateLastPoint("course_type",v)}/>
+                    </div>
                     {isMiss && (
                       <div style={{ marginTop:10 }}>
-                        <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
+                        <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>④ ミスの種類</div>
                         {MISS_TYPES.map(m=>{
                           const isSel = lp?.miss_type===m.key;
                           return <span key={m.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("miss_type",m.key)}>{m.label}</span>;
@@ -13444,7 +13525,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                         {pt.scoring_team==="A"?teamALabel||"A":teamBLabel||"B"}
                       </span>
                       <span style={{ fontSize:11,flex:1,color:C.text }}>
-                        {[pt.player_name,pt.result_type?getResultLabel(pt.result_type):null,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.miss_type?getMissLabel(pt.miss_type):null].filter(Boolean).join(" · ")||"—"}
+                        {[pt.player_name,pt.result_type?getResultLabel(pt.result_type):null,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.course_type?getCourseLabel(pt.course_type):null,pt.miss_type?getMissLabel(pt.miss_type):null].filter(Boolean).join(" · ")||"—"}
                       </span>
                       <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
                       <span style={{ fontSize:13,color:C.textSec }}>›</span>
@@ -13469,7 +13550,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
                   {g.points.map(pt=>(
-                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.miss_type?getMissLabel(pt.miss_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
+                    <div key={pt.id} title={[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):"",pt.side_type?getSideLabel(pt.side_type):"",pt.course_type?getCourseLabel(pt.course_type):"",pt.miss_type?getMissLabel(pt.miss_type):"",pt.result_type?getResultLabel(pt.result_type):""].filter(Boolean).join(" ")} style={{ width:22,height:22,borderRadius:5,background:pt.scoring_team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",cursor:"default" }}>
                       <span style={{ fontSize:9,color:C.white,fontWeight:700 }}>{pt.scoring_team}</span>
                     </div>
                   ))}
@@ -14246,6 +14327,13 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                           total={Object.values(p.sideWin ?? {}).reduce((a,b)=>a+b,0)}
                           color="#7bdba0"
                         />
+                        {/* ★コース別の得点 */}
+                        <Breakdown
+                          title="コース別の得点"
+                          entries={COURSE_TYPES.map(ct => [getCourseLabel(ct.key), p.courseWin?.[ct.key] ?? 0])}
+                          total={Object.values(p.courseWin ?? {}).reduce((a,b)=>a+b,0)}
+                          color="#7bdba0"
+                        />
                       </div>
                     );
                   })()}
@@ -14277,6 +14365,13 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                           entries={SIDE_TYPES.map(sd => [sd.label, p.sideErr?.[sd.key] ?? 0])}
                           total={Object.values(p.sideErr ?? {}).reduce((a,b)=>a+b,0)}
                           color="#8fb4dd"
+                        />
+                        {/* ★コース別のミス */}
+                        <Breakdown
+                          title="コース別のミス"
+                          entries={COURSE_TYPES.map(ct => [getCourseLabel(ct.key), p.courseErr?.[ct.key] ?? 0])}
+                          total={Object.values(p.courseErr ?? {}).reduce((a,b)=>a+b,0)}
+                          color="#f0a49c"
                         />
                         {/* ★ミスの種類は入力が任意なので、必ず母数を添える */}
                         {(p.missTyped ?? 0) > 0 && (
