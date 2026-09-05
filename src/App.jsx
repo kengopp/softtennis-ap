@@ -74,8 +74,10 @@ const COURSE_TYPES = [
 const MISS_TYPES = [
   { key: "net",  label: "ネット"   },
   { key: "over", label: "オーバー" },
-  { key: "chip", label: "チップ"   },
 ];
+// ★選択肢からは外したが、すでに記録済みのデータが「chip」のまま表示されないよう
+//   表示用のラベルだけ残しておく
+const RETIRED_MISS_LABELS = { chip: "チップ" };
 // ★ミス時は「サーブ」を選択肢から外す（サーブのミス＝ダブルフォルトで別に記録するため）
 const playTypesFor = (resultType) =>
   resultType === "error" ? PLAY_TYPES.filter(p => p.key !== "serve") : PLAY_TYPES;
@@ -94,7 +96,7 @@ const getRateTierColor = (rate) => {
 };
 const getResultLabel = (key) => RESULT_LABELS[key] ?? key ?? "";
 const getSideLabel   = (key) => SIDE_TYPES.find(s => s.key === key)?.label ?? key ?? "";
-const getMissLabel   = (key) => MISS_TYPES.find(m => m.key === key)?.label ?? key ?? "";
+const getMissLabel   = (key) => MISS_TYPES.find(m => m.key === key)?.label ?? RETIRED_MISS_LABELS[key] ?? key ?? "";
 const getCourseLabel = (key) => {
   const c = COURSE_TYPES.find(c => c.key === key);
   return c ? `${c.pos}・${c.dir}` : (key ?? "");
@@ -3062,15 +3064,10 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           </div>
         </div>
 
-        <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>③ コース</div>
-          <CoursePicker value={course} onChange={setCourse}/>
-        </div>
-
-        {/* ★④ミスの種類は「相手ミス」を選んだときだけ表示する */}
+        {/* ★③ミスの種類は「相手ミス」を選んだときだけ表示する。コースは入力の負担が大きいので最後に置く */}
         {isMiss && (
           <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>④ ミスの種類</div>
+            <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>③ ミスの種類</div>
             <div>
               {MISS_TYPES.map(m=>(
                 <span key={m.key} style={S.chip(miss===m.key)} onClick={()=>setMiss(miss===m.key?null:m.key)}>{m.label}</span>
@@ -3078,6 +3075,11 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
             </div>
           </div>
         )}
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>{isMiss ? "④" : "③"} コース</div>
+          <CoursePicker value={course} onChange={setCourse}/>
+        </div>
 
         <div style={{ marginBottom:12 }}>
           <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果</div>
@@ -12889,16 +12891,17 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>② フォア / バック</div>
           {SIDE_TYPES.map(s=>{ const isSel=lp.side_type===s.key; return <span key={s.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"side_type",s.key)}>{s.label}</span>; })}
         </div>
-        <div style={{ marginBottom: isMiss?8:0 }}>
-          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ コース</div>
-          <CoursePicker value={lp.course_type ?? null} onChange={v=>updatePointDetail(gameId,"course_type",v)}/>
-        </div>
+        {/* ★コースまで入力するのは負担が大きいという声があったため、コースは最後に置く */}
         {isMiss && (
-          <div>
-            <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>④ ミスの種類</div>
+          <div style={{ marginBottom:8 }}>
+            <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
             {MISS_TYPES.map(m=>{ const isSel=lp.miss_type===m.key; return <span key={m.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"miss_type",m.key)}>{m.label}</span>; })}
           </div>
         )}
+        <div>
+          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>{isMiss ? "④" : "③"} コース</div>
+          <CoursePicker value={lp.course_type ?? null} onChange={v=>updatePointDetail(gameId,"course_type",v)}/>
+        </div>
       </div>
     );
   }
@@ -13523,8 +13526,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     </div>
                     {playDetailOpen && (<>
                     <div style={{ marginTop:8,fontSize:10,color:"#5b8bc9" }}>対象：{detailParts.length>0?detailParts.join("・"):"（未選択）"}</div>
-                    {/* ★①プレー内容 → ②フォア/バック → ③ミスの種類 の三段階。
-                        「決めた」のときは③を表示せず、「相手ミス」のときは①からサーブを除く。 */}
+                    {/* ★①プレー内容 → ②フォア/バック → ③ミスの種類 → ④コース の順。
+                        「決めた」のときはミスの種類を表示せず、「相手ミス」のときは①からサーブを除く。
+                        コースは入力の負担が大きいという声があったため、いちばん最後に置いている。 */}
                     <div style={{ marginTop:10 }}>
                       <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>① プレー内容</div>
                       {playTypesFor(lp?.result_type).map(p=>{
@@ -13539,19 +13543,20 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                         return <span key={s.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("side_type",s.key)}>{s.label}</span>;
                       })}
                     </div>
-                    <div style={{ marginTop:10 }}>
-                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ コース</div>
-                      <CoursePicker value={lp?.course_type ?? null} onChange={v=>updateLastPoint("course_type",v)}/>
-                    </div>
+                    {/* ★コースまで入力するのは負担が大きいという声があったため、コースは最後に置く */}
                     {isMiss && (
                       <div style={{ marginTop:10 }}>
-                        <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>④ ミスの種類</div>
+                        <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
                         {MISS_TYPES.map(m=>{
                           const isSel = lp?.miss_type===m.key;
                           return <span key={m.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("miss_type",m.key)}>{m.label}</span>;
                         })}
                       </div>
                     )}
+                    <div style={{ marginTop:10 }}>
+                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>{isMiss ? "④" : "③"} コース</div>
+                      <CoursePicker value={lp?.course_type ?? null} onChange={v=>updateLastPoint("course_type",v)}/>
+                    </div>
                     </>)}
                   </div>
                 );
