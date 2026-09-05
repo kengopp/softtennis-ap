@@ -795,7 +795,7 @@ function rowToMatchFull(m, players, games, points, faults) {
       points: points.filter(pt => pt.game_id === g.id).map(pt => ({
         id: pt.id, game_id: pt.game_id, match_id: m.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name,
-        play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, miss_type: pt.miss_type ?? null, result_type: pt.result_type ?? null,
+        play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, course_type: pt.course_type ?? null, miss_type: pt.miss_type ?? null, result_type: pt.result_type ?? null,
         is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
         scored_at: pt.scored_at ?? null, // ★動画同期用：得点を記録した時刻
       })),
@@ -864,7 +864,7 @@ async function saveMatch(match) {
         id: pt.id, game_id: g.id, match_id: match.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name || null,
         shot_type: toShotType(pt.play_type, pt.result_type),
-        play_type: pt.play_type || null, side_type: pt.side_type || null, miss_type: pt.miss_type || null, result_type: pt.result_type || null,
+        play_type: pt.play_type || null, side_type: pt.side_type || null, course_type: pt.course_type || null, miss_type: pt.miss_type || null, result_type: pt.result_type || null,
         is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
         scored_at: pt.scored_at || null, // ★動画同期用：得点を記録した時刻
       }));
@@ -2770,7 +2770,7 @@ function buildLineText(match) {
 
 // CSV出力
 function buildCsv(match) {
-  const headers = ["試合日","大会名","何回戦","ゲーム番号","ファイナルゲーム","ポイント番号","得点チーム","チーム区分","選手名","所属","プレイ内容","フォア/バック","ミスの種類","結果","チームA得点","チームB得点"];
+  const headers = ["試合日","大会名","何回戦","ゲーム番号","ファイナルゲーム","ポイント番号","得点チーム","チーム区分","選手名","所属","プレイ内容","フォア/バック","コース","ミスの種類","結果","チームA得点","チームB得点"];
   const rows = [];
   for (const g of match.games) {
     for (const f of (g.faults ?? [])) {
@@ -2818,6 +2818,54 @@ const S = {
 // ============================================================
 // 共通コンポーネント
 // ============================================================
+// ★打球コースの選択ボタン。小さなコート図の上に打球ラインを描いて、
+//   「どこからどこへ打ったか」が一目で分かるようにしている。
+//   記録タブ・ゲーム終了時の詳細入力・ポイント修正モーダルの3か所で共用する。
+function CourseCourt({ course, selected }) {
+  const col = selected ? C.accent : C.navy;
+  const mid = `arrow_${course.key}_${selected ? "s" : "n"}`;
+  return (
+    <svg viewBox="0 0 100 100" width="100%" height="66" style={{ display:"block" }}>
+      <rect x="8" y="8" width="84" height="84" rx="3" fill="#f7f9fb" stroke="#c9d2dd" strokeWidth="1.5"/>
+      <line x1="8" y1="50" x2="92" y2="50" stroke="#8d9aa9" strokeWidth="2.5"/>
+      <line x1="50" y1="8" x2="50" y2="92" stroke="#dde3ea" strokeWidth="1"/>
+      <defs>
+        <marker id={mid} markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+          <path d="M0,0 L5,2.5 L0,5 z" fill={col}/>
+        </marker>
+      </defs>
+      <line x1={course.from[0]} y1={course.from[1]} x2={course.to[0]} y2={course.to[1]}
+        stroke={col} strokeWidth="4" strokeLinecap="round" markerEnd={`url(#${mid})`}/>
+      <circle cx={course.from[0]} cy={course.from[1]} r="4.5" fill={col}/>
+    </svg>
+  );
+}
+
+function CoursePicker({ value, onChange }) {
+  const row = (pos) => (
+    <>
+      <div style={{ fontSize:10.5, fontWeight:800, color:C.navy, margin:"8px 0 5px" }}>{pos} から</div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+        {COURSE_TYPES.filter(c => c.pos === pos).map(c => {
+          const sel = value === c.key;
+          return (
+            <div key={c.key}
+              onClick={()=>onChange(sel ? null : c.key)}
+              style={{
+                border:`2px solid ${sel?C.accent:C.border}`, background:sel?C.accentL:C.white,
+                borderRadius:12, padding:"8px 6px 6px", cursor:"pointer", textAlign:"center", userSelect:"none",
+              }}>
+              <CourseCourt course={c} selected={sel}/>
+              <div style={{ fontSize:11, fontWeight:800, color:C.navy, marginTop:4 }}>{c.dir}</div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+  return <div>{row("正クロス")}{row("逆クロス")}</div>;
+}
+
 // ★モーダル表示中に背景（body）がスクロールしてしまうのを防ぐ（主にiOSで発生する不具合対策）
 function useBodyScrollLock(locked) {
   useEffect(() => {
