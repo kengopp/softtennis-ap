@@ -70,6 +70,10 @@ const COURSE_TYPES = [
   { key:"gyaku_nagashi",pos:"逆クロス",dir:"流し",     from:[26,86], to:[76,16] },
 ];
 
+// ★コース分析のグラフで使う色（青＝引っ張り／黄＝流し）
+const COURSE_PULL_COLOR    = "#5b8bc9";
+const COURSE_NAGASHI_COLOR = "#e0a63a";
+
 // ★ミスの種類（「相手ミス」のときだけ選ぶ third step）
 const MISS_TYPES = [
   { key: "net",  label: "ネット"   },
@@ -10470,13 +10474,41 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
   const missSideTotal = missSideRows.reduce((a,[,n]) => a + n, 0);
   const topMissCombos = Object.entries(agg.missCombos ?? {}).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
-  // ★コース別の得点・ミス（正クロス／逆クロス × 引っ張り／流し）
-  const courseRows = COURSE_TYPES.map(ct => ({
-    key: ct.key, label: getCourseLabel(ct.key),
-    win: agg.courseWin?.[ct.key] ?? 0,
-    err: agg.courseErr?.[ct.key] ?? 0,
-  })).filter(r => r.win > 0 || r.err > 0);
-  const courseMax = Math.max(1, ...courseRows.map(r => Math.max(r.win, r.err)));
+  // ★コース分析（① 引っ張り/流し → ② 立ち位置ごとの引っ張り/流し → ③ コース別の決めた/ミス）
+  const courseStats = useMemo(() => {
+    const cell = (key) => {
+      const win = agg.courseWin?.[key] ?? 0;
+      const err = agg.courseErr?.[key] ?? 0;
+      return { key, label: getCourseLabel(key), win, err, total: win + err };
+    };
+    const byKey = {};
+    COURSE_TYPES.forEach(ct => { byKey[ct.key] = cell(ct.key); });
+    const all = COURSE_TYPES.reduce((a, ct) => a + byKey[ct.key].total, 0);
+
+    // ① 立ち位置に関係なく、引っ張り／流しのどちらを多く打っているか
+    const pull = byKey.sei_pull.total + byKey.gyaku_pull.total;
+    const nagashi = byKey.sei_nagashi.total + byKey.gyaku_nagashi.total;
+
+    // ② 正クロス時・逆クロス時それぞれの中での引っ張り／流し
+    const positions = [
+      { pos:"正クロス", pullCell: byKey.sei_pull,   nagaCell: byKey.sei_nagashi   },
+      { pos:"逆クロス", pullCell: byKey.gyaku_pull, nagaCell: byKey.gyaku_nagashi },
+    ].map(p => ({ ...p, total: p.pullCell.total + p.nagaCell.total }));
+
+    // ③ 4コースそれぞれの決めた／ミス
+    const rows = COURSE_TYPES.map(ct => byKey[ct.key]);
+
+    // 気づきの一文（本数が少ないと割合が極端に出るため3本以上のコースだけを対象にする）
+    let best = null, worst = null;
+    rows.forEach(r => {
+      if (r.total < 3) return;
+      const rate = r.win / r.total;
+      if (!best  || rate > best.rate)  best  = { ...r, rate };
+      if (!worst || rate < worst.rate) worst = { ...r, rate };
+    });
+
+    return { all, pull, nagashi, positions, rows, best, worst };
+  }, [agg]);
   const hasMissDetail = (agg.missTyped ?? 0) > 0 || missSideTotal > 0;
 
   // ミスの傾向カードで使う1行分の横棒
@@ -10680,34 +10712,122 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
               </div>
             </div>
 
-            {/* ★コース別の得点・ミス（打った方向ごとの得意・不得意を見る） */}
-            {courseRows.length>0 && (
+            {/* ★コース分析：①引っ張り/流し → ②立ち位置ごと → ③コース別の決めた/ミス と、
+                だんだん細かく見ていく構成。本数は割合より大きな文字にして読み取りやすくしている。 */}
+            {courseStats.all > 0 && (
               <div style={S.card}>
                 <div style={{ padding:14 }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:4 }}>🎯 コース別の得点・ミス</div>
-                  <div style={{ fontSize:10, color:C.textSec, marginBottom:8 }}>緑＝決めた／赤＝ミス</div>
-                  {courseRows.map(r => (
-                    <div key={r.key} style={{ marginBottom:8 }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:11.5, fontWeight:700, color:C.text, marginBottom:3 }}>
-                        <span>{r.label}</span>
-                        <span style={{ color:C.textSec, fontWeight:400 }}>
-                          <b style={{ color:C.accent }}>{r.win}</b> / <b style={{ color:C.red }}>{r.err}</b>
-                        </span>
+                  <div style={{ fontSize:13, fontWeight:800, color:C.navy }}>🎯 コース分析</div>
+                  <div style={{ fontSize:10, color:C.textSec, margin:"3px 0 12px" }}>コースが入力されたポイントのみを集計</div>
+
+                  {/* ① 引っ張り / 流し */}
+                  <div style={{ fontSize:11.5, fontWeight:800, color:C.navy, marginBottom:2 }}>① 引っ張り / 流し</div>
+                  <div style={{ fontSize:11.5, color:C.textSec, marginBottom:9 }}>
+                    全<b style={{ fontSize:13, fontWeight:800, color:C.text }}>{courseStats.all}</b>本
+                    （引っ張り <b style={{ fontSize:13, fontWeight:800, color:C.text }}>{courseStats.pull}</b>本
+                    {" / "}流し <b style={{ fontSize:13, fontWeight:800, color:C.text }}>{courseStats.nagashi}</b>本）
+                  </div>
+                  <div style={{ display:"flex", height:34, borderRadius:8, overflow:"hidden", background:"#eef0f3" }}>
+                    {courseStats.pull>0 && (
+                      <div style={{ width:`${courseStats.pull/courseStats.all*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11.5, fontWeight:800, color:C.white }}>
+                        {Math.round(courseStats.pull/courseStats.all*100)}%
                       </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:4, marginBottom:2 }}>
-                        <div style={{ flex:1, height:7, background:"#eef0f3", borderRadius:4, overflow:"hidden" }}>
-                          <div style={{ width:`${r.win/courseMax*100}%`, height:"100%", background:C.accent }}/>
+                    )}
+                    {courseStats.nagashi>0 && (
+                      <div style={{ width:`${courseStats.nagashi/courseStats.all*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11.5, fontWeight:800, color:C.white }}>
+                        {Math.round(courseStats.nagashi/courseStats.all*100)}%
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.textSec, marginTop:5 }}>
+                    <span>引っ張り</span><span>流し</span>
+                  </div>
+
+                  {/* ② 立ち位置ごとの 引っ張り / 流し */}
+                  <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+                    <div style={{ fontSize:11.5, fontWeight:800, color:C.navy, marginBottom:2 }}>② 立ち位置ごとの 引っ張り / 流し</div>
+                    <div style={{ fontSize:11.5, color:C.textSec, marginBottom:9 }}>正クロス・逆クロスそれぞれの中での割合</div>
+                    {courseStats.positions.map(p => (
+                      <div key={p.pos} style={{ marginTop:12 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:11.5, fontWeight:700, color:C.text, marginBottom:5 }}>
+                          <span>{p.pos}時</span>
+                          {p.total>0
+                            ? <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}><b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{p.total}</b>本</span>
+                            : <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}>記録なし</span>}
                         </div>
+                        {p.total>0 && (
+                          <>
+                            <div style={{ display:"flex", height:22, borderRadius:6, overflow:"hidden", background:"#eef0f3" }}>
+                              {p.pullCell.total>0 && (
+                                <div style={{ width:`${p.pullCell.total/p.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                  {Math.round(p.pullCell.total/p.total*100)}%
+                                </div>
+                              )}
+                              {p.nagaCell.total>0 && (
+                                <div style={{ width:`${p.nagaCell.total/p.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                  {Math.round(p.nagaCell.total/p.total*100)}%
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.textSec, marginTop:5 }}>
+                              <span>引っ張り <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{p.pullCell.total}</b>本</span>
+                              <span>流し <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{p.nagaCell.total}</b>本</span>
+                            </div>
+                          </>
+                        )}
                       </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                        <div style={{ flex:1, height:7, background:"#eef0f3", borderRadius:4, overflow:"hidden" }}>
-                          <div style={{ width:`${r.err/courseMax*100}%`, height:"100%", background:C.red }}/>
+                    ))}
+                  </div>
+
+                  {/* ③ コース別の 決めた / ミス */}
+                  <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+                    <div style={{ fontSize:11.5, fontWeight:800, color:C.navy, marginBottom:2 }}>③ コース別の 決めた / ミス</div>
+                    <div style={{ fontSize:11.5, color:C.textSec, marginBottom:9 }}>4コースそれぞれの中での割合</div>
+                    {courseStats.rows.map(r => (
+                      <div key={r.key} style={{ marginBottom:11 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:11.5, fontWeight:700, color:C.text, marginBottom:4 }}>
+                          <span>{r.label}</span>
+                          {r.total>0
+                            ? <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}>
+                                <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{r.total}</b>本（全体の{Math.round(r.total/courseStats.all*100)}%）
+                              </span>
+                            : <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}>記録なし</span>}
                         </div>
+                        {r.total>0 && (
+                          <>
+                            <div style={{ display:"flex", height:20, borderRadius:5, overflow:"hidden", background:"#eef0f3" }}>
+                              {r.win>0 && (
+                                <div style={{ width:`${r.win/r.total*100}%`, background:C.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                  {Math.round(r.win/r.total*100)}%
+                                </div>
+                              )}
+                              {r.err>0 && (
+                                <div style={{ width:`${r.err/r.total*100}%`, background:C.red, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                  {Math.round(r.err/r.total*100)}%
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.textSec, marginTop:5 }}>
+                              <span>決めた <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{r.win}</b>本</span>
+                              <span>ミス <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{r.err}</b>本</span>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    </div>
-                  ))}
-                  <div style={{ fontSize:9.5, color:"#9aa1ad", marginTop:6, lineHeight:1.5 }}>
-                    ※コースが入力されたポイントのみを集計しています
+                    ))}
+                  </div>
+
+                  {/* 気づき（本数が少ないと割合が極端に出るため、3本以上のコースだけを対象にしている） */}
+                  <div style={{ background:"#f7f9fc", borderLeft:`3px solid ${C.navy}`, borderRadius:6, padding:"8px 10px", fontSize:11, lineHeight:1.65, marginTop:12 }}>
+                    {courseStats.best ? (
+                      <>
+                        よく決まっているのは<b>{courseStats.best.label}</b>（決定率{Math.round(courseStats.best.rate*100)}%・{courseStats.best.total}本）。<br/>
+                        苦しいのは<b>{courseStats.worst.label}</b>（決定率{Math.round(courseStats.worst.rate*100)}%・{courseStats.worst.total}本）。
+                      </>
+                    ) : "まだ本数が少なく、傾向は出ていません。"}
+                  </div>
+                  <div style={{ fontSize:9.5, color:"#9aa1ad", marginTop:8, lineHeight:1.5 }}>
+                    ※コースが入力された{courseStats.all}本をもとに集計。3本未満のコースは上のコメントの対象から外しています。
                   </div>
                 </div>
               </div>
