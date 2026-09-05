@@ -10475,7 +10475,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
   const topMissCombos = Object.entries(agg.missCombos ?? {}).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
   // ★コース分析（① 引っ張り/流し → ② 立ち位置ごとの引っ張り/流し → ③ コース別の決めた/ミス）
-  const courseStats = useMemo(() => {
+  const courseStats = (() => {
     const cell = (key) => {
       const win = agg.courseWin?.[key] ?? 0;
       const err = agg.courseErr?.[key] ?? 0;
@@ -10508,7 +10508,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
     });
 
     return { all, pull, nagashi, positions, rows, best, worst };
-  }, [agg]);
+  })();
   const hasMissDetail = (agg.missTyped ?? 0) > 0 || missSideTotal > 0;
 
   // ミスの傾向カードで使う1行分の横棒
