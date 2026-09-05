@@ -13516,10 +13516,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       <button
                         onClick={()=>setPlayDetailOpen(v=>!v)}
                         style={{
+                          // ★開く／閉じるで色を変えず、白黒（グレー）で統一する
                           minWidth:96,minHeight:44,padding:"10px 14px",borderRadius:12,cursor:"pointer",
-                          border:`2px solid ${playDetailOpen?C.border:C.accent}`,
-                          background:playDetailOpen?"#f3f4f6":C.accent,
-                          color:playDetailOpen?C.textSec:C.white,
+                          border:`2px solid ${C.border}`,
+                          background:"#f3f4f6",
+                          color:C.textSec,
                           fontSize:14,fontWeight:800,whiteSpace:"nowrap",
                         }}
                       >{playDetailOpen ? "▲ 閉じる" : "▼ 開く"}</button>
