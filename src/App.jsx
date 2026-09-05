@@ -2592,25 +2592,6 @@ function calcPlayerStats(match) {
   return Object.values(result);
 }
 
-function calcAutoComment(stats, team) {
-  const comments = [];
-  for (const p of stats.filter(s => s.team === team)) {
-    const topPlay   = Object.entries(p.plays).filter(([k])=>k!=="fault").sort((a,b)=>b[1]-a[1])[0];
-    const topResult = Object.entries(p.results).sort((a,b)=>b[1]-a[1])[0];
-    if (topPlay && p.winners > 0) {
-      const pct = Math.round((p.plays[topPlay[0]] ?? 0) / p.total * 100);
-      comments.push({ type: "strength", player: p.player_name, text: `${getPlayLabel(topPlay[0])}が全ポイントの${pct}%を占める主な得点パターン。` });
-    }
-    if (p.errors > 0 && topResult && !isWinnerResult(topResult[0])) {
-      const pct = Math.round(topResult[1] / (p.errors || 1) * 100);
-      comments.push({ type: "weakness", player: p.player_name, text: `${getResultLabel(topResult[0])}による失点が${pct}%。重点的に改善が必要。` });
-    }
-    const df = p.plays["fault"] ?? 0;
-    if (df >= 2) comments.push({ type: "warning", player: p.player_name, text: `1stフォルト${df}回。サーブの安定が課題。` });
-  }
-  return comments;
-}
-
 // ============================================================
 // ★試合サマリー／AI総評／改善優先順位（自チーム=A視点で集計）
 // ============================================================
@@ -14314,7 +14295,6 @@ function MatchSummaryPanel({ match }) {
 function StatsTab({ match, onDownloadCsv, onShareLine }) {
   const [teamFilter, setTeamFilter] = useState("A");
   const stats    = calcPlayerStats(match);
-  const comments = calcAutoComment(stats, teamFilter);
   // ★修正: teamFilterで絞る（Bも正しく表示）
   const filtered = stats.filter(s => s.team === teamFilter);
 
@@ -14561,18 +14541,6 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         );
       })}
 
-
-      {/* 自動コメント */}
-      {comments.length>0&&(
-        <div style={{ marginBottom:16 }}>
-          {comments.map((c,i)=>(
-            <div key={i} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
-              <div style={{ fontSize:11,fontWeight:700,color:C.textSec,marginBottom:3 }}>{c.type==="strength"?"💪 強み":"⚠️ 課題"} — {c.player}</div>
-              <p style={{ fontSize:12,color:C.navy,lineHeight:1.6 }}>{c.text}</p>
-            </div>
-          ))}
-        </div>
-      )}
 
       <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
         <button style={S.btn("#06c755")} onClick={onShareLine}>💬 LINEで結果を共有</button>
