@@ -13713,12 +13713,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   </div>
                 );
               })()}
-              {teamMatchId && (
-                <>
+              <>
                   <button style={{ width:"100%",padding:11,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setSuspendConfirm(true)}>⏸ 中断</button>
                   <button style={{ width:"100%",padding:11,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setAbandonConfirm(true)}>⏹ 途中終了</button>
-                </>
-              )}
+              </>
 
               {/* 直近記録（タップで編集・削除） */}
               {currentGame.points.length>0&&(
