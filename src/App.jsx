@@ -12757,6 +12757,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
   const [abandonConfirm, setAbandonConfirm] = useState(false); // 途中終了確認ダイアログ
   const [undoConfirm, setUndoConfirm] = useState(false); // 1点前に戻す確認ダイアログ
+  const [gameOverUndoConfirm, setGameOverUndoConfirm] = useState(false); // ゲーム終了直後の「1点前に戻す」確認ダイアログ
   const [resetConfirm, setResetConfirm] = useState(false); // スコアリセット確認ダイアログ
 
   // ★オフライン対応：保存処理
@@ -13064,6 +13065,23 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const last=newPts[newPts.length-1];
     const updG={...cg,points:newPts,score_a:last?.score_a_after??0,score_b:last?.score_b_after??0,winner_team:null};
     persist({...match,games:match.games.map(g=>g.id===cg.id?updG:g)});
+    setFault(0);
+  }
+
+  // ★ゲーム終了直後（「第Nゲーム終了！」画面）に、その決着点だけを取り消して試合を続けられるようにする。
+  //   通常のundo()はcurrentGame（勝者未確定のゲーム）にしか使えないため、
+  //   すでにwinner_teamが確定した直後のゲームを対象にする専用処理を用意する。
+  function undoGameEndingPoint(gameId, winner){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g || g.points.length===0) return;
+    const newPts = g.points.slice(0,-1);
+    const last = newPts[newPts.length-1];
+    const updG = { ...g, points:newPts, score_a:last?.score_a_after??0, score_b:last?.score_b_after??0, winner_team:null };
+    const newMA = match.match_score_a - (winner==="A"?1:0);
+    const newMB = match.match_score_b - (winner==="B"?1:0);
+    persist({ ...match, games: match.games.map(gm=>gm.id===gameId?updG:gm), match_score_a:newMA, match_score_b:newMB });
+    setModal(null);
+    resetSel();
     setFault(0);
   }
 
@@ -13611,7 +13629,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                           {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
                           <button disabled={leftDisabled} style={{ height:70,background:isYounger?"#2ecc71":"#f97316",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:leftDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(249,115,22,0.35)",opacity:leftDisabled?0.35:1 }} onClick={()=>{ if(!leftDisabled){ if(fault===2){ addPoint(leftTeam);} else { wizardChooseTeam(leftTeam);} } }}>
                             <span style={{ fontSize:22,fontWeight:800 }}>+1</span>
-                            <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||"自チーム"}</span>
+                            <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||(isYounger?"自チーム":"相手")}</span>
                           </button>
                           {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
                           <button disabled={rightDisabled} style={{ height:70,background:isYounger?"#f97316":"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:rightDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)",opacity:rightDisabled?0.35:1 }} onClick={()=>{ if(!rightDisabled){ if(fault===2){ addPoint(rightTeam);} else { wizardChooseTeam(rightTeam);} } }}>
@@ -13810,6 +13828,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
             {renderPointDetailEditor(modal.gameId)}
             <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:14 }} onClick={()=>{setModal(null);startNewGame();}}>次のゲームへ</button>
+            <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setGameOverUndoConfirm(true)}>↩ 1点前に戻す</button>
           </div>
         </Modal>
       )}
@@ -13884,6 +13903,20 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setUndoConfirm(false)}>キャンセル</button>
               <button style={{ padding:11, background:C.navy, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>{ setUndoConfirm(false); undo(); }}>はい</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {gameOverUndoConfirm && modal?.type==="gameOver" && (
+        <Modal onClose={()=>setGameOverUndoConfirm(false)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40, marginBottom:8 }}>↩️</div>
+            <h3 style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>1点前に戻しますか？</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:20 }}>このゲームを決めた1点が取り消され、ゲームの途中から続きを記録できます。</p>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>setGameOverUndoConfirm(false)}>キャンセル</button>
+              <button style={{ padding:11, background:C.navy, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>{ const gid=modal.gameId, w=modal.winner; setGameOverUndoConfirm(false); undoGameEndingPoint(gid, w); }}>はい</button>
             </div>
           </div>
         </Modal>
