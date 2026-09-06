@@ -4397,6 +4397,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [individualResultFilter, setIndividualResultFilter] = useState("all"); // "all" | "win" | "lose"（勝ち残り／敗退の絞り込み）
   const [individualSearch, setIndividualSearch] = useState(""); // ★選手名・チーム名でのペア絞り込み
   const [individualRoundFilter, setIndividualRoundFilter] = useState("all"); // ★回戦ごとの絞り込み
+  const [individualPairFilter, setIndividualPairFilter] = useState("all"); // ★自チームのペアごとの絞り込み
   const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
@@ -4468,12 +4469,28 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const individualMatches = matches.filter(m => !teamLinkedMatchIds.has(m.id));
   // ★回戦の選択肢（登録されている試合から実在するroundだけを、大会作成時の入力順ではなく出現順に抽出）
   const individualRounds = [...new Set(individualMatches.map(m => m.round).filter(Boolean))];
+  // ★自チームのペアの選択肢（この大会に登場した自チームのペア名を、初出順で重複なく抽出）
+  const individualMyPairs = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    individualMatches.forEach(m => {
+      const side = mySideOf(m, mySchoolName);
+      const names = (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/");
+      if (names && !seen.has(names)) { seen.add(names); list.push(names); }
+    });
+    return list;
+  }, [individualMatches, mySchoolName]);
   // ★「勝ち残ってるペアだけ」：まだ負けが確定していないペアを表示する（＝敗退した試合だけ除外）。
   //   未実施・進行中の試合や、過去に勝った試合はすべて残す（勝った試合を見たいわけではなく、
   //   あと何ペア残っているかを確認するための絞り込みのため）
   //   ★「敗退ペアのみ」は逆に、負けが確定した試合だけを残す（勝ち残り確認とは対照的な用途）
   const filteredIndividualMatches = individualMatches.filter(m => {
     if (individualRoundFilter !== "all" && m.round !== individualRoundFilter) return false;
+    if (individualPairFilter !== "all") {
+      const side = mySideOf(m, mySchoolName);
+      const names = (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/");
+      if (names !== individualPairFilter) return false;
+    }
     if (individualResultFilter === "win" || individualResultFilter === "lose") {
       const mySide = mySideOf(m, mySchoolName);
       const lost = m.status==="finished" && winnerSideOf(m) !== null && winnerSideOf(m) !== mySide;
@@ -4849,6 +4866,18 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 style={{ flex:1, minWidth:0, padding:"7px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:12.5, color:C.text, boxSizing:"border-box" }}
               />
             </div>
+            {individualMyPairs.length>1 && (
+              <select
+                value={individualPairFilter}
+                onChange={e=>setIndividualPairFilter(e.target.value)}
+                style={{ width:"100%", marginTop:8, padding:"8px 10px", borderRadius:10, border:`1.5px solid ${individualPairFilter!=="all"?C.navy:C.border}`, background:"#fff", fontSize:12.5, fontWeight:700, color:individualPairFilter!=="all"?C.navy:C.textSec }}
+              >
+                <option value="all">👥 自チームのペアで絞り込み（すべて）</option>
+                {individualMyPairs.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            )}
             {individualRounds.length>0 && (
               <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:2 }}>
                 <button onClick={()=>setIndividualRoundFilter("all")}
