@@ -10535,12 +10535,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
     </div>
   );
 
-  const sortedResults = [...resultMatches].sort((a,b)=> new Date(a.match_date)-new Date(b.match_date));
-  const oldestM = sortedResults[0], newestM = sortedResults[sortedResults.length-1];
-  const canShowGrowth = sortedResults.length >= 2 && oldestM.id !== newestM.id;
-  const oldestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([oldestM], selectedPlayer, effectiveSchoolName)) : null;
-  const newestRates = canShowGrowth ? keyRatesFromAgg(aggregatePlayerStats([newestM], selectedPlayer, effectiveSchoolName)) : null;
-
   // ★レシーブミス率は算出方法が複雑で誤差が出やすいため、比較表からは外す（内部計算・keyRatesFromAggは維持）
   const metricLabel = { serveRate:"1stサーブ成功率", decisionRate:"決定率" };
 
@@ -10910,31 +10904,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                 </div>
               </div>
             )}
-
-            {/* 変化した点 */}
-            <div style={S.card}>
-              <div style={{ padding:14 }}>
-                <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:10 }}>📈 変化した点（一番古い試合 → 一番新しい試合）</div>
-                {!canShowGrowth ? (
-                  <div style={{ fontSize:12, color:C.textSec }}>比較するには試合が2件以上必要です</div>
-                ) : (
-                  Object.keys(metricLabel).map(key => {
-                    const ov = oldestRates[key], nv = newestRates[key];
-                    if (ov==null || nv==null) return null;
-                    const delta = nv - ov;
-                    const isMiss = key==="receiveMissRate";
-                    const good = isMiss ? delta<=0 : delta>=0;
-                    return (
-                      <div key={key} style={{ display:"flex", alignItems:"center", padding:"9px 0", borderBottom:`1px solid ${C.border}` }}>
-                        <div style={{ flex:1, fontSize:12.5, fontWeight:700, color:C.text }}>{metricLabel[key]}</div>
-                        <div style={{ fontSize:11.5, color:C.textSec, marginRight:8 }}>{ov}% → {nv}%</div>
-                        <div style={{ fontSize:11, fontWeight:800, padding:"2px 8px", borderRadius:6, color:good?C.accent:C.red, background:good?C.accentL:C.redL }}>{delta>=0?"+":""}{delta}pt</div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
 
             {/* 勝敗別データ比較 */}
             <div style={S.card}>
