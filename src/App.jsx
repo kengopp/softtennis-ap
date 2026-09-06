@@ -2812,7 +2812,7 @@ const S = {
 function CoursePicker({ value, onChange }) {
   const row = (pos) => (
     <>
-      <div style={{ fontSize:10.5, fontWeight:800, color:C.navy, margin:"8px 0 5px" }}>{pos} から</div>
+      <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"8px 0 5px" }}>{pos} から</div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
         {COURSE_TYPES.filter(c => c.pos === pos).map(c => {
           const sel = value === c.key;
