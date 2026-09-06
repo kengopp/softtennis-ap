@@ -78,10 +78,11 @@ const COURSE_NAGASHI_COLOR = "#e0a63a";
 const MISS_TYPES = [
   { key: "net",  label: "ネット"   },
   { key: "over", label: "オーバー" },
+  { key: "chip", label: "チップ"   },
 ];
-// ★選択肢からは外したが、すでに記録済みのデータが「chip」のまま表示されないよう
-//   表示用のラベルだけ残しておく
-const RETIRED_MISS_LABELS = { chip: "チップ" };
+// ★選択肢に「チップ」を復活。RETIRED_MISS_LABELSは今後また選択肢から外す種類が出た場合の
+//   フォールバック表示用に汎用の仕組みとして残しておく（現在は該当なし）
+const RETIRED_MISS_LABELS = {};
 // ★ミス時は「サーブ」を選択肢から外す（サーブのミス＝ダブルフォルトで別に記録するため）
 const playTypesFor = (resultType) =>
   resultType === "error" ? PLAY_TYPES.filter(p => p.key !== "serve") : PLAY_TYPES;
@@ -2808,26 +2809,6 @@ const S = {
 // ★打球コースの選択ボタン。小さなコート図の上に打球ラインを描いて、
 //   「どこからどこへ打ったか」が一目で分かるようにしている。
 //   記録タブ・ゲーム終了時の詳細入力・ポイント修正モーダルの3か所で共用する。
-function CourseCourt({ course, selected }) {
-  const col = selected ? C.accent : C.navy;
-  const mid = `arrow_${course.key}_${selected ? "s" : "n"}`;
-  return (
-    <svg viewBox="0 0 100 100" width="100%" height="66" style={{ display:"block" }}>
-      <rect x="8" y="8" width="84" height="84" rx="3" fill="#f7f9fb" stroke="#c9d2dd" strokeWidth="1.5"/>
-      <line x1="8" y1="50" x2="92" y2="50" stroke="#8d9aa9" strokeWidth="2.5"/>
-      <line x1="50" y1="8" x2="50" y2="92" stroke="#dde3ea" strokeWidth="1"/>
-      <defs>
-        <marker id={mid} markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
-          <path d="M0,0 L5,2.5 L0,5 z" fill={col}/>
-        </marker>
-      </defs>
-      <line x1={course.from[0]} y1={course.from[1]} x2={course.to[0]} y2={course.to[1]}
-        stroke={col} strokeWidth="4" strokeLinecap="round" markerEnd={`url(#${mid})`}/>
-      <circle cx={course.from[0]} cy={course.from[1]} r="4.5" fill={col}/>
-    </svg>
-  );
-}
-
 function CoursePicker({ value, onChange }) {
   const row = (pos) => (
     <>
@@ -2840,10 +2821,9 @@ function CoursePicker({ value, onChange }) {
               onClick={()=>onChange(sel ? null : c.key)}
               style={{
                 border:`2px solid ${sel?C.accent:C.border}`, background:sel?C.accentL:C.white,
-                borderRadius:12, padding:"8px 6px 6px", cursor:"pointer", textAlign:"center", userSelect:"none",
+                borderRadius:12, padding:"14px 6px", cursor:"pointer", textAlign:"center", userSelect:"none",
               }}>
-              <CourseCourt course={c} selected={sel}/>
-              <div style={{ fontSize:11, fontWeight:800, color:C.navy, marginTop:4 }}>{c.dir}</div>
+              <div style={{ fontSize:14, fontWeight:800, color:sel?C.accent:C.navy }}>{c.dir}</div>
             </div>
           );
         })}
