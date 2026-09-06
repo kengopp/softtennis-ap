@@ -10628,6 +10628,26 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
           >全部</button>
         </div>
 
+        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+          {[["今日",0],["1週間",6],["1ヶ月",29]].map(([label,daysBack]) => {
+            const active = resultCondLabel === label;
+            return (
+              <button
+                key={label}
+                disabled={resultLoading}
+                onClick={()=>{
+                  const now = new Date();
+                  const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate()-daysBack); // ★「今日」を含めてdaysBack日前までを対象にする
+                  const filtered = playerMatches.filter(m => new Date(m.match_date) >= cutoff);
+                  loadResults(filtered, label);
+                }}
+                style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
+                  border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}
+              >{label}</button>
+            );
+          })}
+        </div>
+
         <button
           style={{ width:"100%", padding:12, background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, color:C.navy, fontSize:13, fontWeight:700, cursor:"pointer", marginBottom:12 }}
           onClick={()=>setMode("wizardPlayer")}
