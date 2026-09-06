@@ -2881,8 +2881,8 @@ function useBodyScrollLock(locked) {
 function Modal({ children, onClose }) {
   useBodyScrollLock(true);
   return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
-      <div style={{ background:C.white,borderRadius:20,padding:"28px 20px",width:"100%",maxWidth:340,maxHeight:"85vh",overflowY:"auto",WebkitOverflowScrolling:"touch" }} onClick={e=>e.stopPropagation()}>{children}</div>
+    <div style={{ position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
+      <div style={{ background:C.white,borderRadius:20,padding:"28px 20px calc(28px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:340,maxHeight:"80dvh",overflowY:"auto",WebkitOverflowScrolling:"touch" }} onClick={e=>e.stopPropagation()}>{children}</div>
     </div>
   );
 }
