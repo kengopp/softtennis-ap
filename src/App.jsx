@@ -4406,11 +4406,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [simpleTeamScoreA, setSimpleTeamScoreA] = useState("");
   const [simpleTeamScoreB, setSimpleTeamScoreB] = useState("");
   const [simpleTeamResultSaving, setSimpleTeamResultSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false); // ★ヘッダーの「最新データに更新」ボタン用（画面を空にせず裏で再取得する）
+  const [refreshToast, setRefreshToast] = useState(false);
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
 
-  const reload = useCallback(() => {
-    setLoading(true);
+  // ★silent=trueの時は一覧を「読み込み中...」で消さずに裏で再取得する（手動更新ボタン用）
+  const reload = useCallback((silent) => {
+    if (silent) setRefreshing(true); else setLoading(true);
     Promise.all([getTournamentMatchesAndTeamMatches(tournament.name), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id)]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList]) => {
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
@@ -4437,7 +4440,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       const statusMap = {};
       list.forEach(m => { statusMap[m.id] = m.status; });
       setMatchStatusById(statusMap);
-      setLoading(false);
+      if (silent) {
+        setRefreshing(false);
+        setRefreshToast(true);
+        setTimeout(() => setRefreshToast(false), 1600);
+      } else {
+        setLoading(false);
+      }
     });
     Promise.all([getDrawSummary(tournament.id, "team"), getDrawSummary(tournament.id, "individual")]).then(([teamCount, indivCount]) => {
       setDrawSummary({ team: teamCount, individual: indivCount });
@@ -4528,6 +4537,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>📅 {fmtDateRange(tournament.start_date, tournament.end_date)}</div>
         </div>
+        <button
+          style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:15, width:32, height:32, cursor: refreshing ? "default" : "pointer", lineHeight:1, flexShrink:0 }}
+          onClick={()=>{ if (!refreshing) reload(true); }}
+          disabled={refreshing}
+          title="最新データに更新"
+        ><span style={{ display:"inline-block", animation: refreshing ? "td-refresh-spin 0.8s linear infinite" : "none" }}>🔄</span></button>
+        <style>{"@keyframes td-refresh-spin{to{transform:rotate(360deg);}}"}</style>
         <div style={{ position:"relative" }}>
           <button
             style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, width:32, height:32, cursor:"pointer", lineHeight:1 }}
@@ -5041,6 +5057,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           </Modal>
         );
       })()}
+      {refreshToast && (
+        <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"rgba(20,20,20,0.85)", color:"#fff", fontSize:12.5, fontWeight:700, padding:"9px 16px", borderRadius:20, boxShadow:"0 4px 12px rgba(0,0,0,0.25)", zIndex:50 }}>
+          ✅ 最新データに更新しました
+        </div>
+      )}
     </div>
   );
 }
