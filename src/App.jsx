@@ -16594,7 +16594,36 @@ function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
   const [commentText, setCommentText] = useState(existing?.comment_text || "");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const textareaRef = useRef(null);
   const label = aiMatchLabel(match).text;
+
+  // ★選択した文字だけ赤くする／赤を解除する（**で囲んで印をつけ、詳細画面ではその部分だけ赤字で表示する）
+  const toggleRedHighlight = () => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const s = ta.selectionStart, e = ta.selectionEnd;
+    if (s === e) { alert("赤くしたい文字をドラッグして選択してから押してください"); return; }
+    const before2 = commentText.slice(Math.max(0, s-2), s);
+    const after2 = commentText.slice(e, e+2);
+    const selText = commentText.slice(s, e);
+    let newText, newS, newE;
+    if (before2 === "**" && after2 === "**") {
+      // 選択範囲のすぐ外側が**で囲まれている → 解除
+      newText = commentText.slice(0, s-2) + selText + commentText.slice(e+2);
+      newS = s-2; newE = e-2;
+    } else if (selText.startsWith("**") && selText.endsWith("**") && selText.length>=4) {
+      // **記号ごと選択されていた → 解除
+      const inner = selText.slice(2, -2);
+      newText = commentText.slice(0, s) + inner + commentText.slice(e);
+      newS = s; newE = s + inner.length;
+    } else {
+      // まだ赤くなっていない → **で囲んで赤くする
+      newText = commentText.slice(0, s) + "**" + selText + "**" + commentText.slice(e);
+      newS = s; newE = e + 4;
+    }
+    setCommentText(newText);
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(newS, newE); });
+  };
 
   const handleSave = async () => {
     if (!commentText.trim()) { setErrorMsg("分析結果のテキストを入力してください"); return; }
@@ -16626,11 +16655,27 @@ function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
 
             <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"18px 0 6px" }}>AI分析結果のテキストを貼り付け</div>
             <textarea
+              ref={textareaRef}
               style={{ width:"100%", padding:"10px 12px", border:"1px solid "+C.border, borderRadius:8, fontSize:12.5, color:C.text, height:220, boxSizing:"border-box", fontFamily:"inherit", lineHeight:1.6 }}
               placeholder="AI分析結果のテキストを貼り付けてください"
               value={commentText}
               onChange={e=>setCommentText(e.target.value)}
             />
+            <button
+              style={{ ...S.btn("#fff"), color:C.red, border:"1px solid #f5b5b0", marginTop:8, fontSize:12.5 }}
+              onClick={toggleRedHighlight}
+              type="button"
+            >🔴 選んだ文字を赤くする／戻す</button>
+            <div style={{ fontSize:10.5, color:C.textSec, marginTop:4, marginBottom:4 }}>赤くしたい部分をテキスト内でドラッグして選択してから、このボタンを押してください。もう一度押すと元に戻せます。</div>
+
+            {commentText.trim() && (
+              <>
+                <div style={{ fontSize:11.5, fontWeight:700, color:C.textSec, margin:"14px 0 6px" }}>プレビュー</div>
+                <div style={{ background:"#f7f9fc", border:"1px solid "+C.border, borderRadius:8, padding:"10px 12px", fontSize:12.5, color:C.text, whiteSpace:"pre-wrap", lineHeight:1.7 }}>
+                  {renderAiComment(commentText)}
+                </div>
+              </>
+            )}
 
             {errorMsg && <div style={{ background:C.redL, color:C.red, fontSize:12, padding:"10px 14px", borderRadius:10, marginTop:12, fontWeight:700 }}>⚠️ {errorMsg}</div>}
 
@@ -16642,6 +16687,15 @@ function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
       </div>
     </div>
   );
+}
+
+// ★AI分析コメント内の「**強調テキスト**」を赤字で表示する（AIが要点として太字にした部分をそのまま目立たせる）
+function renderAiComment(text) {
+  if (!text) return null;
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
+    const m = part.match(/^\*\*([^*]+)\*\*$/);
+    return m ? <span key={i} style={{ color:C.red, fontWeight:800 }}>{m[1]}</span> : part;
+  });
 }
 
 function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
@@ -16664,7 +16718,7 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
           >▶ {analysis.youtube_url}</a>
         )}
         <div style={{ background:C.white, border:"1px solid "+C.border, borderRadius:12, padding:16, fontSize:13, lineHeight:1.8, color:C.text, whiteSpace:"pre-wrap" }}>
-          {analysis.comment_text}
+          {renderAiComment(analysis.comment_text)}
         </div>
         <div style={{ display:"flex", gap:8, marginTop:16 }}>
           <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy }} onClick={onEdit}>✏️ 編集する</button>
