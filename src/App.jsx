@@ -10648,11 +10648,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
           })}
         </div>
 
-        <button
-          style={{ width:"100%", padding:12, background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, color:C.navy, fontSize:13, fontWeight:700, cursor:"pointer", marginBottom:12 }}
-          onClick={()=>setMode("wizardPlayer")}
-        >🔧 条件を変更する（選手・試合を選び直す）</button>
-
         {resultLoading ? (
           <div style={{ textAlign:"center", padding:40, color:C.textSec }}>集計中...</div>
         ) : resultMatches.length===0 ? (
