@@ -17052,6 +17052,7 @@ export default function App() {
   const [aiAnalysisTargetMatch, setAiAnalysisTargetMatch] = useState(null); // 追加/詳細画面の対象試合
   const [aiAnalysisEditRow, setAiAnalysisEditRow] = useState(null); // 既存のAI分析（詳細表示・編集用）
   const [aiAnalysisReturnScreen, setAiAnalysisReturnScreen] = useState(null); // 追加/詳細画面から戻る先
+  const [aiAnalysisEditReturnScreen, setAiAnalysisEditReturnScreen] = useState(null); // ★詳細画面の「編集する」から入った時だけ使う戻り先（保存・キャンセル後にリストや試合詳細まで飛ばず、元の詳細画面に戻すため）
 
   // ★大会詳細から試合を開いた後に「戻る」を押したとき、途中でアプリが再読み込みされていても
   //   元の大会・タブに戻れるよう、tournamentContext/tournamentSegをsessionStorageにも控えておく。
@@ -17449,10 +17450,14 @@ export default function App() {
       <AiAnalysisAddScreen
         match={aiAnalysisTargetMatch}
         existing={aiAnalysisEditRow}
-        onCancel={()=>setScreen(aiAnalysisReturnScreen || "list")}
+        onCancel={()=>{
+          setScreen(aiAnalysisEditReturnScreen || aiAnalysisReturnScreen || "list");
+          setAiAnalysisEditReturnScreen(null);
+        }}
         onSaved={(row)=>{
           setAiAnalysisEditRow(row);
-          setScreen(aiAnalysisReturnScreen || "list");
+          setScreen(aiAnalysisEditReturnScreen || aiAnalysisReturnScreen || "list");
+          setAiAnalysisEditReturnScreen(null);
         }}
       />
     );
@@ -17463,7 +17468,7 @@ export default function App() {
         match={aiAnalysisTargetMatch}
         analysis={aiAnalysisEditRow}
         onBack={()=>setScreen(aiAnalysisReturnScreen || "list")}
-        onEdit={()=>setScreen("aiAnalysisAdd")}
+        onEdit={()=>{ setAiAnalysisEditReturnScreen("aiAnalysisDetail"); setScreen("aiAnalysisAdd"); }}
         onDelete={async ()=>{
           if (!window.confirm("このAI分析を削除しますか？")) return;
           await deleteAiAnalysis(aiAnalysisEditRow.id);
