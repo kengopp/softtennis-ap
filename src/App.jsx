@@ -10549,9 +10549,15 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
           <div onClick={onOpenTeamStats} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:C.textSec, cursor:"pointer" }}>チーム統計</div>
         </div>
 
-        <div style={{ background:C.navy, color:"#fff", borderRadius:14, padding:14, marginBottom:12 }}>
-          <div style={{ fontSize:11, color:"#b9c2d6", marginBottom:4 }}>{resultCondLabel}</div>
-          <div style={{ fontSize:15, fontWeight:800 }}>{selectedPlayer}さん・{resultMatches.length}試合</div>
+        <div
+          onClick={()=>setMode("wizardPlayer")}
+          style={{ background:C.navy, color:"#fff", borderRadius:14, padding:14, marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}
+        >
+          <div>
+            <div style={{ fontSize:11, color:"#b9c2d6", marginBottom:4 }}>{resultCondLabel}</div>
+            <div style={{ fontSize:15, fontWeight:800 }}>{selectedPlayer}さん・{resultMatches.length}試合</div>
+          </div>
+          <div style={{ fontSize:11, fontWeight:700, color:"#b9c2d6", display:"flex", alignItems:"center", gap:3, flexShrink:0, marginLeft:10 }}>🔧 変更 ›</div>
         </div>
 
         {/* ★戦績カード（勝敗の○×一覧） */}
