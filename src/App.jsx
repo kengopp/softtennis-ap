@@ -407,9 +407,12 @@ async function getFullMatchesByIds(ids) {
     ] = await Promise.all([
       supabase.from("matches").select("*").in("id", chunkIds),
       supabase.from("match_players").select("*").in("match_id", chunkIds),
-      supabase.from("games").select("*").in("match_id", chunkIds),
-      supabase.from("points").select("*").in("match_id", chunkIds),
-      supabase.from("faults").select("*").in("match_id", chunkIds),
+      // ★ポイントは必ずpoint_number順で取得する。サーブを誰が打ったかの推定は
+      //   「そのゲームの何本目か」を配列の並び順で数えているため、順番が崩れると
+      //   ダブルフォルトや1st/2ndの内訳がペアの別の選手に割り当てられてしまう。
+      supabase.from("games").select("*").in("match_id", chunkIds).order("game_number"),
+      supabase.from("points").select("*").in("match_id", chunkIds).order("point_number"),
+      supabase.from("faults").select("*").in("match_id", chunkIds).order("fault_number"),
     ]);
     const chunkErr = mErr || pErr || gErr || ptErr || fErr;
     if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
@@ -419,6 +422,12 @@ async function getFullMatchesByIds(ids) {
     (pointsData ?? []).forEach(pt => { (pointsByMatch[pt.match_id] ??= []).push(pt); });
     (faultsData ?? []).forEach(f => { (faultsByMatch[f.match_id] ??= []).push(f); });
   }
+
+  // ★チャンクごとに取得しているため、詰め直した後にも必ず番号順へ並べ直しておく
+  const byNumFull = (key) => (a, b) => (a[key] ?? 0) - (b[key] ?? 0);
+  Object.values(gamesByMatch).forEach(list => list.sort(byNumFull("game_number")));
+  Object.values(pointsByMatch).forEach(list => list.sort(byNumFull("point_number")));
+  Object.values(faultsByMatch).forEach(list => list.sort(byNumFull("fault_number")));
 
   return ms.map(m => rowToMatchFull(
     m,
@@ -541,13 +550,19 @@ async function getRankingMatchDetails(ids) {
         .in("match_id", chunkIds),
       supabase.from("games")
         .select("id, match_id, game_number, server_team, is_final")
-        .in("match_id", chunkIds),
+        .in("match_id", chunkIds)
+        .order("game_number"),
+      // ★重要：サーブを誰が打ったかは「そのゲームの何本目のサーブか」を配列の並び順で数えて割り出しているため、
+      //   point_number順で取得しないと、DFや1st/2ndの内訳がペアの別の選手に割り当てられてしまう。
+      //   （試合詳細のスタッツタブはorder指定済みなので、以前はこの分析メニューだけ数字が食い違っていた）
       supabase.from("points")
-        .select("game_id, match_id, player_name, scoring_team, play_type, result_type, is_winner, fault_count")
-        .in("match_id", chunkIds),
+        .select("game_id, match_id, point_number, player_name, scoring_team, play_type, result_type, is_winner, fault_count")
+        .in("match_id", chunkIds)
+        .order("point_number"),
       supabase.from("faults")
-        .select("game_id, match_id, player_name, server_team")
-        .in("match_id", chunkIds),
+        .select("game_id, match_id, fault_number, player_name, server_team")
+        .in("match_id", chunkIds)
+        .order("fault_number"),
     ]);
     const chunkErr = mErr || pErr || gErr || ptErr || fErr;
     if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
@@ -557,6 +572,13 @@ async function getRankingMatchDetails(ids) {
     (pointsData ?? []).forEach(pt => { (pointsByGame[pt.game_id] ??= []).push(pt); });
     (faultsData ?? []).forEach(f => { (faultsByGame[f.game_id] ??= []).push(f); });
   }
+
+  // ★念のための二重の保険：チャンク単位で取得しているため、配列に詰め直した後にも
+  //   ゲーム・ポイント・フォルトを必ず番号順に並べ直しておく。
+  const byNum = (key) => (a, b) => (a[key] ?? 0) - (b[key] ?? 0);
+  Object.values(gamesByMatch).forEach(list => list.sort(byNum("game_number")));
+  Object.values(pointsByGame).forEach(list => list.sort(byNum("point_number")));
+  Object.values(faultsByGame).forEach(list => list.sort(byNum("fault_number")));
 
   return ms.map(m => ({
     id: m.id, match_date: m.match_date, tournament_name: m.tournament_name ?? "", status: m.status,
@@ -2516,8 +2538,10 @@ function calcPlayerStats(match) {
   };
 
   for (const g of matchGames) {
-    const points = Array.isArray(g.points) ? g.points : [];
-    const faults = Array.isArray(g.faults) ? g.faults : [];
+    // ★最後の砦：サーブを誰が打ったかは、この配列を先頭から数えた「そのゲームの何本目か」で決めている。
+    //   呼び出し元が並べ替え忘れた場合でもダブルフォルト等が別の選手に付かないよう、ここでも必ず番号順に整える。
+    const points = (Array.isArray(g.points) ? g.points.slice() : []).sort((a,b)=>(a.point_number ?? 0)-(b.point_number ?? 0));
+    const faults = (Array.isArray(g.faults) ? g.faults.slice() : []).sort((a,b)=>(a.fault_number ?? 0)-(b.fault_number ?? 0));
     for (const pt of points) {
       if (!pt.player_name) continue;
       // ★重要：「得点(勝ち)」はscoring_teamの選手の得点だが、「ミス」はscoring_teamの
@@ -12574,6 +12598,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         // 既存試合の試合情報・選手情報のみ更新（スコア・ゲームは変更しない）
         // ★対戦相手情報が何も入力されていない場合はB側の選手行自体を作らない
         //   （新規作成・予定試合の登録と挙動を揃え、「選手A/選手B」が出たり出なかったりする不整合をなくす）
+        // ★注意：編集時は新規作成と違い、既にgames/pointsにA/Bで得点が記録されている場合があるため、
+        //   ここで自動的にチームを入れ替えることはできない（入れ替えるとスタッツが逆転してしまう）。
+        //   自チームがB側で保存されてしまっている試合は、下の「🔄 チームを入れ替える」ボタンで
+        //   ゲーム・ポイントの記録も含めて正しく入れ替える。
         const bEntered = bP1.trim() || bClub.trim();
         const updatedPlayers = [
           { id: aBase?.id ?? uid(), match_id: editing.id, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:aBase?.position ?? null, order_num:1, entry_no: aEntryNo.trim() || null },
