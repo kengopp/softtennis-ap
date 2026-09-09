@@ -10749,6 +10749,50 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
               </div>
             </div>
 
+            {/* ★サーブ分析（集計）：1st/2nd/DFの本数比率をドーナツ図＋凡例で、それぞれのサーブ時得点率も表示 */}
+            {serveStats.total > 0 && (
+              <div style={S.card}>
+                <div style={{ padding:14 }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:2 }}>🎾 サーブ分析（集計）</div>
+                  <div style={{ fontSize:10.5, color:C.textSec, marginBottom:12 }}>サーブ総数：{serveStats.total}本</div>
+
+                  <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:12 }}>
+                    <div style={{
+                      width:96, height:96, borderRadius:"50%", flexShrink:0, position:"relative",
+                      background:`conic-gradient(${C.accent} 0% ${serveStats.s1/serveStats.total*100}%, ${C.serve} ${serveStats.s1/serveStats.total*100}% ${(serveStats.s1+serveStats.s2)/serveStats.total*100}%, ${C.red} ${(serveStats.s1+serveStats.s2)/serveStats.total*100}% 100%)`,
+                    }}>
+                      <div style={{ position:"absolute", inset:14, background:C.white, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column" }}>
+                        <div style={{ fontSize:16, fontWeight:900, color:C.text }}>{serveStats.total}本</div>
+                        <div style={{ fontSize:8.5, color:C.textSec }}>サーブ総数</div>
+                      </div>
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0" }}>
+                        <span style={{ width:10, height:10, borderRadius:3, background:C.accent, flexShrink:0 }}/>
+                        <span style={{ fontSize:12.5, fontWeight:700, flex:1 }}>1stイン</span>
+                        <span style={{ fontSize:14, fontWeight:800 }}>{serveStats.s1}／{serveStats.total}（{Math.round(serveStats.s1/serveStats.total*100)}%）</span>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0" }}>
+                        <span style={{ width:10, height:10, borderRadius:3, background:C.serve, flexShrink:0 }}/>
+                        <span style={{ fontSize:12.5, fontWeight:700, flex:1 }}>2ndイン</span>
+                        <span style={{ fontSize:14, fontWeight:800 }}>{serveStats.s2}／{serveStats.total}（{Math.round(serveStats.s2/serveStats.total*100)}%）</span>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0" }}>
+                        <span style={{ width:10, height:10, borderRadius:3, background:C.red, flexShrink:0 }}/>
+                        <span style={{ fontSize:12.5, fontWeight:700, flex:1 }}>DF</span>
+                        <span style={{ fontSize:14, fontWeight:800, color:C.red }}>{serveStats.df}／{serveStats.total}（{Math.round(serveStats.df/serveStats.total*100)}%）</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize:13, color:C.text, fontWeight:700, lineHeight:1.9, paddingTop:8, borderTop:`1px solid ${C.border}` }}>
+                    1stサーブ時の得点率：<b style={{ fontSize:15 }}>{serveStats.s1>0 ? `${serveStats.s1Win}／${serveStats.s1}本（${Math.round(serveStats.s1Win/serveStats.s1*100)}%）` : "記録なし"}</b><br/>
+                    2ndサーブ時の得点率：<b style={{ fontSize:15 }}>{serveStats.s2>0 ? `${serveStats.s2Win}／${serveStats.s2}本（${Math.round(serveStats.s2Win/serveStats.s2*100)}%）` : "記録なし"}</b>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 得点・ミスの内訳 */}
             <div style={S.card}>
               <div style={{ padding:14 }}>
@@ -11021,50 +11065,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                 )}
               </div>
             </div>
-
-            {/* ★サーブ分析（集計）：1st/2nd/DFの本数比率をドーナツ図＋凡例で、それぞれのサーブ時得点率も表示 */}
-            {serveStats.total > 0 && (
-              <div style={S.card}>
-                <div style={{ padding:14 }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:2 }}>🎾 サーブ分析（集計）</div>
-                  <div style={{ fontSize:10.5, color:C.textSec, marginBottom:12 }}>サーブ総数：{serveStats.total}本</div>
-
-                  <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:12 }}>
-                    <div style={{
-                      width:96, height:96, borderRadius:"50%", flexShrink:0, position:"relative",
-                      background:`conic-gradient(${C.accent} 0% ${serveStats.s1/serveStats.total*100}%, ${C.serve} ${serveStats.s1/serveStats.total*100}% ${(serveStats.s1+serveStats.s2)/serveStats.total*100}%, ${C.red} ${(serveStats.s1+serveStats.s2)/serveStats.total*100}% 100%)`,
-                    }}>
-                      <div style={{ position:"absolute", inset:14, background:C.white, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column" }}>
-                        <div style={{ fontSize:16, fontWeight:900, color:C.text }}>{serveStats.total}本</div>
-                        <div style={{ fontSize:8.5, color:C.textSec }}>サーブ総数</div>
-                      </div>
-                    </div>
-                    <div style={{ flex:1 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0" }}>
-                        <span style={{ width:10, height:10, borderRadius:3, background:C.accent, flexShrink:0 }}/>
-                        <span style={{ fontSize:12.5, fontWeight:700, flex:1 }}>1stイン</span>
-                        <span style={{ fontSize:14, fontWeight:800 }}>{serveStats.s1}／{serveStats.total}（{Math.round(serveStats.s1/serveStats.total*100)}%）</span>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0" }}>
-                        <span style={{ width:10, height:10, borderRadius:3, background:C.serve, flexShrink:0 }}/>
-                        <span style={{ fontSize:12.5, fontWeight:700, flex:1 }}>2ndイン</span>
-                        <span style={{ fontSize:14, fontWeight:800 }}>{serveStats.s2}／{serveStats.total}（{Math.round(serveStats.s2/serveStats.total*100)}%）</span>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0" }}>
-                        <span style={{ width:10, height:10, borderRadius:3, background:C.red, flexShrink:0 }}/>
-                        <span style={{ fontSize:12.5, fontWeight:700, flex:1 }}>DF</span>
-                        <span style={{ fontSize:14, fontWeight:800, color:C.red }}>{serveStats.df}／{serveStats.total}（{Math.round(serveStats.df/serveStats.total*100)}%）</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize:13, color:C.text, fontWeight:700, lineHeight:1.9, paddingTop:8, borderTop:`1px solid ${C.border}` }}>
-                    1stサーブ時の得点率：<b style={{ fontSize:15 }}>{serveStats.s1>0 ? `${serveStats.s1Win}／${serveStats.s1}本（${Math.round(serveStats.s1Win/serveStats.s1*100)}%）` : "記録なし"}</b><br/>
-                    2ndサーブ時の得点率：<b style={{ fontSize:15 }}>{serveStats.s2>0 ? `${serveStats.s2Win}／${serveStats.s2}本（${Math.round(serveStats.s2Win/serveStats.s2*100)}%）` : "記録なし"}</b>
-                  </div>
-                </div>
-              </div>
-            )}
           </>
         )}
 
