@@ -5486,6 +5486,16 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
     );
   }
 
+  if (view === "syncPlayers") {
+    return (
+      <TournamentPairPlayerSyncScreen
+        tournament={tournament}
+        pairs={pairs}
+        onBack={() => setView("list")}
+      />
+    );
+  }
+
   return (
     <div style={S.page}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
@@ -5510,6 +5520,15 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
           onChange={e => setSearch(e.target.value)}
         />
       </div>
+
+      {pairs.length > 0 && (
+        <div style={{ padding:"0 14px 10px" }}>
+          <button
+            style={{ width:"100%", padding:"9px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer" }}
+            onClick={() => setView("syncPlayers")}
+          >👤 未登録の選手を選手マスターに登録</button>
+        </div>
+      )}
 
       <div style={{ padding:"0 14px" }}>
         {loading ? (
@@ -5929,6 +5948,207 @@ function TournamentPairBulkImportScreen({ tournament, existingPairs, onBack }) {
         >{importing ? "登録中..." : `この内容で登録する（${preview.length}件）`}</button>
         <button style={{ ...S.btn("transparent", C.textSec), marginTop:4 }} disabled={importing} onClick={onBack}>キャンセル</button>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ペアマスターの選手を選手マスターへ登録（未登録選手の一括登録）
+// ============================================================
+function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
+  // ★どの大会のペアマスターから取り込むかを選べるようにする（デフォルトは今開いている大会）
+  const [srcTournament, setSrcTournament] = useState(tournament);
+  const [allTournaments, setAllTournaments] = useState([]);
+  const [showTournamentPicker, setShowTournamentPicker] = useState(false);
+  const [tournamentSearch, setTournamentSearch] = useState("");
+
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [candidates, setCandidates] = useState([]); // [{ name, clubName, isOwn, checked }]
+  const [registering, setRegistering] = useState(false);
+  const [result, setResult] = useState(null); // { ok, fail }
+
+  useEffect(() => { getTournaments().then(setAllTournaments); }, []);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setErrorMsg("");
+      setResult(null);
+      try {
+        // ★選んだ大会が今開いている大会と同じ場合は、既に読み込み済みのpairsをそのまま使う（再取得を省く）
+        const srcPairs = srcTournament.id === tournament.id ? pairs : await getTournamentPairs(srcTournament.id);
+        const [roster, schools, profile] = await Promise.all([getPlayerRoster(), getSchools(), getMyProfile()]);
+        if (!alive) return;
+        let myName = "";
+        if (profile?.school_id) {
+          const s = schools.find(s => s.id === profile.school_id);
+          if (s) myName = s.name;
+        }
+        const existingNames = new Set(roster.map(p => normalizePlayerName(p.player_name)));
+        const seen = new Set(); // ★同じ選手が複数ペアに登場しても候補には1件だけ出す
+        const list = [];
+        srcPairs.forEach(p => {
+          [p.player1_name, p.player2_name].forEach(name => {
+            const trimmed = (name || "").trim();
+            if (!trimmed) return;
+            const key = normalizePlayerName(trimmed);
+            if (existingNames.has(key) || seen.has(key)) return;
+            seen.add(key);
+            const clubName = (p.club_name || "").trim();
+            list.push({ name: trimmed, clubName, isOwn: !!myName && clubName === myName, checked: true });
+          });
+        });
+        if (alive) setCandidates(list);
+      } catch (e) {
+        if (alive) setErrorMsg("読み込みに失敗しました: " + (e.message || e));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [srcTournament, pairs, tournament.id]);
+
+  const filteredTournaments = allTournaments.filter(t => !tournamentSearch.trim() || (t.name || "").includes(tournamentSearch.trim()));
+
+  function toggle(idx) {
+    setCandidates(list => list.map((c, i) => i === idx ? { ...c, checked: !c.checked } : c));
+  }
+  function toggleOwn(idx) {
+    setCandidates(list => list.map((c, i) => i === idx ? { ...c, isOwn: !c.isOwn } : c));
+  }
+  function toggleAll(checked) {
+    setCandidates(list => list.map(c => ({ ...c, checked })));
+  }
+
+  async function handleRegister() {
+    const targets = candidates.filter(c => c.checked);
+    if (targets.length === 0) { alert("登録する選手を選んでください。"); return; }
+    setRegistering(true);
+    let ok = 0, fail = 0;
+    for (const c of targets) {
+      try {
+        await savePlayer({ player_name: c.name, is_own_team: c.isOwn, team_name: c.clubName || null });
+        ok++;
+      } catch (e) {
+        fail++;
+      }
+    }
+    setRegistering(false);
+    setResult({ ok, fail });
+    if (fail === 0) {
+      alert(`${ok}件を選手マスターに登録しました。`);
+      onBack();
+    }
+  }
+
+  const allChecked = candidates.length > 0 && candidates.every(c => c.checked);
+  const checkedCount = candidates.filter(c => c.checked).length;
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack} disabled={registering}>←</button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>選手マスターへ登録</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{srcTournament.name}</div>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 14px 0" }}>
+        <div style={{ fontSize:11.5, color:C.navy, background:"#eef0ff", border:"1px solid #dcdffc", borderRadius:10, padding:"10px 12px", lineHeight:1.6 }}>
+          💡 ペアマスターに登録されている選手のうち、選手マスターにまだいない選手だけを一覧にしています。チーム名から自チーム／他チームを自動判定していますが、間違っていればタップで切り替えられます。
+        </div>
+      </div>
+
+      <div style={{ padding:"10px 14px 0" }}>
+        <div style={{ fontSize:11, color:C.textSec, marginBottom:5, fontWeight:700 }}>取り込み元の大会</div>
+        <button
+          style={{ width:"100%", padding:"10px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.text, fontSize:13, fontWeight:700, textAlign:"left", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between" }}
+          disabled={registering}
+          onClick={() => setShowTournamentPicker(true)}
+        >
+          <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{srcTournament.name}</span>
+          <span style={{ color:C.navy, flexShrink:0, marginLeft:8 }}>変更 ›</span>
+        </button>
+      </div>
+
+      <div style={{ padding:14 }}>
+        {loading ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:40, fontSize:12 }}>読み込み中...</div>
+        ) : errorMsg ? (
+          <div style={{ fontSize:12, color:C.red, textAlign:"center", marginTop:30 }}>{errorMsg}</div>
+        ) : candidates.length === 0 ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:40, fontSize:12.5, lineHeight:1.8 }}>
+            <div style={{ fontSize:36, marginBottom:10 }}>✅</div>
+            ペアマスターの選手は全員、既に選手マスターに登録されています
+          </div>
+        ) : (
+          <>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"2px 2px 8px" }}>
+              <div style={{ fontSize:11, fontWeight:700, color:C.navy }}>未登録の選手（{candidates.length}名）</div>
+              <button style={{ background:"none", border:"none", color:C.navy, fontSize:11.5, fontWeight:700, cursor:"pointer" }} onClick={() => toggleAll(!allChecked)}>
+                {allChecked ? "全て解除" : "全て選択"}
+              </button>
+            </div>
+            <div style={S.card}>
+              {candidates.map((c, i) => (
+                <div key={c.name + "_" + i} style={{ padding:"11px 14px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10 }}>
+                  <input type="checkbox" checked={c.checked} onChange={() => toggle(i)} style={{ width:18, height:18, flexShrink:0 }} />
+                  <div style={{ flex:1, minWidth:0, cursor:"pointer" }} onClick={() => toggle(i)}>
+                    <div style={{ fontSize:13.5, fontWeight:700, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                      {c.name}
+                      <span style={{ fontWeight:400, color:C.textSec }}> ／ {c.clubName || "（チーム名未入力）"}</span>
+                    </div>
+                  </div>
+                  <span style={S.chip(c.isOwn)} onClick={() => toggleOwn(i)}>{c.isOwn ? "自チーム" : "他チーム"}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {!loading && candidates.length > 0 && (
+        <div style={{ padding:14 }}>
+          <button
+            style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white) }}
+            disabled={registering || checkedCount===0}
+            onClick={handleRegister}
+          >{registering ? "登録中..." : `選択した選手を登録する（${checkedCount}件）`}</button>
+          {result && result.fail > 0 && (
+            <div style={{ fontSize:11, color:C.red, marginTop:8, textAlign:"center" }}>{result.ok}件登録・{result.fail}件失敗しました</div>
+          )}
+        </div>
+      )}
+
+      {showTournamentPicker && (
+        <Modal onClose={() => setShowTournamentPicker(false)}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:12 }}>取り込み元の大会を選択</h3>
+          <input
+            style={{ width:"100%", padding:"9px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13, color:C.text, boxSizing:"border-box", marginBottom:10 }}
+            placeholder="🔍 大会名で検索"
+            value={tournamentSearch}
+            onChange={e => setTournamentSearch(e.target.value)}
+          />
+          <div style={{ maxHeight:"46dvh", overflowY:"auto" }}>
+            {filteredTournaments.length === 0 ? (
+              <div style={{ fontSize:12, color:C.textSec, textAlign:"center", padding:"20px 0" }}>該当する大会がありません</div>
+            ) : filteredTournaments.map(t => (
+              <div
+                key={t.id}
+                style={{ padding:"11px 10px", borderBottom:`1px solid ${C.border}`, fontSize:13, fontWeight: t.id===srcTournament.id ? 800 : 400, color: t.id===srcTournament.id ? C.navy : C.text, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between" }}
+                onClick={() => { setSrcTournament(t); setShowTournamentPicker(false); setTournamentSearch(""); }}
+              >
+                <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.name}</span>
+                {t.id===srcTournament.id && <span>✓</span>}
+              </div>
+            ))}
+          </div>
+          <button style={{ ...S.btn("transparent", C.textSec), marginTop:12 }} onClick={() => setShowTournamentPicker(false)}>閉じる</button>
+        </Modal>
+      )}
     </div>
   );
 }
