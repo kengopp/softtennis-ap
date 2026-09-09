@@ -10867,13 +10867,13 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                               <span>流し <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.nagashi}</b>本</span>
                             </div>
                             {sd.positions.filter(p=>p.total>0).map(p => (
-                              <div key={p.pos} style={{ display:"flex", alignItems:"center", fontSize:11, color:C.textSec, padding:"2px 0" }}>
-                                <span style={{ width:56 }}>{p.pos}時</span>
-                                <span style={{ flex:1, height:6, background:"#eef0f3", borderRadius:3, overflow:"hidden", display:"flex", marginRight:8 }}>
+                              <div key={p.pos} style={{ display:"flex", alignItems:"center", fontSize:11.5, color:C.textSec, padding:"3px 0" }}>
+                                <span style={{ width:60, flexShrink:0 }}>{p.pos}時</span>
+                                <span style={{ flex:1, height:18, background:"#eef0f3", borderRadius:5, overflow:"hidden", display:"flex", marginRight:8 }}>
                                   <div style={{ width:`${p.pull/p.total*100}%`, background:COURSE_PULL_COLOR }}/>
                                   <div style={{ width:`${p.nagashi/p.total*100}%`, background:COURSE_NAGASHI_COLOR }}/>
                                 </span>
-                                <span style={{ fontWeight:700, color:C.text }}>{p.total}本</span>
+                                <span style={{ fontWeight:700, color:C.text, flexShrink:0 }}>{p.total}本</span>
                               </div>
                             ))}
                           </>
@@ -10905,14 +10905,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                         </div>
                         {r.total>0 && (
                           <>
-                            <div style={{ display:"flex", height:14, borderRadius:4, overflow:"hidden", background:"#eef0f3" }}>
+                            <div style={{ display:"flex", height:17, borderRadius:5, overflow:"hidden", background:"#eef0f3" }}>
                               {r.win>0 && (
-                                <div style={{ width:`${r.win/r.total*100}%`, background:C.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${r.win/r.total*100}%`, background:C.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
                                   {Math.round(r.win/r.total*100)}%
                                 </div>
                               )}
                               {r.err>0 && (
-                                <div style={{ width:`${r.err/r.total*100}%`, background:C.red, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${r.err/r.total*100}%`, background:C.red, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
                                   {Math.round(r.err/r.total*100)}%
                                 </div>
                               )}
