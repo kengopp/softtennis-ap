@@ -9816,6 +9816,8 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
 // 団体戦 詳細画面（リアルタイム観戦含む）
 // ============================================================
 function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onNavigate, onOpenAiAnalysis }) {
+  // ★AI動画分析の閲覧は本人・保護者・管理者だけ（AI分析メニューと同じ基準）
+  const aiViewer = useAiAnalysisViewer();
   const [tm, setTm] = useState(null);
   const [notFound, setNotFound] = useState(false); // ★削除済みなどで団体戦が見つからない場合
   const [loading, setLoading] = useState(true);
@@ -10035,7 +10037,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   {isRecording && recorderName && match?.status !== "finished" && (
                     <span style={{ fontSize:11,color:"#dc2626",fontWeight:700,background:"#fdecea",padding:"2px 8px",borderRadius:20 }}>🔴 {recorderName} 記録中</span>
                   )}
-                  {(isFinished || match?.status === "finished") && match?.id && aiAnalyses[match.id] && (
+                  {(isFinished || match?.status === "finished") && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer) && (
                     <span
                       onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
                       style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid #dcdffc", cursor:"pointer" }}
@@ -13050,6 +13052,40 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
 // ============================================================
 // スコア記録
 // ============================================================
+// ★AI動画分析の閲覧権限を判定するための共通フック。
+//   AI分析メニュー(AiAnalysisListScreen)と同じ基準にそろえる：
+//   管理者か、その試合に出場している本人（保護者アカウントも連携先が同じ選手名になるので含む）だけが開ける。
+//   これが無いと、AI分析メニュー側で鍵をかけても試合詳細のボタンから素通りできてしまう。
+function useAiAnalysisViewer() {
+  const [viewer, setViewer] = useState({ isAdmin: false, linkedPlayerName: null, loaded: false });
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const p = await getMyProfile();
+        let name = null;
+        if (p?.linked_player_id) {
+          const roster = await getPlayerRoster();
+          name = roster.find(r => r.id === p.linked_player_id)?.player_name ?? null;
+        }
+        if (alive) setViewer({ isAdmin: !!p?.is_admin, linkedPlayerName: name, loaded: true });
+      } catch (e) {
+        // 取得に失敗したときは「見せない」側に倒す（権限判定は安全側に寄せる）
+        if (alive) setViewer({ isAdmin: false, linkedPlayerName: null, loaded: true });
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+  return viewer;
+}
+
+function canViewAiAnalysisFor(match, viewer) {
+  if (!viewer?.loaded) return false;
+  if (viewer.isAdmin) return true;
+  if (!viewer.linkedPlayerName) return false;
+  return (match?.players || []).some(p => p.player_name === viewer.linkedPlayerName);
+}
+
 function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenAiAnalysis, initialTab }) {
   const [initialMatch, setInitialMatch] = useState(null);
   const [loadKey, setLoadKey] = useState(0);
@@ -13168,6 +13204,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   // ★個人戦の試合にもAI動画分析を追加できるようにする（団体戦の各番手と同様の機能）
   // 　undefined=未確認、null=未登録、オブジェクト=登録済み
   const [aiAnalysis, setAiAnalysis] = useState(undefined);
+  // ★AI動画分析は本人・保護者・管理者だけが開ける（AI分析メニューと同じ基準）
+  const aiViewer = useAiAnalysisViewer();
+  const canViewAi = canViewAiAnalysisFor(match, aiViewer);
   useEffect(() => {
     if (!teamMatchId && match.status === "finished" && match.id) {
       getAiAnalyses([match.id]).then(rows => setAiAnalysis(rows[0] ?? null));
@@ -13922,8 +13961,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
                 </>
               )}
-              {/* ★AI動画分析はチームの誰でも追加・閲覧できるようにする（観戦モード＝作成者以外でも表示） */}
-              {!teamMatchId && aiAnalysis !== undefined && (
+              {/* ★AI動画分析は、管理者か、この試合に出場している本人（保護者アカウント含む）だけに表示する。
+                  以前は誰にでも表示していたため、AI分析メニュー側で閲覧制限をかけても
+                  この試合詳細のボタンから中身を見られてしまう抜け道になっていた。 */}
+              {!teamMatchId && aiAnalysis !== undefined && (aiAnalysis ? canViewAi : true) && (
                 <button style={{ ...S.btn("#fff"),color:C.purple,border:"1px solid #dcdffc",marginBottom:8 }}
                   onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalysis)}
                 >🤖 {aiAnalysis ? "AI動画分析を見る" : "AI動画分析を追加する"}</button>
