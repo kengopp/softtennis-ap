@@ -12727,10 +12727,33 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           ...(bEntered ? [{ id: bBase?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP1, "選手A"), club_name:bClub.trim(), position:bBase?.position ?? null, order_num:1, entry_no: bEntryNo.trim() || null }] : []),
           ...(isDoubles && bEntered ? [{ id: bBase2?.id ?? uid(), match_id: editing.id, team:"B", player_name:withPlaceholder(bP2, "選手B"), club_name:bClub.trim(), position:bBase2?.position ?? null, order_num:2, entry_no: bEntryNo.trim() || null }] : []),
         ];
+        // ★選手名を変更したときは、すでに記録済みのポイント・フォルトに残っている
+        //   古い名前（「選手A」などの仮名を含む）も一緒に書き換える。
+        //   これをしないと、試合の途中で相手の名前が分かって登録し直しても、
+        //   スタッツ画面が「選手A」のままになってしまう。
+        const renameMap = {};
+        [[aBase, updatedPlayers.find(p=>p.team==="A"&&p.order_num===1)],
+         [aBase2, updatedPlayers.find(p=>p.team==="A"&&p.order_num===2)],
+         [bBase,  updatedPlayers.find(p=>p.team==="B"&&p.order_num===1)],
+         [bBase2, updatedPlayers.find(p=>p.team==="B"&&p.order_num===2)]].forEach(([before, after]) => {
+          const oldName = (before?.player_name ?? "").trim();
+          const newName = (after?.player_name ?? "").trim();
+          if (oldName && newName && oldName !== newName) renameMap[oldName] = newName;
+        });
+        const applyRename = (name) => (name && renameMap[name]) ? renameMap[name] : name;
+        const renamedGames = Object.keys(renameMap).length === 0
+          ? editing.games
+          : (editing.games ?? []).map(g => ({
+              ...g,
+              points: (g.points ?? []).map(pt => ({ ...pt, player_name: applyRename(pt.player_name) })),
+              faults: (g.faults ?? []).map(f  => ({ ...f,  player_name: applyRename(f.player_name) })),
+            }));
+
         const updated = {
           ...editing,
           match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null, match_type:matchType, court_number:courtNumber||null,
           players: updatedPlayers,
+          games: renamedGames,
           // 予定の場合は形式設定も更新可能
           ...((editing.status === "scheduled" || editing.status === "waiting") ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
         };
