@@ -12167,19 +12167,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                           {matchStatusShortLabel(m)}
                         </span>
                       </div>
-                      {m.status==="finished" && (
-                        <button
-                          style={{ marginTop:6, fontSize:11, color:C.textSec, background:C.gray, border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 10px", cursor:"pointer" }}
-                          onClick={async (e)=>{
-                            e.stopPropagation();
-                            if (!window.confirm("この試合を「途中終了」に変更しますか？\n\n・スコアの記録はそのまま残ります\n・勝率や勝敗数の集計から除外されます")) return;
-                            try {
-                              await supabase.from("matches").update({ status:"abandoned" }).eq("id", m.id);
-                              setMatches(prev => prev.map(x => x.id===m.id ? { ...x, status:"abandoned" } : x));
-                            } catch(err) { alert("エラー: " + (err.message||err)); }
-                          }}
-                        >⏸ 途中終了</button>
-                      )}
+                      {/* ★「途中終了」は記録中の画面から押すものに統一したため、ここには置かない */}
                       {m.memo && (
                         <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:4 }}>📝 {m.memo}</div>
                       )}
@@ -14156,8 +14144,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     記録係と、あとから内容を直す人（顧問など）が別なことが多いため。 */}
               <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
               <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
-              {/* ★「本当は最後までやっていない試合」を勝敗の集計から外す */}
-              <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「途中終了」に変更しますか？\n\n・スコアの記録はそのまま残ります\n・勝率や勝敗数の集計から除外されます")) persist({ ...match, status:"abandoned" }); }}>⏸ 途中終了</button>
+              {/* ★「途中終了」は記録中の画面から押すもの。終了済みの画面に置くと
+                    「試合終了」と表示しながら「途中終了」ボタンが並ぶことになり紛らわしいので置かない。 */}
               <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
               {/* ★AI動画分析は、管理者か、この試合に出場している本人（保護者アカウント含む）だけに表示する。
                   以前は誰にでも表示していたため、AI分析メニュー側で閲覧制限をかけても
