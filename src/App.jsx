@@ -1389,6 +1389,7 @@ async function savePlayer(player) {
     dominant_hand: player.dominant_hand || null,
     is_own_team: player.is_own_team === true,
     team_name: player.team_name || null,
+    memo: player.memo || null,   // ★選手の特徴・注意点などの自由メモ
     created_by: user.id,
   };
   const { error } = await supabase.from("players").upsert(row);
@@ -15792,12 +15793,14 @@ function PlayerRosterScreen({ onBack }) {
   const [newPosition, setNewPosition] = useState("");
   const [showNewSchoolInput, setShowNewSchoolInput] = useState(false); // ★一覧に無い新しい対戦相手の学校を、検索入力で追加する時だけ表示
   const [newDominantHand, setNewDominantHand] = useState("");
+  const [newMemo, setNewMemo] = useState("");     // ★特徴などの自由メモ
   const [editingId, setEditingId] = useState(null);
   const [editLastName, setEditLastName] = useState("");
   const [editFirstName, setEditFirstName] = useState("");
   const [editPosition, setEditPosition] = useState("");
   const [editTeamName, setEditTeamName] = useState("");
   const [editDominantHand, setEditDominantHand] = useState("");
+  const [editMemo, setEditMemo] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [nameSearch, setNameSearch] = useState(""); // ★学校を問わず選手名で直接検索するための入力
 
@@ -15848,9 +15851,9 @@ function PlayerRosterScreen({ onBack }) {
       if (tab==="other" && !finalTeamName.trim()) { setErrorMsg("学校を選択してください"); return; }
       // ★「他チーム」で自チームと同じ学校名を入力した場合は自動的に自チーム扱いにする
       const isOwn = tab==="own" || (!!mySchoolName && finalTeamName.trim() === mySchoolName.trim());
-      await savePlayer({ player_name: fullName, position: newPosition || null, dominant_hand: newDominantHand || null, is_own_team: isOwn, team_name: finalTeamName });
+      await savePlayer({ player_name: fullName, position: newPosition || null, dominant_hand: newDominantHand || null, is_own_team: isOwn, team_name: finalTeamName, memo: newMemo.trim() || null });
       // ★学校の選択（filterSchool）はリセットしない → 同じ学校の選手を続けて登録しやすくする
-      setNewLastName(""); setNewFirstName(""); setNewPosition(""); setNewDominantHand("");
+      setNewLastName(""); setNewFirstName(""); setNewPosition(""); setNewDominantHand(""); setNewMemo("");
       reload();
     } catch (e) { setErrorMsg("追加に失敗しました: " + (e.message || JSON.stringify(e))); }
   }
@@ -15863,7 +15866,7 @@ function PlayerRosterScreen({ onBack }) {
       // ★学校名が自チームと同じかどうかで自チーム／他チームを判定する（タブではなく実際の学校名で判定）
       const isOwn = !!mySchoolName && finalTeamName.trim() === mySchoolName.trim();
       const oldName = players.find(p => p.id === id)?.player_name;
-      await savePlayer({ id, player_name: fullName, position: editPosition || null, dominant_hand: editDominantHand || null, is_own_team: isOwn, team_name: finalTeamName });
+      await savePlayer({ id, player_name: fullName, position: editPosition || null, dominant_hand: editDominantHand || null, is_own_team: isOwn, team_name: finalTeamName, memo: editMemo.trim() || null });
       // ★名前を変更した場合、過去の試合記録（そのチーム側の出場分）にも反映する
       if (oldName && oldName !== fullName) {
         try {
@@ -15886,6 +15889,7 @@ function PlayerRosterScreen({ onBack }) {
     setEditPosition(p.position||"");
     setEditTeamName(p.team_name||"");
     setEditDominantHand(p.dominant_hand||"");
+    setEditMemo(p.memo||"");
   }
   async function handleDelete(id) {
     if (!window.confirm("この選手をマスターから削除しますか？")) return;
@@ -15926,6 +15930,7 @@ function PlayerRosterScreen({ onBack }) {
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:14, fontWeight:700, color:C.text }}>{p.player_name}</div>
                     <div style={{ fontSize:11, color:C.textSec }}>{[p.team_name, p.position, handLabel(p.dominant_hand)].filter(Boolean).join(" ・ ")}</div>
+                    {p.memo && <div style={{ fontSize:11, color:C.text, marginTop:4, whiteSpace:"pre-wrap", lineHeight:1.5 }}>📝 {p.memo}</div>}
                   </div>
                   <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer", color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
                 </div>
@@ -16000,7 +16005,14 @@ function PlayerRosterScreen({ onBack }) {
                     <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>ポジション</div>
                     <div style={{ marginBottom:8 }}><PositionButtons value={editPosition} onChange={setEditPosition} /></div>
                     <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>利き手</div>
-                    <div style={{ marginBottom:10 }}><HandButtons value={editDominantHand} onChange={setEditDominantHand} /></div>
+                    <div style={{ marginBottom:8 }}><HandButtons value={editDominantHand} onChange={setEditDominantHand} /></div>
+                    <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>メモ（特徴・注意点など）</div>
+                    <textarea
+                      style={{ ...S.inp, minHeight:64, resize:"vertical", lineHeight:1.6, fontFamily:"inherit", marginBottom:10 }}
+                      placeholder="例：カットサーブが速い／バック側が苦手"
+                      value={editMemo}
+                      onChange={e=>setEditMemo(e.target.value)}
+                    />
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                       <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
                       <button style={{ ...S.btn(C.accent), fontSize:12 }} onClick={()=>handleUpdate(p.id)}>保存</button>
@@ -16011,6 +16023,7 @@ function PlayerRosterScreen({ onBack }) {
                     <div style={{ flex:1 }}>
                       <div style={{ fontSize:14, fontWeight:700, color:C.text }}>{p.player_name}</div>
                       <div style={{ fontSize:11, color:C.textSec }}>{[p.team_name, p.position, handLabel(p.dominant_hand)].filter(Boolean).join(" ・ ")}</div>
+                      {p.memo && <div style={{ fontSize:11, color:C.text, marginTop:4, whiteSpace:"pre-wrap", lineHeight:1.5 }}>📝 {p.memo}</div>}
                     </div>
                     <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer" }} onClick={()=>startEdit(p)}>✏️</button>
                     <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer", color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
@@ -16038,6 +16051,14 @@ function PlayerRosterScreen({ onBack }) {
           </FormRow>
           <FormRow label="利き手（任意）">
             <HandButtons value={newDominantHand} onChange={setNewDominantHand} />
+          </FormRow>
+          <FormRow label="メモ（任意）">
+            <textarea
+              style={{ ...S.inp, minHeight:64, resize:"vertical", lineHeight:1.6, fontFamily:"inherit" }}
+              placeholder="例：カットサーブが速い／バック側が苦手／ロブで崩すと有効"
+              value={newMemo}
+              onChange={e=>setNewMemo(e.target.value)}
+            />
           </FormRow>
         </FormSec>
         {errorMsg && <div style={{ color:C.red, fontSize:12, marginBottom:10 }}>{errorMsg}</div>}
@@ -16067,7 +16088,14 @@ function PlayerRosterScreen({ onBack }) {
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>ポジション</div>
                 <div style={{ marginBottom:8 }}><PositionButtons value={editPosition} onChange={setEditPosition} /></div>
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>利き手</div>
-                <div style={{ marginBottom:10 }}><HandButtons value={editDominantHand} onChange={setEditDominantHand} /></div>
+                <div style={{ marginBottom:8 }}><HandButtons value={editDominantHand} onChange={setEditDominantHand} /></div>
+                <div style={{ fontSize:11, color:C.textSec, marginBottom:4 }}>メモ（特徴・注意点など）</div>
+                <textarea
+                  style={{ ...S.inp, minHeight:64, resize:"vertical", lineHeight:1.6, fontFamily:"inherit", marginBottom:10 }}
+                  placeholder="例：カットサーブが速い／バック側が苦手"
+                  value={editMemo}
+                  onChange={e=>setEditMemo(e.target.value)}
+                />
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                   <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:12 }} onClick={()=>setEditingId(null)}>キャンセル</button>
                   <button style={{ ...S.btn(C.accent), fontSize:12 }} onClick={()=>handleUpdate(p.id)}>保存</button>
@@ -16078,6 +16106,7 @@ function PlayerRosterScreen({ onBack }) {
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:14, fontWeight:700, color:C.text }}>{p.player_name}</div>
                   <div style={{ fontSize:11, color:C.textSec }}>{[p.team_name, p.position, handLabel(p.dominant_hand)].filter(Boolean).join(" ・ ")}</div>
+                  {p.memo && <div style={{ fontSize:11, color:C.text, marginTop:4, whiteSpace:"pre-wrap", lineHeight:1.5 }}>📝 {p.memo}</div>}
                 </div>
                 <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer" }} onClick={()=>startEdit(p)}>✏️</button>
                 <button style={{ background:"none", border:"none", fontSize:16, cursor:"pointer", color:C.red }} onClick={()=>handleDelete(p.id)}>🗑</button>
