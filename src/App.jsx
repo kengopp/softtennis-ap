@@ -190,7 +190,10 @@ const looksNaturallyFinished = (m) => {
   const need = Math.ceil(fmt / 2);
   return Math.max(m?.match_score_a ?? 0, m?.match_score_b ?? 0) >= need;
 };
-const matchStatusShortLabel = (m) => (m.status==="finished" || (m.status==="abandoned" && looksNaturallyFinished(m))) ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : "進行中";
+// ★以前は「終了・途中終了・中断」以外をすべて「進行中」と表示していたため、
+//   まだ始まっていない予定（scheduled）や待機中（waiting）の試合まで「進行中」と出てしまっていた。
+//   試合一覧では「予定」と出るのに戦績画面では「進行中」と出る、という食い違いの原因。
+const matchStatusShortLabel = (m) => (m.status==="finished" || (m.status==="abandoned" && looksNaturallyFinished(m))) ? `${m.match_score_a}-${m.match_score_b}` : m.status==="abandoned" ? `途中終了 ${m.match_score_a}-${m.match_score_b}` : m.status==="suspended" ? `中断 ${m.match_score_a}-${m.match_score_b}` : m.status==="scheduled" ? "予定" : m.status==="waiting" ? "待機中" : "進行中";
 // ★選手選択チップの並び順をバラバラ（登録順）ではなく五十音順に揃えるための比較関数。
 //   読み仮名（ふりがな）は選手マスターに保存していないため完全な厳密さではないが、
 //   日本語ロケールでの文字列比較（Intl collation）により実用上ほぼ五十音順になる。
