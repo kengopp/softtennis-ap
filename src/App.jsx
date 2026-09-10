@@ -1185,6 +1185,33 @@ function countPlaceholderRecords(match) {
   return n;
 }
 
+// ★チーム内の全試合をまとめて修正する（1試合ずつ開いて直すのは大変なため）
+async function repairAllPlaceholderPlayerNames() {
+  // 仮名が残っているポイント・フォルトから、対象の試合を洗い出す
+  const [{ data: pRows, error: pErr }, { data: fRows, error: fErr }] = await Promise.all([
+    supabase.from("points").select("match_id").in("player_name", PLACEHOLDER_NAMES),
+    supabase.from("faults").select("match_id").in("player_name", PLACEHOLDER_NAMES),
+  ]);
+  if (pErr) throw pErr;
+  if (fErr) throw fErr;
+  const matchIds = [...new Set([...(pRows ?? []), ...(fRows ?? [])].map(r => r.match_id).filter(Boolean))];
+  if (matchIds.length === 0) return { matches: 0, fixed: 0 };
+
+  // 対象試合の選手情報だけをまとめて取得する（ポイントまで読み込むと重くなるため）
+  const { data: players, error: plErr } = await supabase
+    .from("match_players").select("match_id, team, order_num, player_name").in("match_id", matchIds);
+  if (plErr) throw plErr;
+  const byMatch = {};
+  (players ?? []).forEach(p => { (byMatch[p.match_id] ??= []).push(p); });
+
+  let fixed = 0, matches = 0;
+  for (const mid of matchIds) {
+    const n = await repairPlaceholderPlayerNames({ id: mid, players: byMatch[mid] ?? [] });
+    if (n > 0) { fixed += n; matches++; }
+  }
+  return { matches, fixed };
+}
+
 async function repairPlaceholderPlayerNames(match) {
   const map = findPlaceholderRenameMap(match);
   if (Object.keys(map).length === 0) return 0;
@@ -16075,6 +16102,21 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                     setShowTransferScreen(true);
                   }}
                 >👤 管理者を移譲する ›</button>
+
+                {/* ★相手の名前が分からないまま記録した試合に残る「選手A」「選手B」を、
+                      全試合まとめて今の選手名に置き換える。1試合ずつ直すのは大変なため。 */}
+                <button
+                  style={{ width:"100%",background:C.white,color:C.text,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:13,fontWeight:700,cursor:"pointer",textAlign:"left",marginTop:8 }}
+                  onClick={async ()=>{
+                    if (!window.confirm("すべての試合を調べて、記録に残っている「選手A」「選手B」を、その試合の相手選手名に置き換えます。\n\n相手選手名がまだ登録されていない試合は変更されません。\n実行しますか？")) return;
+                    try {
+                      const { matches, fixed } = await repairAllPlaceholderPlayerNames();
+                      if (fixed === 0) alert("修正が必要な記録は見つかりませんでした。");
+                      else alert(matches + "試合・合計" + fixed + "件を修正しました。");
+                    } catch(e) { alert("修正に失敗しました: " + (e.message||e)); }
+                  }}
+                >🩹 「選手A／選手B」の記録をまとめて直す</button>
+                <div style={{ fontSize:11,color:C.textSec,marginTop:6 }}>相手の名前が分からないまま記録した試合に残る仮の名前を、あとから登録した正しい選手名に置き換えます。</div>
               </div>
             )}
 
