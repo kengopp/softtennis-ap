@@ -14414,6 +14414,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       {/* スタッツタブ */}
       {tab==="stats"&&<StatsTab match={match} onDownloadCsv={()=>downloadCsv(match)} onShareLine={()=>window.open(`https://line.me/R/msg/text/?${encodeURIComponent(buildLineText(match))}`,"_blank")}/>}
 
+      {/* ★スコア・スタッツ・検算は縦に長くなるため、一番下にも戻るボタンを置く
+            （毎回画面の一番上までスクロールし直さなくて済むように） */}
+      {(tab==="score"||tab==="stats"||tab==="sheet")&&(
+        <div style={{ padding:"4px 14px 20px" }}>
+          <button style={{ ...S.btn("#fff"), color:C.navy, border:`1px solid ${C.border}`, fontSize:13 }} onClick={onBack}>← 戻る</button>
+        </div>
+      )}
+
       {modal?.type==="gameOver"&&(
         <Modal>
           <div style={{ textAlign:"center" }}>
