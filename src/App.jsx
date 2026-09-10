@@ -2472,6 +2472,77 @@ function finalServer(first, played) {
 }
 
 // ============================================================
+// ★サーブ／レシーブの担当者を1ポイントずつ割り出す（検算シートと統計の共通処理）
+// ------------------------------------------------------------
+// ソフトテニスのダブルス規則：
+// 　サーブ側は2ポイントずつ交代（1人目が1-2点目、2人目が3-4点目…／チームの通算サーブ数で判定）
+// 　レシーブ側は1ポイントごとに交代（コート左右の位置で決まるため、ゲーム内の総ポイント数で判定）
+// シングルスの場合は1人しかいないので常にその選手になる。
+//
+// ★重要：スタッツ（calcPlayerStats）も検算シートもこの関数を使う。
+// 　別々に同じ計算を書くと、片方だけ直したときに数字がズレて
+// 　「検算したのに合っているのか分からない」状態になるため、必ずここに一本化する。
+// ============================================================
+function buildServeReceiveRows(match) {
+  if (!match) return [];
+  const matchPlayers = Array.isArray(match.players) ? match.players : [];
+  const matchGames   = Array.isArray(match.games) ? match.games : [];
+
+  // チームごとの選手をorder_num順に並べる（[0]=選手1, [1]=選手2）
+  const teamPlayers = {
+    A: matchPlayers.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
+    B: matchPlayers.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
+  };
+  // ★どちらの選手が先に始めるか（通常は選手1＝配列[0]から）。稀に選手2から始まるケースがあるため、
+  // 　match.order_a / match.order_b（"p1" | "p2"）で入れ替え可能にしている。
+  const orderFlags = { A: match?.order_a === "p2" ? "p2" : "p1", B: match?.order_b === "p2" ? "p2" : "p1" };
+  const orderedPlayers = (players, flag) => {
+    if (!Array.isArray(players) || players.length<=1) return players;
+    return flag==="p2" ? [players[1], players[0]] : players;
+  };
+  const serverIndividualAt = (players, turn, flag) => {
+    const ps = orderedPlayers(players, flag);
+    if (!Array.isArray(ps) || ps.length===0) return null;
+    if (ps.length===1) return ps[0];
+    return Math.floor(turn/2)%2===0 ? ps[0] : ps[1];
+  };
+  const receiverIndividualAt = (players, turn, flag) => {
+    const ps = orderedPlayers(players, flag);
+    if (!Array.isArray(ps) || ps.length===0) return null;
+    if (ps.length===1) return ps[0];
+    return turn%2===0 ? ps[0] : ps[1];
+  };
+
+  const out = [];
+  for (const g of matchGames) {
+    // ★サーブ担当は「そのゲームの何本目か」を配列の先頭から数えて決めるため、必ず番号順に整える。
+    const points = (Array.isArray(g.points) ? g.points.slice() : []).sort((a,b)=>(a.point_number ?? 0)-(b.point_number ?? 0));
+    let serveTurnA = 0, serveTurnB = 0; // 各チームがこのゲームで通算何ポイント目のサーブか
+    for (let idx=0; idx<points.length; idx++) {
+      const pt = points[idx];
+      const serverTeam = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
+      if (serverTeam !== "A" && serverTeam !== "B") {
+        out.push({ game: g, point: pt, idx, serverTeam: null, receiveTeam: null, serverPlayer: null, receiverPlayer: null, serveResult: null });
+        continue;
+      }
+      const receiveTeam = serverTeam==="A" ? "B" : "A";
+      const serveTurn   = serverTeam==="A" ? serveTurnA : serveTurnB;
+      const serverPlayer   = serverIndividualAt(teamPlayers[serverTeam], serveTurn, orderFlags[serverTeam]);
+      // ★レシーブ側は「そのゲームで何点目か（idx）」で1ポイントごとに交代する（サーブ側の通算カウントとは別）
+      const receiverPlayer = receiverIndividualAt(teamPlayers[receiveTeam], idx, orderFlags[receiveTeam]);
+      const fc = pt.fault_count ?? 0;
+      const serveResult = fc===0 ? "1st" : fc===1 ? "2nd" : fc===2 ? "df" : null;
+      out.push({
+        game: g, point: pt, idx, serverTeam, receiveTeam, serverPlayer, receiverPlayer, serveResult,
+        serverWonPoint: pt.scoring_team === serverTeam,
+      });
+      if (serverTeam==="A") serveTurnA++; else serveTurnB++;
+    }
+  }
+  return out;
+}
+
+// ============================================================
 // 統計計算（play_type / result_type ベースに対応）
 // ============================================================
 function calcPlayerStats(match) {
@@ -2509,34 +2580,7 @@ function calcPlayerStats(match) {
     return result[key];
   };
 
-  // チームごとの選手をorder_num順に並べる（[0]=選手1, [1]=選手2）
-  const teamPlayers = {
-    A: matchPlayers.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
-    B: matchPlayers.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name),
-  };
-  // ★どちらの選手が先に始めるか（通常は選手1＝配列[0]から）。稀に選手2から始まるケースがあるため、
-  // 　match.order_a / match.order_b（"p1" | "p2"）で入れ替え可能にしている。
-  const orderFlags = { A: match?.order_a === "p2" ? "p2" : "p1", B: match?.order_b === "p2" ? "p2" : "p1" };
-  const orderedPlayers = (players, flag) => {
-    if (!Array.isArray(players) || players.length<=1) return players;
-    return flag==="p2" ? [players[1], players[0]] : players;
-  };
-  // ソフトテニスのダブルス規則：
-  // 　サーブ側は2ポイントずつ交代（1人目が1-2点目、2人目が3-4点目…／チームの通算サーブ数で判定）
-  // 　レシーブ側は1ポイントごとに交代（コート左右の位置で決まるため、ゲーム内の総ポイント数で判定）
-  // シングルスの場合はteamPlayersが1人なので常にその選手に集計される。
-  const serverIndividualAt = (players, turn, flag) => {
-    const ps = orderedPlayers(players, flag);
-    if (!Array.isArray(ps) || ps.length===0) return null;
-    if (ps.length===1) return ps[0];
-    return Math.floor(turn/2)%2===0 ? ps[0] : ps[1];
-  };
-  const receiverIndividualAt = (players, turn, flag) => {
-    const ps = orderedPlayers(players, flag);
-    if (!Array.isArray(ps) || ps.length===0) return null;
-    if (ps.length===1) return ps[0];
-    return turn%2===0 ? ps[0] : ps[1];
-  };
+  // ★サーブ／レシーブ担当者の割り出しは buildServeReceiveRows() に一本化した（下のループで使う）
 
   for (const g of matchGames) {
     // ★最後の砦：サーブを誰が打ったかは、この配列を先頭から数えた「そのゲームの何本目か」で決めている。
@@ -2591,46 +2635,37 @@ function calcPlayerStats(match) {
       r.plays["fault"] = (r.plays["fault"] ?? 0) + 1;
     }
 
-    // ★1stサーブ確率・レシーブミス率（サーブは2ポイントごと、レシーブは1ポイントごとの選手交代を反映して個人に按分）
-    let beforeA = 0, beforeB = 0;       // このポイント開始時点のスコア（フォルト記録との突き合わせ用）
-    let serveTurnA = 0, serveTurnB = 0; // 各チームがこのゲームで通算何ポイント目のサーブか
-    for (let idx=0; idx<points.length; idx++) {
-      const pt = points[idx];
-      const serverTeam  = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
-      if (serverTeam !== "A" && serverTeam !== "B") { beforeA = pt.score_a_after; beforeB = pt.score_b_after; continue; }
-      const receiveTeam = serverTeam==="A" ? "B" : "A";
-      const serveTurn   = serverTeam==="A" ? serveTurnA : serveTurnB;
+  }
 
-      const serverPlayer   = serverIndividualAt(teamPlayers[serverTeam],  serveTurn, orderFlags[serverTeam]);
-      // ★レシーブ側は「そのゲームで何点目か（idx）」で1ポイントごとに交代する（サーブ側の通算カウントとは別）
-      const receiverPlayer = receiverIndividualAt(teamPlayers[receiveTeam], idx, orderFlags[receiveTeam]);
+  // ★1stサーブ確率・レシーブミス率（サーブは2ポイントごと、レシーブは1ポイントごとの選手交代を反映して個人に按分）
+  // 　担当者の割り出しは buildServeReceiveRows() に一本化している。検算シートも同じ関数を使うので、
+  // 　画面に出ている「誰が打ったか」とここでの集計が食い違うことはない。
+  for (const row of buildServeReceiveRows(match)) {
+    const { point: pt, serverTeam, receiveTeam, serverPlayer, receiverPlayer } = row;
+    if (!serverTeam) continue;
 
-      // ★このポイントの直前に1stフォルトがあったかは、ポイント自身が持つfault_countで確実に判定できる
-      // 　（別テーブルのfaultsとスコアで突き合わせる方式は、フォルト記録時のスコアが実際とズレていると
-      // 　　対応が取れなくなり、集計から漏れることがあったため廃止）
-      const hadFault = (pt.fault_count ?? 0) >= 1;
+    // ★このポイントの直前に1stフォルトがあったかは、ポイント自身が持つfault_countで確実に判定できる
+    // 　（別テーブルのfaultsとスコアで突き合わせる方式は、フォルト記録時のスコアが実際とズレていると
+    // 　　対応が取れなくなり、集計から漏れることがあったため廃止）
+    const hadFault = (pt.fault_count ?? 0) >= 1;
 
-      if (serverPlayer) {
-        const r = ensure(serverTeam, serverPlayer);
-        r.serveTotal++;
-        if (hadFault) r.serveFault++;
-        if (pt.fault_count===0)      { r.serve1st++; if (pt.scoring_team===serverTeam) r.serve1stWin++; }
-        else if (pt.fault_count===1) { r.serve2nd++; if (pt.scoring_team===serverTeam) r.serve2ndWin++; }
-        else if (pt.fault_count===2) { r.serveDf++; }
-      }
-      if (receiverPlayer) {
-        const r = ensure(receiveTeam, receiverPlayer);
-        r.receiveTotal++;
-      }
-      // ★分子（ミス数）は実際にそのポイントで記録された選手名をそのまま使う（ローテーション推定に頼らない）。
-      // 　分母（レシーブ機会数）は上のreceiveTotalの通りローテーションからの推定値のまま。
-      if (pt.play_type==="receive" && pt.result_type==="error" && pt.player_name && teamOf[pt.player_name]===receiveTeam) {
-        const rMiss = ensure(receiveTeam, pt.player_name);
-        rMiss.receiveMiss++;
-      }
-
-      if (serverTeam==="A") serveTurnA++; else serveTurnB++;
-      beforeA = pt.score_a_after; beforeB = pt.score_b_after;
+    if (serverPlayer) {
+      const r = ensure(serverTeam, serverPlayer);
+      r.serveTotal++;
+      if (hadFault) r.serveFault++;
+      if (pt.fault_count===0)      { r.serve1st++; if (pt.scoring_team===serverTeam) r.serve1stWin++; }
+      else if (pt.fault_count===1) { r.serve2nd++; if (pt.scoring_team===serverTeam) r.serve2ndWin++; }
+      else if (pt.fault_count===2) { r.serveDf++; }
+    }
+    if (receiverPlayer) {
+      const r = ensure(receiveTeam, receiverPlayer);
+      r.receiveTotal++;
+    }
+    // ★分子（ミス数）は実際にそのポイントで記録された選手名をそのまま使う（ローテーション推定に頼らない）。
+    // 　分母（レシーブ機会数）は上のreceiveTotalの通りローテーションからの推定値のまま。
+    if (pt.play_type==="receive" && pt.result_type==="error" && pt.player_name && teamOf[pt.player_name]===receiveTeam) {
+      const rMiss = ensure(receiveTeam, pt.player_name);
+      rMiss.receiveMiss++;
     }
   }
   return Object.values(result);
@@ -13787,7 +13822,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         </div>
       )}
       <div style={{ display:"flex",background:C.white,borderBottom:`1px solid ${C.border}` }}>
-        {[["record","記録"],["score","スコア"],["stats","スタッツ"]].map(([v,l])=>(
+        {[["record","記録"],["score","スコア"],["stats","スタッツ"],["sheet","検算"]].map(([v,l])=>(
           <button key={v} style={{ flex:1,padding:11,border:"none",cursor:"pointer",background:"transparent",fontWeight:tab===v?700:400,fontSize:14,color:tab===v?C.accent:C.textSec,borderBottom:tab===v?`3px solid ${C.accent}`:"3px solid transparent" }} onClick={()=>setTab(v)}>{l}</button>
         ))}
       </div>
@@ -14287,6 +14322,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           ))}
         </div>
       )}
+
+      {/* ★検算タブ：1ポイントずつサーブ／レシーブ担当と1st・2nd・DFを書き出す */}
+      {tab==="sheet"&&<ServeSheetTab match={match} teamALabel={teamALabel} teamBLabel={teamBLabel} />}
 
       {/* スタッツタブ */}
       {tab==="stats"&&<StatsTab match={match} onDownloadCsv={()=>downloadCsv(match)} onShareLine={()=>window.open(`https://line.me/R/msg/text/?${encodeURIComponent(buildLineText(match))}`,"_blank")}/>}
@@ -14840,6 +14878,128 @@ function MatchSummaryPanel({ match }) {
             })()}
           </div>
         </details>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ★検算シート：1ポイントずつ「誰がサーブし、誰がレシーブし、1stイン/2ndイン/DFのどれだったか」を
+//   すべて書き出す画面。スタッツの数字が本当に合っているかを目で確かめるためのもの。
+//   担当者の割り出しは buildServeReceiveRows() を使う＝スタッツとまったく同じ計算なので、
+//   ここに出ている内容とスタッツの数字は必ず一致する。
+// ============================================================
+function ServeSheetTab({ match, teamALabel, teamBLabel }) {
+  const rows = buildServeReceiveRows(match);
+  const byGame = {};
+  rows.forEach(r => { (byGame[r.game.id] ??= []).push(r); });
+
+  const serveResultLabel = (k) => k==="1st" ? "1stイン" : k==="2nd" ? "2ndイン" : k==="df" ? "ダブルフォルト" : "－";
+  const serveResultColor = (k) => k==="1st" ? "#16a34a" : k==="2nd" ? "#d97706" : k==="df" ? C.red : C.textSec;
+  const teamColor = (t) => t==="A" ? C.teamA : C.teamB;
+  const teamName  = (t) => t==="A" ? teamALabel : teamBLabel;
+
+  // ★選手ごとのサーブ集計（スタッツ画面の「サーブ分析」と同じ数字になるはず）
+  const tally = {};
+  rows.forEach(r => {
+    if (!r.serverPlayer || !r.serveResult) return;
+    const key = r.serverTeam + "__" + r.serverPlayer;
+    tally[key] ??= { team:r.serverTeam, name:r.serverPlayer, first:0, second:0, df:0 };
+    if (r.serveResult==="1st") tally[key].first++;
+    else if (r.serveResult==="2nd") tally[key].second++;
+    else if (r.serveResult==="df") tally[key].df++;
+  });
+  const tallyRows = Object.values(tally);
+
+  if (rows.length === 0) {
+    return <div style={{ padding:30, textAlign:"center", color:C.textSec, fontSize:12.5 }}>まだポイントが記録されていません</div>;
+  }
+
+  return (
+    <div style={{ padding:12 }}>
+      <div style={{ fontSize:11.5, color:C.navy, background:"#eef0ff", border:"1px solid #dcdffc", borderRadius:10, padding:"10px 12px", lineHeight:1.6, marginBottom:12 }}>
+        💡 1ポイントずつ、誰がサーブして誰がレシーブしたかを書き出しています。サーブ担当は「2本ずつ交代」、レシーブ担当は「1本ごとに交代」というルールから自動で割り出しています。実際と違っていた場合は、記録タブの「サーブ・レシーブ順を修正」で直せます。
+      </div>
+
+      {match.games.map(g => {
+        const gRows = byGame[g.id] ?? [];
+        if (gRows.length === 0) return null;
+        return (
+          <div key={g.id} style={{ ...S.card, overflow:"hidden", marginBottom:12 }}>
+            <div style={{ padding:"8px 12px", background:g.winner_team==="A"?"#2ecc71":g.winner_team==="B"?"#f97316":C.accent, color:C.white, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontWeight:700, fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
+              <span style={{ fontWeight:700, fontSize:13 }}>{g.score_a} - {g.score_b}</span>
+            </div>
+            {gRows.map((r, i) => {
+              const pt = r.point;
+              return (
+                <div key={pt.id ?? i} style={{ padding:"9px 12px", borderBottom:`1px solid ${C.border}` }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                    <span style={{ fontSize:10, fontWeight:800, color:C.textSec, background:C.gray, borderRadius:5, padding:"2px 6px", minWidth:20, textAlign:"center" }}>{r.idx+1}</span>
+                    <span style={{ fontSize:13, fontWeight:800, color:C.text }}>{pt.score_a_after}-{pt.score_b_after}</span>
+                    <span style={{ fontSize:10.5, fontWeight:700, color:teamColor(pt.scoring_team), marginLeft:"auto" }}>
+                      {teamName(pt.scoring_team)} の得点
+                    </span>
+                  </div>
+
+                  {r.serverTeam ? (
+                    <div style={{ fontSize:11.5, color:C.text, lineHeight:1.7 }}>
+                      <div>
+                        <span style={{ color:C.textSec }}>サーブ　</span>
+                        <span style={{ fontWeight:700, color:teamColor(r.serverTeam) }}>{r.serverPlayer || "（選手不明）"}</span>
+                        <span style={{ marginLeft:6, fontWeight:800, color:serveResultColor(r.serveResult) }}>{serveResultLabel(r.serveResult)}</span>
+                      </div>
+                      <div>
+                        <span style={{ color:C.textSec }}>レシーブ　</span>
+                        <span style={{ fontWeight:700, color:teamColor(r.receiveTeam) }}>{r.receiverPlayer || "（選手不明）"}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:11.5, color:C.textSec }}>サーブ側が記録されていません</div>
+                  )}
+
+                  {(pt.player_name || pt.play_type) && (
+                    <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>
+                      内容　{[pt.player_name, pt.play_type?getPlayLabel(pt.play_type):"", pt.side_type?getSideLabel(pt.side_type):"", pt.course_type?getCourseLabel(pt.course_type):"", pt.miss_type?getMissLabel(pt.miss_type):"", pt.is_winner?"決めた":"ミス"].filter(Boolean).join("・")}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {tallyRows.length > 0 && (
+        <div style={{ ...S.card, overflow:"hidden" }}>
+          <div style={{ padding:"9px 12px", background:C.navy, color:C.white, fontSize:12.5, fontWeight:800 }}>
+            この試合のサーブ集計（スタッツと同じ数字）
+          </div>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ borderCollapse:"collapse", width:"100%", fontSize:11.5 }}>
+              <thead>
+                <tr style={{ background:C.gray }}>
+                  <th style={{ textAlign:"left", padding:"7px 10px", color:C.textSec, fontWeight:700 }}>選手</th>
+                  <th style={{ padding:"7px 6px", color:C.textSec, fontWeight:700 }}>1st</th>
+                  <th style={{ padding:"7px 6px", color:C.textSec, fontWeight:700 }}>2nd</th>
+                  <th style={{ padding:"7px 6px", color:C.textSec, fontWeight:700 }}>DF</th>
+                  <th style={{ padding:"7px 6px", color:C.textSec, fontWeight:700 }}>計</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tallyRows.map(t => (
+                  <tr key={t.team+t.name} style={{ borderTop:`1px solid ${C.border}` }}>
+                    <td style={{ padding:"8px 10px", fontWeight:700, color:teamColor(t.team), whiteSpace:"nowrap" }}>{t.name}</td>
+                    <td style={{ padding:"8px 6px", textAlign:"center", fontWeight:700 }}>{t.first}</td>
+                    <td style={{ padding:"8px 6px", textAlign:"center", fontWeight:700 }}>{t.second}</td>
+                    <td style={{ padding:"8px 6px", textAlign:"center", fontWeight:800, color:t.df>0?C.red:C.text }}>{t.df}</td>
+                    <td style={{ padding:"8px 6px", textAlign:"center", fontWeight:800 }}>{t.first+t.second+t.df}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );
