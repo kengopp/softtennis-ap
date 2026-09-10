@@ -1153,6 +1153,58 @@ async function releaseMatchRecorder(id) {
 }
 
 // ============================================================
+// ★仮の名前（「選手A」「選手B」）で記録されたポイント・フォルトを、今の選手名に直す
+// ------------------------------------------------------------
+// 相手の名前が分からないまま試合を始めると、記録された1点ごとに「選手A」「選手B」という
+// 仮名が文字列としてそのまま書き込まれる。あとから正しい名前を登録しても、
+// 既に記録済みのポイントは仮名のまま残ってしまうため、それをまとめて置き換える。
+// 　「選手A」＝相手チーム（B）の1人目 / 「選手B」＝相手チーム（B）の2人目
+// ============================================================
+const PLACEHOLDER_NAMES = ["選手A", "選手B"];
+
+function findPlaceholderRenameMap(match) {
+  const bPlayers = (match?.players ?? []).filter(p => p.team === "B").sort((a,b)=>a.order_num-b.order_num);
+  const map = {};
+  PLACEHOLDER_NAMES.forEach((ph, i) => {
+    const real = (bPlayers[i]?.player_name ?? "").trim();
+    // 今の選手名がまだ仮名のままなら置き換えない（意味がないので）
+    if (real && !PLACEHOLDER_NAMES.includes(real)) map[ph] = real;
+  });
+  return map;
+}
+
+// 仮名が実際に記録に残っているかを調べる（ボタンを出すかどうかの判定用）
+function countPlaceholderRecords(match) {
+  const map = findPlaceholderRenameMap(match);
+  if (Object.keys(map).length === 0) return 0;
+  let n = 0;
+  (match?.games ?? []).forEach(g => {
+    (g.points ?? []).forEach(pt => { if (map[pt.player_name]) n++; });
+    (g.faults ?? []).forEach(f  => { if (map[f.player_name])  n++; });
+  });
+  return n;
+}
+
+async function repairPlaceholderPlayerNames(match) {
+  const map = findPlaceholderRenameMap(match);
+  if (Object.keys(map).length === 0) return 0;
+  let fixed = 0;
+  for (const [placeholder, realName] of Object.entries(map)) {
+    const { error: pErr, count: pCount } = await supabase.from("points")
+      .update({ player_name: realName }, { count: "exact" })
+      .eq("match_id", match.id).eq("player_name", placeholder);
+    if (pErr) throw pErr;
+    fixed += pCount ?? 0;
+    const { error: fErr, count: fCount } = await supabase.from("faults")
+      .update({ player_name: realName }, { count: "exact" })
+      .eq("match_id", match.id).eq("player_name", placeholder);
+    if (fErr) throw fErr;
+    fixed += fCount ?? 0;
+  }
+  return fixed;
+}
+
+// ============================================================
 // プロフィール
 // ============================================================
 async function getMyProfile() {
@@ -14409,7 +14461,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       )}
 
       {/* ★検算タブ：1ポイントずつサーブ／レシーブ担当と1st・2nd・DFを書き出す */}
-      {tab==="sheet"&&<ServeSheetTab match={match} teamALabel={teamALabel} teamBLabel={teamBLabel} />}
+      {tab==="sheet"&&<ServeSheetTab match={match} teamALabel={teamALabel} teamBLabel={teamBLabel} onReload={onReload} />}
 
       {/* スタッツタブ */}
       {tab==="stats"&&<StatsTab match={match} onDownloadCsv={()=>downloadCsv(match)} onShareLine={()=>window.open(`https://line.me/R/msg/text/?${encodeURIComponent(buildLineText(match))}`,"_blank")}/>}
@@ -14982,8 +15034,11 @@ function MatchSummaryPanel({ match }) {
 //   担当者の割り出しは buildServeReceiveRows() を使う＝スタッツとまったく同じ計算なので、
 //   ここに出ている内容とスタッツの数字は必ず一致する。
 // ============================================================
-function ServeSheetTab({ match, teamALabel, teamBLabel }) {
+function ServeSheetTab({ match, teamALabel, teamBLabel, onReload }) {
   const rows = buildServeReceiveRows(match);
+  // ★「選手A」「選手B」のまま記録されたポイントが残っていないか
+  const placeholderCount = countPlaceholderRecords(match);
+  const [repairing, setRepairing] = useState(false);
   const byGame = {};
   rows.forEach(r => { (byGame[r.game.id] ??= []).push(r); });
 
@@ -15013,6 +15068,31 @@ function ServeSheetTab({ match, teamALabel, teamBLabel }) {
       <div style={{ fontSize:11.5, color:C.navy, background:"#eef0ff", border:"1px solid #dcdffc", borderRadius:10, padding:"10px 12px", lineHeight:1.6, marginBottom:12 }}>
         💡 1ポイントずつ、誰がサーブして誰がレシーブしたかを書き出しています。サーブ担当は「2本ずつ交代」、レシーブ担当は「1本ごとに交代」というルールから自動で割り出しています。実際と違っていた場合は、記録タブの「サーブ・レシーブ順を修正」で直せます。
       </div>
+
+      {/* ★相手の名前が分からないまま記録した試合は、1点ごとの記録に「選手A」「選手B」という
+            仮の名前が残る。あとから正しい名前を登録しても記録側は直らないため、ここでまとめて直す。 */}
+      {placeholderCount > 0 && (
+        <div style={{ fontSize:11.5, color:"#92400e", background:"#fff7ed", border:"1px solid #fed7aa", borderRadius:10, padding:"10px 12px", lineHeight:1.6, marginBottom:12 }}>
+          ⚠️ 「選手A」「選手B」という仮の名前のまま記録されたポイントが {placeholderCount} 件あります。今の相手選手名（{(match.players??[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("／")}）に置き換えられます。
+          <button
+            style={{ ...S.btn("#f97316", C.white), fontSize:12, padding:"9px", marginTop:8 }}
+            disabled={repairing}
+            onClick={async ()=>{
+              if (!window.confirm("記録に残っている「選手A」「選手B」を、今の相手選手名に置き換えます。よろしいですか？")) return;
+              setRepairing(true);
+              try {
+                const n = await repairPlaceholderPlayerNames(match);
+                alert(n + "件を修正しました。");
+                onReload && onReload();
+              } catch(e) {
+                alert("修正に失敗しました: " + (e.message || e));
+              } finally {
+                setRepairing(false);
+              }
+            }}
+          >{repairing ? "修正中..." : "今の選手名に直す"}</button>
+        </div>
+      )}
 
       {match.games.map(g => {
         const gRows = byGame[g.id] ?? [];
