@@ -5992,6 +5992,13 @@ function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
   const [registering, setRegistering] = useState(false);
   const [result, setResult] = useState(null); // { ok, fail }
 
+  // ★選手名・チーム名の修正（対戦表の読み取り違いなど）。保存するとペアマスター側も書き換える。
+  const [ownSchoolName, setOwnSchoolName] = useState("");
+  const [editIdx, setEditIdx] = useState(-1);
+  const [editName, setEditName] = useState("");
+  const [editClub, setEditClub] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
   useEffect(() => { getTournaments().then(setAllTournaments); }, []);
 
   useEffect(() => {
@@ -6014,17 +6021,18 @@ function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
         const seen = new Set(); // ★同じ選手が複数ペアに登場しても候補には1件だけ出す
         const list = [];
         srcPairs.forEach(p => {
-          [p.player1_name, p.player2_name].forEach(name => {
+          // ★どのペアの何人目かを覚えておく（編集時にペアマスター側を直接書き換えるため）
+          [["player1_name", p.player1_name], ["player2_name", p.player2_name]].forEach(([slot, name]) => {
             const trimmed = (name || "").trim();
             if (!trimmed) return;
             const key = normalizePlayerName(trimmed);
             if (existingNames.has(key) || seen.has(key)) return;
             seen.add(key);
             const clubName = (p.club_name || "").trim();
-            list.push({ name: trimmed, clubName, isOwn: !!myName && clubName === myName, checked: true });
+            list.push({ name: trimmed, clubName, isOwn: !!myName && clubName === myName, checked: true, pair: p, slot });
           });
         });
-        if (alive) setCandidates(list);
+        if (alive) { setCandidates(list); setOwnSchoolName(myName); }
       } catch (e) {
         if (alive) setErrorMsg("読み込みに失敗しました: " + (e.message || e));
       } finally {
@@ -6044,6 +6052,39 @@ function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
   }
   function toggleAll(checked) {
     setCandidates(list => list.map(c => ({ ...c, checked })));
+  }
+
+  function openEdit(idx) {
+    const c = candidates[idx];
+    setEditIdx(idx);
+    setEditName(c.name);
+    setEditClub(c.clubName);
+  }
+
+  async function handleSaveEdit() {
+    const c = candidates[editIdx];
+    const newName = editName.trim();
+    const newClub = editClub.trim();
+    if (!newName) { alert("選手名を入力してください。"); return; }
+    setSavingEdit(true);
+    try {
+      // ★ペアマスター（tournament_pairs）そのものを更新するので、大会の対戦表側の表示も直る。
+      //   チーム名はペア単位の情報なので、同じペアのもう1人にも同じチーム名が反映される。
+      const updated = { ...c.pair, [c.slot]: newName, club_name: newClub || null };
+      await saveTournamentPair(updated);
+      setCandidates(list => list.map(x => {
+        if (x.pair.id !== c.pair.id) return x;
+        const nextPair = { ...x.pair, [c.slot]: newName, club_name: newClub || null };
+        // 同じペアの相方はチーム名だけ、本人は名前とチーム名の両方を更新する
+        const nextName = x.slot === c.slot ? newName : x.name;
+        return { ...x, pair: nextPair, name: nextName, clubName: newClub, isOwn: !!ownSchoolName && newClub === ownSchoolName };
+      }));
+      setEditIdx(-1);
+    } catch (e) {
+      alert("保存に失敗しました: " + (e.message || e));
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   async function handleRegister() {
@@ -6127,6 +6168,12 @@ function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
                     </div>
                   </div>
                   <span style={S.chip(c.isOwn)} onClick={() => toggleOwn(i)}>{c.isOwn ? "自チーム" : "他チーム"}</span>
+                  <button
+                    style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", padding:"2px 0", flexShrink:0 }}
+                    onClick={() => openEdit(i)}
+                    disabled={registering}
+                    title="選手名・チーム名を修正"
+                  >✏️</button>
                 </div>
               ))}
             </div>
@@ -6145,6 +6192,39 @@ function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
             <div style={{ fontSize:11, color:C.red, marginTop:8, textAlign:"center" }}>{result.ok}件登録・{result.fail}件失敗しました</div>
           )}
         </div>
+      )}
+
+      {editIdx >= 0 && candidates[editIdx] && (
+        <Modal onClose={() => { if (!savingEdit) setEditIdx(-1); }}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>選手名・チーム名を修正</h3>
+          <div style={{ fontSize:10.5, color:C.textSec, marginBottom:12, lineHeight:1.6 }}>
+            大会のペアマスターも合わせて修正されます。チーム名はペア単位の情報のため、同じペアのもう1人にも反映されます。
+          </div>
+
+          <div style={{ fontSize:11, fontWeight:700, color:C.textSec, marginBottom:4 }}>選手名</div>
+          <input
+            style={{ width:"100%", padding:"9px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13.5, color:C.text, boxSizing:"border-box", marginBottom:12 }}
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            disabled={savingEdit}
+          />
+
+          <div style={{ fontSize:11, fontWeight:700, color:C.textSec, marginBottom:4 }}>チーム名</div>
+          <input
+            style={{ width:"100%", padding:"9px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13.5, color:C.text, boxSizing:"border-box", marginBottom:6 }}
+            value={editClub}
+            onChange={e => setEditClub(e.target.value)}
+            disabled={savingEdit}
+          />
+          <div style={{ fontSize:10.5, color:C.textSec, marginBottom:14 }}>
+            出場番号：{candidates[editIdx].pair?.entry_no || "（なし）"}
+          </div>
+
+          <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white) }} disabled={savingEdit} onClick={handleSaveEdit}>
+            {savingEdit ? "保存中..." : "保存する"}
+          </button>
+          <button style={{ ...S.btn("transparent", C.textSec), marginTop:6 }} disabled={savingEdit} onClick={() => setEditIdx(-1)}>キャンセル</button>
+        </Modal>
       )}
 
       {showTournamentPicker && (
