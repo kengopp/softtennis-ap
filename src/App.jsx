@@ -803,6 +803,8 @@ function rowToMatchSummary(m, players=[], games=[]) {
 function rowToMatchFull(m, players, games, points, faults) {
   return {
     id: m.id, created_by: m.created_by,
+    // ★記録者ロック（今この試合を記録している人）。観戦モードの「○○ 記録中」表示に使う。
+    recorder_id: m.recorder_id ?? null, recorder_name: m.recorder_name ?? null,
     match_date: m.match_date, venue: m.venue ?? "",
     tournament_name: m.tournament_name ?? "", round: m.round ?? "",
     match_number: m.match_number ?? "",
@@ -838,6 +840,20 @@ function rowToMatchFull(m, players, games, points, faults) {
   };
 }
 
+// ★記録者ロックの値を決める。
+//   ・試合が終了／中断／途中終了になったらロックを外す（次に誰でも記録を引き継げるように）
+//   ・進行中なのにロックが空なら、いま保存している人を記録者にする（新規に試合を始めた人＝記録者）
+//   ・それ以外は今のロックをそのまま維持する
+async function resolveRecorderFields(match, user) {
+  const ended = match.status === "finished" || match.status === "suspended" || match.status === "abandoned";
+  if (ended) return { recorder_id: null, recorder_name: null };
+  if (match.status === "active" && !match.recorder_id && user) {
+    const profile = await getMyProfile();
+    return { recorder_id: user.id, recorder_name: profile?.name || null };
+  }
+  return { recorder_id: match.recorder_id ?? null, recorder_name: match.recorder_name ?? null };
+}
+
 // 試合1件を関連テーブルごと保存（新規・更新どちらも対応）
 async function saveMatch(match) {
   const { data: { user } } = await supabase.auth.getUser();
@@ -856,6 +872,9 @@ async function saveMatch(match) {
     court_number: match.court_number || null,
     is_younger: match.is_younger !== false,
     walkover_winner: match.walkover_winner || null,
+    // ★記録者ロック：今この試合のスコアを記録している人。団体戦(team_match_games)と同じ考え方。
+    //   試合を作る人と実際に記録する人は別なことが多いので、created_byとは分けて持つ。
+    ...(await resolveRecorderFields(match, user)),
   };
   const { error: mErr } = await supabase.from("matches").upsert(matchRow);
   if (mErr) throw mErr;
@@ -1113,8 +1132,21 @@ async function startScheduledMatch(id, firstServer, orderA, orderB) {
   if (firstServer) updates.first_server = firstServer;
   if (orderA) updates.order_a = orderA;
   if (orderB) updates.order_b = orderB;
+  // ★試合を開始した人がそのまま記録者になる（作成者とは別に管理する）
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    const profile = await getMyProfile();
+    updates.recorder_id = user.id;
+    updates.recorder_name = profile?.name || null;
+  }
   const { error } = await supabase.from("matches").update(updates).eq("id", id);
   if (error) throw error;
+}
+
+// ★記録者ロックを外す（試合終了・中断・途中終了のとき）
+async function releaseMatchRecorder(id) {
+  const { error } = await supabase.from("matches").update({ recorder_id:null, recorder_name:null }).eq("id", id);
+  if (error) console.error(error);
 }
 
 // ============================================================
@@ -13192,8 +13224,12 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
             const baseViewOnly = !tmg || !tmg.recorder_id || tmg.recorder_id !== user.id;
             setViewOnly(baseViewOnly || (suspendedLike && !statusLockOverride));
           } else {
-            // 個人戦：作成者以外は観戦モード
-            const baseViewOnly = m.created_by !== user.id;
+            // ★個人戦も団体戦と同じ「記録者ロック」で判定する。
+            //   試合を作る人と実際に記録する人は別なことが多いため、created_byでは判定しない。
+            //   recorder_idがまだ無い古い試合は、これまで通り作成者を記録者とみなす（移行のための保険）。
+            const baseViewOnly = m.recorder_id
+              ? m.recorder_id !== user.id
+              : m.created_by !== user.id;
             setViewOnly(baseViewOnly || (suspendedLike && !statusLockOverride));
           }
         }
@@ -13787,6 +13823,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       {/* タブ */}
       {viewOnly && (
         <div style={{ background:"#f5f5f5", borderBottom:"1px solid #e0e0e0", padding:"8px 14px" }}>
+          {/* ★誰が記録中かを表示（団体戦の番手一覧と同じ見せ方にそろえる） */}
+          {!teamMatchId && match.recorder_name && match.status!=="finished" && (
+            <div style={{ marginBottom:6 }}>
+              <span style={{ fontSize:11, color:"#dc2626", fontWeight:700, background:"#fdecea", padding:"3px 9px", borderRadius:20 }}>🔴 {match.recorder_name} 記録中</span>
+            </div>
+          )}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
             <button
@@ -13807,7 +13849,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     const { data: tmg } = await supabase.from("team_match_games").select("id").eq("match_id", match.id).maybeSingle();
                     if (tmg) await updateTeamMatchGame(tmg.id, { recorder_id:user.id, recorder_name: profile?.name || null });
                   } else {
-                    await supabase.from("matches").update({ created_by:user.id }).eq("id", match.id);
+                    // ★created_byは「誰が試合を作ったか」の記録なので書き換えない。記録者だけを付け替える。
+                    await supabase.from("matches").update({ recorder_id:user.id, recorder_name: profile?.name || null }).eq("id", match.id);
                   }
                   onClaimRecorder && onClaimRecorder();
                   onReload();
@@ -13816,6 +13859,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 }
               }}
             >🔓 自分が記録者になる（続きから記録する）</button>
+          )}
+          {/* ★記録者ロックが残ったまま操作不能になった場合の逃げ道（団体戦と同じ）。
+                通信が切れた・画面をそのまま閉じた等でロックが外れないことがあるため。 */}
+          {!teamMatchId && match.recorder_name && match.status!=="finished" && (
+            <div style={{ textAlign:"center", marginTop:6 }}>
+              <button
+                style={{ background:"none", border:"none", color:C.textSec, fontSize:11, textDecoration:"underline", cursor:"pointer" }}
+                onClick={async ()=>{
+                  if (!window.confirm("この試合の記録者ロックを解除しますか？\n（他の人が今まさに記録中でないことを確認してください）")) return;
+                  try {
+                    await releaseMatchRecorder(match.id);
+                    onReload();
+                  } catch(e) { alert("エラー: " + (e.message || e)); }
+                }}
+              >記録者ロックを解除する</button>
+            </div>
           )}
           {/* ★「結果だけ記録」で終えた試合（ゲームが1つも無いまま終了扱い）は、
                 ここから直接ポイント記録に切り替えられるようにする */}
@@ -13833,7 +13892,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     const { data: tmg } = await supabase.from("team_match_games").select("id").eq("match_id", match.id).maybeSingle();
                     if (tmg) await updateTeamMatchGame(tmg.id, { status:"waiting", recorder_id:user.id, recorder_name: profile?.name || null });
                   } else {
-                    await supabase.from("matches").update({ created_by:user.id }).eq("id", match.id);
+                    await supabase.from("matches").update({ recorder_id:user.id, recorder_name: profile?.name || null }).eq("id", match.id);
                   }
                   onReload();
                 } catch(e) {
