@@ -14130,8 +14130,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <span style={{ width:74,textAlign:"center",fontSize:16 }}>{rightMatchScore>leftMatchScore?"🏆":""}</span>
                 </div>
               </div>
-              {/* 試合メモ */}
-              {!viewOnly && (
+              {/* 試合メモ（★記録者以外も書けるようにする） */}
+              {(
                 <div style={{ ...S.card, padding:14, marginBottom:8 }}>
                   <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
                   <textarea
@@ -14152,14 +14152,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 <button style={{ ...S.btn(C.navyMid),fontSize:13 }} onClick={()=>setTab("stats")}>📊 スタッツを見る</button>
                 <button style={{ ...S.btn(C.navyMid),fontSize:13 }} onClick={()=>setTab("score")}>📋 スコアを見る</button>
               </div>
-              {!viewOnly && (
-                <>
-                  <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
-                  <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
-                  <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「途中終了」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"abandoned" }); }}>実は途中終了だった試合として、勝敗集計から除外する</button>
-                  <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
-                </>
-              )}
+              {/* ★終了した試合の編集は、記録した本人でなくてもできるようにする。
+                    記録係と、あとから内容を直す人（顧問など）が別なことが多いため。 */}
+              <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
+              <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
+              <button style={{ ...S.btn("#fff"),color:C.textSec,border:"1px solid "+C.border,marginBottom:8,fontSize:12 }} onClick={()=>{ if(window.confirm("この試合を「途中終了」扱いに変更しますか？\nスコアはそのまま残りますが、勝敗の集計から除外されます。")) persist({ ...match, status:"abandoned" }); }}>実は途中終了だった試合として、勝敗集計から除外する</button>
+              <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
               {/* ★AI動画分析は、管理者か、この試合に出場している本人（保護者アカウント含む）だけに表示する。
                   以前は誰にでも表示していたため、AI分析メニュー側で閲覧制限をかけても
                   この試合詳細のボタンから中身を見られてしまう抜け道になっていた。 */}
@@ -14172,7 +14170,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             </div>
           )}
 
-          {match.status==="finished"&&correctMode&&!viewOnly&&(
+          {match.status==="finished"&&correctMode&&(
             <div>
               <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7a5800" }}>
                 ✏️ 修正したいポイントをタップすると内容の変更・削除ができます。「＋」では好きな位置にポイントを追加できます。
