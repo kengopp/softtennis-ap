@@ -17659,6 +17659,11 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
           <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy }} onClick={onEdit}>✏️ 編集する</button>
           <button style={{ ...S.btn(C.redL), color:C.red }} onClick={onDelete}>🗑 削除</button>
         </div>
+        {/* ★コメントが長くなりやすいので、一番下にも戻るボタンを置く
+              （毎回画面の一番上までスクロールし直さなくて済むように） */}
+        <div style={{ marginTop:10 }}>
+          <button style={{ ...S.btn("#fff"), border:`1px solid ${C.border}`, color:C.navy, fontSize:13 }} onClick={onBack}>← 戻る</button>
+        </div>
       </div>
     </div>
   );
