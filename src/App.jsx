@@ -726,8 +726,11 @@ async function getHomeScreenData(linkedPlayerName) {
   //   「これからの試合（予定）」と「終わった試合」に分けて、それぞれ適切な順番で並べる。
   const byDateAsc  = (a,b) => String(a.match_date??"").localeCompare(String(b.match_date??""));
   const byDateDesc = (a,b) => String(b.match_date??"").localeCompare(String(a.match_date??""));
+  // ★「これから」なので、日付が過ぎたまま残っている予定は除く。
+  //   （結局やらなかった試合や古いテストデータが、いつまでも先頭に居座ってしまうため）
+  const todayStr = today();
   const upcomingRows = allMatchesLite
-    .filter(m => m.status === "scheduled" || m.status === "waiting")
+    .filter(m => (m.status === "scheduled" || m.status === "waiting") && String(m.match_date ?? "") >= todayStr)
     .sort(byDateAsc)     // 日付が近いものから
     .slice(0, 3);
   const recentRows = allMatchesLite
