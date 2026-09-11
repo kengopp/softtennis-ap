@@ -5150,6 +5150,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         })}
 
         {!loading && <div style={{ textAlign:"center", fontSize:11, color:C.textSec, marginTop:16 }}>＋ボタンから、この大会に紐づく試合を作成できます</div>}
+
+        {/* ★試合が増えると縦に長くなるため、一番下にも戻るボタンを置く。
+              右下の＋ボタンと重ならないよう、下に余白をとっている。 */}
+        {!loading && (
+          <div style={{ marginTop:16, marginBottom:80 }}>
+            <button style={{ ...S.btn("#fff"), border:`1px solid ${C.border}`, color:C.navy, fontSize:13 }} onClick={onBack}>← 戻る</button>
+          </div>
+        )}
       </div>
 
       <button
