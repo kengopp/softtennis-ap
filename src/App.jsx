@@ -714,15 +714,27 @@ async function getHomeScreenData(linkedPlayerName) {
       ? supabase.from("match_players").select("match_id, team, club_name").eq("player_name", linkedPlayerName)
       : Promise.resolve({ data: [], error: null }),
   ]);
-  if (mErr) { console.error(mErr); return { allMatchesLite: [], liveMatch: null, recent: [], linkedMatches: [] }; }
+  if (mErr) { console.error(mErr); return { allMatchesLite: [], liveMatch: null, recent: [], upcoming: [], linkedMatches: [] }; }
   if (lErr) console.error(lErr);
 
   const allMatchesLite = matchRows ?? [];
 
-  // カード表示（進行中の試合／直近3件）に必要な出場選手だけ、対象を絞って取得する
+  // カード表示（進行中の試合／これからの試合／終わった試合）に必要な出場選手だけ、対象を絞って取得する
   const liveRow = allMatchesLite.find(m => m.status === "active");
-  const recentRows = allMatchesLite.slice(0, 3);
-  const cardIds = Array.from(new Set([liveRow?.id, ...recentRows.map(m => m.id)].filter(Boolean)));
+  // ★以前は「作成が新しい順に3件」をまとめて『最近の試合』として出していたため、
+  //   これから先の予定が『最近の試合』として並んでしまい分かりにくかった。
+  //   「これからの試合（予定）」と「終わった試合」に分けて、それぞれ適切な順番で並べる。
+  const byDateAsc  = (a,b) => String(a.match_date??"").localeCompare(String(b.match_date??""));
+  const byDateDesc = (a,b) => String(b.match_date??"").localeCompare(String(a.match_date??""));
+  const upcomingRows = allMatchesLite
+    .filter(m => m.status === "scheduled" || m.status === "waiting")
+    .sort(byDateAsc)     // 日付が近いものから
+    .slice(0, 3);
+  const recentRows = allMatchesLite
+    .filter(m => m.status === "finished" || m.status === "abandoned" || m.status === "suspended")
+    .sort(byDateDesc)    // 新しく行われたものから
+    .slice(0, 3);
+  const cardIds = Array.from(new Set([liveRow?.id, ...upcomingRows.map(m => m.id), ...recentRows.map(m => m.id)].filter(Boolean)));
   const playersByMatch = {};
   if (cardIds.length > 0) {
     const { data: playersData, error: pErr } = await supabase
@@ -733,6 +745,7 @@ async function getHomeScreenData(linkedPlayerName) {
   const withPlayers = (row) => row ? { ...row, players: playersByMatch[row.id] ?? [] } : null;
   const liveMatch = withPlayers(liveRow);
   const recent = recentRows.map(withPlayers);
+  const upcoming = upcomingRows.map(withPlayers);
 
   // ★紐づけ選手（自分／お子さん）の対戦履歴：match_playersを起点にその選手の
   //   出場試合IDだけに絞り込む（全試合の選手データを経由しない）
@@ -745,7 +758,7 @@ async function getHomeScreenData(linkedPlayerName) {
       .map(m => ({ ...m, players: [{ player_name: linkedPlayerName, team: rowByMatch[m.id].team, club_name: rowByMatch[m.id].club_name }] }));
   }
 
-  return { allMatchesLite, liveMatch, recent, linkedMatches };
+  return { allMatchesLite, liveMatch, recent, upcoming, linkedMatches };
 }
 
 // 試合1件を、関連テーブルすべて含めて取得
@@ -9348,6 +9361,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [allMatchesLite, setAllMatchesLite] = useState([]); // ★games/players無しの軽量データ（全体の勝敗集計用）
   const [liveMatch, setLiveMatch] = useState(null);
   const [recent, setRecent] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);   // ★これから行う予定の試合
   const [linkedMatches, setLinkedMatches] = useState([]);
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9379,6 +9393,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
     setAllMatchesLite(homeData.allMatchesLite);
     setLiveMatch(homeData.liveMatch);
     setRecent(homeData.recent);
+    setUpcoming(homeData.upcoming ?? []);
     setLinkedMatches(homeData.linkedMatches);
     setLoading(false);
   }, []);
@@ -9626,31 +9641,56 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
               onClick={onGoPlayerStats}
             >👥 他の選手の戦績を見る</button>
 
-            <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>最近の試合</div>
-            {allMatchesLite.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
-            {recent.map(m=>{
-              const aWin = winnerSideOf(m)==="A";
-              const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
-              const bP = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
-              const bC = m.players.find(p=>p.team==="B")?.club_name??"";
+            {/* ★「これからの試合」と「終わった試合」を分けて表示する。
+                  以前はまとめて『最近の試合』として出していたため、先の予定が
+                  『最近の試合』として並んでしまい分かりにくかった。 */}
+            {(() => {
+              const renderCard = (m) => {
+                const aWin = winnerSideOf(m)==="A";
+                const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
+                const bP = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
+                const bC = m.players.find(p=>p.team==="B")?.club_name??"";
+                const done = m.status==="finished";
+                return (
+                  <div key={m.id} style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
+                    <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
+                      <span style={{ fontSize:12,fontWeight:700 }}>{m.tournament_name||"試合"}</span>
+                      <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
+                    </div>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
+                      <span style={{ fontSize:12,color:C.textSec }}>{aP}{(bC||bP) ? ` vs ${bC} ${bP}` : ""}</span>
+                      <span style={{ fontSize:14,fontWeight:800,color:done?(aWin?"#2ecc71":"#f97316"):C.textSec,whiteSpace:"nowrap" }}>
+                        {matchStatusShortLabel(m)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              };
               return (
-                <div key={m.id} style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
-                  <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
-                    <span style={{ fontSize:12,fontWeight:700 }}>{m.tournament_name||"試合"}</span>
-                    <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
-                  </div>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                    <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
-                    <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(aWin?"#2ecc71":"#f97316"):C.textSec }}>
-                      {matchStatusShortLabel(m)}
-                    </span>
-                  </div>
-                </div>
+                <>
+                  {allMatchesLite.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>まだ試合記録がありません</div>}
+
+                  {upcoming.length>0 && (
+                    <>
+                      <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>🎾 これからの試合</div>
+                      {upcoming.map(renderCard)}
+                      <div style={{ height:14 }} />
+                    </>
+                  )}
+
+                  {recent.length>0 && (
+                    <>
+                      <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>📋 終わった試合</div>
+                      {recent.map(renderCard)}
+                    </>
+                  )}
+
+                  {allMatchesLite.length>0 && (
+                    <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:13 }} onClick={()=>onNavigate("list")}>すべての試合を見る →</button>
+                  )}
+                </>
               );
-            })}
-            {allMatchesLite.length>0 && (
-              <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:13 }} onClick={()=>onNavigate("list")}>すべての試合を見る →</button>
-            )}
+            })()}
           </>
         )}
       </div>
