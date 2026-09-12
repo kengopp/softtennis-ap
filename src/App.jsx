@@ -4128,27 +4128,23 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       </div>
                       {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                     </div>
-                    {/* ★メモ・動画は内容を一覧に出さず、マークだけ出す。タップで内容を確認できる。 */}
-                    {(m.memo || (m.video_links && m.video_links.length > 0)) && (
-                      <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:7,justifyContent:"flex-end" }}>
-                        {m.memo && (
-                          <span
-                            style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:C.navy,background:C.accentL,border:"1px solid #c8ebd8" }}
-                            onClick={e=>{ e.stopPropagation(); setMemoView(m); }}
-                          >📝 メモあり</span>
-                        )}
-                        {m.video_links && m.video_links.length > 0 && (
-                          <span
-                            style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:"#c4302b",background:"#fdeceb",border:"1px solid #f7cfcd" }}
-                            onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
-                          >🎥 動画 {m.video_links.length}</span>
-                        )}
-                      </div>
-                    )}
                   </div>
                   <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                    <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>
+                    <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>
                     <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>
+                    {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
+                    {m.memo && (
+                      <button
+                        style={{ width:44, padding:"8px", background:C.accentL, color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                        onClick={e=>{ e.stopPropagation(); setMemoView(m); }}
+                      >📝</button>
+                    )}
+                    {m.video_links && m.video_links.length > 0 && (
+                      <button
+                        style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
+                        onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
+                      >🎥{m.video_links.length}</button>
+                    )}
                   </div>
                 </div>
               );
@@ -5221,28 +5217,24 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   </div>
                   {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
                 </div>
-                {/* ★メモ・動画は内容を一覧に出さず、マークだけ出す。タップで内容を確認できる。 */}
-                {(m.memo || (m.video_links && m.video_links.length > 0)) && (
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:7,justifyContent:"flex-end" }}>
-                    {m.memo && (
-                      <span
-                        style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:C.navy,background:C.accentL,border:"1px solid #c8ebd8" }}
-                        onClick={e=>{ e.stopPropagation(); setMemoView(m); }}
-                      >📝 メモあり</span>
-                    )}
-                    {m.video_links && m.video_links.length > 0 && (
-                      <span
-                        style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:"#c4302b",background:"#fdeceb",border:"1px solid #f7cfcd" }}
-                        onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
-                      >🎥 動画 {m.video_links.length}</span>
-                    )}
-                  </div>
-                )}
               </div>
               {!m.is_simple_draw_result && (
                 <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                  <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>
+                  <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>
                   <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>
+                  {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
+                  {m.memo && (
+                    <button
+                      style={{ width:44, padding:"8px", background:C.accentL, color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                      onClick={e=>{ e.stopPropagation(); setMemoView(m); }}
+                    >📝</button>
+                  )}
+                  {m.video_links && m.video_links.length > 0 && (
+                    <button
+                      style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
+                      onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
+                    >🎥{m.video_links.length}</button>
+                  )}
                 </div>
               )}
             </div>
