@@ -12778,7 +12778,10 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
       </div>
     );
   }
-  return <MatchSetupForm onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} tournamentParticipantIds={tournamentParticipantIds} />;
+  // ★key を付けて、編集対象・コピー元が変わったら必ず作り直す。
+  //   付けないと前回開いたときの入力内容や「予定として登録済みのID」が残ったままになり、
+  //   別の試合を上書きしてしまう恐れがある。
+  return <MatchSetupForm key={`${editMatchId || "new"}_${sourceMatchId || "none"}`} onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} tournamentParticipantIds={tournamentParticipantIds} />;
 }
 
 function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
@@ -13475,6 +13478,10 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
 
   useEffect(() => {
     let cancelled = false;
+    // ★別の試合に切り替わった瞬間は、前の試合のデータを必ず捨てる。
+    //   これをしないと読み込みが終わるまで前の試合（スコア・終了状態）がそのまま表示され、
+    //   その画面を操作すると意図しない試合に書き込んでしまう恐れがある。
+    setInitialMatch(null);
     (async () => {
       try {
         const [m, { data: { user } }] = await Promise.all([
