@@ -4640,6 +4640,25 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
     </div>
   );
 }
+// ★大会詳細の個人戦フィルター（回戦・勝敗・ペア・検索）を大会ごとに覚えておく。
+//   試合を開いて戻ったときに「すべて」に戻ってしまい、毎回選び直すのが手間だったため。
+const TOURNAMENT_FILTER_STORAGE_KEY = "tournamentIndividualFilterV1";
+function loadTournamentFilterPrefs(tournamentName) {
+  try {
+    const raw = localStorage.getItem(TOURNAMENT_FILTER_STORAGE_KEY);
+    const all = raw ? JSON.parse(raw) : {};
+    return all[tournamentName] || {};
+  } catch (e) { return {}; }
+}
+function saveTournamentFilterPrefs(tournamentName, prefs) {
+  try {
+    const raw = localStorage.getItem(TOURNAMENT_FILTER_STORAGE_KEY);
+    const all = raw ? JSON.parse(raw) : {};
+    all[tournamentName] = prefs;
+    localStorage.setItem(TOURNAMENT_FILTER_STORAGE_KEY, JSON.stringify(all));
+  } catch (e) {}
+}
+
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
@@ -4661,10 +4680,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
-  const [individualResultFilter, setIndividualResultFilter] = useState("all"); // "all" | "win" | "lose"（勝ち残り／敗退の絞り込み）
-  const [individualSearch, setIndividualSearch] = useState(""); // ★選手名・チーム名でのペア絞り込み
-  const [individualRoundFilter, setIndividualRoundFilter] = useState("all"); // ★回戦ごとの絞り込み
-  const [individualPairFilter, setIndividualPairFilter] = useState("all"); // ★自チームのペアごとの絞り込み
+  // ★前回この大会で使っていた絞り込みを復元する（試合を見て戻ってきても選び直さなくていいように）
+  const savedFilterPrefs = useMemo(() => loadTournamentFilterPrefs(tournament?.name || ""), [tournament?.name]);
+  const [individualResultFilter, setIndividualResultFilter] = useState(savedFilterPrefs.result || "all"); // "all" | "win" | "lose"（勝ち残り／敗退の絞り込み）
+  const [individualSearch, setIndividualSearch] = useState(savedFilterPrefs.search || ""); // ★選手名・チーム名でのペア絞り込み
+  const [individualRoundFilter, setIndividualRoundFilter] = useState(savedFilterPrefs.round || "all"); // ★回戦ごとの絞り込み
+  const [individualPairFilter, setIndividualPairFilter] = useState(savedFilterPrefs.pair || "all"); // ★自チームのペアごとの絞り込み
   const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
@@ -4678,6 +4699,17 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [refreshToast, setRefreshToast] = useState(false);
 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []);
+
+  // ★絞り込みを変えるたびに保存しておき、次にこの大会を開いたときに復元する
+  useEffect(() => {
+    if (!tournament?.name) return;
+    saveTournamentFilterPrefs(tournament.name, {
+      result: individualResultFilter,
+      search: individualSearch,
+      round: individualRoundFilter,
+      pair: individualPairFilter,
+    });
+  }, [tournament?.name, individualResultFilter, individualSearch, individualRoundFilter, individualPairFilter]);
 
   // ★silent=trueの時は一覧を「読み込み中...」で消さずに裏で再取得する（手動更新ボタン用）
   const reload = useCallback((silent) => {
