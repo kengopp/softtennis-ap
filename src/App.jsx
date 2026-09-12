@@ -11179,7 +11179,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
 
         <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:6 }}>選手はそのままで試合数だけ変える</div>
         <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-          {[3,5,10,20].map(n => {
+          {[1,3,5,10].map(n => {
             const active = resultCondLabel === `直近${n}試合`;
             return (
               <button
