@@ -792,6 +792,33 @@ async function getMatch(id) {
   return rowToMatchFull(m, players ?? [], games ?? [], points ?? [], faults ?? []);
 }
 
+// ★試合に紐づけるYouTube動画リンク（複数登録できる）
+//   ・DBには matches.video_links（jsonb）に [{id, title, url}] の配列で保存する
+//   ・古いデータや壊れた値が入っていても落ちないよう、読み込み時に必ずこの関数を通す
+function youtubeIdOf(url) {
+  if (!url) return null;
+  const m = String(url).match(/(?:youtu\.be\/|[?&]v=|embed\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+function youtubeThumbOf(videoId) {
+  return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+}
+function normalizeVideoLinks(raw) {
+  let arr = raw;
+  if (typeof arr === "string") { try { arr = JSON.parse(arr); } catch { arr = []; } }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map(v => {
+      if (!v) return null;
+      const url = typeof v === "string" ? v : (v.url || "");
+      const id = youtubeIdOf(url);
+      if (!id) return null;
+      const title = (typeof v === "object" && v.title) ? String(v.title) : "";
+      return { id, title, url: `https://youtu.be/${id}` };
+    })
+    .filter(Boolean);
+}
+
 function rowToMatchSummary(m, players=[], games=[]) {
   return {
     id: m.id, created_by: m.created_by,
@@ -803,6 +830,7 @@ function rowToMatchSummary(m, players=[], games=[]) {
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
+    video_links: normalizeVideoLinks(m.video_links),
     court_number: m.court_number ?? "",
     is_younger: m.is_younger === true,
     walkover_winner: m.walkover_winner ?? null,
@@ -832,6 +860,7 @@ function rowToMatchFull(m, players, games, points, faults) {
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
+    video_links: normalizeVideoLinks(m.video_links),
     court_number: m.court_number ?? "",
     is_younger: m.is_younger === false ? false : true,
     walkover_winner: m.walkover_winner ?? null,
@@ -888,6 +917,7 @@ async function saveMatch(match) {
     order_a: match.order_a === "p2" ? "p2" : "p1", order_b: match.order_b === "p2" ? "p2" : "p1",
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
+    video_links: normalizeVideoLinks(match.video_links),
     court_number: match.court_number || null,
     is_younger: match.is_younger !== false,
     walkover_winner: match.walkover_winner || null,
@@ -3303,6 +3333,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [allTeamMatches, setAllTeamMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  // ★一覧の「📝 メモあり」「🎥 動画」バッジをタップしたときに内容を表示するためのstate
+  const [memoView, setMemoView] = useState(null);
+  const [videoView, setVideoView] = useState(null);
   const [confirmDeleteTeam, setConfirmDeleteTeam] = useState(null);
   const [serveSelectMatch, setServeSelectMatch] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -4095,8 +4128,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       </div>
                       {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                     </div>
-                    {m.memo && (
-                      <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:6 }}>📝 {m.memo}</div>
+                    {/* ★メモ・動画は内容を一覧に出さず、マークだけ出す。タップで内容を確認できる。 */}
+                    {(m.memo || (m.video_links && m.video_links.length > 0)) && (
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:7,justifyContent:"flex-end" }}>
+                        {m.memo && (
+                          <span
+                            style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:C.navy,background:C.accentL,border:"1px solid #c8ebd8" }}
+                            onClick={e=>{ e.stopPropagation(); setMemoView(m); }}
+                          >📝 メモあり</span>
+                        )}
+                        {m.video_links && m.video_links.length > 0 && (
+                          <span
+                            style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:"#c4302b",background:"#fdeceb",border:"1px solid #f7cfcd" }}
+                            onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
+                          >🎥 動画 {m.video_links.length}</span>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
@@ -4196,6 +4243,36 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>handleDelete(confirmDelete)}>削除する</button>
             </div>
           </div>
+        </Modal>
+      )}
+      {/* ★一覧のバッジから開く「試合メモ」表示 */}
+      {memoView && (
+        <Modal onClose={()=>setMemoView(null)}>
+          <h3 style={{ fontSize:14,fontWeight:800,color:C.navy,marginBottom:12 }}>📝 試合メモ</h3>
+          <div style={{ fontSize:13,lineHeight:1.75,whiteSpace:"pre-wrap",background:C.accentL,borderRadius:10,padding:"12px 13px",color:C.text }}>{memoView.memo}</div>
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:14, padding:"11px" }} onClick={()=>setMemoView(null)}>閉じる</button>
+        </Modal>
+      )}
+      {/* ★一覧のバッジから開く「動画リンク」一覧 */}
+      {videoView && (
+        <Modal onClose={()=>setVideoView(null)}>
+          <h3 style={{ fontSize:14,fontWeight:800,color:C.navy,marginBottom:12 }}>🎥 動画リンク</h3>
+          {(videoView.video_links || []).map(v=>(
+            <a
+              key={v.id}
+              href={v.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderRadius:10,padding:8,marginBottom:9,textDecoration:"none",color:"inherit" }}
+            >
+              <img src={youtubeThumbOf(v.id)} alt="" style={{ width:88,height:52,objectFit:"cover",borderRadius:7,background:"#000",flexShrink:0 }}/>
+              <div>
+                <div style={{ fontSize:12.5,fontWeight:700,color:C.navy }}>{v.title || "動画"}</div>
+                <div style={{ fontSize:10.5,color:"#c4302b",fontWeight:700,marginTop:3 }}>▶ YouTubeで開く</div>
+              </div>
+            </a>
+          ))}
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:6, padding:"11px" }} onClick={()=>setVideoView(null)}>閉じる</button>
         </Modal>
       )}
       {confirmDeleteTeam && (
@@ -4582,6 +4659,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [loading, setLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null);
+  // ★一覧の「📝 メモあり」「🎥 動画」バッジをタップしたときに内容を表示するためのstate
+  const [memoView, setMemoView] = useState(null);
+  const [videoView, setVideoView] = useState(null);
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
   const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
@@ -5141,8 +5221,22 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   </div>
                   {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
                 </div>
-                {m.memo && (
-                  <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:6 }}>📝 {m.memo}</div>
+                {/* ★メモ・動画は内容を一覧に出さず、マークだけ出す。タップで内容を確認できる。 */}
+                {(m.memo || (m.video_links && m.video_links.length > 0)) && (
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:7,justifyContent:"flex-end" }}>
+                    {m.memo && (
+                      <span
+                        style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:C.navy,background:C.accentL,border:"1px solid #c8ebd8" }}
+                        onClick={e=>{ e.stopPropagation(); setMemoView(m); }}
+                      >📝 メモあり</span>
+                    )}
+                    {m.video_links && m.video_links.length > 0 && (
+                      <span
+                        style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:700,borderRadius:99,padding:"4px 10px",cursor:"pointer",color:"#c4302b",background:"#fdeceb",border:"1px solid #f7cfcd" }}
+                        onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
+                      >🎥 動画 {m.video_links.length}</span>
+                    )}
+                  </div>
                 )}
               </div>
               {!m.is_simple_draw_result && (
@@ -5221,6 +5315,36 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <button style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={async()=>{ const link = await getDrawMatchByMatchId(confirmDeleteMatch); await deleteMatch(confirmDeleteMatch); if (link) await clearDrawMatchLink(link.id); setConfirmDeleteMatch(null); reload(); }}>削除する</button>
             </div>
           </div>
+        </Modal>
+      )}
+      {/* ★一覧のバッジから開く「試合メモ」表示 */}
+      {memoView && (
+        <Modal onClose={()=>setMemoView(null)}>
+          <h3 style={{ fontSize:14,fontWeight:800,color:C.navy,marginBottom:12 }}>📝 試合メモ</h3>
+          <div style={{ fontSize:13,lineHeight:1.75,whiteSpace:"pre-wrap",background:C.accentL,borderRadius:10,padding:"12px 13px",color:C.text }}>{memoView.memo}</div>
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:14, padding:"11px" }} onClick={()=>setMemoView(null)}>閉じる</button>
+        </Modal>
+      )}
+      {/* ★一覧のバッジから開く「動画リンク」一覧 */}
+      {videoView && (
+        <Modal onClose={()=>setVideoView(null)}>
+          <h3 style={{ fontSize:14,fontWeight:800,color:C.navy,marginBottom:12 }}>🎥 動画リンク</h3>
+          {(videoView.video_links || []).map(v=>(
+            <a
+              key={v.id}
+              href={v.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderRadius:10,padding:8,marginBottom:9,textDecoration:"none",color:"inherit" }}
+            >
+              <img src={youtubeThumbOf(v.id)} alt="" style={{ width:88,height:52,objectFit:"cover",borderRadius:7,background:"#000",flexShrink:0 }}/>
+              <div>
+                <div style={{ fontSize:12.5,fontWeight:700,color:C.navy }}>{v.title || "動画"}</div>
+                <div style={{ fontSize:10.5,color:"#c4302b",fontWeight:700,marginTop:3 }}>▶ YouTubeで開く</div>
+              </div>
+            </a>
+          ))}
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:6, padding:"11px" }} onClick={()=>setVideoView(null)}>閉じる</button>
         </Modal>
       )}
       {confirmDeleteTeamMatch && (
@@ -13443,6 +13567,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [editingPoint, setEditingPoint] = useState(null); // 修正中のポイント { gameId, point }
   const [addingPoint, setAddingPoint] = useState(null); // 追加位置 { gameId, atIndex }
   const [memoDraft, setMemoDraft] = useState(initialMatch.memo || ""); // 試合メモ（下書き）
+  // ★動画リンク（複数）の下書き。メモと同じ「保存ボタンを押したら反映」の流れに合わせる。
+  const [videoLinksDraft, setVideoLinksDraft] = useState(normalizeVideoLinks(initialMatch.video_links));
+  const [videoUrlInput, setVideoUrlInput] = useState("");
+  const [videoUrlError, setVideoUrlError] = useState("");
   const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
   const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
   const [abandonConfirm, setAbandonConfirm] = useState(false); // 途中終了確認ダイアログ
@@ -14201,11 +14329,71 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     value={memoDraft}
                     onChange={e=>{ setMemoDraft(e.target.value); setMemoSaved(false); }}
                   />
+
+                  {/* ★動画リンク（YouTube・複数登録可） */}
+                  <div style={{ fontSize:11,fontWeight:700,color:C.textSec,margin:"14px 0 5px" }}>🎥 動画リンク（YouTube・複数登録可）</div>
+                  <div style={{ display:"flex",gap:6 }}>
+                    <input
+                      type="text"
+                      style={{ flex:1,minWidth:0,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 10px",fontSize:13,fontFamily:"inherit" }}
+                      placeholder="https://youtu.be/... を貼り付け"
+                      value={videoUrlInput}
+                      onChange={e=>{ setVideoUrlInput(e.target.value); setVideoUrlError(""); }}
+                    />
+                    <button
+                      style={{ background:C.accent,color:C.white,border:"none",borderRadius:8,padding:"0 14px",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap" }}
+                      onClick={()=>{
+                        const vid = youtubeIdOf(videoUrlInput.trim());
+                        if (!vid) { setVideoUrlError("YouTubeのURLとして認識できませんでした"); return; }
+                        if (videoLinksDraft.some(v=>v.id===vid)) { setVideoUrlError("この動画はすでに登録されています"); return; }
+                        setVideoLinksDraft([...videoLinksDraft, { id:vid, title:`動画${videoLinksDraft.length+1}`, url:`https://youtu.be/${vid}` }]);
+                        setVideoUrlInput(""); setVideoUrlError(""); setMemoSaved(false);
+                      }}
+                    >追加</button>
+                  </div>
+                  <div style={{ fontSize:10.5,color:C.textSec,marginTop:5,lineHeight:1.5 }}>追加後、タイトル欄をタップすると「1ゲーム目」など自由に名前を付けられます。</div>
+                  {videoUrlError && <div style={{ fontSize:10.5,color:C.red,marginTop:5 }}>{videoUrlError}</div>}
+
+                  {videoLinksDraft.length > 0 ? (
+                    <div style={{ marginTop:10,display:"flex",flexDirection:"column",gap:8 }}>
+                      {videoLinksDraft.map((v,i)=>(
+                        <div key={v.id} style={{ display:"flex",alignItems:"center",gap:9,border:`1px solid ${C.border}`,borderRadius:10,padding:"7px 9px",background:"#fafbfd" }}>
+                          <img src={youtubeThumbOf(v.id)} alt="" style={{ width:64,height:38,objectFit:"cover",borderRadius:6,background:"#000",flexShrink:0 }}/>
+                          <div style={{ flex:1,minWidth:0 }}>
+                            <input
+                              type="text"
+                              value={v.title}
+                              placeholder="タイトル"
+                              onChange={e=>{
+                                const next = videoLinksDraft.slice();
+                                next[i] = { ...next[i], title: e.target.value };
+                                setVideoLinksDraft(next); setMemoSaved(false);
+                              }}
+                              style={{ width:"100%",border:"none",background:"transparent",fontSize:12,fontWeight:700,color:C.navy,padding:"2px 0",fontFamily:"inherit" }}
+                            />
+                            <div style={{ fontSize:10,color:C.textSec,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{v.url}</div>
+                          </div>
+                          <button
+                            style={{ background:"none",border:"none",color:C.red,fontSize:15,cursor:"pointer",padding:4 }}
+                            onClick={()=>{ setVideoLinksDraft(videoLinksDraft.filter((_,j)=>j!==i)); setMemoSaved(false); }}
+                          >🗑</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:11.5,color:C.textSec,textAlign:"center",padding:14,border:`1px dashed ${C.border}`,borderRadius:10,marginTop:10 }}>まだ動画が登録されていません</div>
+                  )}
+
                   <button
-                    style={{ ...S.btn(memoSaved?"#f0f0f0":C.navy), color:memoSaved?C.textSec:C.white, fontSize:12, marginTop:8, padding:"9px" }}
+                    style={{ ...S.btn(memoSaved?"#f0f0f0":C.navy), color:memoSaved?C.textSec:C.white, fontSize:12, marginTop:12, padding:"9px" }}
                     disabled={memoSaved}
-                    onClick={()=>{ persist({...match, memo: memoDraft}); setMemoSaved(true); }}
-                  >{memoSaved ? "保存済み" : "💾 メモを保存"}</button>
+                    onClick={()=>{
+                      const cleaned = videoLinksDraft.map((v,i)=>({ ...v, title: v.title.trim() || `動画${i+1}` }));
+                      setVideoLinksDraft(cleaned);
+                      persist({ ...match, memo: memoDraft, video_links: cleaned });
+                      setMemoSaved(true);
+                    }}
+                  >{memoSaved ? "保存済み" : "💾 保存"}</button>
                 </div>
               )}
               {/* ボタン群 */}
