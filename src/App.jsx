@@ -13572,15 +13572,31 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
   function resetSel(){ setSelPlay(null); setSelSide(null); setSelResult(null); setSelPlayer(null); setSelPlayerId(null); setScoreStep(1); setPendingTeam(null); }
 
-  const startingGameRef = useRef(false); // ★第1ゲーム開始の二重呼び出し防止（duplicate keyエラー対策）
+  const startingGameRef = useRef(false); // ★ゲーム開始の二重呼び出し防止（duplicate key・空ゲーム量産の対策）
+  const [startingGame, setStartingGame] = useState(false); // ★開始処理中はボタンを押せなくする
   function startNewGame(base=match, overrideServer=null, overrideOrderA=null, overrideOrderB=null){
     if (startingGameRef.current) return; // 連打・多重タップは無視
     const server = overrideServer || base.first_server;
     if (!server) {
+      // ★サーブ選択モーダルを出している間もロックしておく。
+      //   以前はここでロックしていなかったため、モーダルで決定 → 保存の通信を待っている間に
+      //   まだ残っている「第1ゲーム開始」ボタンをもう一度押せてしまい、
+      //   モーダルが2回出て空のゲームが2つ作られる不具合があった。
+      startingGameRef.current = true;
+      setStartingGame(true);
       setServeSelectModal(true);
       return;
     }
+    // ★まだ点が入っていない進行中のゲームがあるなら、新しく作らずそのまま使う。
+    //   何らかの経路で二重に呼ばれても空ゲームが増えないようにするための最後の砦。
+    const last = base.games[base.games.length-1];
+    if (last && !last.winner_team && (last.points?.length ?? 0) === 0) {
+      startingGameRef.current = false;
+      setStartingGame(false);
+      return;
+    }
     startingGameRef.current = true;
+    setStartingGame(true);
     // ★予定(scheduled)・待機中(waiting)のまま作成された試合（ドロー経由など）が、採点開始後も
     //   ずっとその表示のままにならないよう、ここで進行中(active)に切り替える
     const statusFix = (base.status === "scheduled" || base.status === "waiting") ? { status: "active" } : {};
@@ -13591,7 +13607,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const srv=gameServer(base.first_server||server,num);
     const g={id:uid(),match_id:base.id,game_number:num,server_team:srv,is_final:isFin,score_a:0,score_b:0,winner_team:null,points:[],faults:[]};
     persist({...base,games:[...base.games,g]});
-    setTimeout(()=>{ startingGameRef.current = false; }, 800); // 保存が実行された後にロック解除
+    setTimeout(()=>{ startingGameRef.current = false; setStartingGame(false); }, 800); // 保存が実行された後にロック解除
   }
 
   function addPoint(team, resultKey=selResult, playerName=selPlayer){
@@ -14077,7 +14093,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               )}
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                 <div style={{ display:"flex", gap:8 }}>
-                  <button style={{ flex:1, padding:"13px 16px", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:700, cursor:"pointer" }} onClick={()=>startNewGame()}>第1ゲーム開始</button>
+                  <button disabled={startingGame} style={{ flex:1, padding:"13px 16px", background:startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame()}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
                   <button
                     style={{ flex:"0 0 48px", width:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
                     onClick={()=>shareToLine("試合開始")}
@@ -14126,7 +14142,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(
             <div style={{ textAlign:"center",padding:"30px 0" }}>
               <p style={{ color:C.textSec,marginBottom:16 }}>ゲーム終了。次のゲームへ</p>
-              <button style={S.btn(`linear-gradient(135deg,${C.accent},#00a066)`)} onClick={()=>startNewGame()}>第{match.games.length+1}ゲーム開始</button>
+              <button disabled={startingGame} style={{ ...S.btn(startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`), cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame()}>{startingGame?"開始中...":`第${match.games.length+1}ゲーム開始`}</button>
             </div>
           )}
           {match.status==="finished"&&!correctMode&&(
@@ -14219,7 +14235,23 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 <div key={g.id} style={S.card}>
                   <div style={{ padding:"8px 12px",background:C.navyMid,color:C.white,display:"flex",justifyContent:"space-between" }}>
                     <span style={{ fontWeight:700,fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
-                    <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
+                    <span style={{ display:"flex",alignItems:"center",gap:10 }}>
+                      {/* ★点が1つも入っていない空のゲームは、間違って作られたものなので削除できるようにする。
+                            削除すると後ろのゲーム番号が繰り上がる（第2→第1のように詰められる）。 */}
+                      {g.points.length===0 && match.games.length>1 && (
+                        <button
+                          style={{ background:"none",border:"none",color:"#ffb3ab",fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline",padding:0 }}
+                          onClick={()=>{
+                            if (!window.confirm(`第${g.game_number}ゲームは点が記録されていません。\nこのゲームを削除しますか？\n\n※以降のゲーム番号は繰り上がります。`)) return;
+                            const remain = match.games.filter(x=>x.id!==g.id).map((x,i)=>({ ...x, game_number:i+1 }));
+                            const newScoreA = remain.filter(x=>x.winner_team==="A").length;
+                            const newScoreB = remain.filter(x=>x.winner_team==="B").length;
+                            persist({ ...match, games:remain, match_score_a:newScoreA, match_score_b:newScoreB });
+                          }}
+                        >🗑 削除</button>
+                      )}
+                      <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
+                    </span>
                   </div>
                   <div style={{ padding:"8px 10px" }}>
                     <div style={{ textAlign:"center" }}>
@@ -14601,13 +14633,21 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             aLabel={aPlayers.join("/") || "自チーム"} bLabel={bPlayers.join("/") || "相手チーム"}
             aP1={aPlayers[0]} aP2={aPlayers[1]} bP1={bPlayers[0]} bP2={bPlayers[1]}
             isDoubles={aPlayers.length>1 || bPlayers.length>1}
-            onCancel={()=>setServeSelectModal(false)}
+            onCancel={()=>{ setServeSelectModal(false); startingGameRef.current = false; setStartingGame(false); }}
             onConfirm={async (team, orderA, orderB)=>{
               setServeSelectModal(false);
               // DBのfirst_server・order_a・order_bを更新してからゲーム開始
               const updated = {...match, first_server: team, order_a: orderA, order_b: orderB};
-              await saveMatch(updated);
-              setMatch(updated);
+              try {
+                await saveMatch(updated);
+                setMatch(updated);
+              } catch(e) {
+                startingGameRef.current = false; setStartingGame(false);
+                alert("保存に失敗しました: " + (e.message || e));
+                return;
+              }
+              // ★モーダルを開いた時点でロックしているので、ここで一度解除してから作成処理に入る
+              startingGameRef.current = false;
               startNewGame(updated, team, orderA, orderB);
             }}
           />
