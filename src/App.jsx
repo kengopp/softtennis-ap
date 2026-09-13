@@ -14304,7 +14304,24 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               </div>
             </div>
           )}
-          {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(
+          {/* ★すでに勝利ゲーム数に達しているのに終了できていない試合（終了ポップアップを閉じてしまった等）を救済する。
+                 以前はここで「次のゲーム開始」しか出ず、試合を終われなくなっていた。 */}
+          {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(match.match_score_a>=winGames||match.match_score_b>=winGames)&&(
+            <div style={{ textAlign:"center",padding:"30px 0" }}>
+              <p style={{ color:C.textSec,marginBottom:6 }}>{winGames}ゲーム先取に達しています</p>
+              <p style={{ fontSize:20,fontWeight:900,color:C.navy,marginBottom:16 }}>{leftMatchScore} - {rightMatchScore}</p>
+              <button
+                style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`) }}
+                onClick={()=>persist({ ...match, status:"finished" })}
+              >🏆 この結果で試合を終了する</button>
+              <button
+                disabled={startingGame}
+                style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8, cursor:startingGame?"default":"pointer" }}
+                onClick={()=>startNewGame()}
+              >{startingGame?"開始中...":`第${match.games.length+1}ゲーム開始（続ける）`}</button>
+            </div>
+          )}
+          {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&!(match.match_score_a>=winGames||match.match_score_b>=winGames)&&(
             <div style={{ textAlign:"center",padding:"30px 0" }}>
               <p style={{ color:C.textSec,marginBottom:16 }}>ゲーム終了。次のゲームへ</p>
               <button disabled={startingGame} style={{ ...S.btn(startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`), cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame()}>{startingGame?"開始中...":`第${match.games.length+1}ゲーム開始`}</button>
