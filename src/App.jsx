@@ -4888,10 +4888,18 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       if (names !== individualPairFilter) return false;
     }
     if (individualResultFilter === "win" || individualResultFilter === "lose") {
-      const mySide = mySideOf(m, mySchoolName);
-      const lost = m.status==="finished" && winnerSideOf(m) !== null && winnerSideOf(m) !== mySide;
-      if (individualResultFilter === "win" && lost) return false; // 負けた試合（＝敗退したペア）だけ除外
-      if (individualResultFilter === "lose" && !lost) return false; // 負けが確定していない試合は除外
+      // ★同校対決（東福岡 vs 東福岡など）は、A側・B側どちらも自チームのペアなので、
+      //   片方だけを「自チーム側」と決め打ちすると、勝った方のペアまで除外されてしまう。
+      //   「個人戦成績」の勝敗数と同じ考え方で、同校対決だけは勝ち残り・敗退どちらの
+      //   絞り込みでも表示する（＝この判定をスキップする）。
+      const aIsMine = (m.players || []).some(p => p.team === "A" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+      const bIsMine = (m.players || []).some(p => p.team === "B" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+      if (!(aIsMine && bIsMine)) {
+        const mySide = mySideOf(m, mySchoolName);
+        const lost = m.status==="finished" && winnerSideOf(m) !== null && winnerSideOf(m) !== mySide;
+        if (individualResultFilter === "win" && lost) return false; // 負けた試合（＝敗退したペア）だけ除外
+        if (individualResultFilter === "lose" && !lost) return false; // 負けが確定していない試合は除外
+      }
     }
     if (individualSearch.trim()) {
       const q = individualSearch.trim();
