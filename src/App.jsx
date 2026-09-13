@@ -13588,6 +13588,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [scoreStep, setScoreStep] = useState(1); // 1|2|3
   const [pendingTeam, setPendingTeam] = useState(null); // ①で選んだ得点チーム
   const [correctMode, setCorrectMode] = useState(false); // 試合終了後のスコア修正モード
+  // ★特定のゲームだけを修正するときに、そのゲームIDを入れる（nullなら全ゲームを表示）
+  const [correctGameId, setCorrectGameId] = useState(null);
+  const [showGamePicker, setShowGamePicker] = useState(false); // 「どのゲームを直すか」の選択モーダル
   // ★個人戦の試合にもAI動画分析を追加できるようにする（団体戦の各番手と同様の機能）
   // 　undefined=未確認、null=未登録、オブジェクト=登録済み
   const [aiAnalysis, setAiAnalysis] = useState(undefined);
@@ -14233,7 +14236,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               >🗑️ スコア全削除</button>
             </div>
           )}
-          {match.games.length===0&&match.status!=="finished"&&!viewOnly&&(
+          {!correctMode&&match.games.length===0&&match.status!=="finished"&&!viewOnly&&(
             <div style={{ textAlign:"center",padding:"40px 0" }}>
               <div style={{ fontSize:36,marginBottom:12 }}>🎾</div>
               <p style={{ color:C.textSec,marginBottom:8 }}>第1ゲームを開始してください</p>
@@ -14317,7 +14320,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           )}
           {/* ★すでに勝利ゲーム数に達しているのに終了できていない試合（終了ポップアップを閉じてしまった等）を救済する。
                  以前はここで「次のゲーム開始」しか出ず、試合を終われなくなっていた。 */}
-          {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(match.match_score_a>=winGames||match.match_score_b>=winGames)&&(
+          {!correctMode&&!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(match.match_score_a>=winGames||match.match_score_b>=winGames)&&(
             <div style={{ textAlign:"center",padding:"30px 0" }}>
               <p style={{ color:C.textSec,marginBottom:6 }}>{winGames}ゲーム先取に達しています</p>
               <p style={{ fontSize:20,fontWeight:900,color:C.navy,marginBottom:16 }}>{leftMatchScore} - {rightMatchScore}</p>
@@ -14332,7 +14335,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               >{startingGame?"開始中...":`第${match.games.length+1}ゲーム開始（続ける）`}</button>
             </div>
           )}
-          {!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&!(match.match_score_a>=winGames||match.match_score_b>=winGames)&&(
+          {!correctMode&&!currentGame&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&!(match.match_score_a>=winGames||match.match_score_b>=winGames)&&(
             <div style={{ textAlign:"center",padding:"30px 0" }}>
               <p style={{ color:C.textSec,marginBottom:16 }}>ゲーム終了。次のゲームへ</p>
               <button disabled={startingGame} style={{ ...S.btn(startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`), cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame()}>{startingGame?"開始中...":`第${match.games.length+1}ゲーム開始`}</button>
@@ -14478,7 +14481,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 >✏️ 結果を修正する</button>
               )}
               {(match.games?.length ?? 0) > 0 && (
-                <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
+                <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>{ setCorrectGameId(null); setCorrectMode(true); }}>✏️ スコアを修正</button>
               )}
               {/* ★「途中終了」は記録中の画面から押すもの。終了済みの画面に置くと
                     「試合終了」と表示しながら「途中終了」ボタンが並ぶことになり紛らわしいので置かない。 */}
@@ -14495,12 +14498,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             </div>
           )}
 
-          {match.status==="finished"&&correctMode&&(
+          {/* ★記録中でも、前のゲームの間違いに気づいたときに直せるようにする。
+                 どのゲームを直すか選ぶと、試合終了後と同じポイント修正画面がそのゲームだけ開く。 */}
+          {!correctMode&&match.games.length>0&&match.status!=="finished"&&!viewOnly&&(
+            <div style={{ textAlign:"center", margin:"4px 0 14px" }}>
+              <button
+                style={{ background:"none",border:`1px dashed ${C.border}`,borderRadius:8,color:C.textSec,fontSize:11.5,fontWeight:700,cursor:"pointer",padding:"8px 14px",width:"100%" }}
+                onClick={()=>setShowGamePicker(true)}
+              >🔧 記録済みのゲームを修正する</button>
+            </div>
+          )}
+          {correctMode&&(
             <div>
               <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7a5800" }}>
                 ✏️ 修正したいポイントをタップすると内容の変更・削除ができます。「＋」では好きな位置にポイントを追加できます。
               </div>
-              {match.games.map(g=>(
+              {match.games.filter(g=>!correctGameId||g.id===correctGameId).map(g=>(
                 <div key={g.id} style={S.card}>
                   <div style={{ padding:"8px 12px",background:C.navyMid,color:C.white,display:"flex",justifyContent:"space-between" }}>
                     <span style={{ fontWeight:700,fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
@@ -14547,6 +14560,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   </div>
                 </div>
               ))}
+              {/* ★特定のゲームだけを直しているときは「ゲームを追加」は出さない（意図しない進行を防ぐ） */}
+              {!correctGameId && match.status==="finished" && (
               <div style={{ textAlign:"center", marginBottom:10 }}>
                 <button
                   style={{ background:"none",border:`1px dashed ${C.accent}`,borderRadius:8,color:C.accent,fontSize:12,fontWeight:700,cursor:"pointer",padding:"8px 14px",width:"100%" }}
@@ -14558,12 +14573,48 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     const srv = gameServer(match.first_server || "A", num);
                     const g = { id:uid(), match_id:match.id, game_number:num, server_team:srv, is_final:isFin, score_a:0, score_b:0, winner_team:null, points:[], faults:[] };
                     persist({ ...match, status:"active", games:[...match.games, g] });
-                    setCorrectMode(false);
+                    setCorrectMode(false); setCorrectGameId(null);
                   }}
                 >＋ 第{match.games.length+1}ゲームを追加（試合を再開する）</button>
               </div>
-              <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:4 }} onClick={()=>setCorrectMode(false)}>修正を完了</button>
+              )}
+              <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:4 }} onClick={()=>{ setCorrectMode(false); setCorrectGameId(null); }}>修正を完了</button>
+              {/* ★別のゲームを直したいときのために、ゲーム選択に戻れるボタンも置く。
+                     修正内容はタップした時点で保存済みなので、どちらで抜けても内容は残る。 */}
+              {correctGameId ? (
+                <button
+                  style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }}
+                  onClick={()=>{ setCorrectMode(false); setCorrectGameId(null); setShowGamePicker(true); }}
+                >← ゲーム選択に戻る</button>
+              ) : (
+                <button
+                  style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }}
+                  onClick={()=>{ setCorrectMode(false); setCorrectGameId(null); }}
+                >← 戻る</button>
+              )}
             </div>
+          )}
+
+          {showGamePicker && (
+            <Modal onClose={()=>setShowGamePicker(false)}>
+              <h3 style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:4,textAlign:"center" }}>🔧 修正するゲームを選んでください</h3>
+              <p style={{ fontSize:11,color:C.textSec,marginBottom:14,textAlign:"center" }}>選んだゲームのポイントを1つずつ修正・削除・追加できます</p>
+              {match.games.map(g=>(
+                <div
+                  key={g.id}
+                  style={{ display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 12px",marginBottom:7,cursor:"pointer" }}
+                  onClick={()=>{ setCorrectGameId(g.id); setCorrectMode(true); setShowGamePicker(false); }}
+                >
+                  <span style={{ fontSize:12,fontWeight:800,color:C.navy,width:54 }}>{g.is_final?"🔥":""}第{g.game_number}G</span>
+                  <span style={{ fontSize:14,fontWeight:800,color:C.text }}>{g.score_a} - {g.score_b}</span>
+                  <span style={{ marginLeft:"auto",fontSize:10.5,fontWeight:700,color:C.textSec }}>
+                    {g.winner_team ? `${g.winner_team==="A"?teamALabel:teamBLabel} の勝ち` : "記録中"}
+                  </span>
+                  <span style={{ fontSize:14,color:C.textSec }}>›</span>
+                </div>
+              ))}
+              <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setShowGamePicker(false)}>キャンセル</button>
+            </Modal>
           )}
 
           {editingPoint && (
@@ -14591,7 +14642,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             />
           )}
 
-          {currentGame&&match.status!=="finished"&&!viewOnly&&(
+          {!correctMode&&currentGame&&match.status!=="finished"&&!viewOnly&&(
             <>
               {/* サーブ表示：大型セグメントボタン（1st=緑／2nd=黄／df=赤、案①の配色＋案②サイズ） */}
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10 }}>
