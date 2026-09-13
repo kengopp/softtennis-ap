@@ -11493,6 +11493,46 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
           })}
         </div>
 
+        {/* ★どの試合を集計しているのかを、切り替えボタンのすぐ下で確認できるようにする。
+              以前は上の条件バーまで戻らないと分からず、絞り込むたびに往復が必要だった。 */}
+        {!resultLoading && resultMatches.length>0 && (
+          <div style={{ background:C.white, border:`1.5px solid ${C.accent}`, borderRadius:12, padding:"11px 13px", marginBottom:12 }}>
+            <div style={{ fontSize:10.5, fontWeight:800, color:C.accent, marginBottom:7 }}>✓ いま集計している試合（{resultMatches.length}件）</div>
+            {resultMatches
+              .slice()
+              .sort((a,b)=> new Date(b.match_date)-new Date(a.match_date))
+              .slice(0,3)
+              .map((m,i,arr)=>{
+                const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
+                const oppTeam = team==="A" ? "B" : "A";
+                const oppNames = m.players.filter(p=>p.team===oppTeam).map(p=>p.player_name).join("/");
+                const myScore = team==="A" ? m.match_score_a : m.match_score_b;
+                const oppScore = team==="A" ? m.match_score_b : m.match_score_a;
+                const win = winForPlayer(m, selectedPlayer, effectiveSchoolName);
+                return (
+                  <div
+                    key={m.id}
+                    onClick={()=>onOpenMatch && onOpenMatch(m.id)}
+                    style={{ display:"flex", alignItems:"center", gap:8, fontSize:11.5, padding:"6px 0",
+                      borderBottom: i===arr.length-1 ? "none" : "1px solid #f2f4f8", cursor:"pointer" }}
+                  >
+                    <span style={{ color:C.textSec, fontSize:10.5, width:38, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
+                    <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {m.round ? m.round+"・" : ""}{oppNames || "相手未登録"}
+                    </span>
+                    <span style={{ fontWeight:800, fontSize:10.5, borderRadius:20, padding:"2px 8px", whiteSpace:"nowrap",
+                      color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"○":"●"} {myScore}-{oppScore}</span>
+                  </div>
+                );
+              })}
+            {resultMatches.length > 3 && (
+              <div style={{ fontSize:10.5, color:C.textSec, marginTop:6 }}>
+                ほか{resultMatches.length - 3}試合（下の「試合の一覧」で確認できます）
+              </div>
+            )}
+          </div>
+        )}
+
         {resultLoading ? (
           <div style={{ textAlign:"center", padding:40, color:C.textSec }}>集計中...</div>
         ) : resultMatches.length===0 ? (
