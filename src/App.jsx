@@ -4876,6 +4876,48 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     });
     return list;
   }, [individualMatches, mySchoolName]);
+  // ★ペア名（自チーム側の選手名を「/」で連結したもの）を取得する共通ヘルパー
+  function pairNameOfSide(m, side) {
+    return (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/");
+  }
+  // ★「回戦：すべて」＋「勝ち残りのみ」のときだけ使う特別な判定。
+  //   通常の「勝ち残りのみ」は個々の試合が負けていないかだけを見るが、
+  //   全回戦をまとめて見るときは「この大会を通じて一度も負けていないペア（＝優勝ペア）」
+  //   だけに絞りたいというニーズのため、大会全体を見てペアごとに負けたことがあるかを記録する。
+  const pairLossMap = useMemo(() => {
+    const map = {};
+    individualMatches.forEach(m => {
+      if (m.status !== "finished") return;
+      const winSide = winnerSideOf(m);
+      if (winSide === null) return;
+      ["A","B"].forEach(side => {
+        const isMine = (m.players || []).some(p => p.team === side && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+        if (!isMine) return;
+        const name = pairNameOfSide(m, side);
+        if (!name) return;
+        if (winSide !== side) map[name] = true; // このペアは大会中に一度負けたことがある
+      });
+    });
+    return map;
+  }, [individualMatches, mySchoolName]);
+  // ★優勝ペアの準々決勝・準決勝・決勝…と全部並ぶと見づらいので、
+  //   「回戦：すべて」＋「勝ち残りのみ」のときは、そのペアが到達した一番先の回戦
+  //   （＝最新の試合）だけを残し、それより前の回戦の試合は表示しない。
+  //   例：決勝に名前があるペアは、準決勝以下の試合は表示しない。
+  const pairMaxRoundRank = useMemo(() => {
+    const map = {};
+    individualMatches.forEach(m => {
+      const rank = roundSortRank(m.round);
+      ["A","B"].forEach(side => {
+        const isMine = (m.players || []).some(p => p.team === side && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+        if (!isMine) return;
+        const name = pairNameOfSide(m, side);
+        if (!name) return;
+        if (map[name] === undefined || rank > map[name]) map[name] = rank;
+      });
+    });
+    return map;
+  }, [individualMatches, mySchoolName]);
   // ★「勝ち残ってるペアだけ」：まだ負けが確定していないペアを表示する（＝敗退した試合だけ除外）。
   //   未実施・進行中の試合や、過去に勝った試合はすべて残す（勝った試合を見たいわけではなく、
   //   あと何ペア残っているかを確認するための絞り込みのため）
@@ -4887,7 +4929,17 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       const names = (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/");
       if (names !== individualPairFilter) return false;
     }
-    if (individualResultFilter === "win" || individualResultFilter === "lose") {
+    if (individualResultFilter === "win" && individualRoundFilter === "all") {
+      // ★「回戦：すべて」のときの「勝ち残りのみ」は、大会全体を通じて一度も負けていないペア
+      //   （＝優勝ペア）が絡む試合だけを表示する。同校対決で片方だけ自チームでも、
+      //   そのペアがまだ負けていなければ表示対象になる。
+      const aIsMine = (m.players || []).some(p => p.team === "A" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+      const bIsMine = (m.players || []).some(p => p.team === "B" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+      const stillUndefeated =
+        (aIsMine && !pairLossMap[pairNameOfSide(m, "A")]) ||
+        (bIsMine && !pairLossMap[pairNameOfSide(m, "B")]);
+      if (!stillUndefeated) return false;
+    } else if (individualResultFilter === "win" || individualResultFilter === "lose") {
       // ★同校対決（東福岡 vs 東福岡など）は、A側・B側どちらも自チームのペアなので、
       //   片方だけを「自チーム側」と決め打ちすると、勝った方のペアまで除外されてしまう。
       //   「個人戦成績」の勝敗数と同じ考え方で、同校対決だけは勝ち残り・敗退どちらの
@@ -4930,7 +4982,29 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     const n = Number(no);
     return (no != null && no !== "" && !isNaN(n)) ? n : Infinity; // 番号が無い/数値でない試合は後ろへ
   }
-  const sortedIndividualMatches = [...filteredIndividualMatches].sort((a, b) => {
+  // ★「回戦：すべて」＋「勝ち残りのみ」のときは、同じペアの試合が複数回戦分（準々決勝・準決勝・決勝…）
+  //   残ってしまうので、一覧表示だけは「一番勝ち進んだ回戦の試合」1件に絞り込む。
+  //   （＝決勝に名前があるペアは、準決勝以下の試合は一覧に出さない）
+  //   ※「個人戦成績」の勝敗数集計は各試合を数える必要があるので、上のfilteredIndividualMatchesは絞り込まない。
+  const displayIndividualMatches = useMemo(() => {
+    if (individualResultFilter !== "win" || individualRoundFilter !== "all") return filteredIndividualMatches;
+    const bestByPair = new Map(); // ペア名 -> { match, rank }
+    filteredIndividualMatches.forEach(m => {
+      const aIsMine = (m.players || []).some(p => p.team === "A" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+      const bIsMine = (m.players || []).some(p => p.team === "B" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
+      const rank = roundSortRank(m.round);
+      [aIsMine ? "A" : null, bIsMine ? "B" : null].filter(Boolean).forEach(side => {
+        const name = pairNameOfSide(m, side);
+        if (!name) return;
+        const cur = bestByPair.get(name);
+        if (!cur || rank > cur.rank) bestByPair.set(name, { match: m, rank });
+      });
+    });
+    const keepIds = new Set([...bestByPair.values()].map(v => v.match.id));
+    return filteredIndividualMatches.filter(m => keepIds.has(m.id));
+  }, [filteredIndividualMatches, individualResultFilter, individualRoundFilter, mySchoolName]);
+
+  const sortedIndividualMatches = [...displayIndividualMatches].sort((a, b) => {
     const ra = roundSortRank(a.round), rb = roundSortRank(b.round);
     if (ra !== rb) return rb - ra; // 回戦が新しい方を上に
     return myEntryNoOf(a) - myEntryNoOf(b); // ペア番号が若い方を上に
@@ -5317,7 +5391,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         )}
 
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🎾</div>この大会の個人戦記録がありません</div>}
-        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && filteredIndividualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40,fontSize:12 }}>条件に一致する試合がありません</div>}
+        {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && displayIndividualMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40,fontSize:12 }}>条件に一致する試合がありません</div>}
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && sortedIndividualMatches.map(m => {
           const mySide = mySideOf(m, mySchoolName);
           const myScore = mySide==="B" ? m.match_score_b : m.match_score_a;
