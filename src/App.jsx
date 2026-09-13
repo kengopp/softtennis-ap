@@ -967,7 +967,25 @@ async function saveMatch(match) {
   // 　保存の合間に「ポイントはあるがその親のゲーム行がまだ存在しない」瞬間ができてしまい、
   // 　外部キー制約違反（points_game_id_fkey）でエラーになることがあった。
   // 　そのため、先に現在の内容をすべて保存（upsert）し、その後で
-  // 　クライアント側に無くなった（削除された）行だけを掃除する順番に変更。
+  // 　クライアント側に無くなった（削除された）行だけを掃除する順番に変更した。
+  //
+  // ★ただしそれだけだと、ポイントを修正・削除して番号が振り直された場合に
+  // 　「消すべき古い行がまだ残っているのに、同じ番号の新しい行を入れようとする」状態になり、
+  // 　points_game_id_point_number_key（同じゲーム内で番号が重複）で保存が止まってしまう。
+  // 　そこで、ポイントとフォルトの「もう存在しない行の削除」だけは先に済ませておく。
+  // 　（ゲーム行の削除は後のまま。先に消すと、まだ保存していないポイントの親が居なくなるため）
+  {
+    const keepPointIds = (match.games ?? []).flatMap(g => (g.points ?? []).map(p => p.id));
+    const keepFaultIds = (match.games ?? []).flatMap(g => (g.faults ?? []).map(f => f.id));
+    const { data: existingPointsBefore } = await supabase.from("points").select("id").eq("match_id", match.id);
+    const stalePointIdsBefore = (existingPointsBefore ?? []).map(r => r.id).filter(id => !keepPointIds.includes(id));
+    if (stalePointIdsBefore.length) await supabase.from("points").delete().in("id", stalePointIdsBefore);
+
+    const { data: existingFaultsBefore } = await supabase.from("faults").select("id").eq("match_id", match.id);
+    const staleFaultIdsBefore = (existingFaultsBefore ?? []).map(r => r.id).filter(id => !keepFaultIds.includes(id));
+    if (staleFaultIdsBefore.length) await supabase.from("faults").delete().in("id", staleFaultIdsBefore);
+  }
+
   for (const g of (match.games ?? [])) {
     const gameRow = {
       id: g.id, match_id: match.id, game_number: g.game_number, server_team: g.server_team,
@@ -985,7 +1003,15 @@ async function saveMatch(match) {
         is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
         scored_at: pt.scored_at || null, // ★動画同期用：得点を記録した時刻
       }));
-      const { error: ptErr } = await supabase.from("points").upsert(pointRows);
+      let { error: ptErr } = await supabase.from("points").upsert(pointRows);
+      // ★それでも番号の重複で弾かれた場合の最後の手段：
+      //   そのゲームのポイントを一度すべて消してから入れ直す。
+      //   （記録が消えないよう、入れ直す内容は手元にある今の内容そのもの）
+      if (ptErr && /point_number/.test(ptErr.message || "")) {
+        console.warn("saveMatch: ポイント番号の重複を検出したため、ゲーム" + g.game_number + "を作り直します。");
+        await supabase.from("points").delete().eq("game_id", g.id);
+        ({ error: ptErr } = await supabase.from("points").insert(pointRows));
+      }
       if (ptErr) throw ptErr;
     }
     if (g.faults?.length) {
@@ -994,7 +1020,11 @@ async function saveMatch(match) {
         server_team: f.server_team, player_name: f.player_name || null,
         score_a_at: f.score_a_at, score_b_at: f.score_b_at,
       }));
-      const { error: fErr } = await supabase.from("faults").upsert(faultRows);
+      let { error: fErr } = await supabase.from("faults").upsert(faultRows);
+      if (fErr && /fault_number/.test(fErr.message || "")) {
+        await supabase.from("faults").delete().eq("game_id", g.id);
+        ({ error: fErr } = await supabase.from("faults").insert(faultRows));
+      }
       if (fErr) throw fErr;
     }
   }
