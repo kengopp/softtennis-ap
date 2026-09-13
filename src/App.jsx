@@ -5133,6 +5133,17 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                     }}
                   >📝 結果だけ記録</button>
                 )}
+                {/* ★「結果だけ記録」で終えた団体戦（番手の記録が無い）は、入力し直せるようにする */}
+                {!notStarted && tm.status === "finished" && (tm.games || []).length === 0 && (
+                  <button
+                    style={{ flex:1, padding:"8px", background:"#fff7ed", color:C.orange, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
+                    onClick={()=>{
+                      setSimpleTeamResultFor(tm);
+                      setSimpleTeamScoreA(String(tm.my_score ?? ""));
+                      setSimpleTeamScoreB(String(tm.opponent_score ?? ""));
+                    }}
+                  >✏️ 結果を修正</button>
+                )}
                 <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>
               </div>
             </div>
@@ -5391,7 +5402,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         return (
           <Modal onClose={()=>setSimpleTeamResultFor(null)}>
             <div>
-              <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>🏆 団体戦の結果だけ記録</div>
+              <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>{simpleTeamResultFor.status === "finished" ? "✏️ 団体戦の結果を修正" : "🏆 団体戦の結果だけ記録"}</div>
               <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>各番手を記録せず、団体戦の最終スコアだけ入力します</div>
               <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
                 <div style={{ flex:1, textAlign:"center" }}>
@@ -14452,7 +14463,23 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               {/* ★終了した試合の編集は、記録した本人でなくてもできるようにする。
                     記録係と、あとから内容を直す人（顧問など）が別なことが多いため。 */}
               <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
-              <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
+              {/* ★「結果だけ記録」で終えた試合は、ポイント記録が無いのでスコア修正画面では直せない。
+                     入力し直せるよう、同じ入力モーダルを今の値を入れた状態で開き直す。 */}
+              {(match.games?.length ?? 0) === 0 && (
+                <button
+                  style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }}
+                  onClick={()=>{
+                    setSimpleScoreA(String(match.match_score_a ?? ""));
+                    setSimpleScoreB(String(match.match_score_b ?? ""));
+                    setIsWithdrawalResult(!!match.walkover_winner);
+                    setWithdrawalWinner(match.walkover_winner || null);
+                    setShowSimpleResult(true);
+                  }}
+                >✏️ 結果を修正する</button>
+              )}
+              {(match.games?.length ?? 0) > 0 && (
+                <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>setCorrectMode(true)}>✏️ スコアを修正</button>
+              )}
               {/* ★「途中終了」は記録中の画面から押すもの。終了済みの画面に置くと
                     「試合終了」と表示しながら「途中終了」ボタンが並ぶことになり紛らわしいので置かない。 */}
               <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
@@ -14988,9 +15015,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const withdrawalMemo = isWithdrawalResult
                   ? `棄権による試合終了（${withdrawalWinner==="A" ? teamALabel : teamBLabel} の勝利）`
                   : "";
+                // ★修正のたびに棄権メモが積み重ならないよう、前回付けた棄権行はいったん取り除いてから付け直す
+                const memoWithoutWithdrawal = (match.memo || "")
+                  .split("\n")
+                  .filter(line => !line.startsWith("棄権による試合終了"))
+                  .join("\n")
+                  .trim();
                 const newMemo = withdrawalMemo
-                  ? [match.memo, withdrawalMemo].filter(Boolean).join("\n")
-                  : match.memo;
+                  ? [memoWithoutWithdrawal, withdrawalMemo].filter(Boolean).join("\n")
+                  : memoWithoutWithdrawal;
                 persist({ ...match, games:[], match_score_a:a, match_score_b:b, status:"finished", memo:newMemo, walkover_winner: isWithdrawalResult ? withdrawalWinner : null });
                 setSimpleResultSaving2(false);
                 setShowSimpleResult(false);
