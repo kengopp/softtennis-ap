@@ -171,6 +171,7 @@ async function performLogout() {
   if (!window.confirm("ログアウトしますか？")) return;
   skipUnloadConfirm = true;
   clearScreenCache(); // ★別のアカウントのデータが残らないように破棄する
+  _isViewerCache = null; // ★閲覧専用かどうかの判定も、次のアカウントに引き継がないよう破棄する
   await supabase.auth.signOut();
   window.location.reload();
 }
@@ -917,7 +918,6 @@ async function saveMatch(match) {
     order_a: match.order_a === "p2" ? "p2" : "p1", order_b: match.order_b === "p2" ? "p2" : "p1",
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
-    video_links: normalizeVideoLinks(match.video_links),
     court_number: match.court_number || null,
     is_younger: match.is_younger !== false,
     walkover_winner: match.walkover_winner || null,
@@ -925,7 +925,21 @@ async function saveMatch(match) {
     //   試合を作る人と実際に記録する人は別なことが多いので、created_byとは分けて持つ。
     ...(await resolveRecorderFields(match, user)),
   };
-  const { error: mErr } = await supabase.from("matches").upsert(matchRow);
+  // ★動画リンクは「登録されているときだけ」保存する。
+  //   毎回この項目を送っていると、DB側に video_links 列が無い環境では
+  //   スコアや試合メモの保存まで丸ごと失敗してしまうため。
+  //   （列が無い環境でも、動画リンクを使わない限り記録は普通に続けられる）
+  const videoLinks = normalizeVideoLinks(match.video_links);
+  if (videoLinks.length > 0) matchRow.video_links = videoLinks;
+
+  let { error: mErr } = await supabase.from("matches").upsert(matchRow);
+  // ★video_links 列がまだ無い場合は、その項目だけ外して保存し直す。
+  //   動画リンクは保存されないが、スコア・メモなど本体の記録は必ず守る。
+  if (mErr && matchRow.video_links && /video_links/.test(mErr.message || "")) {
+    console.warn("saveMatch: video_links列が無いため、動画リンクを除いて保存します。");
+    const { video_links, ...rowWithoutVideo } = matchRow;
+    ({ error: mErr } = await supabase.from("matches").upsert(rowWithoutVideo));
+  }
   if (mErr) throw mErr;
 
   // 選手情報：一旦削除してから入れ直す（シンプルで確実な方式）
@@ -1357,6 +1371,8 @@ async function saveMyProfile(profile) {
   //   通常のプロフィール編集（ProfileScreenなど）からの保存では触らないようにする
   //   （うっかり完了済みユーザーを未完了扱いに戻してしまわないため）。
   if (profile.signup_completed !== undefined) updates.signup_completed = profile.signup_completed;
+  // ★閲覧専用アカウントかどうか。閲覧専用コードで参加したときだけ true になる。
+  if (profile.is_viewer !== undefined) updates.is_viewer = profile.is_viewer;
   // ★update だと usersテーブルに行がまだ存在しない場合、0件更新のままエラーも出さずに終わってしまい、
   // 保存できたように見えて実は何も保存されていない、という無限ループの原因になっていた。
   // upsert にすることで、行がなければ新規作成、あれば更新、のどちらでも確実に保存されるようにする。
@@ -1367,25 +1383,69 @@ async function saveMyProfile(profile) {
   }
 }
 
+// ★閲覧専用アカウント（先生・保護者）かどうかを判定するための共通の仕組み。
+//   画面ごとに毎回プロフィールを取りに行くと遅いので、一度取った結果は使い回す。
+//   ※ここで隠すのは操作の入口だけなので、実際の書き込み禁止はSupabase側(RLS)でも設定すること。
+let _isViewerCache = null;
+async function fetchIsViewer() {
+  const p = await getMyProfile();
+  _isViewerCache = !!p?.is_viewer;
+  return _isViewerCache;
+}
+function useIsViewer() {
+  const [isViewer, setIsViewer] = useState(_isViewerCache === null ? false : _isViewerCache);
+  useEffect(() => {
+    let alive = true;
+    if (_isViewerCache !== null) { setIsViewer(_isViewerCache); return; }
+    fetchIsViewer().then(v => { if (alive) setIsViewer(v); });
+    return () => { alive = false; };
+  }, []);
+  return isViewer;
+}
+// 閲覧専用の人に見せる「押せないボタン」の見た目
+const viewerDisabledStyle = { opacity:0.4, cursor:"not-allowed", filter:"grayscale(0.6)" };
+function viewerAlert() { alert("閲覧専用アカウントのため、この操作はできません。"); }
+
 // 招待コード・管理者情報を取得
+// ★viewer_invite_code は「閲覧専用」で参加するためのコード（先生・保護者向け）
 async function getSchoolInviteInfo(schoolId) {
   if (!schoolId) return null;
-  const { data, error } = await supabase.from("schools").select("invite_code, admin_user_id").eq("id", schoolId).single();
+  const { data, error } = await supabase.from("schools").select("invite_code, viewer_invite_code, admin_user_id").eq("id", schoolId).single();
   if (error) { console.error(error); return null; }
   return data;
 }
 
-// 招待コードを照合
-async function verifyInviteCode(schoolId, code) {
+// 招待コードを照合する。
+// 戻り値: "member"（記録もできる通常メンバー） / "viewer"（閲覧専用） / null（不一致）
+async function verifyInviteCodeKind(schoolId, code) {
   const info = await getSchoolInviteInfo(schoolId);
-  if (!info) return false;
-  return info.invite_code === code.trim().toUpperCase();
+  if (!info) return null;
+  const input = (code || "").trim().toUpperCase();
+  if (!input) return null;
+  if (info.invite_code && info.invite_code === input) return "member";
+  if (info.viewer_invite_code && info.viewer_invite_code === input) return "viewer";
+  return null;
 }
+
+// 招待コードを照合（真偽値だけ欲しい既存の呼び出し用）
+async function verifyInviteCode(schoolId, code) {
+  return (await verifyInviteCodeKind(schoolId, code)) !== null;
+}
+
+const makeInviteCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
 // 招待コードを再発行
 async function reissueInviteCode(schoolId) {
-  const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const newCode = makeInviteCode();
   const { error } = await supabase.from("schools").update({ invite_code: newCode }).eq("id", schoolId);
+  if (error) throw error;
+  return newCode;
+}
+
+// 閲覧専用コードを発行・再発行
+async function reissueViewerInviteCode(schoolId) {
+  const newCode = makeInviteCode();
+  const { error } = await supabase.from("schools").update({ viewer_invite_code: newCode }).eq("id", schoolId);
   if (error) throw error;
   return newCode;
 }
@@ -3333,6 +3393,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [allTeamMatches, setAllTeamMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const isViewer = useIsViewer(); // ★閲覧専用アカウントには作成・削除・コピーを出さない
   // ★一覧の「📝 メモあり」「🎥 動画」バッジをタップしたときに内容を表示するためのstate
   const [memoView, setMemoView] = useState(null);
   const [videoView, setVideoView] = useState(null);
@@ -3779,6 +3840,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          {/* ★閲覧専用アカウントであることが一目でわかるようにする */}
+          {isViewer && (
+            <span style={{ display:"inline-flex",alignItems:"center",gap:4,fontSize:10.5,fontWeight:800,borderRadius:99,padding:"3px 10px",background:"rgba(255,255,255,0.18)",color:C.white,whiteSpace:"nowrap" }}>👀 閲覧専用</span>
+          )}
           {linkedPlayerName && (
             <button onClick={()=>setChildOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(childOnly?"#fff":"rgba(255,255,255,0.4)"), background:childOnly?"#fff":"transparent", color:childOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>{linkedPlayerName}</button>
           )}
@@ -4083,8 +4148,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               );
             })}
           </div>
-          {/* 大会FAB */}
-          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>
+          {/* 大会FAB（★閲覧専用アカウントには出さない） */}
+          {!isViewer && <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>}
         </>
       )}
 
@@ -4130,8 +4195,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     </div>
                   </div>
                   <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                    <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>
-                    <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>
+                    {/* ★閲覧専用アカウントには削除・コピー（新規作成）は出さない */}
+                    {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>}
+                    {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>}
                     {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
                     {m.memo && (
                       <button
@@ -4156,8 +4222,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               >もっと見る（残り{filteredMatches.length - visibleCount}件）</button>
             )}
           </div>
-          {/* 個人戦FAB */}
-          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>
+          {/* 個人戦FAB（★閲覧専用アカウントには出さない） */}
+          {!isViewer && <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>}
         </>
       )}
 
@@ -4205,8 +4271,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               >もっと見る（残り{filteredTeamMatches.length - visibleCount}件）</button>
             )}
           </div>
-          {/* 団体戦FAB */}
-          <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch&&onNewTeamMatch()}>＋</button>
+          {/* 団体戦FAB（★閲覧専用アカウントには出さない） */}
+          {!isViewer && <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch&&onNewTeamMatch()}>＋</button>}
         </>
       )}
 
@@ -4674,6 +4740,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [loading, setLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
   const [confirmDeleteMatch, setConfirmDeleteMatch] = useState(null);
+  const isViewer = useIsViewer(); // ★閲覧専用アカウントには作成・削除・コピーを出さない
   // ★一覧の「📝 メモあり」「🎥 動画」バッジをタップしたときに内容を表示するためのstate
   const [memoView, setMemoView] = useState(null);
   const [videoView, setVideoView] = useState(null);
@@ -4869,26 +4936,29 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             <>
               <div style={{ position:"fixed", inset:0, zIndex:9 }} onClick={()=>setShowMoreMenu(false)} />
               <div style={{ position:"absolute", top:38, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 6px 16px rgba(0,0,0,0.18)", overflow:"hidden", zIndex:10, minWidth:190 }}>
+                {/* ★閲覧専用アカウントには編集系メニューをグレー表示にする（押せないことを示す） */}
                 <button
-                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                  onClick={()=>{ setShowMoreMenu(false); setShowEditModal(true); }}
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text, ...(isViewer?viewerDisabledStyle:{}) }}
+                  onClick={()=>{ if(isViewer){viewerAlert();return;} setShowMoreMenu(false); setShowEditModal(true); }}
                 >✏️ 大会を編集</button>
                 <button
-                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                  onClick={()=>{ setShowMoreMenu(false); onOpenDrawSetup && onOpenDrawSetup(seg); }}
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text, ...(isViewer?viewerDisabledStyle:{}) }}
+                  onClick={()=>{ if(isViewer){viewerAlert();return;} setShowMoreMenu(false); onOpenDrawSetup && onOpenDrawSetup(seg); }}
                 >🗂️ ドロー設定</button>
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                   onClick={()=>{ setShowMoreMenu(false); onOpenDailyRanking && onOpenDailyRanking(tournament); }}
                 >📊 日別選手ランキング</button>
                 <button
-                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                  onClick={()=>{ setShowMoreMenu(false); onOpenPairMaster && onOpenPairMaster(tournament); }}
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text, ...(isViewer?viewerDisabledStyle:{}) }}
+                  onClick={()=>{ if(isViewer){viewerAlert();return;} setShowMoreMenu(false); onOpenPairMaster && onOpenPairMaster(tournament); }}
                 >👥 ペアマスター</button>
+                {!isViewer && (
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                   onClick={()=>{ setShowMoreMenu(false); setDrawViewMode("draw"); onRequestBulkImport && onRequestBulkImport(); }}
                 >📋 一覧から一括登録</button>
+                )}
               </div>
             </>
           )}
@@ -5123,8 +5193,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <span style={{ fontSize:10, color:C.textSec, marginLeft:8 }}>{tm.is_younger===false ? "遅番" : tm.is_younger===true ? "若番" : "若番/遅番未設定"}</span>
               </div>
               <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピー</button>
-                {notStarted && (
+                {/* ★閲覧専用アカウントには作成・記録・削除系は出さない */}
+                {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピー</button>}
+                {!isViewer && notStarted && (
                   <button
                     style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
                     onClick={()=>{
@@ -5134,7 +5205,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   >📝 結果だけ記録</button>
                 )}
                 {/* ★「結果だけ記録」で終えた団体戦（番手の記録が無い）は、入力し直せるようにする */}
-                {!notStarted && tm.status === "finished" && (tm.games || []).length === 0 && (
+                {!isViewer && !notStarted && tm.status === "finished" && (tm.games || []).length === 0 && (
                   <button
                     style={{ flex:1, padding:"8px", background:"#fff7ed", color:C.orange, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
                     onClick={()=>{
@@ -5144,7 +5215,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                     }}
                   >✏️ 結果を修正</button>
                 )}
-                <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>
+                {!isViewer && <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>}
               </div>
             </div>
           );
@@ -5263,8 +5334,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               </div>
               {!m.is_simple_draw_result && (
                 <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                  <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>
-                  <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>
+                  {/* ★閲覧専用アカウントには削除・コピー（新規作成）は出さない */}
+                  {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>}
+                  {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>}
                   {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
                   {m.memo && (
                     <button
@@ -5284,7 +5356,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           );
         })}
 
-        {!loading && <div style={{ textAlign:"center", fontSize:11, color:C.textSec, marginTop:16 }}>＋ボタンから、この大会に紐づく試合を作成できます</div>}
+        {!loading && !isViewer && <div style={{ textAlign:"center", fontSize:11, color:C.textSec, marginTop:16 }}>＋ボタンから、この大会に紐づく試合を作成できます</div>}
 
         {/* ★試合が増えると縦に長くなるため、一番下にも戻るボタンを置く。
               右下の＋ボタンと重ならないよう、下に余白をとっている。 */}
@@ -5295,10 +5367,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         )}
       </div>
 
+      {/* ★閲覧専用アカウントには試合作成ボタンを出さない */}
+      {!isViewer && (
       <button
         style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:seg==="team"?`linear-gradient(135deg,${C.navy},${C.navyMid})`:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center" }}
         onClick={()=>seg==="team" ? onNewTeam() : onNewIndividual()}
       >＋</button>
+      )}
 
       {showEditModal && (
         <FullScreenSheet title="✏️ 大会を編集" onClose={()=>setShowEditModal(false)}>
@@ -10181,6 +10256,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
 // 団体戦 詳細画面（リアルタイム観戦含む）
 // ============================================================
 function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onNavigate, onOpenAiAnalysis }) {
+  const isViewer = useIsViewer(); // ★閲覧専用アカウントには記録・編集系を出さない
   // ★AI動画分析の閲覧は本人・保護者・管理者だけ（AI分析メニューと同じ基準）
   const aiViewer = useAiAnalysisViewer();
   const [tm, setTm] = useState(null);
@@ -10458,7 +10534,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                         )}
                       </div>
                     )}
-                    {isFinished && match?.id && !aiAnalyses[match.id] && (
+                    {!isViewer && isFinished && match?.id && !aiAnalyses[match.id] && (
                       <div
                         onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, null)}
                         style={{ marginTop:8, textAlign:"center", fontSize:11, color:C.textSec, cursor:"pointer" }}
@@ -13470,6 +13546,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
   const [loadKey, setLoadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [viewOnly, setViewOnly] = useState(false); // 観戦モード
+  const isViewer = useIsViewer(); // ★閲覧専用アカウントは常に観戦モード
   // ★中断／途中終了の試合は、記録者本人であっても「自分が記録者になる（続きから記録する）」を
   //   押すまでは観戦モード（閲覧のみ）にしておく。押した瞬間だけこのフラグをtrueにして即アクティブ化する。
   const [statusLockOverride, setStatusLockOverride] = useState(false);
@@ -13553,7 +13630,8 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
         onRefresh={handleRefresh}
         refreshing={refreshing}
         onNavigate={onNavigate}
-        viewOnly={viewOnly}
+        viewOnly={viewOnly || isViewer}
+        isViewer={isViewer}
         teamMatchId={teamMatchId}
         onOpenAiAnalysis={onOpenAiAnalysis}
       />
@@ -13561,7 +13639,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, teamMatchId, onOpenAiAnalysis, initialTab }) {
+function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, isViewer, teamMatchId, onOpenAiAnalysis, initialTab }) {
   const [match,  setMatch]  = useState(initialMatch);
   // ★観戦モード（閲覧のみ）では、親から渡されるinitialMatchが「最新に更新」で
   // 　差し替わった時にこの内部stateへ反映されないと画面が更新されない。
@@ -13630,6 +13708,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   //     最新のもの1つだけを保持して送信する
   const LOCAL_DRAFT_KEY = `offline_match_draft_${initialMatch.id}`;
   const [syncStatus, setSyncStatus] = useState("synced"); // "synced" | "pending" | "error"
+  const [syncErrorMsg, setSyncErrorMsg] = useState(""); // ★保存に失敗した本当の理由（原因調査用）
   const [restoredNotice, setRestoredNotice] = useState(false);
   const latestUnsavedRef = useRef(null);
   const savingRef = useRef(false);
@@ -13645,10 +13724,16 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           latestUnsavedRef.current = null;
           try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch(e) {}
           setSyncStatus("synced");
+          setSyncErrorMsg("");
         }
       })
-      .catch(() => {
-        setSyncStatus("error"); // 通信エラー等。ポップアップは出さず、画面のバッジで知らせるだけにする
+      .catch((e) => {
+        // ★以前はエラー内容を捨てて一律「電波待ち」と表示していたため、
+        //   実際にはサーバー側のエラー（列が無い・権限が無い等）なのに
+        //   電波のせいだと思い込んで、いつまでも直せない状態になっていた。
+        //   オンラインかどうかで文言を分け、原因もそのまま表示する。
+        setSyncStatus("error");
+        setSyncErrorMsg(e?.message || String(e || "不明なエラー"));
       })
       .finally(() => {
         savingRef.current = false;
@@ -14011,7 +14096,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     // ★未同期のデータが残っている状態でこの画面を離れると、自動リトライが止まってしまうため、
     //   一度確認する（オフラインで記録を続けている最中に誤って戻るのを防ぐ）
     if (syncStatus !== "synced") {
-      if (!window.confirm("まだサーバーに保存できていない記録があります（電波待ち）。\nこのまま戻ると自動での再送が止まります。\n記録自体は端末に残っているので、この画面をもう一度開けば再送は再開されます。\n\n戻りますか？")) {
+      if (!window.confirm("まだサーバーに保存できていない記録があります。\n" + (syncErrorMsg ? "原因：" + syncErrorMsg + "\n" : "") + "このまま戻ると自動での再送が止まります。\n記録自体は端末に残っているので、この画面をもう一度開けば再送は再開されます。\n\n戻りますか？")) {
         return;
       }
     }
@@ -14023,7 +14108,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     <div style={S.page}>
       {restoredNotice && (
         <div style={{ background:"#fff3e0", borderBottom:"1px solid #ffd9b3", padding:"8px 14px", fontSize:11.5, color:"#8a5a00", display:"flex", alignItems:"center", gap:8 }}>
-          <span style={{ flex:1 }}>⚠️ 前回、同期できないまま終了した記録を復元しました。電波が戻り次第、自動で保存されます。</span>
+          <span style={{ flex:1 }}>⚠️ 前回、同期できないまま終了した記録を復元しました。保存できる状態になり次第、自動で保存されます。</span>
           <button style={{ background:"none", border:"none", color:"#8a5a00", fontWeight:700, fontSize:13, cursor:"pointer" }} onClick={()=>setRestoredNotice(false)}>✕</button>
         </div>
       )}
@@ -14038,8 +14123,19 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <div style={{ marginTop:3, display:"inline-flex", alignItems:"center", gap:4, fontSize:9.5, fontWeight:700, borderRadius:99, padding:"1px 8px",
                 background: syncStatus==="synced" ? "rgba(46,204,113,0.2)" : syncStatus==="error" ? "rgba(255,255,255,0.15)" : "rgba(249,115,22,0.2)",
                 color: syncStatus==="synced" ? "#7CF0B0" : syncStatus==="error" ? "#ffb199" : "#ffcf8f" }}>
-                {syncStatus==="synced" ? "🟢 同期済み" : syncStatus==="error" ? "🔴 未同期（電波待ち・記録は端末に保存済み）" : "🟡 保存中…"}
+                {syncStatus==="synced"
+                  ? "🟢 同期済み"
+                  : syncStatus==="error"
+                    ? (navigator.onLine ? "🔴 保存できません（タップで原因）" : "🔴 未同期（電波待ち・記録は端末に保存済み）")
+                    : "🟡 保存中…"}
               </div>
+            )}
+            {/* ★オンラインなのに保存できない＝サーバー側の問題。原因をそのまま見せて直せるようにする。 */}
+            {!viewOnly && syncStatus==="error" && navigator.onLine && syncErrorMsg && (
+              <div
+                style={{ marginTop:4, fontSize:9.5, color:"#ffd5c9", lineHeight:1.5, cursor:"pointer", wordBreak:"break-all" }}
+                onClick={()=>alert("サーバーに保存できませんでした。\n\n原因：" + syncErrorMsg + "\n\n記録は端末に残っています。原因を解消してからこの画面を開き直すと、自動で再送されます。")}
+              >{syncErrorMsg}</div>
             )}
           </div>
           <div style={{ display:"flex", gap:6, flex:"none" }}>
@@ -14146,7 +14242,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             </div>
           )}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-            <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>👁 観戦モード（スコア閲覧のみ）</span>
+            <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>{isViewer ? "👀 閲覧専用（記録・編集はできません）" : "👁 観戦モード（スコア閲覧のみ）"}</span>
             <button
               style={{ background:C.navy, border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
               onClick={onRefresh} disabled={refreshing}
@@ -14154,7 +14250,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           </div>
           {/* ★試合が終了していなければ、いつでも自分が記録者としてロックを引き継げるようにする
                 （記録者ロックが自分以外・または不整合になっていても、これで即座に復帰できる） */}
-          {match.status!=="finished" && (
+          {!isViewer && match.status!=="finished" && (
             <button
               style={{ ...S.btn(C.navy), fontSize:12, padding:"9px", marginTop:8 }}
               onClick={async ()=>{
@@ -14178,7 +14274,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           )}
           {/* ★記録者ロックが残ったまま操作不能になった場合の逃げ道（団体戦と同じ）。
                 通信が切れた・画面をそのまま閉じた等でロックが外れないことがあるため。 */}
-          {!teamMatchId && match.recorder_name && match.status!=="finished" && (
+          {!isViewer && !teamMatchId && match.recorder_name && match.status!=="finished" && (
             <div style={{ textAlign:"center", marginTop:6 }}>
               <button
                 style={{ background:"none", border:"none", color:C.textSec, fontSize:11, textDecoration:"underline", cursor:"pointer" }}
@@ -14381,8 +14477,34 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <span style={{ width:74,textAlign:"center",fontSize:16 }}>{rightMatchScore>leftMatchScore?"🏆":""}</span>
                 </div>
               </div>
-              {/* 試合メモ（★記録者以外も書けるようにする） */}
-              {(
+              {/* 試合メモ（★記録者以外も書けるようにする。ただし閲覧専用アカウントは読むだけ） */}
+              {isViewer ? (
+                (match.memo || (match.video_links && match.video_links.length > 0)) && (
+                  <div style={{ ...S.card, padding:14, marginBottom:8 }}>
+                    {match.memo && (
+                      <>
+                        <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
+                        <div style={{ fontSize:13,lineHeight:1.75,whiteSpace:"pre-wrap",background:C.accentL,borderRadius:10,padding:"12px 13px",color:C.text }}>{match.memo}</div>
+                      </>
+                    )}
+                    {match.video_links && match.video_links.length > 0 && (
+                      <>
+                        <div style={{ fontSize:12,fontWeight:700,color:C.navy,margin:"14px 0 8px" }}>🎥 動画リンク</div>
+                        {match.video_links.map(v=>(
+                          <a key={v.id} href={v.url} target="_blank" rel="noopener noreferrer"
+                            style={{ display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderRadius:10,padding:8,marginBottom:9,textDecoration:"none",color:"inherit" }}>
+                            <img src={youtubeThumbOf(v.id)} alt="" style={{ width:88,height:52,objectFit:"cover",borderRadius:7,background:"#000",flexShrink:0 }}/>
+                            <div>
+                              <div style={{ fontSize:12.5,fontWeight:700,color:C.navy }}>{v.title || "動画"}</div>
+                              <div style={{ fontSize:10.5,color:"#c4302b",fontWeight:700,marginTop:3 }}>▶ YouTubeで開く</div>
+                            </div>
+                          </a>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )
+              ) : (
                 <div style={{ ...S.card, padding:14, marginBottom:8 }}>
                   <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
                   <textarea
@@ -14465,13 +14587,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               </div>
               {/* ★終了した試合の編集は、記録した本人でなくてもできるようにする。
                     記録係と、あとから内容を直す人（顧問など）が別なことが多いため。 */}
-              <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8 }} onClick={()=>onEdit&&onEdit(match.id)}>✏️ 試合情報を編集</button>
+              {/* ★閲覧専用アカウントには、編集系はグレー表示で「あるけれど押せない」ことを示す */}
+              <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8, ...(isViewer?viewerDisabledStyle:{}) }} onClick={()=>{ if(isViewer){viewerAlert();return;} onEdit&&onEdit(match.id); }}>✏️ 試合情報を編集</button>
               {/* ★「結果だけ記録」で終えた試合は、ポイント記録が無いのでスコア修正画面では直せない。
                      入力し直せるよう、同じ入力モーダルを今の値を入れた状態で開き直す。 */}
               {(match.games?.length ?? 0) === 0 && (
                 <button
-                  style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }}
+                  style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8, ...(isViewer?viewerDisabledStyle:{}) }}
                   onClick={()=>{
+                    if(isViewer){viewerAlert();return;}
                     setSimpleScoreA(String(match.match_score_a ?? ""));
                     setSimpleScoreB(String(match.match_score_b ?? ""));
                     setIsWithdrawalResult(!!match.walkover_winner);
@@ -14481,7 +14605,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 >✏️ 結果を修正する</button>
               )}
               {(match.games?.length ?? 0) > 0 && (
-                <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8 }} onClick={()=>{ setCorrectGameId(null); setCorrectMode(true); }}>✏️ スコアを修正</button>
+                <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8, ...(isViewer?viewerDisabledStyle:{}) }} onClick={()=>{ if(isViewer){viewerAlert();return;} setCorrectGameId(null); setCorrectMode(true); }}>✏️ スコアを修正</button>
               )}
               {/* ★「途中終了」は記録中の画面から押すもの。終了済みの画面に置くと
                     「試合終了」と表示しながら「途中終了」ボタンが並ぶことになり紛らわしいので置かない。 */}
@@ -14490,8 +14614,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   以前は誰にでも表示していたため、AI分析メニュー側で閲覧制限をかけても
                   この試合詳細のボタンから中身を見られてしまう抜け道になっていた。 */}
               {!teamMatchId && aiAnalysis !== undefined && (aiAnalysis ? canViewAi : true) && (
-                <button style={{ ...S.btn("#fff"),color:C.purple,border:"1px solid #dcdffc",marginBottom:8 }}
-                  onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalysis)}
+                <button style={{ ...S.btn("#fff"),color:C.purple,border:"1px solid #dcdffc",marginBottom:8, ...((isViewer && !aiAnalysis)?viewerDisabledStyle:{}) }}
+                  onClick={()=>{ if(isViewer && !aiAnalysis){viewerAlert();return;} onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalysis); }}
                 >🤖 {aiAnalysis ? "AI動画分析を見る" : "AI動画分析を追加する"}</button>
               )}
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={handleBack}>← 試合一覧に戻る</button>
@@ -15951,7 +16075,9 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [inviteCode, setInviteCode] = useState("");
   const [inviteInput, setInviteInput] = useState("");
   const [inviteError, setInviteError] = useState("");
+  const [inviteKind, setInviteKind] = useState(null); // ★"member" | "viewer" | null（入力されたコードの種類）
   const [inviteCodeDisplay, setInviteCodeDisplay] = useState("");
+  const [viewerCodeDisplay, setViewerCodeDisplay] = useState(""); // ★閲覧専用の招待コード
   const [showTransferScreen, setShowTransferScreen] = useState(false);
   const [memberList, setMemberList] = useState([]);
   const [dissolveStep, setDissolveStep] = useState(0); // 0=非表示 1=1回目 2=2回目
@@ -15987,6 +16113,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           const info = await getSchoolInviteInfo(p.school_id);
           if (!cancelled && info) {
             setInviteCodeDisplay(info.invite_code || "");
+            setViewerCodeDisplay(info.viewer_invite_code || "");
             setIsAdmin(info.admin_user_id === p.id);
           }
         }
@@ -16003,9 +16130,12 @@ function ProfileScreen({ onBack, forced, onSaved }) {
     if (!schoolId) { setErrorMsg("学校名を選択してください"); return; }
     if (!genderCategory) { setErrorMsg("男子・女子・共通を選択してください"); return; }
     if (!category) { setErrorMsg("区分を選択してください"); return; }
+    // ★入力されたコードが「メンバー用」か「閲覧専用」かを判定する
+    let joinKind = inviteKind;
     if (!isApproved) {
-      const ok = await verifyInviteCode(schoolId, inviteInput);
-      if (!ok) { setInviteError("招待コードが正しくありません。管理者に確認してください。"); return; }
+      joinKind = await verifyInviteCodeKind(schoolId, inviteInput);
+      if (!joinKind) { setInviteError("招待コードが正しくありません。管理者に確認してください。"); return; }
+      setInviteKind(joinKind);
     }
     setSaving(true);
     try {
@@ -16013,7 +16143,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
       // players（選手マスター）へのINSERTはRLSで「同じチームの承認済みユーザーのみ」という
       // 判定になっており、usersの行がまだ無い/未承認のままだと選手登録が権限エラーで弾かれていた。
       // そのため、選手マスターへの登録より先にプロフィールを保存して承認状態にする。
-      await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId, is_approved: true });
+      await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId, is_approved: true, ...(joinKind ? { is_viewer: joinKind === "viewer" } : {}) });
       setIsApproved(true);
 
       let newLinkedPlayerId = linkedPlayerId;
@@ -16255,9 +16385,23 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                 placeholder=""
                 value={inviteInput}
                 maxLength={6}
-                onChange={e=>{ setInviteInput(e.target.value.toUpperCase()); setInviteError(""); }}
+                onChange={e=>{
+                  const v = e.target.value.toUpperCase();
+                  setInviteInput(v); setInviteError("");
+                  // ★入力し終えた時点で「メンバー用」か「閲覧専用」かを先に知らせる
+                  if (v.length === 6 && schoolId) {
+                    verifyInviteCodeKind(schoolId, v).then(setInviteKind);
+                  } else {
+                    setInviteKind(null);
+                  }
+                }}
               />
               {inviteError && <div style={{ fontSize:11,color:C.red,fontWeight:700,marginTop:4 }}>⚠️ {inviteError}</div>}
+              {inviteKind === "viewer" && (
+                <div style={{ background:"#f3f0ff",border:"1px solid #ddd4ff",borderRadius:10,padding:"10px 12px",marginTop:8,fontSize:11.5,color:"#5b3fb8",lineHeight:1.7 }}>
+                  👀 <b>閲覧専用コードです</b><br/>チームの記録をすべて見られますが、記録・編集はできません。
+                </div>
+              )}
               <div style={{ fontSize:11,color:C.textSec,marginTop:4 }}>チームの管理者からコードを受け取り入力してください。</div>
             </div>
           )}
@@ -16496,6 +16640,35 @@ function ProfileScreen({ onBack, forced, onSaved }) {
                     >🔄 再発行</button>
                   </div>
                   <div style={{ fontSize:11,color:C.textSec }}>このコードをLINEなどで部員に共有してください。再発行しても既存メンバーへの影響はありません。</div>
+                </div>
+                {/* ★閲覧専用コード：先生・保護者に渡す用。記録・編集ができないアカウントになる。 */}
+                <div style={{ background:"#f6f3ff",border:"1.5px solid #8b5cf6",borderRadius:10,padding:"12px 14px",marginBottom:10 }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:"#7c4ddb",marginBottom:4 }}>👀 閲覧専用の招待コード</div>
+                  <div style={{ fontSize:11,color:C.textSec,marginBottom:8,lineHeight:1.6 }}>先生・保護者に渡すコードです。記録は見られますが、入力・編集・削除はできません。</div>
+                  {viewerCodeDisplay ? (
+                    <div style={{ background:C.white,border:"1.5px dashed #8b5cf6",borderRadius:8,padding:14,textAlign:"center",fontSize:24,fontWeight:800,letterSpacing:8,color:C.navy,marginBottom:8 }}>{viewerCodeDisplay}</div>
+                  ) : (
+                    <div style={{ background:C.white,border:`1px dashed ${C.border}`,borderRadius:8,padding:14,textAlign:"center",fontSize:12,color:C.textSec,marginBottom:8 }}>まだ発行されていません</div>
+                  )}
+                  <div style={{ display:"flex",gap:8 }}>
+                    {viewerCodeDisplay && (
+                      <button
+                        style={{ flex:1,background:"#8b5cf6",color:C.white,border:"none",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
+                        onClick={()=>{ navigator.clipboard?.writeText(viewerCodeDisplay); alert("閲覧専用コードをコピーしました！"); }}
+                      >📋 コードをコピー</button>
+                    )}
+                    <button
+                      style={{ flex:1,background:C.white,color:"#8b5cf6",border:"1.5px solid #8b5cf6",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer" }}
+                      onClick={async ()=>{
+                        if (viewerCodeDisplay && !window.confirm("閲覧専用コードを再発行しますか？\n古いコードは使えなくなりますが、すでに参加している人への影響はありません。")) return;
+                        try {
+                          const newCode = await reissueViewerInviteCode(schoolId);
+                          setViewerCodeDisplay(newCode);
+                          alert(viewerCodeDisplay ? "閲覧専用コードを再発行しました。" : "閲覧専用コードを発行しました。");
+                        } catch(e) { alert("発行に失敗しました: " + (e.message||"")); }
+                      }}
+                    >{viewerCodeDisplay ? "🔄 再発行" : "🔑 発行する"}</button>
+                  </div>
                 </div>
                 {/* 管理者を移譲する */}
                 <button
@@ -18008,6 +18181,7 @@ function renderAiComment(text) {
 }
 
 function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
+  const isViewer = useIsViewer(); // ★閲覧専用アカウントは見るだけ（編集・削除は不可）
   const label = aiMatchLabel(match).text;
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40 }}>
@@ -18030,8 +18204,9 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
           {renderAiComment(analysis.comment_text)}
         </div>
         <div style={{ display:"flex", gap:8, marginTop:16 }}>
-          <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy }} onClick={onEdit}>✏️ 編集する</button>
-          <button style={{ ...S.btn(C.redL), color:C.red }} onClick={onDelete}>🗑 削除</button>
+          {/* ★閲覧専用アカウント：編集はグレー表示、削除は非表示 */}
+          <button style={{ ...S.btn("#fff"), border:"1px solid "+C.border, color:C.navy, ...(isViewer?viewerDisabledStyle:{}) }} onClick={()=>{ if(isViewer){viewerAlert();return;} onEdit&&onEdit(); }}>✏️ 編集する</button>
+          {!isViewer && <button style={{ ...S.btn(C.redL), color:C.red }} onClick={onDelete}>🗑 削除</button>}
         </div>
         {/* ★コメントが長くなりやすいので、一番下にも戻るボタンを置く
               （毎回画面の一番上までスクロールし直さなくて済むように） */}
