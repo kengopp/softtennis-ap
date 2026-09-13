@@ -13755,6 +13755,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch(e) {}
           setSyncStatus("synced");
           setSyncErrorMsg("");
+          // ★「復元しました」の案内は、保存が終わった時点で役目が終わるので自動で消す。
+          //   以前は✕を押すまで残り続け、保存できたのかどうか分からなかった。
+          setRestoredNotice(false);
         }
       })
       .catch((e) => {
