@@ -4996,13 +4996,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       [aIsMine ? "A" : null, bIsMine ? "B" : null].filter(Boolean).forEach(side => {
         const name = pairNameOfSide(m, side);
         if (!name) return;
+        if (pairLossMap[name]) return; // ★既に負けが確定しているペアは「一番勝ち進んだ試合」の対象にしない
         const cur = bestByPair.get(name);
         if (!cur || rank > cur.rank) bestByPair.set(name, { match: m, rank });
       });
     });
     const keepIds = new Set([...bestByPair.values()].map(v => v.match.id));
     return filteredIndividualMatches.filter(m => keepIds.has(m.id));
-  }, [filteredIndividualMatches, individualResultFilter, individualRoundFilter, mySchoolName]);
+  }, [filteredIndividualMatches, individualResultFilter, individualRoundFilter, mySchoolName, pairLossMap]);
 
   const sortedIndividualMatches = [...displayIndividualMatches].sort((a, b) => {
     const ra = roundSortRank(a.round), rb = roundSortRank(b.round);
