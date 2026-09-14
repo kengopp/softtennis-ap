@@ -13851,6 +13851,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [videoUrlInput, setVideoUrlInput] = useState("");
   const [videoUrlError, setVideoUrlError] = useState("");
   const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
+  const [showVideoModal, setShowVideoModal] = useState(false); // ★動画リンクの追加・一覧はボタンを押したときだけモーダルで開く
   const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
   const [abandonConfirm, setAbandonConfirm] = useState(false); // 途中終了確認ダイアログ
   const [undoConfirm, setUndoConfirm] = useState(false); // 1点前に戻す確認ダイアログ
@@ -14664,120 +14665,153 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   </div>
                 )
               ) : (
-                <div style={{ ...S.card, padding:14, marginBottom:8 }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
-                  <textarea
-                    style={{ width:"100%",minHeight:70,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:13,fontFamily:"inherit",resize:"vertical" }}
-                    placeholder="気づいたこと、課題、次への作戦などを自由にメモできます"
-                    value={memoDraft}
-                    onChange={e=>{ setMemoDraft(e.target.value); setMemoSaved(false); }}
-                  />
-
-                  {/* ★動画リンク（YouTube・複数登録可） */}
-                  <div style={{ fontSize:11,fontWeight:700,color:C.textSec,margin:"14px 0 5px" }}>🎥 動画リンク（YouTube・複数登録可）</div>
-                  <div style={{ display:"flex",gap:6 }}>
-                    <input
-                      type="text"
-                      style={{ flex:1,minWidth:0,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 10px",fontSize:13,fontFamily:"inherit" }}
-                      placeholder="https://youtu.be/... を貼り付け"
-                      value={videoUrlInput}
-                      onChange={e=>{ setVideoUrlInput(e.target.value); setVideoUrlError(""); }}
+                <>
+                  <div style={{ ...S.card, padding:14, marginBottom:8 }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:8 }}>📝 試合メモ</div>
+                    <textarea
+                      style={{ width:"100%",minHeight:70,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:13,fontFamily:"inherit",resize:"vertical" }}
+                      placeholder="気づいたこと、課題、次への作戦などを自由にメモできます"
+                      value={memoDraft}
+                      onChange={e=>{ setMemoDraft(e.target.value); setMemoSaved(false); }}
                     />
-                    <button
-                      style={{ background:C.accent,color:C.white,border:"none",borderRadius:8,padding:"0 14px",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap" }}
-                      onClick={()=>{
-                        const vid = youtubeIdOf(videoUrlInput.trim());
-                        if (!vid) { setVideoUrlError("YouTubeのURLとして認識できませんでした"); return; }
-                        if (videoLinksDraft.some(v=>v.id===vid)) { setVideoUrlError("この動画はすでに登録されています"); return; }
-                        setVideoLinksDraft([...videoLinksDraft, { id:vid, title:`動画${videoLinksDraft.length+1}`, url:`https://youtu.be/${vid}` }]);
-                        setVideoUrlInput(""); setVideoUrlError(""); setMemoSaved(false);
-                      }}
-                    >追加</button>
+                    {/* ★保存ボタンは、メモに未保存の変更があるときだけ出す。
+                           何も書いていない・変更していない状態で「保存済み」ボタンを出し続けると、
+                           何も入れていないのに保存済みと言われているように見えて紛らわしいため。 */}
+                    {!memoSaved && (
+                      <button
+                        style={{ ...S.btn(C.navy), color:C.white, fontSize:12, marginTop:10, padding:"9px" }}
+                        onClick={()=>{
+                          persist({ ...match, memo: memoDraft });
+                          setMemoSaved(true);
+                        }}
+                      >💾 保存</button>
+                    )}
                   </div>
-                  <div style={{ fontSize:10.5,color:C.textSec,marginTop:5,lineHeight:1.5 }}>追加後、タイトル欄をタップすると「1ゲーム目」など自由に名前を付けられます。</div>
-                  {videoUrlError && <div style={{ fontSize:10.5,color:C.red,marginTop:5 }}>{videoUrlError}</div>}
 
-                  {videoLinksDraft.length > 0 ? (
-                    <div style={{ marginTop:10,display:"flex",flexDirection:"column",gap:8 }}>
-                      {videoLinksDraft.map((v,i)=>(
-                        <div key={v.id} style={{ display:"flex",alignItems:"center",gap:9,border:`1px solid ${C.border}`,borderRadius:10,padding:"7px 9px",background:"#fafbfd" }}>
-                          <img src={youtubeThumbOf(v.id)} alt="" style={{ width:64,height:38,objectFit:"cover",borderRadius:6,background:"#000",flexShrink:0 }}/>
-                          <div style={{ flex:1,minWidth:0 }}>
-                            <input
-                              type="text"
-                              value={v.title}
-                              placeholder="タイトル"
-                              onChange={e=>{
-                                const next = videoLinksDraft.slice();
-                                next[i] = { ...next[i], title: e.target.value };
-                                setVideoLinksDraft(next); setMemoSaved(false);
-                              }}
-                              style={{ width:"100%",border:"none",background:"transparent",fontSize:12,fontWeight:700,color:C.navy,padding:"2px 0",fontFamily:"inherit" }}
-                            />
-                            <div style={{ fontSize:10,color:C.textSec,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{v.url}</div>
-                          </div>
-                          <button
-                            style={{ background:"none",border:"none",color:C.red,fontSize:15,cursor:"pointer",padding:4 }}
-                            onClick={()=>{ setVideoLinksDraft(videoLinksDraft.filter((_,j)=>j!==i)); setMemoSaved(false); }}
-                          >🗑</button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize:11.5,color:C.textSec,textAlign:"center",padding:14,border:`1px dashed ${C.border}`,borderRadius:10,marginTop:10 }}>まだ動画が登録されていません</div>
-                  )}
-
+                  {/* ★動画リンクは常時入力欄を出さず、AI動画分析と同じ「ボタンを押したら開く」形にする。
+                        登録数に応じてボタンの文言を変え、押すと下のモーダルで追加・編集ができる。 */}
                   <button
-                    style={{ ...S.btn(memoSaved?"#f0f0f0":C.navy), color:memoSaved?C.textSec:C.white, fontSize:12, marginTop:12, padding:"9px" }}
-                    disabled={memoSaved}
-                    onClick={()=>{
-                      const cleaned = videoLinksDraft.map((v,i)=>({ ...v, title: v.title.trim() || `動画${i+1}` }));
-                      setVideoLinksDraft(cleaned);
-                      persist({ ...match, memo: memoDraft, video_links: cleaned });
-                      setMemoSaved(true);
-                    }}
-                  >{memoSaved ? "保存済み" : "💾 保存"}</button>
-                </div>
+                    style={{ ...S.btn("#f2f3f6"), color:"#3a4152", border:"1px solid "+C.border, marginBottom:8, display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}
+                    onClick={()=>{ setVideoLinksDraft(normalizeVideoLinks(match.video_links)); setVideoUrlInput(""); setVideoUrlError(""); setShowVideoModal(true); }}
+                  >🎥 {match.video_links && match.video_links.length > 0 ? `動画リンクを見る（${match.video_links.length}件）` : "動画リンクを追加する"}</button>
+                </>
               )}
               {/* ボタン群 */}
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8 }}>
-                <button style={{ ...S.btn(C.navyMid),fontSize:13 }} onClick={()=>setTab("stats")}>📊 スタッツを見る</button>
-                <button style={{ ...S.btn(C.navyMid),fontSize:13 }} onClick={()=>setTab("score")}>📋 スコアを見る</button>
+              {/* ★スタッツ／スコアは上部のタブ（記録・スコア・スタッツ・検算）と機能が重複しているため削除。
+                    「試合情報を編集」「スコアを修正」は、どちらも記録を直す系なので2列にまとめて省スペース化。 */}
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8 }}>
+                {/* ★終了した試合の編集は、記録した本人でなくてもできるようにする。
+                      記録係と、あとから内容を直す人（顧問など）が別なことが多いため。 */}
+                {/* ★閲覧専用アカウントには、編集系はグレー表示で「あるけれど押せない」ことを示す */}
+                <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:0, ...(isViewer?viewerDisabledStyle:{}) }} onClick={()=>{ if(isViewer){viewerAlert();return;} onEdit&&onEdit(match.id); }}>✏️ 試合情報を編集</button>
+                {/* ★「結果だけ記録」で終えた試合は、ポイント記録が無いのでスコア修正画面では直せない。
+                       入力し直せるよう、同じ入力モーダルを今の値を入れた状態で開き直す。 */}
+                {(match.games?.length ?? 0) === 0 && (
+                  <button
+                    style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:0, ...(isViewer?viewerDisabledStyle:{}) }}
+                    onClick={()=>{
+                      if(isViewer){viewerAlert();return;}
+                      setSimpleScoreA(String(match.match_score_a ?? ""));
+                      setSimpleScoreB(String(match.match_score_b ?? ""));
+                      setIsWithdrawalResult(!!match.walkover_winner);
+                      setWithdrawalWinner(match.walkover_winner || null);
+                      setShowSimpleResult(true);
+                    }}
+                  >✏️ 結果を修正する</button>
+                )}
+                {(match.games?.length ?? 0) > 0 && (
+                  <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:0, ...(isViewer?viewerDisabledStyle:{}) }} onClick={()=>{ if(isViewer){viewerAlert();return;} setCorrectGameId(null); setCorrectMode(true); }}>✏️ スコアを修正</button>
+                )}
               </div>
-              {/* ★終了した試合の編集は、記録した本人でなくてもできるようにする。
-                    記録係と、あとから内容を直す人（顧問など）が別なことが多いため。 */}
-              {/* ★閲覧専用アカウントには、編集系はグレー表示で「あるけれど押せない」ことを示す */}
-              <button style={{ ...S.btn("#fff"),color:C.navy,border:"1px solid "+C.border,marginBottom:8, ...(isViewer?viewerDisabledStyle:{}) }} onClick={()=>{ if(isViewer){viewerAlert();return;} onEdit&&onEdit(match.id); }}>✏️ 試合情報を編集</button>
-              {/* ★「結果だけ記録」で終えた試合は、ポイント記録が無いのでスコア修正画面では直せない。
-                     入力し直せるよう、同じ入力モーダルを今の値を入れた状態で開き直す。 */}
-              {(match.games?.length ?? 0) === 0 && (
-                <button
-                  style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8, ...(isViewer?viewerDisabledStyle:{}) }}
-                  onClick={()=>{
-                    if(isViewer){viewerAlert();return;}
-                    setSimpleScoreA(String(match.match_score_a ?? ""));
-                    setSimpleScoreB(String(match.match_score_b ?? ""));
-                    setIsWithdrawalResult(!!match.walkover_winner);
-                    setWithdrawalWinner(match.walkover_winner || null);
-                    setShowSimpleResult(true);
-                  }}
-                >✏️ 結果を修正する</button>
-              )}
-              {(match.games?.length ?? 0) > 0 && (
-                <button style={{ ...S.btn("#fff"),color:C.orange,border:"1px solid "+C.orange,marginBottom:8, ...(isViewer?viewerDisabledStyle:{}) }} onClick={()=>{ if(isViewer){viewerAlert();return;} setCorrectGameId(null); setCorrectMode(true); }}>✏️ スコアを修正</button>
-              )}
               {/* ★「途中終了」は記録中の画面から押すもの。終了済みの画面に置くと
                     「試合終了」と表示しながら「途中終了」ボタンが並ぶことになり紛らわしいので置かない。 */}
-              <button style={{ ...S.btn("#06c755"),marginBottom:8 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINEで結果を共有</button>
-              {/* ★AI動画分析は、管理者か、この試合に出場している本人（保護者アカウント含む）だけに表示する。
-                  以前は誰にでも表示していたため、AI分析メニュー側で閲覧制限をかけても
-                  この試合詳細のボタンから中身を見られてしまう抜け道になっていた。 */}
-              {!teamMatchId && aiAnalysis !== undefined && (aiAnalysis ? canViewAi : true) && (
-                <button style={{ ...S.btn("#fff"),color:C.purple,border:"1px solid #dcdffc",marginBottom:8, ...((isViewer && !aiAnalysis)?viewerDisabledStyle:{}) }}
-                  onClick={()=>{ if(isViewer && !aiAnalysis){viewerAlert();return;} onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalysis); }}
-                >🤖 {aiAnalysis ? "AI動画分析を見る" : "AI動画分析を追加する"}</button>
-              )}
+              {/* ★AI動画分析・LINE共有は、使用頻度が低いので小さく1行にまとめ、目立たせすぎない。
+                    文字色も青系（紫）は避け、グレー系に統一する。 */}
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8 }}>
+                {/* ★AI動画分析は、管理者か、この試合に出場している本人（保護者アカウント含む）だけに表示する。
+                    以前は誰にでも表示していたため、AI分析メニュー側で閲覧制限をかけても
+                    この試合詳細のボタンから中身を見られてしまう抜け道になっていた。 */}
+                {!teamMatchId && aiAnalysis !== undefined && (aiAnalysis ? canViewAi : true) && (
+                  <button style={{ ...S.btn("#f2f3f6"),color:"#3a4152",border:"1px solid "+C.border,fontSize:11,padding:8,marginBottom:0, ...((isViewer && !aiAnalysis)?viewerDisabledStyle:{}) }}
+                    onClick={()=>{ if(isViewer && !aiAnalysis){viewerAlert();return;} onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalysis); }}
+                  >🤖 {aiAnalysis ? "AI分析を見る" : "AI分析"}</button>
+                )}
+                <button style={{ ...S.btn("#f2f3f6"),color:"#3a4152",border:"1px solid "+C.border,fontSize:11,padding:8,marginBottom:0 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINE共有</button>
+              </div>
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={handleBack}>← 試合一覧に戻る</button>
+              {/* ★動画リンクの追加・編集モーダル。「動画リンクを追加する」ボタンを押したときだけ開く。 */}
+              {showVideoModal && (
+                <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center" }} onClick={()=>setShowVideoModal(false)}>
+                  <div style={{ background:C.white,borderRadius:"16px 16px 0 0",padding:16,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                      <div style={{ fontSize:14,fontWeight:800,color:C.navy }}>🎥 動画リンク</div>
+                      <div style={{ color:C.textSec,fontSize:18,cursor:"pointer",padding:4 }} onClick={()=>setShowVideoModal(false)}>✕</div>
+                    </div>
+                    <div style={{ fontSize:11,color:C.textSec,marginBottom:8 }}>YouTubeのリンクを複数登録できます</div>
+                    <div style={{ display:"flex",gap:6 }}>
+                      <input
+                        type="text"
+                        style={{ flex:1,minWidth:0,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 10px",fontSize:13,fontFamily:"inherit" }}
+                        placeholder="https://youtu.be/... を貼り付け"
+                        value={videoUrlInput}
+                        onChange={e=>{ setVideoUrlInput(e.target.value); setVideoUrlError(""); }}
+                      />
+                      <button
+                        style={{ background:C.accent,color:C.white,border:"none",borderRadius:8,padding:"0 14px",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap" }}
+                        onClick={()=>{
+                          const vid = youtubeIdOf(videoUrlInput.trim());
+                          if (!vid) { setVideoUrlError("YouTubeのURLとして認識できませんでした"); return; }
+                          if (videoLinksDraft.some(v=>v.id===vid)) { setVideoUrlError("この動画はすでに登録されています"); return; }
+                          setVideoLinksDraft([...videoLinksDraft, { id:vid, title:`動画${videoLinksDraft.length+1}`, url:`https://youtu.be/${vid}` }]);
+                          setVideoUrlInput(""); setVideoUrlError("");
+                        }}
+                      >追加</button>
+                    </div>
+                    <div style={{ fontSize:10.5,color:C.textSec,marginTop:5,lineHeight:1.5 }}>追加後、タイトル欄をタップすると「1ゲーム目」など自由に名前を付けられます。</div>
+                    {videoUrlError && <div style={{ fontSize:10.5,color:C.red,marginTop:5 }}>{videoUrlError}</div>}
+
+                    {videoLinksDraft.length > 0 ? (
+                      <div style={{ marginTop:10,display:"flex",flexDirection:"column",gap:8 }}>
+                        {videoLinksDraft.map((v,i)=>(
+                          <div key={v.id} style={{ display:"flex",alignItems:"center",gap:9,border:`1px solid ${C.border}`,borderRadius:10,padding:"7px 9px",background:"#fafbfd" }}>
+                            <img src={youtubeThumbOf(v.id)} alt="" style={{ width:64,height:38,objectFit:"cover",borderRadius:6,background:"#000",flexShrink:0 }}/>
+                            <div style={{ flex:1,minWidth:0 }}>
+                              <input
+                                type="text"
+                                value={v.title}
+                                placeholder="タイトル"
+                                onChange={e=>{
+                                  const next = videoLinksDraft.slice();
+                                  next[i] = { ...next[i], title: e.target.value };
+                                  setVideoLinksDraft(next);
+                                }}
+                                style={{ width:"100%",border:"none",background:"transparent",fontSize:12,fontWeight:700,color:C.navy,padding:"2px 0",fontFamily:"inherit" }}
+                              />
+                              <div style={{ fontSize:10,color:C.textSec,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{v.url}</div>
+                            </div>
+                            <button
+                              style={{ background:"none",border:"none",color:C.red,fontSize:15,cursor:"pointer",padding:4 }}
+                              onClick={()=>{ setVideoLinksDraft(videoLinksDraft.filter((_,j)=>j!==i)); }}
+                            >🗑</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:11.5,color:C.textSec,textAlign:"center",padding:14,border:`1px dashed ${C.border}`,borderRadius:10,marginTop:10 }}>まだ動画が登録されていません</div>
+                    )}
+
+                    <button
+                      style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)"), marginTop:14 }}
+                      onClick={()=>{
+                        const cleaned = videoLinksDraft.map((v,i)=>({ ...v, title: v.title.trim() || `動画${i+1}` }));
+                        setVideoLinksDraft(cleaned);
+                        persist({ ...match, video_links: cleaned });
+                        setShowVideoModal(false);
+                      }}
+                    >保存して閉じる</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
