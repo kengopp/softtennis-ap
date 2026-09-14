@@ -9029,7 +9029,7 @@ function PracticeScreen({ onNavigate }) {
   }
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80 }}>
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:"#fff", padding:"18px 16px 14px", fontSize:20, fontWeight:800 }}>練習</div>
       <div style={{ padding:14 }}>
         <div style={{ display:"flex", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12 }}>
@@ -17921,7 +17921,7 @@ function AuthScreen({ onAuthed }) {
   // 一瞬でもステップ1が見えてから飛び直す、という見た目のガタつきを避けるため簡易ローディングを表示する
   if (!sessionRestoreChecked) {
     return (
-      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#f4f6f9" }}>
+      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#f4f6f9", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ textAlign:"center", color:C.textSec }}>
           <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
           読み込み中...
@@ -18314,7 +18314,7 @@ function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
   };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40 }}>
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:C.white, padding:16, display:"flex", alignItems:"center", gap:10 }}>
         <span style={{ cursor:"pointer", fontSize:18 }} onClick={onCancel}>←</span>
         <div style={{ fontSize:18, fontWeight:800 }}>{existing ? "AI動画分析を編集" : "AI動画分析を追加"}</div>
@@ -18377,7 +18377,7 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
   const isViewer = useIsViewer(); // ★閲覧専用アカウントは見るだけ（編集・削除は不可）
   const label = aiMatchLabel(match).text;
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40 }}>
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:C.white, padding:16 }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
@@ -18461,7 +18461,7 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
   }, [effectivePlayer, period]);
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90 }}>
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:C.white, padding:16 }}>
         <div style={{ fontSize:20, fontWeight:800 }}>🤖 AI動画分析</div>
         <div style={{ fontSize:11, color:"#b9c2d6", marginTop:2 }}>AI分析を追加した試合の一覧</div>
@@ -18577,7 +18577,7 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
   const filtered = candidates.filter(r => !search.trim() || r.player_name.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40 }}>
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:C.white, padding:16 }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
