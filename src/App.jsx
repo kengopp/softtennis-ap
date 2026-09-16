@@ -13907,7 +13907,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [videoUrlInput, setVideoUrlInput] = useState("");
   const [videoUrlError, setVideoUrlError] = useState("");
   const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
+  const [memoSaving, setMemoSaving] = useState(false); // ★保存中は「戻る」ボタンを押しても未保存警告が出ないよう、保存完了まで待つ
   const [showVideoModal, setShowVideoModal] = useState(false); // ★動画リンクの追加・一覧はボタンを押したときだけモーダルで開く
+  const [videoSaving, setVideoSaving] = useState(false); // ★保存中は「戻る」ボタンを押しても未保存警告が出ないよう、保存完了までモーダルを閉じない
   const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
   const [abandonConfirm, setAbandonConfirm] = useState(false); // 途中終了確認ダイアログ
   const [undoConfirm, setUndoConfirm] = useState(false); // 1点前に戻す確認ダイアログ
@@ -14735,12 +14737,29 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                            何も入れていないのに保存済みと言われているように見えて紛らわしいため。 */}
                     {!memoSaved && (
                       <button
-                        style={{ ...S.btn(C.navy), color:C.white, fontSize:12, marginTop:10, padding:"9px" }}
-                        onClick={()=>{
-                          persist({ ...match, memo: memoDraft });
-                          setMemoSaved(true);
+                        disabled={memoSaving}
+                        style={{ ...S.btn(C.navy), color:C.white, fontSize:12, marginTop:10, padding:"9px", opacity: memoSaving?0.6:1 }}
+                        onClick={async ()=>{
+                          const updated = { ...match, memo: memoDraft };
+                          setMemoSaving(true);
+                          try {
+                            // ★動画リンクと同じ理由：保存完了を待たずに済ませると、直後に
+                            //   「試合一覧に戻る」を押したときだけ未保存警告が誤って出てしまう。
+                            await saveMatch(updated);
+                            setMatch({...updated});
+                            setSyncStatus("synced");
+                            setSyncErrorMsg("");
+                            try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch(e) {}
+                            latestUnsavedRef.current = null;
+                            setMemoSaved(true);
+                          } catch (e) {
+                            persist(updated);
+                            setMemoSaved(true);
+                          } finally {
+                            setMemoSaving(false);
+                          }
                         }}
-                      >💾 保存</button>
+                      >{memoSaving ? "保存中…" : "💾 保存"}</button>
                     )}
                   </div>
 
@@ -14857,14 +14876,36 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     )}
 
                     <button
-                      style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)"), marginTop:14 }}
-                      onClick={()=>{
+                      disabled={videoSaving}
+                      style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)"), marginTop:14, opacity: videoSaving?0.6:1 }}
+                      onClick={async ()=>{
                         const cleaned = videoLinksDraft.map((v,i)=>({ ...v, title: v.title.trim() || `動画${i+1}` }));
                         setVideoLinksDraft(cleaned);
-                        persist({ ...match, video_links: cleaned });
-                        setShowVideoModal(false);
+                        const updated = { ...match, video_links: cleaned };
+                        setVideoSaving(true);
+                        try {
+                          // ★通常の試合記録（persist）は保存完了を待たず即座に画面を返す作りだが、
+                          //   それだと「保存して閉じる」を押した直後に「試合一覧に戻る」を押すと、
+                          //   まだ保存が終わっていないだけなのに「未保存の記録があります」という
+                          //   警告が出てしまう。動画リンクの保存はすぐ終わるはずなので、ここでは
+                          //   実際に保存が完了するのを待ってからモーダルを閉じる。
+                          await saveMatch(updated);
+                          setMatch({...updated});
+                          setSyncStatus("synced");
+                          setSyncErrorMsg("");
+                          try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch(e) {}
+                          latestUnsavedRef.current = null;
+                          setShowVideoModal(false);
+                        } catch (e) {
+                          // ★オフライン等ですぐに保存できなかった場合だけ、既存の再送の仕組みに乗せて
+                          //   閉じる（この場合は本当に未保存なので、戻ろうとしたときの警告は正しい）
+                          persist(updated);
+                          setShowVideoModal(false);
+                        } finally {
+                          setVideoSaving(false);
+                        }
                       }}
-                    >保存して閉じる</button>
+                    >{videoSaving ? "保存中…" : "保存して閉じる"}</button>
                   </div>
                 </div>
               )}
