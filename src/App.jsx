@@ -23,12 +23,6 @@ class ErrorBoundary extends Component {
 // 定数
 // ============================================================
 const GAME_FORMATS = [5, 7, 9];
-const MATCH_TYPES = [
-  { key: "tournament", label: "公式大会" },
-  { key: "practice",   label: "練習試合" },
-  { key: "internal",   label: "部内戦"   },
-];
-
 // プレイ内容（ショット種別）
 const PLAY_TYPES = [
   { key: "serve",    label: "サーブ"    },
@@ -1098,34 +1092,6 @@ async function permanentlyDeleteMatch(id) {
 }
 
 // ============================================================
-// 動画レビュー（match_videos / video_sync_anchors）
-// ============================================================
-// 指定した試合に登録されている動画（情報のみ。実体のファイルはスマホ内のまま）を取得
-async function getMatchVideos(matchId) {
-  const { data, error } = await supabase.from("match_videos").select("*").eq("match_id", matchId).order("created_at");
-  if (error) { console.error(error); return []; }
-  return data ?? [];
-}
-
-// 動画1件の登録（初回選択時）。まだ同期はしていない状態
-async function saveMatchVideo(row) {
-  const payload = {
-    id: row.id, match_id: row.match_id,
-    video_source_type: row.video_source_type || "local",
-    video_reference: row.video_reference || null,
-    file_name: row.file_name || null,
-    duration_sec: row.duration_sec ?? null,
-  };
-  const { error } = await supabase.from("match_videos").upsert(payload);
-  if (error) throw error;
-}
-
-async function deleteMatchVideo(id) {
-  const { error } = await supabase.from("match_videos").delete().eq("id", id);
-  if (error) throw error;
-}
-
-// ============================================================
 // AI動画分析（外部AIで分析したテキストを試合に紐づけて保存）
 // ============================================================
 // 複数試合分のAI分析をまとめて取得（一覧のバッジ表示・AI分析タブ用）
@@ -1134,12 +1100,6 @@ async function getAiAnalyses(matchIds) {
   const { data, error } = await supabase.from("ai_analyses").select("*").in("match_id", matchIds).is("deleted_at", null);
   if (error) { console.error(error); return []; }
   return data ?? [];
-}
-// 特定1試合分のAI分析を取得（バッジタップ時の詳細表示用）
-async function getAiAnalysisForMatch(matchId) {
-  const { data, error } = await supabase.from("ai_analyses").select("*").eq("match_id", matchId).is("deleted_at", null).order("created_at", { ascending:false }).limit(1);
-  if (error) { console.error(error); return null; }
-  return (data && data[0]) || null;
 }
 async function saveAiAnalysis({ id, match_id, youtube_url, comment_text }) {
   const payload = {
@@ -1199,24 +1159,6 @@ async function getAiAnalysesWithMatches(sinceDate) {
     match: { ...m, players: playersByMatch[m.id] ?? [] },
     analysis: analysisByMatch[m.id],
   }));
-}
-
-// 指定の動画に設定されている同期アンカーを取得（現状は動画1本につき1件＝1点目の位置合わせ）
-async function getSyncAnchor(matchVideoId) {
-  const { data, error } = await supabase.from("video_sync_anchors").select("*").eq("match_video_id", matchVideoId).order("created_at", { ascending:false }).limit(1);
-  if (error) { console.error(error); return null; }
-  return data?.[0] ?? null;
-}
-
-// 同期アンカーの保存（既存があれば置き換える＝常に最新の同期状態のみ保持）
-async function saveSyncAnchor(matchVideoId, matchId, { pointId, gameNo, scoredAt, videoSec }) {
-  await supabase.from("video_sync_anchors").delete().eq("match_video_id", matchVideoId);
-  const { error } = await supabase.from("video_sync_anchors").insert({
-    id: uid(), match_video_id: matchVideoId, match_id: matchId,
-    point_id: pointId || null, game_no: gameNo ?? null,
-    scored_at: scoredAt || null, video_sec: videoSec, anchor_type: "manual",
-  });
-  if (error) throw error;
 }
 
 // 予定 → 進行中に切り替え
@@ -3011,31 +2953,6 @@ function calcMatchSummary(match) {
   };
 }
 
-function buildAiSummary(sum) {
-  const lines = [];
-  if (sum.totalA>0) {
-    const pct = Math.round(sum.attackA/sum.totalA*100);
-    lines.push(`攻撃による得点が${pct}%と${pct>=50?"高く、自分たちの形で試合を進められています":"、相手のミスに助けられている場面も見られます"}。`);
-  }
-  if (sum.totalB>0) {
-    const pct = Math.round(sum.oppAttackA/sum.totalB*100);
-    lines.push(`失点の${pct}%は相手の攻撃によるものでした。`);
-  }
-  if (sum.worstPlays[0]) lines.push(`${sum.worstPlays[0].label}の成功率が${sum.worstPlays[0].rate}%と低く、ここが課題です。`);
-  if (sum.bestPlays[0])  lines.push(`${sum.bestPlays[0].label}は成功率${sum.bestPlays[0].rate}%で最大の得点源です。`);
-  if (sum.secondServeTotal>0) {
-    const rate = Math.round(sum.secondServeWin/sum.secondServeTotal*100);
-    lines.push(`2ndサーブ時の得点率は${rate}%でした。`);
-  }
-  const todayPoints = [];
-  if (sum.worstPlays[0]) todayPoints.push(`${sum.worstPlays[0].label}の成功率向上`);
-  if (sum.bestPlays[0])  todayPoints.push(`${sum.bestPlays[0].label}は継続`);
-  if (sum.secondServeTotal>0 && Math.round(sum.secondServeWin/sum.secondServeTotal*100) < 50) {
-    todayPoints.push("2ndサーブ時の組み立てを見直す");
-  }
-  return { text: lines.join(""), todayPoints };
-}
-
 function buildHighlights(sum) {
   const good = [];
   const bad = [];
@@ -3057,16 +2974,6 @@ function buildHighlights(sum) {
   }
   return { good: good.slice(0,2), bad: bad.slice(0,2) };
 }
-
-function buildPriorities(sum) {
-  return sum.worstPlays.map((p,i)=>({
-    stars: Math.max(5-i, 1),
-    text: `${p.label}の成功率向上`,
-    reason: `理由：${p.label}成功率${p.rate}%（${p.total}回中${p.win}回成功）`,
-    effect: i===0 ? "期待効果：＋1〜3点" : "期待効果：＋1点前後",
-  }));
-}
-
 
 function buildLineText(match) {
   var aP = match.players.filter(function(p){return p.team==="A";}).map(function(p){return p.player_name;}).join("/");
@@ -9271,392 +9178,6 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         <div style={{ textAlign:"center", marginTop:20, fontSize:11, color:C.textSec }}>v1.5</div>
       </div>
       <NavBar active="master" onNavigate={onNavigate}/>
-    </div>
-  );
-}
-
-// ============================================================
-// 動画レビュー画面
-// ・画面1：動画を選ぶ／同期する（試合ごとに一度でよい。次回以降は同じファイルを選べば自動復元）
-// ・画面2：動画とポイント一覧を見る（普段使う画面）
-// ============================================================
-function VideoReviewScreen({ onNavigate, matchId, setMatchId, step, setStep, pickedFile, setPickedFile, videoObjectUrl, setVideoObjectUrl }) {
-  const [matches, setMatches] = useState(null);
-  const [match, setMatch] = useState(null); // getMatch()の詳細（ポイント含む）
-  const [matchVideos, setMatchVideos] = useState([]);
-  const [activeVideoRow, setActiveVideoRow] = useState(null); // DB上のmatch_videos行（選択中）
-  const [anchor, setAnchor] = useState(null); // DB上のvideo_sync_anchors行
-  const [curTime, setCurTime] = useState(0);
-  const [gameTab, setGameTab] = useState(0);
-  const [reviewTab, setReviewTab] = useState("points"); // "points" | "analysis"
-  const [saving, setSaving] = useState(false);
-  const [videoLoading, setVideoLoading] = useState(false); // ★動画ファイルを選んでから再生準備が整うまでの読み込み中フラグ
-  const videoRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const prevMatchIdRef = useRef(matchId); // ★他のタブに移動して戻ってきた際、同じ試合であれば選択状態を維持するため
-
-  useEffect(() => { getMatches().then(setMatches); }, []);
-
-  useEffect(() => {
-    if (!matchId) { setMatch(null); setMatchVideos([]); setActiveVideoRow(null); setAnchor(null); prevMatchIdRef.current = null; return; }
-    const isNewSelection = prevMatchIdRef.current !== matchId;
-    prevMatchIdRef.current = matchId;
-    (async () => {
-      let m, vids;
-      try {
-        [m, vids] = await Promise.all([getMatch(matchId), getMatchVideos(matchId)]);
-      } catch (err) {
-        alert("試合データの読み込みに失敗しました。もう一度お試しください。\n" + (err.message || err));
-        setMatch(null); setMatchVideos([]);
-        return;
-      }
-      setMatch(m);
-      setMatchVideos(vids);
-      if (isNewSelection) {
-        // ★本当に別の試合を選んだ場合だけ、動画の選択状態をリセットする
-        setStep("setup");
-        setPickedFile(null);
-        setVideoObjectUrl(null);
-        setActiveVideoRow(null);
-      } else if (pickedFile) {
-        // ★動画タブを離れてから戻ってきた場合：すでに選んでいたファイルに一致するDB行を復元する
-        setActiveVideoRow(vids.find(v => v.file_name === pickedFile.name) ?? null);
-      } else {
-        setActiveVideoRow(vids[0] ?? null);
-      }
-    })();
-  }, [matchId]);
-
-  // 選択中の動画行が変わったら、同期アンカーを読み込む
-  useEffect(() => {
-    if (!activeVideoRow) { setAnchor(null); return; }
-    getSyncAnchor(activeVideoRow.id).then(setAnchor);
-  }, [activeVideoRow?.id]);
-
-  function fmtTime(sec) {
-    sec = Math.max(0, Math.round(sec || 0));
-    const m = Math.floor(sec / 60), s = sec % 60;
-    return m + ":" + String(s).padStart(2, "0");
-  }
-  function fmtSize(bytes) {
-    const gb = bytes / (1024 ** 3);
-    if (gb >= 1) return gb.toFixed(1) + "GB";
-    return (bytes / (1024 ** 2)).toFixed(0) + "MB";
-  }
-
-  function handlePickFile(file) {
-    if (!file) return;
-    if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl);
-    setVideoLoading(true); // ★ここから再生準備が整うまで「読み込み中」の表示を出す
-    setPickedFile(file);
-    setActiveVideoRow(null); // ★別の動画に差し替えた場合、前の動画のDB行を誤って使わないようにリセット
-    setAnchor(null);
-    const url = URL.createObjectURL(file);
-    setVideoObjectUrl(url);
-  }
-  // ★動画URL（videoObjectUrl）は、動画タブを離れて戻ってくる間も再生を維持したいため、
-  //   コンポーネントのアンマウント時には解放しない（解放は上のhandlePickFileで差し替え時にのみ行う）
-
-  // 動画のメタデータ（長さ）が読めたタイミングで、必要ならDBに新規登録する
-  async function onVideoMetaLoaded() {
-    setVideoLoading(false); // ★読み込み完了
-    const dur = Math.round(videoRef.current?.duration || 0);
-    if (!activeVideoRow && pickedFile) {
-      // ★同じ試合に「同じファイル名・ほぼ同じ長さ」の動画がすでに登録されていれば、
-      //   新規行を作らずそれを再利用する（同じ動画を選び直すたびに行が増えるのを防ぐ）
-      const existing = matchVideos.find(v =>
-        v.file_name === pickedFile.name && Math.abs((v.duration_sec ?? 0) - dur) <= 2
-      );
-      if (existing) { setActiveVideoRow(existing); return; }
-
-      const row = {
-        id: uid(), match_id: matchId, video_source_type: "local",
-        video_reference: pickedFile.name, file_name: pickedFile.name, duration_sec: dur,
-      };
-      try {
-        await saveMatchVideo(row);
-        setMatchVideos(prev => [...prev, row]);
-        setActiveVideoRow(row);
-      } catch (e) { console.error(e); alert("動画情報の保存に失敗しました: " + e.message); }
-    }
-  }
-
-  const firstPoint = match?.games?.[0]?.points?.[0] ?? null;
-
-  async function handleSync() {
-    if (!activeVideoRow) { alert("動画の登録が完了していないため同期できません。もう一度動画を選び直してください。"); return; }
-    if (!firstPoint) return;
-    const videoSec = videoRef.current?.currentTime ?? 0;
-    setSaving(true);
-    try {
-      await saveSyncAnchor(activeVideoRow.id, matchId, {
-        pointId: firstPoint.id, gameNo: match.games[0].game_number,
-        scoredAt: firstPoint.scored_at, videoSec,
-      });
-      const fresh = await getSyncAnchor(activeVideoRow.id);
-      setAnchor(fresh);
-    } catch (e) { console.error(e); alert("同期の保存に失敗しました: " + e.message); }
-    setSaving(false);
-  }
-
-  function goReview() {
-    setStep("review");
-    setGameTab(0);
-    setReviewTab("points");
-  }
-
-  function videoSecForPoint(pt) {
-    if (!anchor || !pt.scored_at || !anchor.scored_at) return null;
-    const diffSec = (new Date(pt.scored_at).getTime() - new Date(anchor.scored_at).getTime()) / 1000;
-    return anchor.video_sec + diffSec;
-  }
-
-  function jumpTo(sec) {
-    if (videoRef.current) videoRef.current.currentTime = Math.max(0, sec);
-  }
-
-  // ---------- 画面1：セットアップ ----------
-  if (step === "setup") {
-    return (
-      <div style={S.page}>
-        <div style={S.hdr}>
-          <div style={{ color: C.white, fontSize: 16, fontWeight: 800 }}>動画レビュー</div>
-          <div style={{ color: "#9fb0d0", fontSize: 11, marginTop: 1 }}>試合動画を選択</div>
-        </div>
-
-        <div style={{ padding: 12 }}>
-          <div style={S.card}>
-            <div style={{ padding: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.navy, marginBottom: 10 }}>試合を選択</div>
-              {matches === null ? (
-                <div style={{ fontSize: 13, color: C.textSec }}>読み込み中…</div>
-              ) : (
-                <select
-                  value={matchId ?? ""}
-                  onChange={e => setMatchId(e.target.value || null)}
-                  style={{ width: "100%", boxSizing: "border-box", padding: "11px 12px", borderRadius: 10, border: `1.5px solid ${C.border}`, fontSize: 14, fontWeight: 600, color: C.text, background: C.white }}
-                >
-                  <option value="">試合を選んでください</option>
-                  {matches.map(m => {
-                    const aNames = (m.players ?? []).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/");
-                    const bNames = (m.players ?? []).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name).join("/");
-                    return (
-                      <option key={m.id} value={m.id}>
-                        {(m.match_date ?? "").slice(5)} {aNames} vs {bNames}（{m.match_score_a}-{m.match_score_b}）
-                      </option>
-                    );
-                  })}
-                </select>
-              )}
-            </div>
-          </div>
-
-          {matchId && match && (
-            <div style={{ ...S.card, padding: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.navy, marginBottom: 10 }}>📹 試合動画</div>
-
-              {!firstPoint && (
-                <div style={{ fontSize: 12, color: C.red, background: C.redL, borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                  この試合にはまだポイントが記録されていないため、動画と同期できません。
-                </div>
-              )}
-
-              {firstPoint && !firstPoint.scored_at && (
-                <div style={{ fontSize: 12, color: C.textSec, background: C.gray, borderRadius: 8, padding: 10, marginBottom: 10, lineHeight: 1.6 }}>
-                  この試合は動画連携前の記録のため、ポイントの時刻がありません。<br/>
-                  新しく記録した試合から動画ジャンプができます。
-                </div>
-              )}
-
-              {!videoObjectUrl && (
-                <>
-                  <label style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", boxSizing: "border-box", padding: 16, borderRadius: 12, border: `1.5px dashed ${C.accent}`, background: C.accentL, color: "#00874f", fontSize: 14, fontWeight: 700, textAlign: "center", cursor: "pointer" }}>
-                    <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }}
-                      onChange={e => handlePickFile(e.target.files[0])} />
-                    <div style={{ fontSize: 28, marginBottom: 6 }}>🎬</div>
-                    動画ファイルを選ぶ
-                    <div style={{ fontSize: 11, color: "#3f9c74", fontWeight: 500, marginTop: 4, lineHeight: 1.6 }}>
-                      スマホ内の動画を利用します<br/>動画はアプリへ保存しません
-                    </div>
-                  </label>
-                  {activeVideoRow && (
-                    <div style={{ fontSize: 11, color: C.textSec, marginTop: 8, lineHeight: 1.6 }}>
-                      前回: {activeVideoRow.file_name}（{fmtTime(activeVideoRow.duration_sec)}）を登録済みです。同じ動画を選ぶと自動で同期状態が復元されます。
-                    </div>
-                  )}
-                </>
-              )}
-
-              {videoObjectUrl && (
-                <>
-                  <video ref={videoRef} src={videoObjectUrl} controls style={{ width: "100%", borderRadius: 12, background: "#000" }}
-                    onLoadedMetadata={onVideoMetaLoaded}
-                    onTimeUpdate={() => setCurTime(videoRef.current?.currentTime ?? 0)} />
-                  {videoLoading && (
-                    <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#fff3e0", border: `1px solid ${C.orange}`, fontSize: 12.5, color: "#c2410c", fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", border: "2px solid #c2410c", borderTopColor: "transparent", animation: "vr-spin 0.8s linear infinite" }} />
-                      動画を読み込んでいます…（大きいファイルは時間がかかることがあります）
-                      <style>{"@keyframes vr-spin{to{transform:rotate(360deg);}}"}</style>
-                    </div>
-                  )}
-                  <div style={{ marginTop: 8, padding: 12, borderRadius: 10, background: C.gray, border: `1px solid ${C.border}`, fontSize: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: C.text, display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                      ✓ {pickedFile?.name}
-                    </div>
-                    <div style={{ display: "flex", gap: 14, color: C.textSec, fontSize: 11.5 }}>
-                      <span>{videoLoading ? "読み込み中…" : fmtTime(videoRef.current?.duration)}</span>
-                      <span>{pickedFile ? fmtSize(pickedFile.size) : ""}</span>
-                    </div>
-                    <div style={{ marginTop: 8, fontSize: 11.5, color: C.accent, fontWeight: 700, cursor: "pointer" }}
-                      onClick={() => fileInputRef.current?.click()}>
-                      動画を変更する
-                    </div>
-                    <input ref={fileInputRef} type="file" accept="video/*" style={{ display: "none" }}
-                      onChange={e => handlePickFile(e.target.files[0])} />
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, fontSize: 12, color: C.textSec }}>
-                    <span>再生位置</span>
-                    <b style={{ color: C.text, fontVariantNumeric: "tabular-nums" }}>{fmtTime(curTime)}</b>
-                  </div>
-
-                  {firstPoint && firstPoint.scored_at && (
-                    <button
-                      disabled={saving || videoLoading}
-                      onClick={handleSync}
-                      style={{ width: "100%", boxSizing: "border-box", marginTop: 10, padding: 12, borderRadius: 10, border: "none", fontSize: 13, fontWeight: 800, background: (saving || videoLoading) ? C.border : C.navy, color: "#fff", cursor: (saving || videoLoading) ? "default" : "pointer" }}
-                    >
-                      {saving ? "保存中…" : videoLoading ? "動画を読み込み中…" : "この位置を1点目として同期する"}
-                    </button>
-                  )}
-
-                  {firstPoint && firstPoint.scored_at && (
-                    <div style={{ marginTop: 10, fontSize: 12, padding: "10px 12px", borderRadius: 10, display: "flex", alignItems: anchor ? "flex-start" : "center", flexDirection: anchor ? "column" : "row", gap: anchor ? 2 : 8, background: anchor ? C.accentL : C.gray, color: anchor ? "#00874f" : C.textSec, fontWeight: anchor ? 700 : 400 }}>
-                      {anchor ? (
-                        <>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, flexShrink: 0 }}/>
-                            同期完了
-                          </div>
-                          <div style={{ display: "flex", gap: 14, fontWeight: 600, fontSize: 11, marginTop: 2 }}>
-                            <span>動画 {fmtTime(anchor.video_sec)}</span>
-                            <span>ポイント {anchor.game_no}G {firstPoint.score_a_after}-{firstPoint.score_b_after}</span>
-                          </div>
-                        </>
-                      ) : (
-                        "1点目が入った瞬間で一時停止して、上のボタンを押してください"
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
-          <button
-            disabled={!anchor || !videoObjectUrl}
-            onClick={goReview}
-            style={{ width: "100%", boxSizing: "border-box", marginTop: 16, padding: 14, borderRadius: 12, border: "none", fontSize: 15, fontWeight: 800, background: (anchor && videoObjectUrl) ? C.accent : C.border, color: (anchor && videoObjectUrl) ? "#fff" : C.textSec, cursor: (anchor && videoObjectUrl) ? "pointer" : "default" }}
-          >
-            レビュー開始
-          </button>
-          {(!anchor || !videoObjectUrl) && (
-            <div style={{ textAlign: "center", fontSize: 11, color: C.textSec, marginTop: 6 }}>
-              {!matchId ? "まず試合を選んでください"
-                : !videoObjectUrl ? "動画ファイルを選んでください"
-                : "動画を同期するとレビューを開始できます"}
-            </div>
-          )}
-        </div>
-
-        <NavBar active="video" onNavigate={onNavigate} />
-      </div>
-    );
-  }
-
-  // ---------- 画面2：レビュー ----------
-  const games = match?.games ?? [];
-  const g = games[gameTab];
-
-  return (
-    <div style={S.page}>
-      <div style={{ ...S.hdr, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <div style={{ color: C.white, fontSize: 16, fontWeight: 800 }}>動画レビュー</div>
-          <div style={{ color: "#9fb0d0", fontSize: 11, marginTop: 1 }}>
-            {(match?.tournament_name || match?.venue || "練習試合")}・{match?.match_score_a}-{match?.match_score_b}
-          </div>
-        </div>
-        <div style={{ color: "#9fb0d0", fontSize: 11, textAlign: "right", lineHeight: 1.4, cursor: "pointer" }} onClick={() => setStep("setup")}>
-          ⚙<br/>動画を変更
-        </div>
-      </div>
-
-      <div style={{ padding: 12 }}>
-        <div style={S.card}>
-          <video ref={videoRef} src={videoObjectUrl} controls style={{ width: "100%", borderRadius: 12, background: "#000", display: "block" }}
-            onTimeUpdate={() => setCurTime(videoRef.current?.currentTime ?? 0)} />
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", fontSize: 12, color: C.textSec }}>
-            <span>再生位置</span>
-            <b style={{ color: C.text, fontVariantNumeric: "tabular-nums" }}>{fmtTime(curTime)}</b>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", background: C.white, borderRadius: 12, border: `1px solid ${C.border}`, overflow: "hidden", marginBottom: 10 }}>
-          {[["points", "ポイント一覧"], ["analysis", "分析"]].map(([key, label]) => (
-            <div key={key} onClick={() => setReviewTab(key)}
-              style={{ flex: 1, textAlign: "center", padding: 10, fontSize: 12, fontWeight: 700, color: reviewTab === key ? C.accent : C.textSec, borderBottom: reviewTab === key ? `3px solid ${C.accent}` : "3px solid transparent", cursor: "pointer" }}>
-              {label}
-            </div>
-          ))}
-        </div>
-
-        {reviewTab === "points" && (
-          <div style={{ ...S.card, padding: 14 }}>
-            <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 2 }}>
-              {games.map((gg, i) => (
-                <div key={gg.id} onClick={() => setGameTab(i)}
-                  style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, border: `1.5px solid ${i === gameTab ? C.navy : C.border}`, background: i === gameTab ? C.navy : C.white, color: i === gameTab ? "#fff" : C.textSec, cursor: "pointer", whiteSpace: "nowrap" }}>
-                  {gg.game_number}ゲーム目
-                </div>
-              ))}
-            </div>
-            {(g?.points ?? []).map(pt => {
-              const sec = videoSecForPoint(pt);
-              const jumpable = sec !== null;
-              return (
-                <div key={pt.id} onClick={() => jumpable && jumpTo(sec)}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: C.gray, borderRadius: 8, marginBottom: 6, cursor: jumpable ? "pointer" : "default", opacity: jumpable ? 1 : 0.55 }}>
-                  <div style={{ width: 4, alignSelf: "stretch", borderRadius: 3, flexShrink: 0, background: pt.scoring_team === "A" ? C.accent : C.orange }} />
-                  <div style={{ fontSize: 12, fontWeight: 800, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0, background: pt.scoring_team === "A" ? C.accentL : "#fff1e6", color: pt.scoring_team === "A" ? "#00874f" : "#c2410c" }}>
-                    {pt.score_a_after} - {pt.score_b_after}
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
-                    {pt.play_type && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 6, background: "#fff", color: C.textSec, border: `1px solid ${C.border}` }}>{getPlayLabel(pt.play_type)}</span>}
-                    {pt.result_type && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 6, background: "#fff", color: C.textSec, border: `1px solid ${C.border}` }}>{getResultLabel(pt.result_type)}</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: C.textSec, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
-                    {jumpable ? fmtTime(sec) : "時刻未記録"}
-                  </div>
-                  {jumpable && <div style={{ fontSize: 13, flexShrink: 0 }}>▶</div>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {reviewTab === "analysis" && (
-          <div style={{ ...S.card, padding: "26px 10px", textAlign: "center", fontSize: 12, color: C.textSec, lineHeight: 1.7 }}>
-            📊 分析機能は今後追加予定です<br/>（タグの絞り込み・成功率の自動集計など）
-          </div>
-        )}
-
-        <div style={{ fontSize: 11, color: C.textSec, lineHeight: 1.6, marginTop: 10 }}>
-          ※タグ（サーブ／ボレー／決めた／ミス 等）は、スコア入力時にすでに記録している内容をそのまま表示しています。
-        </div>
-      </div>
-
-      <NavBar active="video" onNavigate={onNavigate} />
     </div>
   );
 }
@@ -16374,7 +15895,6 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [schools, setSchools] = useState([]);
   const [schoolPrefFilter, setSchoolPrefFilter] = useState("");
-  const [linkedPlayerMode, setLinkedPlayerMode] = useState("select");
   const [linkedPlayerLastName, setLinkedPlayerLastName] = useState("");
   const [linkedPlayerFirstName, setLinkedPlayerFirstName] = useState("");
   const [linkedPlayerSaving, setLinkedPlayerSaving] = useState(false);
@@ -16385,7 +15905,6 @@ function ProfileScreen({ onBack, forced, onSaved }) {
   const [editingPlayerInfo, setEditingPlayerInfo] = useState(false);
   const [isApproved, setIsApproved] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [inviteCode, setInviteCode] = useState("");
   const [inviteInput, setInviteInput] = useState("");
   const [inviteError, setInviteError] = useState("");
   const [inviteKind, setInviteKind] = useState(null); // ★"member" | "viewer" | null（入力されたコードの種類）
@@ -18821,11 +18340,6 @@ export default function App() {
   // ★画面が切り替わるたびに、前の画面のスクロール位置が残らないよう先頭に戻す
   useEffect(() => { window.scrollTo(0, 0); }, [screen]);
 
-  // ★動画レビュー画面の状態はここ（App本体）に持たせ、他のタブに移動して戻っても消えないようにする
-  const [vrMatchId, setVrMatchId] = useState(null);
-  const [vrStep, setVrStep] = useState("setup");
-  const [vrPickedFile, setVrPickedFile] = useState(null);
-  const [vrVideoObjectUrl, setVrVideoObjectUrl] = useState(null);
   const [listFilter,   setListFilter]   = useState("all"); // 試合一覧フィルター
   const [toast, setToast] = useState(null); // トースト通知
   const [matchId,      setMatchId]      = useState(null);
@@ -18842,7 +18356,6 @@ export default function App() {
   const [teamMatchCopyId, setTeamMatchCopyId] = useState(null); // コピー元の団体戦ID
   const [listMatchMode, setListMatchMode] = useState("tournament");
   const [pendingOpenTrash, setPendingOpenTrash] = useState(false); // ★設定画面からゴミ箱を開く指示
-  const [serveSelectForTeam, setServeSelectForTeam] = useState(null); // 団体戦サーブ選択 // 履歴画面のタブ状態
   // 大会関連
   const [tournamentContext, setTournamentContext] = useState(null); // 大会詳細画面から試合作成に入った際の大会情報 {id,name,start_date,end_date}
   const [creatingFromTournament, setCreatingFromTournament] = useState(false); // 大会の＋ボタンから試合作成に入ったかどうか
@@ -19187,12 +18700,11 @@ export default function App() {
   // ★下部ナビゲーション（ホーム/履歴/分析/マスター）の共通遷移ハンドラ
   function goNav(key) {
     // 現在表示中の画面と同じタブを押しても何もしない
-    const screenMap = { home:"home", list:"list", video:"video", stats:"personalAnalysis", master:"master", aiAnalysisList:"aiAnalysisList" };
+    const screenMap = { home:"home", list:"list", stats:"personalAnalysis", master:"master", aiAnalysisList:"aiAnalysisList" };
     if (screen === screenMap[key]) return;
     setTournamentContext(null); // ボトムナビでの移動時は大会の文脈から抜ける
     if (key==="home") setScreen("home");
     else if (key==="list") setScreen("list");
-    else if (key==="video") setScreen("video");
     else if (key==="stats") setScreen("personalAnalysis");
     else if (key==="master") setScreen("master");
     else if (key==="aiAnalysisList") { setAiAnalysisPlayer(null); setScreen("aiAnalysisList"); }
@@ -19211,14 +18723,6 @@ export default function App() {
         onOpenTournament={t=>{ setTournamentContext(t); setListMatchMode("tournament"); setScreen("tournamentDetail"); }}
       />
     );
-  }
-  if (screen==="video") {
-    return <VideoReviewScreen onNavigate={goNav}
-      matchId={vrMatchId} setMatchId={setVrMatchId}
-      step={vrStep} setStep={setVrStep}
-      pickedFile={vrPickedFile} setPickedFile={setVrPickedFile}
-      videoObjectUrl={vrVideoObjectUrl} setVideoObjectUrl={setVrVideoObjectUrl}
-    />;
   }
   if (screen==="practice") {
     return <PracticeScreen onNavigate={goNav} />;
