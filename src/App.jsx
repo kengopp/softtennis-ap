@@ -14768,7 +14768,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <button
                     style={{ ...S.btn("#f2f3f6"), color:"#3a4152", border:"1px solid "+C.border, marginBottom:8, display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}
                     onClick={()=>{ setVideoLinksDraft(normalizeVideoLinks(match.video_links)); setVideoUrlInput(""); setVideoUrlError(""); setShowVideoModal(true); }}
-                  >🎥 {match.video_links && match.video_links.length > 0 ? `動画リンクを見る（${match.video_links.length}件）` : "動画リンクを追加する"}</button>
+                  >🎥 {match.video_links && match.video_links.length > 0 ? `動画リンクを貼る（${match.video_links.length}件）` : "動画リンクを貼る"}</button>
                 </>
               )}
               {/* ボタン群 */}
