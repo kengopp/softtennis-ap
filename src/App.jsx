@@ -3451,6 +3451,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return () => clearTimeout(t);
   }, [filterSearch]);
   const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
+  // ★個人戦一覧の絞り込み：動画リンクがある試合だけ／AI分析がある試合だけ（それぞれ独立してON/OFF、両方ONならAND）
+  const [filterHasVideo, setFilterHasVideo] = useState(false);
+  const [filterHasAi, setFilterHasAi] = useState(false);
   // 日付フィルタ
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
   const [dateFilterMode, setDateFilterMode] = useState("day"); // day | range | month
@@ -3562,7 +3565,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     })();
   }, []);
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [timeTab, searchQuery, filterStatus, dateFilterApplied, childOnly, tmMySchoolOnly]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [timeTab, searchQuery, filterStatus, dateFilterApplied, childOnly, tmMySchoolOnly, filterHasVideo, filterHasAi]);
 
   const todayStr = today();
 
@@ -3645,9 +3648,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (filterStatus === "finished" && isUpcomingMatch(m)) return false;
     if (!matchesDateFilter(m.match_date)) return false;
     if (childOnly && linkedPlayerName && !m.players.some(p => p.player_name === linkedPlayerName && p.team==="A")) return false;
+    if (filterHasVideo && !(m.video_links && m.video_links.length > 0)) return false;
+    if (filterHasAi && !aiAnalysesMap[m.id]) return false;
     if (searchQuery && !(searchIndex[m.id] || "").includes(searchQuery)) return false;
     return true;
-  }), [allMatches, searchIndex, filterStatus, dateFilterApplied, childOnly, linkedPlayerName, searchQuery]);
+  }), [allMatches, searchIndex, filterStatus, dateFilterApplied, childOnly, linkedPlayerName, searchQuery, filterHasVideo, filterHasAi, aiAnalysesMap]);
 
   const filteredTeamMatches = useMemo(() => allTeamMatches.filter(tm => {
     if (filterStatus === "upcoming" && !isUpcomingTeamMatch(tm)) return false;
@@ -3908,7 +3913,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 14px 0" }}>
         <div style={{ flex:1, display:"flex", background:"#f0f2f6", padding:3, borderRadius:10 }}>
           {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); }}>{l}</button>
+            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); if (v!=="individual") { setFilterHasVideo(false); setFilterHasAi(false); } }}>{l}</button>
           ))}
         </div>
       </div>
@@ -3927,7 +3932,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           {filterSearch && <button onClick={()=>setFilterSearch("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }}>✕</button>}
         </div>
         )}
-        <div style={{ display:"flex", gap:6, marginBottom:6, flexWrap:"wrap" }}>
+        <div style={{ display:"flex", gap:6, marginBottom:6, flexWrap:"wrap", alignItems:"center" }}>
           {[["all","すべて"],["upcoming","予定・進行中"],["finished","完了"]].map(([v,l])=>(
             <button key={v} onClick={()=>setFilterStatus(v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+(filterStatus===v?C.navy:C.border), background:filterStatus===v?C.navy:"transparent", color:filterStatus===v?C.white:C.textSec, fontSize:12, fontWeight:700, cursor:"pointer" }}>{l}</button>
           ))}
@@ -3939,6 +3944,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             </div>
           ) : (
             <button onClick={()=>setDateFilterOpen(v=>!v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+C.border, background:"transparent", fontSize:12, fontWeight:700, color:C.textSec, cursor:"pointer" }}>日付</button>
+          )}
+          {/* ★個人戦タブだけ：動画リンクがある試合だけ／AI分析がある試合だけを絞り込むアイコントグル。テキストなしで正方形のボタンにし、既存チップの右に区切り線を挟んで並べる */}
+          {timeTab === "individual" && (
+            <>
+              <div style={{ width:1, height:20, background:C.border, margin:"0 2px" }} />
+              <button
+                onClick={()=>setFilterHasVideo(v=>!v)}
+                title="動画リンクがある試合だけ"
+                style={{ width:34, height:34, borderRadius:10, border:"1.5px solid "+(filterHasVideo?"#c4302b":C.border), background:filterHasVideo?"#fdeceb":C.white, color:filterHasVideo?"#c4302b":C.textSec, fontSize:15, cursor:"pointer", flexShrink:0 }}
+              >🎥</button>
+              <button
+                onClick={()=>setFilterHasAi(v=>!v)}
+                title="AI分析がある試合だけ"
+                style={{ width:34, height:34, borderRadius:10, border:"1.5px solid "+(filterHasAi?"#3a4152":C.border), background:filterHasAi?"#eef0f6":C.white, color:filterHasAi?"#3a4152":C.textSec, fontSize:15, cursor:"pointer", flexShrink:0 }}
+              >🤖</button>
+            </>
           )}
         </div>
         {/* 日付ピッカーパネル */}
