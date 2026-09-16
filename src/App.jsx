@@ -3411,7 +3411,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   // ★スマホでは一度に何百枚もカードを描画するだけで表示が重くなるため、
   //   まず30件だけ描画し、「もっと見る」で追加していく（絞り込み結果の件数自体は変わらない）
@@ -3422,6 +3422,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [allMatchesRaw, setAllMatchesRaw] = useState([]); // ★団体戦の番手も含む「全試合」。個人戦一覧(allMatches)からは除外されるため別途保持
   const [allTeamMatches, setAllTeamMatches] = useState([]);
   const [loading, setLoading] = useState(true);
+  // ★一覧の各試合カードにAIマークを出すための、match_id -> AI分析行のマップ。
+  //   本人・保護者・管理者だけが押せるようにするため、既存のAI分析権限フックをそのまま使う。
+  const [aiAnalysesMap, setAiAnalysesMap] = useState({});
+  const aiViewer = useAiAnalysisViewer();
   const [confirmDelete, setConfirmDelete] = useState(null);
   const isViewer = useIsViewer(); // ★閲覧専用アカウントには作成・削除・コピーを出さない
   // ★一覧の「📝 メモあり」「🎥 動画」バッジをタップしたときに内容を表示するためのstate
@@ -3491,6 +3495,21 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     setAllTeamMatches(tList);
     setLoading(false);
   }, []);
+
+  // ★一覧に出ている個人戦の試合について、AI分析が登録されているものだけmatch_id -> 行 のマップを作る。
+  //   一覧のカードにAIマークを出すためだけの軽い取得なので、内容（コメント本文など）は使わず存在確認用。
+  useEffect(() => {
+    const ids = allMatches.map(m => m.id);
+    if (ids.length === 0) { setAiAnalysesMap({}); return; }
+    let alive = true;
+    getAiAnalyses(ids).then(rows => {
+      if (!alive) return;
+      const map = {};
+      rows.forEach(r => { map[r.match_id] = r; });
+      setAiAnalysesMap(map);
+    });
+    return () => { alive = false; };
+  }, [allMatches]);
 
   const reload = useCallback((opts) => {
     const silent = opts === true || opts?.silent === true; // 裏での更新（画面を「読み込み中」にしない）
@@ -4241,6 +4260,21 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
                       >🎥{m.video_links.length}</button>
                     )}
+                    {/* ★AI分析が付いている試合だけボタンを出す。本人・保護者・管理者は押せる色、
+                          それ以外はグレーで押せない状態にして、あることは分かるが中身は見せない。 */}
+                    {aiAnalysesMap[m.id] && (
+                      canViewAiAnalysisFor(m, aiViewer) ? (
+                        <button
+                          style={{ width:44, padding:"8px", background:"#eef0f6", color:"#3a4152", border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                          onClick={e=>{ e.stopPropagation(); onOpenAiAnalysis && onOpenAiAnalysis(m, aiAnalysesMap[m.id]); }}
+                        >🤖</button>
+                      ) : (
+                        <button
+                          style={{ width:44, padding:"8px", background:"#f4f4f6", color:"#b7bcc7", border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"default" }}
+                          onClick={e=>e.stopPropagation()}
+                        >🤖</button>
+                      )
+                    )}
                   </div>
                 </div>
               );
@@ -4758,13 +4792,15 @@ function saveTournamentFilterPrefs(tournamentName, prefs) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, onOpenPairMaster, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport }) {
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, onOpenPairMaster, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport, onOpenAiAnalysis }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [showMoreMenu, setShowMoreMenu] = useState(false); // ★ヘッダー右上「⋯」メニューの開閉
   const [matches, setMatches] = useState([]);
   const [teamMatches, setTeamMatches] = useState([]);
   const [aiAnalyzedMatchIds, setAiAnalyzedMatchIds] = useState(new Set()); // ★AI分析が付いているmatch_idの集合（団体戦一覧のグレーAIバッジ用）
+  const [aiAnalysesRowMap, setAiAnalysesRowMap] = useState({}); // ★match_id -> AI分析行。個人戦一覧のAIボタンをタップしたときに詳細を開くために使う
+  const aiViewer = useAiAnalysisViewer(); // ★AI分析を開けるか（本人・保護者・管理者）の判定
   const [schoolMap, setSchoolMap] = useState({});
   const [mySchoolName, setMySchoolName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -4832,7 +4868,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       const individualMatchIds = list.map(m => m.id);
       const allMatchIdsForAiCheck = Array.from(new Set([...teamGameMatchIds, ...individualMatchIds]));
       if (allMatchIdsForAiCheck.length > 0) {
-        getAiAnalyses(allMatchIdsForAiCheck).then(rows => setAiAnalyzedMatchIds(new Set(rows.map(r => r.match_id))));
+        getAiAnalyses(allMatchIdsForAiCheck).then(rows => {
+          setAiAnalyzedMatchIds(new Set(rows.map(r => r.match_id)));
+          const map = {};
+          rows.forEach(r => { map[r.match_id] = r; });
+          setAiAnalysesRowMap(map);
+        });
       }
       const statusMap = {};
       list.forEach(m => { statusMap[m.id] = m.status; });
@@ -5465,6 +5506,21 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                       style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
                       onClick={e=>{ e.stopPropagation(); setVideoView(m); }}
                     >🎥{m.video_links.length}</button>
+                  )}
+                  {/* ★AI分析が付いている試合だけボタンを出す。本人・保護者・管理者は押せる色、
+                        それ以外はグレーで押せない状態にして、あることは分かるが中身は見せない。 */}
+                  {aiAnalyzedMatchIds.has(m.id) && (
+                    canViewAiAnalysisFor(m, aiViewer) ? (
+                      <button
+                        style={{ width:44, padding:"8px", background:"#eef0f6", color:"#3a4152", border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                        onClick={e=>{ e.stopPropagation(); onOpenAiAnalysis && onOpenAiAnalysis(m, aiAnalysesRowMap[m.id]); }}
+                      >🤖</button>
+                    ) : (
+                      <button
+                        style={{ width:44, padding:"8px", background:"#f4f4f6", color:"#b7bcc7", border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"default" }}
+                        onClick={e=>e.stopPropagation()}
+                      >🤖</button>
+                    )
                   )}
                 </div>
               )}
@@ -19312,6 +19368,12 @@ export default function App() {
         autoOpenBulkImport={autoOpenBulkImport}
         onAutoOpenBulkImportHandled={()=>setAutoOpenBulkImport(false)}
         onRequestBulkImport={()=>setAutoOpenBulkImport(true)}
+        onOpenAiAnalysis={(match, existing)=>{
+          setAiAnalysisTargetMatch(match);
+          setAiAnalysisEditRow(existing);
+          setAiAnalysisReturnScreen("tournamentDetail");
+          setScreen(existing ? "aiAnalysisDetail" : "aiAnalysisAdd");
+        }}
       />
     );
   }
@@ -19365,6 +19427,12 @@ export default function App() {
       initialMatchMode={listMatchMode}
       initialShowTrash={pendingOpenTrash}
       onTrashConsumed={()=>setPendingOpenTrash(false)}
+      onOpenAiAnalysis={(match, existing)=>{
+        setAiAnalysisTargetMatch(match);
+        setAiAnalysisEditRow(existing);
+        setAiAnalysisReturnScreen("list");
+        setScreen(existing ? "aiAnalysisDetail" : "aiAnalysisAdd");
+      }}
     />
   );
 }
