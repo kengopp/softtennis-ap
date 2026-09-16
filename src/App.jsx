@@ -4904,8 +4904,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   //   （団体戦タブ側の各カードから開けば、これまで通り中身を確認できる）
   const teamLinkedMatchIds = new Set(teamMatches.flatMap(tm => (tm.games || []).map(g => g.match_id).filter(Boolean)));
   const individualMatches = matches.filter(m => !teamLinkedMatchIds.has(m.id));
-  // ★回戦の選択肢（登録されている試合から実在するroundだけを、大会作成時の入力順ではなく出現順に抽出）
-  const individualRounds = [...new Set(individualMatches.map(m => m.round).filter(Boolean))];
+  // ★回戦の選択肢（登録されている試合から実在するroundだけを抽出し、1回戦→…→5回戦→準々決勝→…→決勝の
+  //   トーナメント進行順に並べる。試合一覧の並び替えと同じroundSortRankを使い順序を統一）
+  const individualRounds = [...new Set(individualMatches.map(m => m.round).filter(Boolean))]
+    .sort((a, b) => roundSortRank(a) - roundSortRank(b));
   // ★自チームのペアの選択肢（この大会に登場した自チームのペア名を、初出順で重複なく抽出）
   const individualMyPairs = useMemo(() => {
     const seen = new Set();
@@ -5380,7 +5382,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && (
           <div style={{ margin:"0 14px 12px" }}>
-            <div style={{ display:"flex", gap:8, marginBottom:individualRounds.length>0?8:0 }}>
+            <div style={{ display:"flex", gap:8 }}>
               <button
                 onClick={()=>setIndividualResultFilter(v=>v==="win"?"all":"win")}
                 style={{
@@ -5417,7 +5419,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               </select>
             )}
             {individualRounds.length>0 && (
-              <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:2 }}>
+              <div style={{ display:"flex", gap:6, overflowX:"auto", marginTop:8, paddingBottom:2 }}>
                 <button onClick={()=>setIndividualRoundFilter("all")}
                   style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, fontSize:11.5, fontWeight:700, cursor:"pointer",
                     border:`1.5px solid ${individualRoundFilter==="all"?C.navy:C.border}`,
