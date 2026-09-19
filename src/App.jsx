@@ -1513,6 +1513,23 @@ async function getSchoolGoals(schoolId) {
   return data;
 }
 
+// ★チーム共通のシーズン設定（世代交代の起点日。分析の「◯◯以降」で使う）
+//   目標設定と同じく schools テーブルに1セットだけ持たせ、編集は管理者のみ。
+async function getSchoolSeason(schoolId) {
+  if (!schoolId) return null;
+  const { data, error } = await supabase.from("schools")
+    .select("season_start_date, season_start_label")
+    .eq("id", schoolId).single();
+  if (error) { console.error(error); return null; }
+  return data;
+}
+
+// ★起点日の西暦から既定の呼び名を作る（例：2026-08-01 → 2026チーム）
+function defaultSeasonLabel(dateStr) {
+  if (!dateStr || dateStr.length < 4) return "";
+  return `${dateStr.slice(0,4)}チーム`;
+}
+
 async function deleteSchoolMaster(id) {
   const { data, error } = await supabase.from("schools").delete().eq("id", id).select("id, name");
   if (error) throw error;
@@ -2881,11 +2898,14 @@ function calcMatchSummary(match) {
   const missRanking  = teamAStats.slice().sort((a,b)=>b.errors-a.errors);
   const topScorer = scoreRanking[0] ?? null;
 
-  // 前衛／後衛（登録順=order_num 0番目を後衛、1番目を前衛として扱う）
+  // ★自チーム2人それぞれの決定数・ミス数。
+  // 　以前は登録順から「前衛／後衛」を決め打ちでラベル付けしていたが、
+  // 　ソフトテニスにはダブル前衛・ダブル後衛といった戦術があり、
+  // 　登録順とポジションは必ずしも一致しないためラベルは持たせず、選手名だけで表示する。
   const aPlayersSorted = match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
   const posStats = {
-    front: { label:"前衛", name: aPlayersSorted[1]?.player_name ?? null, win:0, err:0 },
-    back:  { label:"後衛", name: aPlayersSorted[0]?.player_name ?? null, win:0, err:0 },
+    front: { name: aPlayersSorted[1]?.player_name ?? null, win:0, err:0 },
+    back:  { name: aPlayersSorted[0]?.player_name ?? null, win:0, err:0 },
   };
   aPlayersSorted.forEach((p,idx)=>{
     const key = idx===0 ? "back" : "front";
@@ -9085,7 +9105,7 @@ function PracticeScreen({ onNavigate }) {
 
 // マスター管理ハブ画面（選手マスター・学校マスターへの入口）
 // ============================================================
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onTrash, onProfile, onLogout, textScale, onChangeTextScale }) {
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onTrash, onProfile, onLogout, textScale, onChangeTextScale }) {
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
@@ -9129,6 +9149,16 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           <div>
             <div style={{ fontSize:14,fontWeight:700 }}>🎯 目標設定</div>
             <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>1stサーブ確率・決めたプレイ回数などチーム共通の目標<br/>（編集は管理者専用）</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
+        <div
+          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onSeasonSettings}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>📌 シーズン設定</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>世代交代の起点日。分析で「◯◯以降」として使えます<br/>（編集は管理者専用）</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
@@ -9315,6 +9345,185 @@ function GoalSettingsScreen({ onBack }) {
                   disabled={saving}
                   onClick={handleCancel}
                 >キャンセル</button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// シーズン設定画面（チーム共通・起点日1つ・管理者専用）
+// ・世代交代の日を登録しておくと、分析の期間で「◯◯以降」として選べる
+// ============================================================
+function SeasonSettingsScreen({ onBack }) {
+  const [schoolId, setSchoolId] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [label, setLabel] = useState("");
+  // ★呼び名を手で書き換えたら、日付を変えても上書きしない
+  const labelTouchedRef = useRef(false);
+  const backupRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      const profile = await getMyProfile();
+      setIsAdmin(!!profile?.is_admin);
+      if (!profile?.school_id) { setLoading(false); return; }
+      setSchoolId(profile.school_id);
+      const season = await getSchoolSeason(profile.school_id);
+      if (season) {
+        setStartDate(season.season_start_date || "");
+        setLabel(season.season_start_label || "");
+        if (season.season_start_label) labelTouchedRef.current = true;
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  function handleDateChange(v) {
+    setStartDate(v);
+    if (!labelTouchedRef.current) setLabel(defaultSeasonLabel(v));
+  }
+  function handleLabelChange(v) {
+    labelTouchedRef.current = true;
+    setLabel(v);
+  }
+  function handleEdit() {
+    if (!isAdmin) return;
+    backupRef.current = { startDate, label, touched: labelTouchedRef.current };
+    setEditMode(true);
+  }
+  function handleCancel() {
+    if (backupRef.current) {
+      setStartDate(backupRef.current.startDate);
+      setLabel(backupRef.current.label);
+      labelTouchedRef.current = backupRef.current.touched;
+    }
+    setEditMode(false);
+  }
+  async function handleSave() {
+    if (!schoolId || !isAdmin) return;
+    if (startDate && !label.trim()) { alert("呼び名を入力してください"); return; }
+    setSaving(true);
+    try {
+      await updateSchoolMaster(schoolId, {
+        season_start_date: startDate || null,
+        season_start_label: startDate ? label.trim() : null,
+      });
+      alert("シーズン設定を保存しました");
+      setEditMode(false);
+    } catch(e) {
+      alert("保存に失敗しました: "+(e.message||e));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function handleClear() {
+    if (!schoolId || !isAdmin) return;
+    if (!window.confirm("起点日を消しますか？\n分析の期間から「◯◯以降」の選択肢が出なくなります。")) return;
+    setSaving(true);
+    try {
+      await updateSchoolMaster(schoolId, { season_start_date: null, season_start_label: null });
+      setStartDate(""); setLabel(""); labelTouchedRef.current = false;
+      alert("起点日を消しました");
+      setEditMode(false);
+    } catch(e) {
+      alert("削除に失敗しました: "+(e.message||e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const canEditNow = isAdmin && editMode;
+  const inputStyle = (disabled) => ({
+    width:"100%", border:`1.5px solid ${C.border}`, borderRadius:9, padding:"12px", fontSize:15, fontWeight:700,
+    fontFamily:"inherit",
+    color: disabled ? C.textSec : C.text,
+    background: disabled ? "#f0f1f3" : C.white,
+  });
+
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
+        <span style={{ fontSize:18,fontWeight:800,color:C.white }}>シーズン設定</span>
+      </div>
+      <div style={{ padding:14, paddingBottom:90 }}>
+        {loading ? (
+          <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>読み込み中...</div>
+        ) : !schoolId ? (
+          <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のためシーズンを設定できません</div>
+        ) : (
+          <>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+              <div style={{ fontSize:20,fontWeight:800 }}>📌 シーズン設定</div>
+              {isAdmin && !editMode && (
+                <button
+                  style={{ background:C.navy, color:C.white, border:"none", borderRadius:8, fontSize:12, fontWeight:700, padding:"7px 12px", cursor:"pointer" }}
+                  onClick={handleEdit}
+                >✏️ 変更</button>
+              )}
+            </div>
+            <div style={{ fontSize:11,color:C.textSec,marginBottom:14 }}>
+              チーム共通の設定です。分析の期間で「◯◯以降」として使えます{!isAdmin && "（編集は管理者のみ）"}
+            </div>
+
+            <div style={{ ...S.card, padding:14 }}>
+              <div style={{ fontSize:13.5,fontWeight:800,color:C.text,marginBottom:6 }}>起点日</div>
+              <input
+                type="date" style={inputStyle(!canEditNow)} value={startDate} disabled={!canEditNow}
+                onChange={e=>handleDateChange(e.target.value)}
+              />
+              <div style={{ fontSize:12.5,color:C.textSec,lineHeight:1.7,margin:"6px 0 16px" }}>
+                3年生が引退した日や、新チームが始動した日を入れます。分析で「この日以降」を選んだときの開始日になります。
+              </div>
+
+              <div style={{ fontSize:13.5,fontWeight:800,color:C.text,marginBottom:6 }}>呼び名</div>
+              <input
+                type="text" style={inputStyle(!canEditNow)} value={label} disabled={!canEditNow}
+                placeholder="例：2026チーム"
+                onChange={e=>handleLabelChange(e.target.value)}
+              />
+              <div style={{ fontSize:12.5,color:C.textSec,lineHeight:1.7,marginTop:6 }}>
+                起点日の西暦から自動で入ります。「新チーム」「◯◯世代」など自由に書き換えられます。
+              </div>
+            </div>
+
+            {startDate && label.trim() && (
+              <div style={{ background:C.accentL,border:"1px solid #9fe3c8",borderRadius:10,padding:12,fontSize:13.5,fontWeight:700,color:"#0b7a55",lineHeight:1.7,marginTop:10 }}>
+                分析画面の期間に「📌 {label.trim()}以降」が出ます<br/>
+                {startDate.replace(/-/g,"/")} 〜 今日
+              </div>
+            )}
+            {!startDate && !canEditNow && (
+              <div style={{ background:"#fff4e5",border:"1px solid #f5c979",borderRadius:10,padding:12,fontSize:13,fontWeight:700,color:"#8a5a00",lineHeight:1.7,marginTop:10 }}>
+                起点日が未設定です。分析の期間に「◯◯以降」の選択肢は出ません。
+              </div>
+            )}
+
+            {canEditNow && (
+              <>
+                <button style={{ ...S.btn(`linear-gradient(135deg,${C.navy},#12213f)`), marginTop:14, width:"100%" }} disabled={saving} onClick={handleSave}>
+                  {saving?"保存中...":"保存する"}
+                </button>
+                <button
+                  style={{ ...S.btn(C.white,C.textSec), marginTop:10, width:"100%", border:`1px solid ${C.border}` }}
+                  disabled={saving}
+                  onClick={handleCancel}
+                >キャンセル</button>
+                {startDate && (
+                  <button
+                    style={{ ...S.btn(C.white,C.red), marginTop:10, width:"100%", border:`1px solid ${C.border}` }}
+                    disabled={saving}
+                    onClick={handleClear}
+                  >起点日を消す</button>
+                )}
               </>
             )}
           </>
@@ -15240,7 +15449,7 @@ function MatchSummaryPanel({ match }) {
               return (
                 <div key={key} style={{ marginBottom:8 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:4 }}>
-                    <span style={{ fontSize:12, fontWeight:700 }}>{p.label}（{p.name}）</span>
+                    <span style={{ fontSize:12, fontWeight:700 }}>{p.name}</span>
                     <span style={{ fontSize:15, fontWeight:900, color:C.text }}>{rate}%</span>
                   </div>
                   <div style={{ height:5, background:C.gray, borderRadius:3, overflow:"hidden" }}>
@@ -18792,6 +19001,7 @@ export default function App() {
         onSchoolAdmin={()=>setScreen("schoolAdmin")}
         onGroupMembers={()=>setScreen("groupMembers")}
         onGoalSettings={()=>setScreen("goalSettings")}
+        onSeasonSettings={()=>setScreen("seasonSettings")}
         onProfile={()=>setScreen("profile")}
         onTrash={()=>{ setPendingOpenTrash(true); setListMatchMode("tournament"); setScreen("list"); }}
         onLogout={performLogout}
@@ -18802,6 +19012,9 @@ export default function App() {
   }
   if (screen==="goalSettings") {
     return <GoalSettingsScreen onBack={()=>setScreen("master")} />;
+  }
+  if (screen==="seasonSettings") {
+    return <SeasonSettingsScreen onBack={()=>setScreen("master")} />;
   }
   if (screen==="groupMembers") {
     return <GroupMembersScreen onBack={()=>setScreen("master")} />;
