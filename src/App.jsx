@@ -10997,7 +10997,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
             {(side === "own" || selectedOppPair) && (
               <>
                 {side === "opp" && (
-                  <div onClick={()=>setOppPairKey("")} style={{ fontSize:13.5, fontWeight:700, color:C.navy, marginBottom:10, cursor:"pointer" }}>← 相手ペアの一覧に戻る</div>
+                  <div onClick={()=>{ setOppPairKey(""); window.scrollTo(0,0); }} style={{ fontSize:13.5, fontWeight:700, color:C.navy, marginBottom:10, cursor:"pointer" }}>← 相手ペアの一覧に戻る</div>
                 )}
 
                 <div onClick={()=>setRecordOpen(v=>!v)} style={{ ...S.card, padding:14, marginBottom:12, cursor:"pointer" }}>
@@ -11111,6 +11111,15 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                       </div>
                     </div>
                   </>
+                )}
+
+                {/* ★一番下にも戻るボタンを置く（下まで読んだあと上まで戻らなくて済むように） */}
+                {side === "opp" && (
+                  <button
+                    onClick={()=>{ setOppPairKey(""); window.scrollTo(0,0); }}
+                    style={{ width:"100%", padding:15, marginTop:4, borderRadius:11, border:`1.5px solid ${C.border}`,
+                      background:C.white, color:C.navy, fontSize:15, fontWeight:800, cursor:"pointer" }}
+                  >← 相手ペアの一覧に戻る</button>
                 )}
               </>
             )}
