@@ -12954,6 +12954,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   // ★自チーム／対戦チームの2分割。既存の「選手別・ペア別・対戦別」をこの2つに振り分ける
   //   （自チーム＝選手別/ペア別、対戦チーム＝対戦別）。開いたときは対戦チーム側。
   const [side, setSide] = useState(initialPrefs.side ?? "opp");
+  // ★自チームの得点・ミス集計：対象選手をチェックで絞れる（初期は全員）
+  const [pickOpen, setPickOpen] = useState(false);
+  const [excluded, setExcluded] = useState(new Set()); // チェックを外した選手
+  const [ownDetail, setOwnDetail] = useState([]);
+  const [ownDetailLoading, setOwnDetailLoading] = useState(false);
   // ★以前の設定に "opponents" が保存されている場合があるので、自チーム側では選手別に寄せる
   const [tab, setTab] = useState(() => {
     const t = initialPrefs.tab ?? "players";
@@ -13167,6 +13172,47 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     return rows;
   }, [finished, mySchoolName, sort]);
 
+  // ★自チームの得点・ミス：集計対象の試合だけポイントを読み込む（自チームタブを開いたときだけ）
+  const ownIdsKey = finished.map(m=>m.id).sort().join(",");
+  useEffect(() => {
+    if (side !== "own") return;
+    const ids = ownIdsKey ? ownIdsKey.split(",") : [];
+    if (ids.length === 0) { setOwnDetail([]); return; }
+    let cancelled = false;
+    (async () => {
+      setOwnDetailLoading(true);
+      // ★全試合のポイントを一度に読むと重いので、新しい方から最大100試合に絞る
+      const capped = ids.slice(0, SCOPE_MAX);
+      const full = await getFullMatchesByIds(capped);
+      if (!cancelled) { setOwnDetail(full); setOwnDetailLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [ownIdsKey, side]);
+
+  // 集計対象に出場している自チームの選手（チェックボックスの候補）
+  const ownPlayerNames = useMemo(() => {
+    const set = new Set();
+    ownDetail.forEach(m => m.players.filter(p=>p.team==="A").forEach(p => {
+      if (!mySchoolName || !p.club_name || p.club_name.trim()===mySchoolName.trim()) set.add(p.player_name);
+    }));
+    return [...set].sort();
+  }, [ownDetail, mySchoolName]);
+
+  const selectedOwnNames = ownPlayerNames.filter(n => !excluded.has(n));
+
+  // 選んだ選手の合算（決めた・ミス・プレイ別内訳）
+  const ownAgg = useMemo(() => {
+    if (ownDetail.length === 0 || selectedOwnNames.length === 0) return null;
+    const sum = { total:0, winners:0, errors:0, playsWin:{}, playsErr:{} };
+    selectedOwnNames.forEach(n => {
+      const a = aggregatePlayerStats(ownDetail, n, mySchoolName);
+      sum.total += a.total ?? 0; sum.winners += a.winners ?? 0; sum.errors += a.errors ?? 0;
+      for (const k in (a.playsWin??{})) sum.playsWin[k] = (sum.playsWin[k]??0) + a.playsWin[k];
+      for (const k in (a.playsErr??{})) sum.playsErr[k] = (sum.playsErr[k]??0) + a.playsErr[k];
+    });
+    return sum;
+  }, [ownDetail, selectedOwnNames.join("|"), mySchoolName]);
+
   const subLabel = statsCat!=="all" ? (statsCatSub==="specific" && statsCatTournament ? `（${statsCatTournament}）` : "（すべて）") : "";
   const filterSummary = `${STATS_CAT_LABELS[statsCat]}${subLabel}・${STATS_PERIOD_LABELS[period]}`;
 
@@ -13313,6 +13359,86 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
               </div>
             </div>
             <MonthlyTrendCard finishedMatches={finished} winFn={m=>winnerSideOf(m)==="A"} />
+
+            {/* ★自チームの得点・ミス：対象選手をチェックで絞って集計する */}
+            {side==="own" && ownPlayerNames.length>0 && (
+              <>
+                <div onClick={()=>setPickOpen(v=>!v)}
+                  style={{ ...S.card, padding:13, marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+                  <div style={{ fontSize:14.5, fontWeight:800, color:C.text }}>対象選手</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <span onClick={e=>{ e.stopPropagation(); setExcluded(excluded.size>0 ? new Set() : new Set(ownPlayerNames)); }}
+                      style={{ fontSize:13, fontWeight:700, color:C.navy }}>{excluded.size>0 ? "すべて選択" : "すべて解除"}</span>
+                    <span style={{ fontSize:14, color:C.textSec }}>{pickOpen?"▲":"▼"}</span>
+                  </div>
+                </div>
+                {pickOpen && (
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
+                    {ownPlayerNames.map(n => {
+                      const on = !excluded.has(n);
+                      return (
+                        <div key={n} onClick={()=>{
+                            const nx = new Set(excluded);
+                            if (on) nx.add(n); else nx.delete(n);
+                            setExcluded(nx);
+                          }}
+                          style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 12px", borderRadius:9, fontSize:13.5, fontWeight:700, cursor:"pointer",
+                            border:`1.5px solid ${on?C.navy:C.border}`, background:on?"#eef2f7":C.white, color:on?C.navy:C.textSec }}>
+                          <span style={{ width:17, height:17, borderRadius:4, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
+                            border:`2px solid ${on?C.navy:C.border}`, background:on?C.navy:"transparent", color:C.white, fontSize:11, fontWeight:900 }}>{on?"✓":""}</span>
+                          {n}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginBottom:12 }}>
+                  {selectedOwnNames.length===ownPlayerNames.length
+                    ? `${ownPlayerNames.length}名すべてを集計しています`
+                    : selectedOwnNames.length===0 ? "選手を1人以上選んでください"
+                    : `${selectedOwnNames.length}名を集計しています`}
+                </div>
+
+                {ownDetailLoading ? (
+                  <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:13 }}>集計中...</div>
+                ) : ownAgg && ownAgg.total > 0 && (() => {
+                  const tw = Object.entries(ownAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5);
+                  const te = Object.entries(ownAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5);
+                  const mx = Math.max(1, ...tw.map(x=>x[1]), ...te.map(x=>x[1]));
+                  const Bar = ({label,count,color}) => (
+                    <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
+                      <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel(label)}</div>
+                      <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}>
+                        <div style={{ height:"100%", width:`${count/mx*100}%`, background:color, borderRadius:5 }}/>
+                      </div>
+                      <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
+                    </div>
+                  );
+                  return (
+                    <div style={{ ...S.card, padding:14, marginBottom:12 }}>
+                      <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>📊 得点・ミス</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
+                        {[["決めた",ownAgg.winners],["ミス",ownAgg.errors],["決定率",`${Math.round(ownAgg.winners/ownAgg.total*100)}%`]].map(([k,v])=>(
+                          <div key={k} style={{ textAlign:"center", padding:"12px 2px", background:C.gray, borderRadius:10 }}>
+                            <div style={{ fontSize:21, fontWeight:800, color:C.navy }}>{v}</div>
+                            <div style={{ fontSize:12, color:C.textSec, marginTop:3 }}>{k}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:5 }}>✅ 決めた</div>
+                      {tw.map(([l,c])=><Bar key={"w"+l} label={l} count={c} color={C.accent}/>)}
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, margin:"12px 0 5px" }}>⚠️ ミス</div>
+                      {te.map(([l,c])=><Bar key={"e"+l} label={l} count={c} color={C.red}/>)}
+                      {finished.length > SCOPE_MAX && (
+                        <div style={{ fontSize:12, color:"#8a92a0", marginTop:10, lineHeight:1.6 }}>
+                          ※該当{finished.length}試合のうち、新しい{SCOPE_MAX}試合をもとに集計しています
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
 
             {side==="own" && tab==="players" && (
               <>
