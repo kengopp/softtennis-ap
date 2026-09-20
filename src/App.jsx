@@ -12341,8 +12341,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
             const v = pick(r);
             return (
               <div key={r.id} onClick={()=>onOpenMatch && onOpenMatch(r.id)}
-                style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", height:"100%", cursor:"pointer" }}>
-                <div style={{ fontSize:13.5, fontWeight:800, color:v===null?C.textSec:C.text, marginBottom:4 }}>{v===null?"—":`${v}%`}</div>
+                style={{ flex:"1 1 0", minWidth:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", height:"100%", cursor:"pointer" }}>
+                <div style={{ fontSize:13.5, fontWeight:800, color:v===null?C.textSec:C.text, marginBottom:4, whiteSpace:"nowrap" }}>{v===null?"—":`${v}%`}</div>
                 <div style={{ width:"100%", height:`${v===null?2:Math.max(v,3)}%`, background:v===null?"#e3e7ee":color, borderRadius:"5px 5px 0 0" }}/>
               </div>
             );
@@ -12350,7 +12350,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         </div>
         <div style={{ display:"flex", gap:6, marginTop:6 }}>
           {serveTrend.rows.map(r => (
-            <div key={r.id} style={{ flex:1, textAlign:"center", minWidth:0 }}>
+            <div key={r.id} style={{ flex:"1 1 0", minWidth:0, textAlign:"center" }}>
               <div style={{ fontSize:14, fontWeight:800, color:C.text }}>{r.no}</div>
               <div style={{ fontSize:11.5, color:C.textSec }}>
                 {r.date ? `${Number(r.date.slice(5,7))}/${Number(r.date.slice(8,10))}` : ""}
