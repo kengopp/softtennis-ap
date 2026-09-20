@@ -208,6 +208,12 @@ const mySideOf = (m, mySchoolName) => {
 //   通常はゲームカウントの大小で決まるが、「棄権による試合終了」ではゲームカウントの数字だけでは
 //   勝敗が決まらない（棄権した側の方が数字上多いこともある）ため、その場合はmatch.walkover_winnerを
 //   最優先で使う。勝敗が関わるすべての箇所は、直接スコアを比較せず必ずこの関数を使うこと。
+const sortByRecord = (sort) => (a,b) => {
+  if (sort === "lose")  return (b.losses - a.losses) || (b.total - a.total);
+  if (sort === "count") return (b.total - a.total) || (b.wins - a.wins);
+  return (b.wins - a.wins) || (b.total - a.total);
+};
+
 const winnerSideOf = (m) => {
   if (m.walkover_winner === "A" || m.walkover_winner === "B") return m.walkover_winner;
   if (m.match_score_a > m.match_score_b) return "A";
@@ -274,8 +280,9 @@ function PeriodSortBar({ period, setPeriod, sort, setSort }) {
     <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
       <button style={{ ...S.togBtn(period==="all",C.navy),fontSize:11,padding:"6px 10px" }} onClick={()=>setPeriod("all")}>全期間</button>
       <button style={{ ...S.togBtn(period==="month1",C.navy),fontSize:11,padding:"6px 10px" }} onClick={()=>setPeriod("month1")}>直近1ヶ月</button>
-      <button style={{ ...S.togBtn(sort==="desc",C.accent),fontSize:11,padding:"6px 10px" }} onClick={()=>setSort("desc")}>勝率が高い順</button>
-      <button style={{ ...S.togBtn(sort==="asc",C.accent),fontSize:11,padding:"6px 10px" }} onClick={()=>setSort("asc")}>勝率が低い順</button>
+      <button style={{ ...S.togBtn(sort==="win",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("win")}>勝数順</button>
+      <button style={{ ...S.togBtn(sort==="lose",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("lose")}>負数順</button>
+      <button style={{ ...S.togBtn(sort==="count",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("count")}>試合数順</button>
     </div>
   );
 }
@@ -12944,10 +12951,20 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [filterOpen, setFilterOpen] = useState(false);
 
   // ②見る内容タブ：players(選手別) | pairs(ペア別) | opponents(対戦別)
-  const [tab, setTab] = useState(initialPrefs.tab ?? "players");
+  // ★自チーム／対戦チームの2分割。既存の「選手別・ペア別・対戦別」をこの2つに振り分ける
+  //   （自チーム＝選手別/ペア別、対戦チーム＝対戦別）。開いたときは対戦チーム側。
+  const [side, setSide] = useState(initialPrefs.side ?? "opp");
+  // ★以前の設定に "opponents" が保存されている場合があるので、自チーム側では選手別に寄せる
+  const [tab, setTab] = useState(() => {
+    const t = initialPrefs.tab ?? "players";
+    return t === "opponents" ? "players" : t;
+  });
   const [pairMode, setPairMode] = useState(initialPrefs.pairMode ?? "own"); // own | opp
   const [oppMode, setOppMode] = useState(initialPrefs.oppMode ?? "team"); // team | pair
-  const [sort, setSort] = useState("desc"); // desc | asc
+  const [sort, setSort] = useState("win"); // win(勝数順) | lose(負数順) | count(試合数順)
+  // ★以前は勝率順だったが、1試合100%が7試合100%より上に来てしまい実力が分からなかったため、
+  //   勝数・負数の多い順に変更（同数なら試合数が多い方を上にする）
+  const sortRows = sortByRecord(sort);
 
   const [showBreakdown, setShowBreakdown] = useState(false); // 総合成績カードの内訳一覧
   const [breakdownFilter, setBreakdownFilter] = useState("all"); // ★総合成績の内訳：all | win | lose
@@ -12996,7 +13013,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   // ①の絞り込み条件が変わるたびに端末に保存（次回開いたときも保持される）
   useEffect(() => {
-    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, period, tab, pairMode, oppMode });
+    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, period, side, tab, pairMode, oppMode });
   }, [statsCat, statsCatSub, statsCatTournament, period, tab, pairMode, oppMode]);
 
   function resetStatsFilter() {
@@ -13073,7 +13090,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const rows = Object.entries(byPair).map(([name, list]) => ({
       name, ...recordOf(list, x => x.win),
     }));
-    rows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    rows.sort(sortRows);
     return rows;
   }, [byPair, sort]);
 
@@ -13096,7 +13113,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const rows = Object.entries(byOppPair).map(([name, list]) => ({
       name, ...recordOf(list, m => winnerSideOf(m)==="B"),
     }));
-    rows.sort((a,b) => sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    rows.sort(sortRows);
     return rows;
   }, [byOppPair, sort]);
 
@@ -13128,7 +13145,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
         name, total: r.total, wins: r.wins, losses: r.total - r.wins,
         rate: r.total ? Math.round(r.wins / r.total * 100) : 0,
       }));
-    rows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    rows.sort(sortRows);
     return rows;
   }, [roster, finished, mySchoolName, sort]);
 
@@ -13146,7 +13163,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const rows = Object.entries(byOpponent).map(([name,list])=>({
       name, ...recordOf(list, m=>winnerSideOf(m)==="A"),
     }));
-    rows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+    rows.sort(sortRows);
     return rows;
   }, [finished, mySchoolName, sort]);
 
@@ -13228,30 +13245,41 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
               )}
             </div>
 
-            {/* ②見る内容タブ：選手別／ペア別／対戦別 */}
+            {/* ②見る内容タブ：自チーム（選手別／ペア別）と対戦チーム（対戦別）に分ける */}
             <div style={{ display:"flex",gap:6,marginBottom:10 }}>
-              {[["players","選手別"],["pairs","ペア別"],["opponents","対戦別"]].map(([v,l])=>(
-                <button key={v} style={{ ...S.togBtn(tab===v,C.navy),flex:1,fontSize:12,padding:"8px 4px" }} onClick={()=>setTab(v)}>{l}</button>
+              {[["own","自チーム"],["opp","対戦チーム"]].map(([v,l])=>(
+                <button key={v}
+                  style={{ ...S.togBtn(side===v,C.navy),flex:1,fontSize:14.5,padding:"12px 4px" }}
+                  onClick={()=>{ setSide(v); setTab(v==="opp" ? "opponents" : (tab==="opponents" ? "players" : tab)); }}
+                >{l}</button>
               ))}
             </div>
-            {tab==="pairs" && (
+            {side==="own" && (
+              <div style={{ display:"flex",gap:6,marginBottom:10 }}>
+                {[["players","選手別"],["pairs","ペア別"]].map(([v,l])=>(
+                  <button key={v} style={{ ...S.togBtn(tab===v,C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setTab(v)}>{l}</button>
+                ))}
+              </div>
+            )}
+            {side==="own" && tab==="pairs" && (
               <div style={{ display:"flex", gap:6, marginBottom:10 }}>
                 {[["own","自チームのペア"],["opp","相手チームのペア"]].map(([v,l])=>(
                   <button key={v} style={{ ...S.togBtn(pairMode===v, C.accent), flex:1, fontSize:11.5, padding:"7px 4px" }} onClick={()=>setPairMode(v)}>{l}</button>
                 ))}
               </div>
             )}
-            {tab==="opponents" && (
+            {side==="opp" && (
               <div style={{ display:"flex", gap:6, marginBottom:10 }}>
-                {[["team","対戦相手チーム別"],["pair","ペア別"]].map(([v,l])=>(
+                {[["team","学校別"],["pair","相手ペア別"]].map(([v,l])=>(
                   <button key={v} style={{ ...S.togBtn(oppMode===v, C.accent), flex:1, fontSize:11.5, padding:"7px 4px" }} onClick={()=>setOppMode(v)}>{l}</button>
                 ))}
               </div>
             )}
 
             <div style={{ display:"flex",gap:6,marginBottom:12 }}>
-              <button style={{ ...S.togBtn(sort==="desc",C.accent),flex:1,fontSize:11.5,padding:"7px 4px" }} onClick={()=>setSort("desc")}>勝率が高い順</button>
-              <button style={{ ...S.togBtn(sort==="asc",C.accent),flex:1,fontSize:11.5,padding:"7px 4px" }} onClick={()=>setSort("asc")}>勝率が低い順</button>
+              <button style={{ ...S.togBtn(sort==="win",C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setSort("win")}>勝数順</button>
+              <button style={{ ...S.togBtn(sort==="lose",C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setSort("lose")}>負数順</button>
+              <button style={{ ...S.togBtn(sort==="count",C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setSort("count")}>試合数順</button>
             </div>
 
             <div style={{ ...S.card, padding:16, marginBottom:16 }}>
@@ -13286,7 +13314,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
             </div>
             <MonthlyTrendCard finishedMatches={finished} winFn={m=>winnerSideOf(m)==="A"} />
 
-            {tab==="players" && (
+            {side==="own" && tab==="players" && (
               <>
                 <div style={{ fontSize:11,color:C.textSec,marginBottom:8 }}>タップすると、その選手のペア別成績を見られます</div>
                 {playerRows.length===0 ? (
@@ -13299,7 +13327,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 ))}
               </>
             )}
-            {tab==="pairs" && (
+            {side==="own" && tab==="pairs" && (
               <>
                 {(pairMode==="own" ? pairRows : oppPairRows).length===0 ? (
                   <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この条件の試合記録がありません</div>
@@ -13315,7 +13343,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 ))}
               </>
             )}
-            {tab==="opponents" && (
+            {side==="opp" && (
               <>
                 {oppMode==="team" && <div style={{ fontSize:11,color:C.textSec,marginBottom:8 }}>タップすると、相手選手・ペア別の成績を見られます</div>}
                 {(oppMode==="team" ? opponentRows : oppPairRows).length===0 ? (
@@ -13371,7 +13399,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
             </div>
             {finished
               .filter(m => breakdownFilter==="all" ? true : breakdownFilter==="win" ? winnerSideOf(m)==="A" : winnerSideOf(m)==="B")
-              .slice().sort((a,b)=> sort==="desc" ? new Date(b.match_date)-new Date(a.match_date) : new Date(a.match_date)-new Date(b.match_date)).map(m=>{
+              .slice().sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m=>{
               const aWin = winnerSideOf(m)==="A";
               const aPlayers = m.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
               const bPlayers = m.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
@@ -13454,7 +13482,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   const partnerRows = Object.entries(byPartner).map(([name,list])=>({
     name, ...recordOf(list, m=>winForPlayer(m,playerName,mySchoolName)),
   }));
-  partnerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+  partnerRows.sort(sortByRecord(sort));
 
   // 全試合（未確定含む）は日付の新しい順表示用に元のmyMatchesを使う（期間でフィルタ済み）
   const allFinishedForTrend = playerName ? matches.filter(m=>m.status==="finished" && ownSideFor(m, playerName, mySchoolName)) : [];
@@ -13588,9 +13616,9 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
     if (pairKey) (byOppPair[pairKey] ??= []).push(m);
   });
   const oppPlayerRows = Object.entries(byOppPlayer).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
-  oppPlayerRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+  oppPlayerRows.sort(sortByRecord(sort));
   const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
-  oppPairRows.sort((a,b)=> sort==="desc" ? b.rate-a.rate : a.rate-b.rate);
+  oppPairRows.sort(sortByRecord(sort));
 
   const allFinishedForTrend = matches.filter(m => m.status==="finished" && oppOf(m)===schoolName);
 
