@@ -603,6 +603,90 @@ function playerStatsInMatch(match, playerName, mySchoolName) {
 
 // 複数の試合をまたいで、指定選手のスタッツを合算する
 // ============================================================
+// 集計対象（スコープ）の共通処理：個人・ペア・チームで同じ条件指定を使う
+// ============================================================
+const DEFAULT_SCOPE = {
+  period: "all",        // all | season | 1m | 3m | fy | range
+  rangeStart: "", rangeEnd: "",
+  tournaments: [],      // 大会名の配列。空＝すべて
+  limit: 0,             // 0＝すべて（上限100）／それ以外は直近N試合
+  kind: "all",          // all | individual | team
+  pickedIds: [],        // 個別に選んだ試合ID。空でなければ他の条件より優先
+};
+const SCOPE_MAX = 100;   // スマホで快適に集計できる上限
+
+// ★期間の開始日を求める（season＝シーズン設定の起点日）
+function scopePeriodStart(scope, seasonStart) {
+  const today = new Date();
+  const fmt = d => d.toISOString().slice(0,10);
+  switch (scope.period) {
+    case "season": return seasonStart || null;
+    case "1m":     { const d=new Date(today); d.setMonth(d.getMonth()-1); return fmt(d); }
+    case "3m":     { const d=new Date(today); d.setMonth(d.getMonth()-3); return fmt(d); }
+    case "fy":     { const y = today.getMonth()+1 >= 4 ? today.getFullYear() : today.getFullYear()-1; return `${y}-04-01`; }
+    case "range":  return scope.rangeStart || null;
+    default:       return null;
+  }
+}
+function scopePeriodEnd(scope) {
+  return scope.period === "range" ? (scope.rangeEnd || null) : null;
+}
+
+// ★条件を順に適用して、集計対象の試合を決める。
+//   期間・大会・対象試合でしぼったあと、新しい順に「直近N試合」を取る。
+function applyScope(matches, scope, { seasonStart, teamMatchIds } = {}) {
+  if (scope.pickedIds && scope.pickedIds.length > 0) {
+    const set = new Set(scope.pickedIds);
+    return { list: matches.filter(m => set.has(m.id)), capped: 0 };
+  }
+  const start = scopePeriodStart(scope, seasonStart);
+  const end   = scopePeriodEnd(scope);
+  const tset  = new Set(scope.tournaments ?? []);
+  let list = matches.filter(m => {
+    const d = m.match_date || "";
+    if (start && d < start) return false;
+    if (end && d > end) return false;
+    if (tset.size > 0 && !tset.has(m.tournament_name || "")) return false;
+    if (scope.kind !== "all" && teamMatchIds) {
+      const isTeam = teamMatchIds.has(m.id);
+      if (scope.kind === "team" && !isTeam) return false;
+      if (scope.kind === "individual" && isTeam) return false;
+    }
+    return true;
+  });
+  // 新しい順に並べてから必要数だけ取る
+  list.sort((a,b) => {
+    const d = new Date(b.match_date) - new Date(a.match_date);
+    if (d !== 0) return d;
+    return roundProgressRank(b.round) - roundProgressRank(a.round);
+  });
+  const want = scope.limit > 0 ? Math.min(scope.limit, SCOPE_MAX) : SCOPE_MAX;
+  const capped = Math.max(0, list.length - want);
+  list = list.slice(0, want);
+  list.sort((a,b) => {
+    const d = new Date(a.match_date) - new Date(b.match_date);
+    if (d !== 0) return d;
+    return roundProgressRank(a.round) - roundProgressRank(b.round);
+  });
+  return { list, capped };
+}
+
+// ★画面に1行で出すラベル（試合数だけを短く。細かい条件はシートを開けば分かる）
+function scopeShortLabel(scope, seasonLabel) {
+  if (scope.pickedIds && scope.pickedIds.length > 0) return `選んだ${scope.pickedIds.length}試合`;
+  const n = scope.limit > 0 ? `直近${scope.limit}試合` : `すべて（上限${SCOPE_MAX}）`;
+  if (scope.period === "season" && seasonLabel) return `${seasonLabel}以降・${n}`;
+  return n;
+}
+
+// ★団体戦の番手として登録されている試合のIDを集める（対象試合のしぼり込みに使う）
+async function getTeamMatchMatchIds() {
+  const { data, error } = await supabase.from("team_match_games").select("match_id");
+  if (error) { console.error(error); return new Set(); }
+  return new Set((data ?? []).map(r => r.match_id).filter(Boolean));
+}
+
+// ============================================================
 // 相手ペアへのメモ（opponent_notes）
 // ・相手ペアに紐づけて何件でも残せる。試合への紐づけは任意。
 // ============================================================
@@ -10866,6 +10950,232 @@ const STATS_PERIOD_LABELS = { all: "全期間", month1: "直近1ヶ月", month3:
 // 何も設定していない時は「自分（またはお子さん）・直近5試合」をデフォルト表示する
 // ============================================================
 // ============================================================
+// 集計対象の設定シート（個人・ペア・チーム共通）
+// ・期間 → 大会 → 試合数 → 対象試合 の順。条件は重ねがけ（AND）。
+// ・試合数は、期間・大会でしぼった中から新しい順に取る。
+// ============================================================
+function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, onApply, onClose, onChangePlayer, playerLabel }) {
+  const [draft, setDraft] = useState(scope);
+  const [pickOpen, setPickOpen] = useState(false);
+  const [remember, setRemember] = useState(true);
+
+  const set = (patch) => setDraft(v => ({ ...v, ...patch }));
+
+  // 大会の候補（期間でしぼっている場合は、その期間に試合がある大会だけ）
+  const tournamentOptions = useMemo(() => {
+    const start = scopePeriodStart(draft, seasonStart), end = scopePeriodEnd(draft);
+    const inPeriod = new Set(), all = new Set();
+    matches.forEach(m => {
+      const t = m.tournament_name || "";
+      if (!t) return;
+      all.add(t);
+      const d = m.match_date || "";
+      if ((!start || d >= start) && (!end || d <= end)) inPeriod.add(t);
+    });
+    return { inPeriod:[...inPeriod].sort(), outside:[...all].filter(t=>!inPeriod.has(t)).sort() };
+  }, [matches, draft.period, draft.rangeStart, draft.rangeEnd, seasonStart]);
+
+  const preview = applyScope(matches, draft, { seasonStart, teamMatchIds });
+
+  // 期間を変えると、選んでいる大会が対象外になることがあるので確認する
+  function changePeriod(next) {
+    const trial = { ...draft, period: next };
+    if ((draft.tournaments ?? []).length > 0) {
+      const start = scopePeriodStart(trial, seasonStart), end = scopePeriodEnd(trial);
+      const stillOk = draft.tournaments.filter(t =>
+        matches.some(m => (m.tournament_name||"")===t && (!start || (m.match_date||"")>=start) && (!end || (m.match_date||"")<=end))
+      );
+      if (stillOk.length < draft.tournaments.length) {
+        if (!window.confirm("選択中の大会が対象から外れますがよろしいですか？")) return;
+        trial.tournaments = stillOk;
+      }
+    }
+    setDraft(trial);
+  }
+
+  const Chip = ({ on, children, onClick }) => (
+    <div onClick={onClick} style={{ padding:"11px 14px", borderRadius:9, fontSize:14, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
+      border:`1.5px solid ${on?C.navy:C.border}`, background:on?C.navy:C.white, color:on?C.white:C.textSec }}>{children}</div>
+  );
+  const Group = ({ title, children }) => (
+    <div style={{ marginBottom:14 }}>
+      <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:9 }}>{title}</div>
+      {children}
+    </div>
+  );
+  const Row = ({ children }) => <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:6 }}>{children}</div>;
+  const hint = { fontSize:12.5, color:C.textSec, lineHeight:1.7, margin:"4px 0 10px" };
+  const divider = { height:1, background:C.border, margin:"12px 0" };
+
+  // 個別選択の画面
+  if (pickOpen) {
+    const sorted = [...matches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date));
+    const picked = new Set(draft.pickedIds ?? []);
+    return (
+      <div style={{ minHeight:"100vh", background:C.white }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"15px 16px", borderBottom:`1px solid ${C.border}` }}>
+          <div style={{ fontSize:17, fontWeight:800 }}>✓ 試合を個別に選ぶ</div>
+          <div onClick={()=>setPickOpen(false)} style={{ color:C.textSec, fontSize:19, cursor:"pointer" }}>✕</div>
+        </div>
+        <div style={{ padding:"14px 16px 100px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontSize:13.5, color:C.textSec, fontWeight:700 }}>新しい順</div>
+            <div onClick={()=>set({ pickedIds: [] })} style={{ fontSize:13, fontWeight:700, color:C.navy, cursor:"pointer" }}>すべて解除</div>
+          </div>
+          {sorted.map(m => {
+            const on = picked.has(m.id);
+            const win = winnerSideOf(m)==="A";
+            return (
+              <div key={m.id} onClick={()=>{
+                  const nx = new Set(picked);
+                  if (on) nx.delete(m.id); else nx.add(m.id);
+                  set({ pickedIds: [...nx] });
+                }}
+                style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 12px", borderBottom:`1px solid ${C.border}`, cursor:"pointer", background:on?C.accentL:"transparent" }}>
+                <div style={{ width:20, height:20, borderRadius:5, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
+                  border:`2px solid ${on?C.accent:C.border}`, background:on?C.accent:"transparent", color:C.white, fontSize:12, fontWeight:900 }}>{on?"✓":""}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:12.5, color:C.textSec }}>{(m.match_date||"").replace(/-/g,"/")}　{m.tournament_name||""}</div>
+                  <div style={{ fontSize:14, fontWeight:700, color:C.text, marginTop:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                    {m.round ? m.round+"・" : ""}{(m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/")) || "（相手なし）"}
+                  </div>
+                </div>
+                <div style={{ fontSize:12.5, fontWeight:800, borderRadius:6, padding:"3px 9px", flexShrink:0,
+                  color: win?C.accent:C.red, background: win?C.accentL:C.redL }}>{win?"勝":"負"} {m.match_score_a}-{m.match_score_b}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ position:"fixed", left:0, right:0, bottom:0, padding:"12px 16px 16px", background:C.white, borderTop:`1px solid ${C.border}` }}>
+          <button onClick={()=>setPickOpen(false)} style={{ width:"100%", padding:15, borderRadius:11, border:"none", background:C.navy, color:C.white, fontSize:16, fontWeight:800, cursor:"pointer" }}>
+            この{(draft.pickedIds??[]).length}試合にする
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.white }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"15px 16px", borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ fontSize:17, fontWeight:800 }}>🎚️ 集計対象の設定</div>
+        <div onClick={onClose} style={{ color:C.textSec, fontSize:19, cursor:"pointer" }}>✕</div>
+      </div>
+      <div style={{ padding:"14px 16px 20px" }}>
+
+        {onChangePlayer && (
+          <>
+            <Group title="選手">
+              <div onClick={onChangePlayer} style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                border:`1.5px solid ${C.border}`, borderRadius:10, padding:"13px 14px", cursor:"pointer" }}>
+                <span style={{ fontSize:15, fontWeight:800, color:C.text }}>{playerLabel}</span>
+                <span style={{ fontSize:13.5, fontWeight:700, color:C.navy }}>変更する ›</span>
+              </div>
+            </Group>
+            <div style={divider}/>
+          </>
+        )}
+
+        <Group title="期間">
+          <Row>
+            {seasonStart && <Chip on={draft.period==="season"} onClick={()=>changePeriod("season")}>📌 {seasonLabel||"起点日"}以降</Chip>}
+            <Chip on={draft.period==="all"} onClick={()=>changePeriod("all")}>全期間</Chip>
+            <Chip on={draft.period==="1m"} onClick={()=>changePeriod("1m")}>1ヶ月</Chip>
+            <Chip on={draft.period==="3m"} onClick={()=>changePeriod("3m")}>3ヶ月</Chip>
+            <Chip on={draft.period==="fy"} onClick={()=>changePeriod("fy")}>今年度</Chip>
+            <Chip on={draft.period==="range"} onClick={()=>changePeriod("range")}>📅 日付指定</Chip>
+          </Row>
+          {draft.period==="range" && (
+            <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:8 }}>
+              <input type="date" value={draft.rangeStart} onChange={e=>set({ rangeStart:e.target.value })}
+                style={{ flex:1, padding:11, borderRadius:9, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit" }}/>
+              <span style={{ color:C.textSec }}>〜</span>
+              <input type="date" value={draft.rangeEnd} onChange={e=>set({ rangeEnd:e.target.value })}
+                style={{ flex:1, padding:11, borderRadius:9, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit" }}/>
+            </div>
+          )}
+          {!seasonStart && <div style={hint}>設定 → シーズン設定 で起点日を登録すると「◯◯以降」が選べます。</div>}
+        </Group>
+
+        <div style={divider}/>
+
+        <Group title="大会">
+          <Row>
+            <Chip on={(draft.tournaments??[]).length===0} onClick={()=>set({ tournaments: [] })}>すべての試合</Chip>
+          </Row>
+          {tournamentOptions.inPeriod.length===0 ? (
+            <div style={hint}>この期間に大会の記録がありません。</div>
+          ) : (
+            <Row>
+              {tournamentOptions.inPeriod.map(t => {
+                const on = (draft.tournaments??[]).includes(t);
+                return <Chip key={t} on={on} onClick={()=>set({ tournaments: on ? draft.tournaments.filter(x=>x!==t) : [...(draft.tournaments??[]), t] })}>{t}</Chip>;
+              })}
+            </Row>
+          )}
+          <div style={hint}>複数選べます。期間をしぼっている場合は、その期間に開催された大会だけが出ます。</div>
+        </Group>
+
+        <div style={divider}/>
+
+        <Group title="試合数">
+          <Row>
+            <Chip on={!draft.limit} onClick={()=>set({ limit:0 })}>すべて（上限{SCOPE_MAX}）</Chip>
+            {[1,3,5,10,20,50].map(n => <Chip key={n} on={draft.limit===n} onClick={()=>set({ limit:n })}>直近{n}</Chip>)}
+          </Row>
+          <div style={hint}>新しい試合から数えます。上の期間・大会でしぼった中から数えます。</div>
+        </Group>
+
+        <div style={divider}/>
+
+        <Group title="対象試合">
+          <Row>
+            <Chip on={draft.kind==="all"} onClick={()=>set({ kind:"all" })}>すべて</Chip>
+            <Chip on={draft.kind==="individual"} onClick={()=>set({ kind:"individual" })}>個人戦のみ</Chip>
+            <Chip on={draft.kind==="team"} onClick={()=>set({ kind:"team" })}>団体戦のみ</Chip>
+          </Row>
+          <div style={hint}>団体戦の1番手・2番手…として戦った試合を分けて集計できます。</div>
+        </Group>
+
+        <div style={divider}/>
+
+        <Group title="試合を個別に選ぶ">
+          <Row>
+            <Chip on={(draft.pickedIds??[]).length===0} onClick={()=>set({ pickedIds: [] })}>使わない</Chip>
+            <Chip on={(draft.pickedIds??[]).length>0} onClick={()=>setPickOpen(true)}>
+              ✓ 試合を選ぶ{(draft.pickedIds??[]).length>0 ? `（${draft.pickedIds.length}件）` : ""}
+            </Chip>
+          </Row>
+          <div style={hint}>選ぶと上の条件は使わず、選んだ試合だけを集計します。</div>
+        </Group>
+
+        <div style={{ background:C.accentL, border:"1px solid #9fe3c8", borderRadius:9, padding:12, fontSize:14, fontWeight:700, color:"#0b7a55", margin:"14px 0" }}>
+          この条件の対象：{preview.list.length}試合
+          {preview.capped > 0 && <div style={{ fontSize:13, fontWeight:700, marginTop:4 }}>該当{preview.list.length+preview.capped}件のうち、新しい{SCOPE_MAX}試合を対象にしています</div>}
+        </div>
+
+        <div onClick={()=>setRemember(v=>!v)} style={{ display:"flex", alignItems:"center", gap:10, background:"#eef2f7",
+          border:`1.5px solid ${C.navy}`, borderRadius:11, padding:12, cursor:"pointer", marginBottom:14 }}>
+          <div style={{ width:21, height:21, borderRadius:5, background:remember?C.navy:C.white, border:`2px solid ${C.navy}`,
+            display:"flex", alignItems:"center", justifyContent:"center", color:C.white, fontSize:13, fontWeight:900, flexShrink:0 }}>{remember?"✓":""}</div>
+          <div style={{ fontSize:13.5, fontWeight:700, color:C.navy, lineHeight:1.6 }}>この条件を次に開いたときも使う</div>
+        </div>
+
+        <button onClick={()=>onApply(draft, remember)} disabled={preview.list.length===0}
+          style={{ width:"100%", padding:15, borderRadius:11, border:"none", fontSize:16, fontWeight:800, marginBottom:8,
+            background: preview.list.length===0 ? "#d5dae2" : C.navy, color:C.white, cursor:"pointer" }}>
+          {preview.list.length===0 ? "この条件では試合がありません" : `この${preview.list.length}試合で表示する`}
+        </button>
+        <button onClick={()=>setDraft({ ...DEFAULT_SCOPE, period: seasonStart ? "season" : "all" })}
+          style={{ width:"100%", padding:12, borderRadius:11, background:"none", border:"none", color:C.textSec, fontSize:13.5, fontWeight:700, cursor:"pointer" }}>
+          条件をリセット
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // ペア分析画面：自分たち（自チームのペア）／相手分析（過去に対戦した相手ペア）
 // ============================================================
 function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpenMatch }) {
@@ -11447,7 +11757,16 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const [mySchoolName, setMySchoolName] = useState("");
   const [allMatches, setAllMatches] = useState([]); // 一覧用の軽量データ
 
-  const [mode, setMode] = useState("results"); // results | wizardPlayer | wizardMatches
+  const [mode, setMode] = useState("results"); // results | wizardPlayer | scope
+  // ★集計対象（期間・大会・試合数・対象試合）。端末に保存して次回も同じ条件から始める
+  const [scope, setScope] = useState(() => {
+    try { const s = JSON.parse(localStorage.getItem("analysisScope")||"null"); if (s) return { ...DEFAULT_SCOPE, ...s }; } catch {}
+    return DEFAULT_SCOPE;
+  });
+  const [seasonStart, setSeasonStart] = useState(null);
+  const [seasonLabel, setSeasonLabel] = useState("");
+  const [teamMatchIds, setTeamMatchIds] = useState(new Set());
+  const [resultCapped, setResultCapped] = useState(0);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [selectedSchoolName, setSelectedSchoolName] = useState(""); // 空なら自チーム
   const [schoolPickerOpen, setSchoolPickerOpen] = useState(false);
@@ -11484,6 +11803,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   //   前回開いたときの内容をすぐ表示してから、裏で最新に差し替える。
   //   （選手を選び直した後に裏の更新が届いても、選択が勝手に戻らないようにしている）
   const initializedRef = useRef(false);
+  // ★対象試合（個人戦のみ／団体戦のみ）のしぼり込みに使う
+  useEffect(() => { getTeamMatchMatchIds().then(setTeamMatchIds); }, []);
   const apply = useCallback(([p, rosterList, list, schools]) => {
     setRoster(rosterList);
     setAllMatches(list);
@@ -11495,7 +11816,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     }
     if (p?.school_id) {
       const s = (schools || []).find(s => s.id === p.school_id);
-      if (s) setMySchoolName(s.name);
+      if (s) {
+        setMySchoolName(s.name);
+        // ★シーズン設定の起点日（分析の「◯◯以降」で使う）
+        setSeasonStart(s.season_start_date || null);
+        setSeasonLabel(s.season_start_label || "");
+      }
     }
     if (!initializedRef.current) {
       initializedRef.current = true;
@@ -11551,12 +11877,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     : [],
     [allMatches, selectedPlayer, effectiveSchoolName]);
 
-  async function loadResults(matchSummaries, condLabel) {
+  async function loadResults(matchSummaries, condLabel, capped = 0) {
     setResultLoading(true);
     setResultCondLabel(condLabel);
+    setResultCapped(capped);
     setResultFilter("all");
     const full = await getFullMatchesByIds(matchSummaries.map(m => m.id));
-    full.sort((a, b) => new Date(a.match_date) - new Date(b.match_date));
+    full.sort((a, b) => {
+      const d = new Date(a.match_date) - new Date(b.match_date);
+      if (d !== 0) return d;
+      return roundProgressRank(a.round) - roundProgressRank(b.round);
+    });
     setResultMatches(full);
     setResultLoading(false);
     setMode("results");
@@ -11566,8 +11897,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   useEffect(() => {
     if (!loading && selectedPlayer && !hasLoadedDefault) {
       setHasLoadedDefault(true);
-      const recent5 = [...playerMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).slice(0,5);
-      loadResults(recent5, "直近5試合");
+      const { list, capped } = applyScope(playerMatches, scope, { seasonStart, teamMatchIds });
+      loadResults(list, scopeShortLabel(scope, seasonLabel), capped);
     }
     // ★誰の分析かを自動特定できなかった場合、空の結果画面を出さず選手選択画面を案内する
     if (!loading && !selectedPlayer && !hasLoadedDefault) {
@@ -11677,7 +12008,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         <div style={{ position:"fixed", left:0, right:0, bottom:0, padding:14, background:C.gray, borderTop:`1px solid ${C.border}` }}>
           <button
             disabled={!selectedPlayer}
-            onClick={()=>setMode("wizardMatches")}
+            onClick={()=>setMode("scope")}
             style={{ width:"100%", padding:13, borderRadius:11, border:"none", fontSize:14, fontWeight:800, cursor:selectedPlayer?"pointer":"default",
               background: selectedPlayer ? C.navy : "#d5dae2", color:"#fff" }}
           >{selectedPlayer ? "次へ →" : "選手を選んでください"}</button>
@@ -11686,8 +12017,30 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     );
   }
 
-  // ============ ② 試合選択 ============
-  if (mode === "wizardMatches") {
+  // ============ ② 集計対象の設定（期間・大会・試合数・対象試合を1画面で） ============
+  if (mode === "scope") {
+    return (
+      <ScopeSheet
+        matches={playerMatches}
+        scope={scope}
+        seasonStart={seasonStart}
+        seasonLabel={seasonLabel}
+        teamMatchIds={teamMatchIds}
+        playerLabel={selectedPlayer || "未選択"}
+        onChangePlayer={()=>setMode("wizardPlayer")}
+        onClose={()=>setMode("results")}
+        onApply={(next, remember)=>{
+          setScope(next);
+          if (remember) { try { localStorage.setItem("analysisScope", JSON.stringify(next)); } catch {} }
+          const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+          loadResults(list, scopeShortLabel(next, seasonLabel), capped);
+        }}
+      />
+    );
+  }
+
+  // ============ （旧）試合選択ウィザード ============
+  if (mode === "wizardMatchesLegacy") {
     const tournamentNames = Array.from(new Set(playerMatches.map(m=>m.tournament_name).filter(Boolean)));
     let candidateMatches = playerMatches;
     if (selectSubTab === "period" && (periodStart || periodEnd)) {
@@ -12026,16 +12379,26 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         </div>
 
         <div
-          onClick={()=>setMode("wizardPlayer")}
+          onClick={()=>setMode("scope")}
           style={{ background:C.navy, color:"#fff", borderRadius:14, padding:14, marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}
         >
           <div>
             <div style={{ fontSize:12.5, color:"#c6cee0", marginBottom:5 }}>{resultCondLabel}</div>
             <div style={{ fontSize:23, fontWeight:900, lineHeight:1.25 }}>{selectedPlayer}</div>
-            <div style={{ fontSize:14, color:"#d5dbe8", fontWeight:700, marginTop:3 }}>{resultMatches.length}試合</div>
+            <div style={{ fontSize:14, color:"#d5dbe8", fontWeight:700, marginTop:3 }}>
+              {resultMatches.length}試合
+              {resultMatches.length>0 && `（${(resultMatches[0].match_date||"").replace(/-/g,"/")} 〜 ${(resultMatches[resultMatches.length-1].match_date||"").replace(/-/g,"/")}）`}
+            </div>
           </div>
           <div style={{ fontSize:13, fontWeight:700, color:"#c6cee0", display:"flex", alignItems:"center", gap:3, flexShrink:0, marginLeft:10 }}>🔧 変更 ›</div>
         </div>
+
+        {resultCapped > 0 && (
+          <div style={{ background:"#fff4e5", border:"1px solid #f5c979", borderRadius:10, padding:12, fontSize:13, fontWeight:700, color:"#8a5a00", lineHeight:1.7, marginBottom:12 }}>
+            ⚠️ 該当する試合が{resultMatches.length + resultCapped}件ありますが、新しい{SCOPE_MAX}試合を対象にしています。<br/>
+            それ以前も見たい場合は、期間や大会でしぼってください。
+          </div>
+        )}
 
         {/* ★戦績カード（勝敗の○×一覧） */}
         {resultMatches.length>0 && (
@@ -12083,14 +12446,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:6 }}>選手はそのままで試合数だけ変える</div>
         <div style={{ display:"flex", gap:6, marginBottom:12 }}>
           {[1,3,5,10].map(n => {
-            const active = resultCondLabel === `直近${n}試合`;
+            const active = scope.limit === n && (scope.pickedIds??[]).length===0;
             return (
               <button
                 key={n}
                 disabled={resultLoading}
                 onClick={()=>{
-                  const recentN = [...playerMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).slice(0,n);
-                  loadResults(recentN, `直近${n}試合`);
+                  // ★シートを開かずに試合数だけ変えるショートカット。条件（scope）も合わせて更新する
+                  const next = { ...scope, limit:n, pickedIds:[] };
+                  setScope(next);
+                  const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+                  loadResults(list, scopeShortLabel(next, seasonLabel), capped);
                 }}
                 style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
                   border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}
@@ -12099,31 +12465,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           })}
           <button
             disabled={resultLoading}
-            onClick={()=>loadResults(playerMatches, "すべて")}
+            onClick={()=>{
+              const next = { ...scope, limit:0, pickedIds:[] };
+              setScope(next);
+              const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+              loadResults(list, scopeShortLabel(next, seasonLabel), capped);
+            }}
             style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
-              border:`1px solid ${resultCondLabel==="すべて"?C.navy:C.border}`, background:resultCondLabel==="すべて"?C.navy:"#fff", color:resultCondLabel==="すべて"?"#fff":C.textSec }}
+              border:`1px solid ${!scope.limit?C.navy:C.border}`, background:!scope.limit?C.navy:"#fff", color:!scope.limit?"#fff":C.textSec }}
           >全部</button>
         </div>
 
-        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-          {[["今日",0],["1週間",6],["1ヶ月",29]].map(([label,daysBack]) => {
-            const active = resultCondLabel === label;
-            return (
-              <button
-                key={label}
-                disabled={resultLoading}
-                onClick={()=>{
-                  const now = new Date();
-                  const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate()-daysBack); // ★「今日」を含めてdaysBack日前までを対象にする
-                  const filtered = playerMatches.filter(m => new Date(m.match_date) >= cutoff);
-                  loadResults(filtered, label);
-                }}
-                style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
-                  border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}
-              >{label}</button>
-            );
-          })}
-        </div>
 
         {/* ★どの試合を集計しているのかを、切り替えボタンのすぐ下で確認できるようにする。
               以前は上の条件バーまで戻らないと分からず、絞り込むたびに往復が必要だった。 */}
