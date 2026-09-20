@@ -10788,9 +10788,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [allMatches, setAllMatches] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [side, setSide] = useState("own");          // own | opp
-  const [ownPairKey, setOwnPairKey] = useState(""); // 自チームのペア（相手分析では "all" も可）
-  const [oppPairKey, setOppPairKey] = useState(""); // 相手ペアを選んだら詳細を出す
+  const [side, setSide] = useState(() => readScreenCache("pairAnalysis")?.side ?? "own");
+  const [ownPairKey, setOwnPairKey] = useState(() => readScreenCache("pairAnalysis")?.ownPairKey ?? "");
+  const [oppPairKey, setOppPairKey] = useState(() => readScreenCache("pairAnalysis")?.oppPairKey ?? "");
 
   const [detailMatches, setDetailMatches] = useState([]); // 詳細（points込み）
   const [detailLoading, setDetailLoading] = useState(false);
@@ -10809,6 +10809,11 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     })();
   }, []);
 
+  // ★試合スタッツを見て戻ってきたときに、選んでいたペアと画面の状態を復元する
+  useEffect(() => {
+    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey });
+  }, [side, ownPairKey, oppPairKey]);
+
   // 自チームが出場した、終了済みの個人戦・団体戦の試合
   const ownMatches = useMemo(() => allMatches.filter(m =>
     m.status === "finished" && m.players.some(p => p.team==="A")
@@ -10826,16 +10831,23 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   }, [ownMatches, mySchoolName]);
 
   useEffect(() => {
-    if (!ownPairKey && ownPairs.length > 0) setOwnPairKey(ownPairs[0].key);
-  }, [ownPairs, ownPairKey]);
+    if (ownPairs.length === 0) return;
+    // ★選んでいたペアが一覧に無い（データ更新で消えた等）ときや、
+    //   「すべて」のまま自分たちタブに切り替えたときは、先頭のペアに戻す
+    const valid = ownPairs.some(p => p.key === ownPairKey) || (side === "opp" && ownPairKey === "all");
+    if (!valid) setOwnPairKey(ownPairs[0].key);
+  }, [ownPairs, ownPairKey, side]);
 
   const selectedOwnPair = ownPairs.find(p => p.key === ownPairKey) || null;
 
   // 相手ペア一覧（自チームのペア指定に応じて対象試合を変える）
   const oppPairs = useMemo(() => {
-    const base = ownPairKey === "all" || !selectedOwnPair ? ownMatches : selectedOwnPair.matches;
+    const base = ownPairKey === "all" || !selectedOwnPair ? ownMatches : (selectedOwnPair?.matches ?? []);
     const map = {};
     base.forEach(m => {
+      // ★自チーム同士の部内戦は「対戦相手」ではないので除く
+      const bClub = m.players.find(p=>p.team==="B")?.club_name;
+      if (mySchoolName && bClub && bClub.trim() === mySchoolName.trim()) return;
       const op = oppPairOf(m);
       if (!op || !op.names[0]) return;
       const rec = (map[op.key] ??= { ...op, matches: [], w:0, l:0, ownPairKeys:new Set() });
@@ -19614,7 +19626,7 @@ export default function App() {
         matchId={matchId}
         initialTab={recordInitialTab}
         onBack={async ()=>{
-          const target = prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : prevScreen==="personalAnalysis" ? "personalAnalysis" : "list";
+          const target = prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : prevScreen==="personalAnalysis" ? "personalAnalysis" : prevScreen==="pairAnalysis" ? "pairAnalysis" : "list";
           // ★大会詳細に戻るはずなのに、何らかの理由でtournamentContextが失われていた場合はsessionStorageから復元を試みる
           if (target === "tournamentDetail" && !tournamentContext) restoreTournamentReturnCtx();
           setRecordInitialTab(null); // 次に別経路で開いたときは通常どおり「記録」タブから
