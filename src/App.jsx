@@ -13440,7 +13440,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   const [playerName, setPlayerName] = useState(initialPlayerName || null); // 現在表示中の選手（未選択ならnull＝選択画面）
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
-  const [sort, setSort] = useState("desc");
+  const [sort, setSort] = useState("win");
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
 
   useEffect(() => {
@@ -13596,9 +13596,21 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const [loading, setLoading] = useState(true);
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
-  const [sort, setSort] = useState("desc");
+  const [sort, setSort] = useState("win");
+  const [mySchoolName, setMySchoolName] = useState("");
+  const [detail, setDetail] = useState([]);       // points込みの詳細
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => { getMatches().then(list=>{ setMatches(list); setLoading(false); }); }, []);
+  useEffect(() => {
+    (async () => {
+      const [p, schools] = await Promise.all([getMyProfile(), getSchools()]);
+      if (p?.school_id) {
+        const sc = (schools||[]).find(x => x.id === p.school_id);
+        if (sc) setMySchoolName(sc.name);
+      }
+    })();
+  }, []);
 
   const oppOf = m => m.players.find(p=>p.team==="B")?.club_name || "";
   const periodMatches = period==="month1" ? withinLastDays(matches, 30) : matches;
@@ -13621,6 +13633,60 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   oppPairRows.sort(sortByRecord(sort));
 
   const allFinishedForTrend = matches.filter(m => m.status==="finished" && oppOf(m)===schoolName);
+
+  // ★この学校との試合だけポイントを読み込む（学校を開いた時点で読むので待ち時間が短い）
+  const finishedIdsKey = finished.map(m=>m.id).sort().join(",");
+  useEffect(() => {
+    const ids = finishedIdsKey ? finishedIdsKey.split(",") : [];
+    if (ids.length === 0) { setDetail([]); return; }
+    let cancelled = false;
+    (async () => {
+      setDetailLoading(true);
+      const full = await getFullMatchesByIds(ids);
+      if (!cancelled) { setDetail(full); setDetailLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [finishedIdsKey]);
+
+  // ★自チーム側の得点・ミス（この学校と戦ったときの数字）
+  const vsAgg = useMemo(() => {
+    if (detail.length === 0) return null;
+    const names = new Set();
+    detail.forEach(m => m.players.filter(p=>p.team==="A").forEach(p => names.add(p.player_name)));
+    const list = [...names];
+    if (list.length === 0) return null;
+    const base = aggregatePlayerStats(detail, list[0], mySchoolName);
+    const sum = { ...base };
+    const numKeys = ["total","winners","errors","serve1st","serve2nd","serveDf","serve1stWin","serve2ndWin"];
+    const mapKeys = ["playsWin","playsErr"];
+    numKeys.forEach(k => { sum[k] = 0; });
+    mapKeys.forEach(k => { sum[k] = {}; });
+    list.forEach(n => {
+      const a = aggregatePlayerStats(detail, n, mySchoolName);
+      numKeys.forEach(k => { sum[k] += (a[k] ?? 0); });
+      mapKeys.forEach(k => { for (const key in (a[k]??{})) sum[k][key] = (sum[k][key]??0) + a[k][key]; });
+    });
+    return sum;
+  }, [detail, mySchoolName]);
+
+  // ★相性：相手ペアごとに、自チームの誰が当たって何勝何敗か
+  const compatRows = useMemo(() => {
+    const byOpp = {};
+    finished.forEach(m => {
+      const op = pairOnSide(m, "B");
+      const mine = pairOnSide(m, "A");
+      if (!op || !mine) return;
+      const rec = (byOpp[op.key] ??= { label:op.label, w:0, l:0, own:{} });
+      const win = winnerSideOf(m)==="A";
+      if (win) rec.w++; else rec.l++;
+      const o = (rec.own[mine.key] ??= { label:mine.label, w:0, l:0, matches:[] });
+      if (win) o.w++; else o.l++;
+      o.matches.push(m);
+    });
+    return Object.values(byOpp)
+      .map(r => ({ ...r, own: Object.values(r.own).sort((a,b)=>(b.w+b.l)-(a.w+a.l)) }))
+      .sort((a,b)=> (b.w+b.l)-(a.w+a.l));
+  }, [finished]);
 
   return (
     <div style={S.page}>
@@ -13679,6 +13745,68 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                 </div>
 
                 <MonthlyTrendCard finishedMatches={allFinishedForTrend} winFn={m=>winnerSideOf(m)==="A"} />
+
+                {/* ★この学校との得点・ミス（自チーム側） */}
+                {detailLoading ? (
+                  <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:13 }}>集計中...</div>
+                ) : vsAgg && vsAgg.total > 0 && (() => {
+                  const tw = Object.entries(vsAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5);
+                  const te = Object.entries(vsAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5);
+                  const mx = Math.max(1, ...tw.map(x=>x[1]), ...te.map(x=>x[1]));
+                  const Bar = ({label,count,color}) => (
+                    <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
+                      <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel(label)}</div>
+                      <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}>
+                        <div style={{ height:"100%", width:`${count/mx*100}%`, background:color, borderRadius:5 }}/>
+                      </div>
+                      <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
+                    </div>
+                  );
+                  return (
+                    <div style={{ ...S.card, padding:14, marginBottom:12 }}>
+                      <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>📊 この学校との得点・ミス</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
+                        {[["決めた",vsAgg.winners],["ミス",vsAgg.errors],["決定率",`${Math.round(vsAgg.winners/vsAgg.total*100)}%`]].map(([k,v])=>(
+                          <div key={k} style={{ textAlign:"center", padding:"12px 2px", background:C.gray, borderRadius:10 }}>
+                            <div style={{ fontSize:21, fontWeight:800, color:C.navy }}>{v}</div>
+                            <div style={{ fontSize:12, color:C.textSec, marginTop:3 }}>{k}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:5 }}>✅ 決めた</div>
+                      {tw.map(([l,c])=><Bar key={"w"+l} label={l} count={c} color={C.accent}/>)}
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, margin:"12px 0 5px" }}>⚠️ ミス</div>
+                      {te.map(([l,c])=><Bar key={"e"+l} label={l} count={c} color={C.red}/>)}
+                    </div>
+                  );
+                })()}
+
+                {/* ★相性：相手ペアごとに、自チームの誰が当たって何勝何敗か */}
+                {compatRows.length > 0 && (
+                  <>
+                    <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:4 }}>🤝 相性</div>
+                    <div style={{ fontSize:12.5, color:C.textSec, marginBottom:8, lineHeight:1.7 }}>
+                      相手ペアごとに、自チームの誰が当たって何勝何敗かが分かります
+                    </div>
+                    {compatRows.map(r => (
+                      <div key={r.label} style={{ ...S.card, padding:"12px 13px", marginBottom:8 }}>
+                        <div style={{ fontSize:14.5, fontWeight:800, color:C.text, marginBottom:8 }}>
+                          {r.label}　<span style={{ fontSize:13, fontWeight:700, color:C.textSec }}>{r.w}勝{r.l}敗</span>
+                        </div>
+                        {r.own.map(o => (
+                          <div key={o.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                            background:C.gray, borderRadius:9, padding:"10px 11px", marginBottom:6 }}>
+                            <div>
+                              <div style={{ fontSize:14, fontWeight:800, color:C.text }}>{o.label}</div>
+                              <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{o.w+o.l}試合</div>
+                            </div>
+                            <div style={{ fontSize:14, fontWeight:900, color:C.text }}>{o.w}勝{o.l}敗</div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </>
+                )}
 
                 <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>試合一覧</div>
                 {vsMatches.map(m=>{
