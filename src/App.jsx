@@ -10759,6 +10759,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
   const [resultCondLabel, setResultCondLabel] = useState("");
   const [hasLoadedDefault, setHasLoadedDefault] = useState(false);
   const [resultFilter, setResultFilter] = useState("all"); // ★勝敗フィルター：all | win | lose
+  // ★得点・ミスの内訳の切り替え：play=プレイ別（ストローク/ボレー…） course=コース別（引っ張り/流し…）
+  const [breakdownDim, setBreakdownDim] = useState("play");
   const [resultListOpen, setResultListOpen] = useState(false); // ★勝敗内訳一覧の開閉（初期は閉じた状態）
 
   // ★画面を開くたびに全部を取り直して「読み込み中...」で待つのをやめ、
@@ -10865,9 +10867,10 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
           <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
         </div>
         <div style={{ padding:14 }}>
-          <div style={{ display:"flex", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:3, marginBottom:12 }}>
-            <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:C.navy, color:"#fff" }}>個人分析</div>
-            <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:C.textSec }}>チーム統計</div>
+          <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:5, gap:5, marginBottom:12 }}>
+            <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:800, borderRadius:9, background:C.white, color:C.navy, boxShadow:"0 1px 4px rgba(0,0,0,0.12)" }}>個人</div>
+            <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec }}>ペア</div>
+            <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec }}>チーム</div>
           </div>
           <div style={{ padding:40, textAlign:"center", color:C.textSec }}>読み込み中...</div>
         </div>
@@ -11275,6 +11278,50 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
     </div>
   );
 
+  // ★成長の推移：集計対象の試合を1試合ずつ集計し、1st/2ndサーブ得点率の変化を並べる。
+  //   試合数が多いと棒が細くなりすぎるため、新しい方から最大10試合だけを対象にする。
+  const TREND_MAX = 10;
+  const serveTrend = (() => {
+    const src = displayedMatches;
+    if (!src || src.length < 2) return null;
+    const target = src.slice(-TREND_MAX); // resultMatchesは日付の昇順なので末尾が新しい
+    const rows = target.map(m => {
+      const a = aggregatePlayerStats([m], selectedPlayer, effectiveSchoolName);
+      const s1 = a.serve1st ?? 0, s2 = a.serve2nd ?? 0;
+      return {
+        id: m.id,
+        date: m.match_date,
+        r1: s1 > 0 ? Math.round((a.serve1stWin ?? 0) / s1 * 100) : null,
+        r2: s2 > 0 ? Math.round((a.serve2ndWin ?? 0) / s2 * 100) : null,
+      };
+    });
+    const has1 = rows.some(r => r.r1 !== null);
+    const has2 = rows.some(r => r.r2 !== null);
+    if (!has1 && !has2) return null;
+    return { rows, has1, has2, omitted: src.length - target.length };
+  })();
+
+  // 推移カード1枚分（棒グラフ）
+  const TrendCard = ({ title, pick, color }) => (
+    <div style={S.card}>
+      <div style={{ padding:14 }}>
+        <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:7 }}>{title}</div>
+        <div style={{ display:"flex", alignItems:"flex-end", gap:8, height:118, paddingTop:20 }}>
+          {serveTrend.rows.map(r => {
+            const v = pick(r);
+            return (
+              <div key={r.id} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", height:"100%" }}>
+                <div style={{ fontSize:14, fontWeight:800, color:v===null?C.textSec:C.text, marginBottom:4 }}>{v===null?"—":`${v}%`}</div>
+                <div style={{ width:"100%", height:`${v===null?2:Math.max(v,3)}%`, background:v===null?"#e3e7ee":color, borderRadius:"5px 5px 0 0" }}/>
+                <div style={{ fontSize:13, color:C.textSec, marginTop:6 }}>{r.date ? `${Number(r.date.slice(5,7))}/${Number(r.date.slice(8,10))}` : "—"}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
   // ★レシーブミス率は算出方法が複雑で誤差が出やすいため、比較表からは外す（内部計算・keyRatesFromAggは維持）
   const metricLabel = { serveRate:"1stサーブ成功率", decisionRate:"決定率" };
 
@@ -11284,9 +11331,11 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14 }}>
-        <div style={{ display:"flex", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:3, marginBottom:12 }}>
-          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:C.navy, color:"#fff" }}>個人分析</div>
-          <div onClick={onOpenTeamStats} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:C.textSec, cursor:"pointer" }}>チーム統計</div>
+        {/* ★個人／ペア／チームのタブ。ペアは未実装のため準備中の案内を出す */}
+        <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:5, gap:5, marginBottom:12 }}>
+          <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:800, borderRadius:9, background:C.white, color:C.navy, boxShadow:"0 1px 4px rgba(0,0,0,0.12)" }}>個人</div>
+          <div onClick={()=>alert("ペアの分析は準備中です")} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>ペア</div>
+          <div onClick={onOpenTeamStats} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>チーム</div>
         </div>
 
         <div
@@ -11294,10 +11343,11 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
           style={{ background:C.navy, color:"#fff", borderRadius:14, padding:14, marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}
         >
           <div>
-            <div style={{ fontSize:11, color:"#b9c2d6", marginBottom:4 }}>{resultCondLabel}</div>
-            <div style={{ fontSize:15, fontWeight:800 }}>{selectedPlayer}さん・{resultMatches.length}試合</div>
+            <div style={{ fontSize:12.5, color:"#c6cee0", marginBottom:5 }}>{resultCondLabel}</div>
+            <div style={{ fontSize:23, fontWeight:900, lineHeight:1.25 }}>{selectedPlayer}</div>
+            <div style={{ fontSize:14, color:"#d5dbe8", fontWeight:700, marginTop:3 }}>{resultMatches.length}試合</div>
           </div>
-          <div style={{ fontSize:11, fontWeight:700, color:"#b9c2d6", display:"flex", alignItems:"center", gap:3, flexShrink:0, marginLeft:10 }}>🔧 変更 ›</div>
+          <div style={{ fontSize:13, fontWeight:700, color:"#c6cee0", display:"flex", alignItems:"center", gap:3, flexShrink:0, marginLeft:10 }}>🔧 変更 ›</div>
         </div>
 
         {/* ★戦績カード（勝敗の○×一覧） */}
@@ -11311,7 +11361,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                 <span style={{ fontSize:24, fontWeight:900, color:C.text, marginLeft:4 }}>{lostMatches.length}</span>
                 <span style={{ fontSize:14, color:C.textSec }}>敗</span>
               </div>
-              <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>勝率{resultMatches.length>0?Math.round(wonMatches.length/resultMatches.length*100):0}%（{resultCondLabel}）</div>
+              <div style={{ fontSize:13, color:C.textSec, marginTop:2 }}>勝率{resultMatches.length>0?Math.round(wonMatches.length/resultMatches.length*100):0}%（{resultCondLabel}）</div>
               <div style={{ display:"flex", gap:10, marginTop:10, flexWrap:"wrap" }}>
                 {resultMatches.map(m=>{
                   const w = winForPlayer(m, selectedPlayer, effectiveSchoolName);
@@ -11333,7 +11383,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                 <button
                   key={key}
                   onClick={()=>{ setResultFilter(key); setResultListOpen(false); }}
-                  style={{ flex:1, padding:"11px 4px", borderRadius:10, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
+                  style={{ flex:1, padding:"12px 4px", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
                     border:`1px solid ${active?activeColor:C.border}`,
                     background:active?activeBg:"#fff",
                     color:active?(key==="all"?"#fff":activeColor):C.textSec }}
@@ -11343,7 +11393,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
           </div>
         )}
 
-        <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:6 }}>選手はそのままで試合数だけ変える</div>
+        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:6 }}>選手はそのままで試合数だけ変える</div>
         <div style={{ display:"flex", gap:6, marginBottom:12 }}>
           {[1,3,5,10].map(n => {
             const active = resultCondLabel === `直近${n}試合`;
@@ -11392,7 +11442,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
               以前は上の条件バーまで戻らないと分からず、絞り込むたびに往復が必要だった。 */}
         {!resultLoading && resultMatches.length>0 && (
           <div style={{ background:C.white, border:`1.5px solid ${C.accent}`, borderRadius:12, padding:"11px 13px", marginBottom:12 }}>
-            <div style={{ fontSize:10.5, fontWeight:800, color:C.accent, marginBottom:7 }}>✓ いま集計している試合（{resultMatches.length}件）</div>
+            <div style={{ fontSize:13, fontWeight:800, color:C.accent, marginBottom:7 }}>✓ いま集計している試合（{resultMatches.length}件）</div>
             {resultMatches
               .slice()
               .sort((a,b)=> new Date(b.match_date)-new Date(a.match_date))
@@ -11408,20 +11458,20 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                   <div
                     key={m.id}
                     onClick={()=>onOpenMatch && onOpenMatch(m.id)}
-                    style={{ display:"flex", alignItems:"center", gap:8, fontSize:11.5, padding:"6px 0",
+                    style={{ display:"flex", alignItems:"center", gap:8, fontSize:13.5, padding:"6px 0",
                       borderBottom: i===arr.length-1 ? "none" : "1px solid #f2f4f8", cursor:"pointer" }}
                   >
-                    <span style={{ color:C.textSec, fontSize:10.5, width:38, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
+                    <span style={{ color:C.textSec, fontSize:13, width:38, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
                     <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                       {m.round ? m.round+"・" : ""}{oppNames || "相手未登録"}
                     </span>
-                    <span style={{ fontWeight:800, fontSize:10.5, borderRadius:20, padding:"2px 8px", whiteSpace:"nowrap",
+                    <span style={{ fontWeight:800, fontSize:13, borderRadius:20, padding:"2px 8px", whiteSpace:"nowrap",
                       color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"○":"●"} {myScore}-{oppScore}</span>
                   </div>
                 );
               })}
             {resultMatches.length > 3 && (
-              <div style={{ fontSize:10.5, color:C.textSec, marginTop:6 }}>
+              <div style={{ fontSize:13, color:C.textSec, marginTop:6 }}>
                 ほか{resultMatches.length - 3}試合（下の「試合の一覧」で確認できます）
               </div>
             )}
@@ -11466,12 +11516,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                         >
                           <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
                             <span style={{ fontSize:12, fontWeight:700, color:C.text }}>{m.tournament_name || "（大会外）"}{m.round ? "・"+m.round : ""}</span>
-                            <span style={{ fontSize:10.5, color:C.textSec }}>{m.match_date}</span>
+                            <span style={{ fontSize:13, color:C.textSec }}>{m.match_date}</span>
                           </div>
                           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                            <span style={{ fontSize:10.5, fontWeight:800, padding:"3px 8px", borderRadius:6, color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"勝利":"敗北"}</span>
+                            <span style={{ fontSize:13, fontWeight:800, padding:"3px 8px", borderRadius:6, color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"勝利":"敗北"}</span>
                             <span style={{ fontSize:15, fontWeight:900, color:win?C.accent:C.red }}>{myScore} - {oppScore}</span>
-                            {oppClub && <span style={{ marginLeft:"auto", fontSize:11, color:C.textSec }}>対 {oppClub}</span>}
+                            {oppClub && <span style={{ marginLeft:"auto", fontSize:13, color:C.textSec }}>対 {oppClub}</span>}
                             <span style={{ fontSize:13, color:C.textSec, marginLeft: oppClub?6:"auto" }}>›</span>
                           </div>
                         </div>
@@ -11487,7 +11537,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
               <div style={S.card}>
                 <div style={{ padding:14 }}>
                   <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:2 }}>🎾 サーブ分析（集計）</div>
-                  <div style={{ fontSize:10.5, color:C.textSec, marginBottom:12 }}>サーブ総数：{serveStats.total}本</div>
+                  <div style={{ fontSize:13, color:C.textSec, marginBottom:12 }}>サーブ総数：{serveStats.total}本</div>
 
                   <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:12 }}>
                     <div style={{
@@ -11526,6 +11576,20 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
               </div>
             )}
 
+            {/* ★成長の推移：サーブ分析（合計）のすぐ下で、試合ごとの変化を見る */}
+            {serveTrend && (
+              <>
+                <div style={{ fontSize:15, fontWeight:800, color:C.navy, margin:"16px 0 8px" }}>📈 成長の推移</div>
+                {serveTrend.has1 && <TrendCard title="1stサーブ得点率（試合ごと）" pick={r=>r.r1} color={C.accent} />}
+                {serveTrend.has2 && <TrendCard title="2ndサーブ得点率（試合ごと）" pick={r=>r.r2} color="#8fdcbb" />}
+                {serveTrend.omitted > 0 && (
+                  <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginTop:-4, marginBottom:12 }}>
+                    直近{TREND_MAX}試合を表示しています（ほか{serveTrend.omitted}試合）
+                  </div>
+                )}
+              </>
+            )}
+
             {/* 得点・ミスの内訳 */}
             <div style={S.card}>
               <div style={{ padding:14 }}>
@@ -11533,73 +11597,84 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:10 }}>
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{agg.winners}</div>
-                    <div style={{ fontSize:9.5, color:C.textSec, marginTop:2 }}>総得点</div>
+                    <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>総得点</div>
                   </div>
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{agg.errors}</div>
-                    <div style={{ fontSize:9.5, color:C.textSec, marginTop:2 }}>総ミス</div>
+                    <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>総ミス</div>
                   </div>
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:agg.winners-agg.errors>=0?C.accent:C.red }}>{agg.winners-agg.errors>=0?"+":""}{agg.winners-agg.errors}</div>
-                    <div style={{ fontSize:9.5, color:C.textSec, marginTop:2 }}>得失点差</div>
+                    <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>得失点差</div>
                   </div>
                 </div>
+
+                {/* ★プレイ別／コース別の切り替え。以前は別々のカードだったものを1枚にまとめている */}
+                <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:5, gap:5, marginBottom:14 }}>
+                  {[["play","プレイ別"],["course","コース別"]].map(([k,l])=>(
+                    <div key={k} onClick={()=>setBreakdownDim(k)}
+                      style={{ flex:1, textAlign:"center", padding:"11px 4px", fontSize:14, fontWeight:breakdownDim===k?800:700, borderRadius:9, cursor:"pointer",
+                        background:breakdownDim===k?C.white:"transparent", color:breakdownDim===k?C.navy:C.textSec,
+                        boxShadow:breakdownDim===k?"0 1px 4px rgba(0,0,0,0.12)":"none" }}
+                    >{l}</div>
+                  ))}
+                </div>
+
+                {breakdownDim==="play" && (<>
                 {topPlaysWin.map(([label,count])=>(
-                  <div key={"w"+label} style={{ display:"flex", alignItems:"center", fontSize:12, padding:"5px 0" }}>
-                    <div style={{ width:76, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
-                    <div style={{ flex:1, height:8, background:"#eef0f3", borderRadius:4, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.accent, borderRadius:4 }}/></div>
-                    <div style={{ width:26, textAlign:"right", fontWeight:700, color:C.navy }}>{count}</div>
+                  <div key={"w"+label} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
+                    <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
+                    <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.accent, borderRadius:5 }}/></div>
+                    <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
                   </div>
                 ))}
-                {topPlaysWin.length>0 && topPlaysErr.length>0 && <div style={{ height:6 }}/>}
+                {topPlaysWin.length>0 && topPlaysErr.length>0 && <div style={{ height:8 }}/>}
                 {topPlaysErr.map(([label,count])=>(
-                  <div key={"e"+label} style={{ display:"flex", alignItems:"center", fontSize:12, padding:"5px 0" }}>
-                    <div style={{ width:76, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
-                    <div style={{ flex:1, height:8, background:"#eef0f3", borderRadius:4, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.red, borderRadius:4 }}/></div>
-                    <div style={{ width:26, textAlign:"right", fontWeight:700, color:C.navy }}>{count}</div>
+                  <div key={"e"+label} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
+                    <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
+                    <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.red, borderRadius:5 }}/></div>
+                    <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
                   </div>
                 ))}
+                </>)}
+
+                {breakdownDim==="course" && courseStats.all===0 && (
+                  <div style={{ padding:"20px 0", textAlign:"center", color:C.textSec, fontSize:13 }}>コースが入力されたポイントがありません</div>
+                )}
               </div>
             </div>
 
             {/* ★コース分析：①引っ張り/流し → ②立ち位置ごと → ③フォア/バック別 → コース別の決めた/ミス(参考) と、
                 だんだん細かく見ていく構成。本数は割合より大きな文字にして読み取りやすくしている。 */}
-            {courseStats.all > 0 && (
-              <div style={S.card}>
+            {breakdownDim==="course" && courseStats.all > 0 && (
+              <div style={{ ...S.card, marginTop:-4 }}>
                 <div style={{ padding:14 }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:C.navy }}>🎯 コース分析</div>
-                  <div style={{ fontSize:10, color:C.textSec, margin:"3px 0 12px" }}>コースが入力されたポイントのみを集計</div>
 
                   {/* ① 引っ張り / 流し */}
-                  <div style={{ fontSize:11.5, fontWeight:800, color:C.navy, marginBottom:2 }}>① 引っ張り / 流し</div>
-                  <div style={{ fontSize:11.5, color:C.textSec, marginBottom:9 }}>
-                    全<b style={{ fontSize:13, fontWeight:800, color:C.text }}>{courseStats.all}</b>本
-                    （引っ張り <b style={{ fontSize:13, fontWeight:800, color:C.text }}>{courseStats.pull}</b>本
-                    {" / "}流し <b style={{ fontSize:13, fontWeight:800, color:C.text }}>{courseStats.nagashi}</b>本）
-                  </div>
+                  <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:7 }}>① 引っ張り / 流し</div>
                   <div style={{ display:"flex", height:34, borderRadius:8, overflow:"hidden", background:"#eef0f3" }}>
                     {courseStats.pull>0 && (
-                      <div style={{ width:`${courseStats.pull/courseStats.all*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11.5, fontWeight:800, color:C.white }}>
+                      <div style={{ width:`${courseStats.pull/courseStats.all*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13.5, fontWeight:800, color:C.white }}>
                         {Math.round(courseStats.pull/courseStats.all*100)}%
                       </div>
                     )}
                     {courseStats.nagashi>0 && (
-                      <div style={{ width:`${courseStats.nagashi/courseStats.all*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11.5, fontWeight:800, color:C.white }}>
+                      <div style={{ width:`${courseStats.nagashi/courseStats.all*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13.5, fontWeight:800, color:C.white }}>
                         {Math.round(courseStats.nagashi/courseStats.all*100)}%
                       </div>
                     )}
                   </div>
-                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.textSec, marginTop:5 }}>
-                    <span>引っ張り</span><span>流し</span>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.textSec, marginTop:6 }}>
+                    <span>引っ張り <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{courseStats.pull}</b>本</span>
+                    <span>流し <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{courseStats.nagashi}</b>本</span>
                   </div>
 
                   {/* ② 立ち位置ごとの 引っ張り / 流し */}
                   <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                    <div style={{ fontSize:11.5, fontWeight:800, color:C.navy, marginBottom:2 }}>② 立ち位置ごとの 引っ張り / 流し</div>
-                    <div style={{ fontSize:11.5, color:C.textSec, marginBottom:9 }}>正クロス・逆クロスそれぞれの中での割合</div>
+                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>② 立ち位置ごと</div>
                     {courseStats.positions.map(p => (
                       <div key={p.pos} style={{ marginTop:12 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:11.5, fontWeight:700, color:C.text, marginBottom:5 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:5 }}>
                           <span>{p.pos}時</span>
                           {p.total>0
                             ? <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}><b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{p.total}</b>本</span>
@@ -11609,12 +11684,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                           <>
                             <div style={{ display:"flex", height:22, borderRadius:6, overflow:"hidden", background:"#eef0f3" }}>
                               {p.pullCell.total>0 && (
-                                <div style={{ width:`${p.pullCell.total/p.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${p.pullCell.total/p.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
                                   {Math.round(p.pullCell.total/p.total*100)}%
                                 </div>
                               )}
                               {p.nagaCell.total>0 && (
-                                <div style={{ width:`${p.nagaCell.total/p.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${p.nagaCell.total/p.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
                                   {Math.round(p.nagaCell.total/p.total*100)}%
                                 </div>
                               )}
@@ -11631,11 +11706,10 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
 
                   {/* ③ フォア／バック別の 引っ張り / 流し */}
                   <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                    <div style={{ fontSize:11.5, fontWeight:800, color:C.navy, marginBottom:2 }}>③ フォア / バック別の 引っ張り / 流し</div>
-                    <div style={{ fontSize:11.5, color:C.textSec, marginBottom:9 }}>フォア・バックそれぞれで、コースの選び方に偏りがないかを見る</div>
+                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>③ フォア / バック別</div>
                     {courseStats.sides.map((sd, sdIdx) => (
                       <div key={sd.side} style={{ marginTop: sdIdx===0 ? 0 : 14 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:11.5, fontWeight:700, color:C.text, marginBottom:5 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:5 }}>
                           <span>{sd.label}</span>
                           {sd.total>0
                             ? <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}><b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.total}</b>本</span>
@@ -11645,12 +11719,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                           <>
                             <div style={{ display:"flex", height:20, borderRadius:6, overflow:"hidden", background:"#eef0f3" }}>
                               {sd.pull>0 && (
-                                <div style={{ width:`${sd.pull/sd.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${sd.pull/sd.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
                                   {Math.round(sd.pull/sd.total*100)}%
                                 </div>
                               )}
                               {sd.nagashi>0 && (
-                                <div style={{ width:`${sd.nagashi/sd.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${sd.nagashi/sd.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
                                   {Math.round(sd.nagashi/sd.total*100)}%
                                 </div>
                               )}
@@ -11660,7 +11734,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                               <span>流し <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.nagashi}</b>本</span>
                             </div>
                             {sd.positions.filter(p=>p.total>0).map(p => (
-                              <div key={p.pos} style={{ display:"flex", alignItems:"center", fontSize:11.5, color:C.textSec, padding:"3px 0" }}>
+                              <div key={p.pos} style={{ display:"flex", alignItems:"center", fontSize:13.5, color:C.textSec, padding:"3px 0" }}>
                                 <span style={{ width:60, flexShrink:0 }}>{p.pos}時</span>
                                 <span style={{ flex:1, height:18, background:"#eef0f3", borderRadius:5, overflow:"hidden", display:"flex", marginRight:8 }}>
                                   <div style={{ width:`${p.pull/p.total*100}%`, background:COURSE_PULL_COLOR }}/>
@@ -11676,7 +11750,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                   </div>
 
                   {/* 気づき（本数が少ないと割合が極端に出るため、3本以上のコースだけを対象にしている） */}
-                  <div style={{ background:"#f7f9fc", borderLeft:`3px solid ${C.navy}`, borderRadius:6, padding:"8px 10px", fontSize:11, lineHeight:1.65, marginTop:16 }}>
+                  <div style={{ background:"#f7f9fc", borderLeft:`3px solid ${C.navy}`, borderRadius:6, padding:"8px 10px", fontSize:13, lineHeight:1.65, marginTop:16 }}>
                     {courseStats.best ? (
                       <>
                         よく決まっているのは<b>{courseStats.best.label}</b>（決定率{Math.round(courseStats.best.rate*100)}%・{courseStats.best.total}本）。<br/>
@@ -11685,39 +11759,40 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
                     ) : "まだ本数が少なく、傾向は出ていません。"}
                   </div>
 
-                  {/* コース別の 決めた / ミス（参考情報として最後に小さく表示） */}
-                  <div style={{ marginTop:16, paddingTop:12, borderTop:`1px dashed ${C.border}` }}>
-                    <div style={{ fontSize:10, fontWeight:700, color:C.textSec, marginBottom:8 }}>コース別の決めた / ミス</div>
-                    {courseStats.rows.map(r => (
-                      <div key={r.key} style={{ marginBottom:11 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:11, fontWeight:700, color:C.text, marginBottom:4 }}>
+                  {/* ④ コース別の 決めた / ミス */}
+                  <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:10 }}>④ コース別の 決めた / ミス</div>
+                    {courseStats.rows.map(r => {
+                      const rate = r.total>0 ? Math.round(r.win/r.total*100) : 0;
+                      return (
+                      <div key={r.key} style={{ marginBottom:13 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
                           <span>{r.label}</span>
                           {r.total>0
-                            ? <span style={{ fontSize:11, fontWeight:400, color:C.textSec }}>{r.total}本</span>
-                            : <span style={{ fontSize:11, fontWeight:400, color:C.textSec }}>記録なし</span>}
+                            ? <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>{r.total}本中 <b style={{ fontSize:14.5, fontWeight:800, color:rate<40?C.red:C.text }}>決定率 {rate}%</b></span>
+                            : <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>記録なし</span>}
                         </div>
                         {r.total>0 && (
-                          <>
-                            <div style={{ display:"flex", height:17, borderRadius:5, overflow:"hidden", background:"#eef0f3" }}>
-                              {r.win>0 && (
-                                <div style={{ width:`${r.win/r.total*100}%`, background:C.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
-                                  {Math.round(r.win/r.total*100)}%
-                                </div>
-                              )}
-                              {r.err>0 && (
-                                <div style={{ width:`${r.err/r.total*100}%`, background:C.red, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:C.white }}>
-                                  {Math.round(r.err/r.total*100)}%
-                                </div>
-                              )}
-                            </div>
-                          </>
+                          <div style={{ display:"flex", height:26, borderRadius:7, overflow:"hidden", background:"#eef0f3" }}>
+                            {r.win>0 && (
+                              <div style={{ width:`${r.win/r.total*100}%`, background:C.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden" }}>
+                                決めた {r.win}
+                              </div>
+                            )}
+                            {r.err>0 && (
+                              <div style={{ width:`${r.err/r.total*100}%`, background:C.red, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden" }}>
+                                ミス {r.err}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
-                  <div style={{ fontSize:9.5, color:"#9aa1ad", marginTop:8, lineHeight:1.5 }}>
-                    ※コースが入力された{courseStats.all}本をもとに集計。3本未満のコースは上のコメントの対象から外しています。
+                  <div style={{ fontSize:12, color:"#8a92a0", marginTop:10, lineHeight:1.6 }}>
+                    ※コースが入力された{courseStats.all}本をもとに集計しています。
                   </div>
                 </div>
               </div>
@@ -11731,7 +11806,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
 
                   {missTypeRows.length>0 && (
                     <>
-                      <div style={{ fontSize:11, color:C.textSec, fontWeight:700, marginBottom:4 }}>ミスの種類（全{agg.missTyped}回）</div>
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:4 }}>ミスの種類（全{agg.missTyped}回）</div>
                       {missTypeRows.map(([label,count]) => (
                         <MissRow key={label} label={label} count={count} total={agg.missTyped}
                           max={Math.max(...missTypeRows.map(r=>r[1]))} color={C.red}/>
@@ -11741,7 +11816,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
 
                   {missSideRows.length>0 && (
                     <>
-                      <div style={{ fontSize:11, color:C.textSec, fontWeight:700, margin:"10px 0 4px" }}>フォア / バック</div>
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, margin:"10px 0 4px" }}>フォア / バック</div>
                       {missSideRows.map(([label,count]) => (
                         <MissRow key={label} label={label} count={count} total={missSideTotal}
                           max={Math.max(...missSideRows.map(r=>r[1]))} color="#8fb4dd"/>
@@ -11751,7 +11826,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
 
                   {topMissCombos.length>0 && (
                     <>
-                      <div style={{ fontSize:11, color:C.textSec, fontWeight:700, margin:"10px 0 4px" }}>多いミスの組み合わせ</div>
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, margin:"10px 0 4px" }}>多いミスの組み合わせ</div>
                       {topMissCombos.map(([key,count],i) => (
                         <div key={key} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, padding:"5px 0", borderBottom: i<topMissCombos.length-1?`1px solid ${C.border}`:"none" }}>
                           <span style={{ fontSize:9, fontWeight:800, color:"#fff", background:C.navy, borderRadius:5, padding:"1px 5px" }}>{i+1}</span>
@@ -12039,9 +12114,10 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
-        <div style={{ display:"flex", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:3, marginBottom:12 }}>
-          <div onClick={()=>onNavigate&&onNavigate("stats")} style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, color:C.textSec, cursor:"pointer" }}>個人分析</div>
-          <div style={{ flex:1, textAlign:"center", padding:"9px 4px", fontSize:12.5, fontWeight:700, borderRadius:8, background:C.navy, color:"#fff" }}>チーム統計</div>
+        <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:5, gap:5, marginBottom:12 }}>
+          <div onClick={()=>onNavigate&&onNavigate("stats")} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>個人</div>
+          <div onClick={()=>alert("ペアの分析は準備中です")} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>ペア</div>
+          <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:800, borderRadius:9, background:C.white, color:C.navy, boxShadow:"0 1px 4px rgba(0,0,0,0.12)" }}>チーム</div>
         </div>
         {loading ? (
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
