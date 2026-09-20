@@ -602,6 +602,17 @@ function playerStatsInMatch(match, playerName, mySchoolName) {
 }
 
 // 複数の試合をまたいで、指定選手のスタッツを合算する
+// ★回戦名をトーナメントの進行順に並べるための順位（1回戦→…→決勝）。
+//   同じ日に何試合もある大会で、試合を正しい順番に並べるために使う。
+function roundProgressRank(round) {
+  if (!round) return 999;
+  const idx = ROUND_OPTIONS.indexOf(round);
+  if (idx >= 0) return idx;
+  const m = String(round).match(/(\d+)\s*回戦/);
+  if (m) return 1 + Number(m[1]);
+  return 900;
+}
+
 // ★ペアの識別キー：2人の名前を並べ替えて連結する（登録順が入れ替わっても同じペアとして扱う）
 function pairKeyOf(nameA, nameB) {
   return [nameA, nameB].filter(Boolean).sort().join(" / ");
@@ -11660,19 +11671,27 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const serveTrend = (() => {
     const src = displayedMatches;
     if (!src || src.length < 2) return null;
-    const target = src.slice(-TREND_MAX); // resultMatchesは日付の昇順なので末尾が新しい
+    // ★同じ日に何試合もある大会では日付だけでは順番が決まらないため、日付→回戦の順で並べる
+    const ordered = [...src].sort((a,b) => {
+      const d = new Date(a.match_date) - new Date(b.match_date);
+      if (d !== 0) return d;
+      return roundProgressRank(a.round) - roundProgressRank(b.round);
+    });
+    const target = ordered.slice(-TREND_MAX);
     const rows = target.map(m => {
       const a = aggregatePlayerStats([m], selectedPlayer, effectiveSchoolName);
       const s1 = a.serve1st ?? 0, s2 = a.serve2nd ?? 0;
       return {
         id: m.id,
         date: m.match_date,
+        round: m.round || "",
         r1: s1 > 0 ? Math.round((a.serve1stWin ?? 0) / s1 * 100) : null,
         r2: s2 > 0 ? Math.round((a.serve2ndWin ?? 0) / s2 * 100) : null,
       };
     });
-    const has1 = rows.some(r => r.r1 !== null);
-    const has2 = rows.some(r => r.r2 !== null);
+    // ★データが1試合分しかないと「推移」にならないので、2試合以上ある指標だけ出す
+    const has1 = rows.filter(r => r.r1 !== null).length >= 2;
+    const has2 = rows.filter(r => r.r2 !== null).length >= 2;
     if (!has1 && !has2) return null;
     return { rows, has1, has2, omitted: src.length - target.length };
   })();
@@ -11681,18 +11700,34 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const TrendCard = ({ title, pick, color }) => (
     <div style={S.card}>
       <div style={{ padding:14 }}>
-        <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:7 }}>{title}</div>
-        <div style={{ display:"flex", alignItems:"flex-end", gap:8, height:118, paddingTop:20 }}>
+        <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:2 }}>{title}</div>
+        <div style={{ fontSize:12.5, color:C.textSec, marginBottom:6 }}>← 古い　新しい →（棒をタップすると試合へ）</div>
+        <div style={{ display:"flex", alignItems:"flex-end", gap:6, height:120, paddingTop:20 }}>
           {serveTrend.rows.map(r => {
             const v = pick(r);
             return (
-              <div key={r.id} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", height:"100%" }}>
-                <div style={{ fontSize:14, fontWeight:800, color:v===null?C.textSec:C.text, marginBottom:4 }}>{v===null?"—":`${v}%`}</div>
+              <div key={r.id} onClick={()=>onOpenMatch && onOpenMatch(r.id)}
+                style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", height:"100%", cursor:"pointer" }}>
+                <div style={{ fontSize:13.5, fontWeight:800, color:v===null?C.textSec:C.text, marginBottom:4 }}>{v===null?"—":`${v}%`}</div>
                 <div style={{ width:"100%", height:`${v===null?2:Math.max(v,3)}%`, background:v===null?"#e3e7ee":color, borderRadius:"5px 5px 0 0" }}/>
-                <div style={{ fontSize:13, color:C.textSec, marginTop:6 }}>{r.date ? `${Number(r.date.slice(5,7))}/${Number(r.date.slice(8,10))}` : "—"}</div>
               </div>
             );
           })}
+        </div>
+        <div style={{ display:"flex", gap:6, marginTop:6 }}>
+          {serveTrend.rows.map(r => (
+            <div key={r.id} style={{ flex:1, textAlign:"center", minWidth:0 }}>
+              <div style={{ fontSize:12.5, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {r.round || "—"}
+              </div>
+              <div style={{ fontSize:11.5, color:C.textSec }}>
+                {r.date ? `${Number(r.date.slice(5,7))}/${Number(r.date.slice(8,10))}` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize:12, color:"#8a92a0", marginTop:8, lineHeight:1.6 }}>
+          ※「—」はその試合にサーブの記録が無いことを表します
         </div>
       </div>
     </div>
@@ -11955,7 +11990,10 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
             {/* ★成長の推移：サーブ分析（合計）のすぐ下で、試合ごとの変化を見る */}
             {serveTrend && (
               <>
-                <div style={{ fontSize:15, fontWeight:800, color:C.navy, margin:"16px 0 8px" }}>📈 成長の推移</div>
+                <div style={{ fontSize:15, fontWeight:800, color:C.navy, margin:"16px 0 2px" }}>📈 成長の推移</div>
+                <div style={{ fontSize:12.5, color:C.textSec, marginBottom:8 }}>
+                  いま集計している{displayedMatches.length}試合を1試合ずつ集計しています
+                </div>
                 {serveTrend.has1 && <TrendCard title="1stサーブ得点率（試合ごと）" pick={r=>r.r1} color={C.accent} />}
                 {serveTrend.has2 && <TrendCard title="2ndサーブ得点率（試合ごと）" pick={r=>r.r2} color="#8fdcbb" />}
                 {serveTrend.omitted > 0 && (
