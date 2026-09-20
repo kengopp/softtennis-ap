@@ -602,6 +602,32 @@ function playerStatsInMatch(match, playerName, mySchoolName) {
 }
 
 // 複数の試合をまたいで、指定選手のスタッツを合算する
+// ★ペアの識別キー：2人の名前を並べ替えて連結する（登録順が入れ替わっても同じペアとして扱う）
+function pairKeyOf(nameA, nameB) {
+  return [nameA, nameB].filter(Boolean).sort().join(" / ");
+}
+// ★ペアの表示名（キーと同じ並び順にして、画面ごとに前後が入れ替わらないようにする）
+function pairLabelOf(nameA, nameB) {
+  return [nameA, nameB].filter(Boolean).sort().join("・");
+}
+// ★指定した試合で、あるチーム側に出ていた2人をペアとして取り出す
+function pairOnSide(m, team) {
+  const list = m.players.filter(p => p.team === team).sort((a,b)=>(a.order_num??0)-(b.order_num??0));
+  if (list.length < 2) return null;
+  return {
+    names: [list[0].player_name, list[1].player_name],
+    key: pairKeyOf(list[0].player_name, list[1].player_name),
+    label: pairLabelOf(list[0].player_name, list[1].player_name),
+    club: list[0].club_name || list[1].club_name || "",
+  };
+}
+// ★自チーム側／相手側のペアを取り出す（自チーム同士の試合ではA側を自チーム扱いにする）
+function ownPairOf(m, mySchoolName) {
+  const aIsOwn = m.players.some(p => p.team==="A" && p.club_name && mySchoolName && p.club_name.trim()===mySchoolName.trim());
+  return pairOnSide(m, aIsOwn ? "A" : "A"); // 自チームは常にA側に保存されている
+}
+function oppPairOf(m) { return pairOnSide(m, "B"); }
+
 function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
   const agg = {
     total: 0, winners: 0, errors: 0, plays: {}, playsWin: {}, playsErr: {},
@@ -635,6 +661,26 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
   }
   return agg;
 }
+// ★2人分の集計を足し合わせて「ペアの集計」にする
+function aggregatePairStats(fullMatches, nameA, nameB, mySchoolName) {
+  const a = aggregatePlayerStats(fullMatches, nameA, mySchoolName);
+  const b = aggregatePlayerStats(fullMatches, nameB, mySchoolName);
+  const sum = { ...a };
+  const numKeys = ["total","winners","errors","serveTotal","serveFault","receiveTotal","receiveMiss",
+                   "serve1st","serve2nd","serveDf","serve1stWin","serve2ndWin","missTyped"];
+  numKeys.forEach(k => { sum[k] = (a[k]??0) + (b[k]??0); });
+  const mapKeys = ["plays","playsWin","playsErr","missTypes","sideWin","sideErr","missCombos",
+                   "courseWin","courseErr","sideCourseWin","sideCourseErr"];
+  mapKeys.forEach(k => {
+    const merged = {};
+    for (const key in (a[k]??{})) merged[key] = (merged[key]??0) + a[k][key];
+    for (const key in (b[k]??{})) merged[key] = (merged[key]??0) + b[k][key];
+    sum[k] = merged;
+  });
+  sum.matchesCounted = fullMatches.length;
+  return { pair: sum, byPlayer: { [nameA]: a, [nameB]: b } };
+}
+
 // 合算スタッツから、画面表示用の主要指標（%）を計算する
 function keyRatesFromAgg(agg) {
   return {
@@ -10723,7 +10769,337 @@ const STATS_PERIOD_LABELS = { all: "全期間", month1: "直近1ヶ月", month3:
 // 個人分析画面：①選手選択 → ②試合選択 → ③分析結果
 // 何も設定していない時は「自分（またはお子さん）・直近5試合」をデフォルト表示する
 // ============================================================
-function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
+// ============================================================
+// ペア分析画面：自分たち（自チームのペア）／相手分析（過去に対戦した相手ペア）
+// ============================================================
+function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpenMatch }) {
+  const [mySchoolName, setMySchoolName] = useState("");
+  const [allMatches, setAllMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [side, setSide] = useState("own");          // own | opp
+  const [ownPairKey, setOwnPairKey] = useState(""); // 自チームのペア（相手分析では "all" も可）
+  const [oppPairKey, setOppPairKey] = useState(""); // 相手ペアを選んだら詳細を出す
+
+  const [detailMatches, setDetailMatches] = useState([]); // 詳細（points込み）
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);    // 通算成績の内訳の開閉
+  const [breakdownDim, setBreakdownDim] = useState("play");
+
+  useEffect(() => {
+    (async () => {
+      const [p, list, schools] = await Promise.all([getMyProfile(), getMatches(), getSchools()]);
+      if (p?.school_id) {
+        const s = (schools||[]).find(s => s.id === p.school_id);
+        if (s) setMySchoolName(s.name);
+      }
+      setAllMatches(list);
+      setLoading(false);
+    })();
+  }, []);
+
+  // 自チームが出場した、終了済みの個人戦・団体戦の試合
+  const ownMatches = useMemo(() => allMatches.filter(m =>
+    m.status === "finished" && m.players.some(p => p.team==="A")
+  ), [allMatches]);
+
+  // 自チームのペア一覧（出場試合数の多い順）
+  const ownPairs = useMemo(() => {
+    const map = {};
+    ownMatches.forEach(m => {
+      const pr = ownPairOf(m, mySchoolName);
+      if (!pr) return;
+      (map[pr.key] ??= { ...pr, matches: [] }).matches.push(m);
+    });
+    return Object.values(map).sort((a,b)=>b.matches.length-a.matches.length);
+  }, [ownMatches, mySchoolName]);
+
+  useEffect(() => {
+    if (!ownPairKey && ownPairs.length > 0) setOwnPairKey(ownPairs[0].key);
+  }, [ownPairs, ownPairKey]);
+
+  const selectedOwnPair = ownPairs.find(p => p.key === ownPairKey) || null;
+
+  // 相手ペア一覧（自チームのペア指定に応じて対象試合を変える）
+  const oppPairs = useMemo(() => {
+    const base = ownPairKey === "all" || !selectedOwnPair ? ownMatches : selectedOwnPair.matches;
+    const map = {};
+    base.forEach(m => {
+      const op = oppPairOf(m);
+      if (!op || !op.names[0]) return;
+      const rec = (map[op.key] ??= { ...op, matches: [], w:0, l:0, ownPairKeys:new Set() });
+      rec.matches.push(m);
+      const ourSide = winnerSideOf(m);
+      if (ourSide === "A") rec.w++; else if (ourSide === "B") rec.l++;
+      const mine = ownPairOf(m, mySchoolName);
+      if (mine) rec.ownPairKeys.add(mine.key);
+    });
+    return Object.values(map).sort((a,b)=>b.matches.length-a.matches.length);
+  }, [ownMatches, ownPairKey, selectedOwnPair, mySchoolName]);
+
+  const selectedOppPair = oppPairs.find(p => p.key === oppPairKey) || null;
+
+  // 表示対象の試合（自分たち＝そのペアの全試合／相手分析＝その相手ペアとの試合）
+  const targetMatches = side === "own"
+    ? (selectedOwnPair?.matches ?? [])
+    : (selectedOppPair?.matches ?? []);
+
+  // ★points込みの詳細は、見る対象が決まったタイミングでその分だけ読み込む
+  useEffect(() => {
+    const ids = targetMatches.map(m=>m.id);
+    if (ids.length === 0) { setDetailMatches([]); return; }
+    let cancelled = false;
+    (async () => {
+      setDetailLoading(true);
+      const full = await getFullMatchesByIds(ids);
+      if (cancelled) return;
+      full.sort((a,b)=> new Date(a.match_date)-new Date(b.match_date));
+      setDetailMatches(full);
+      setDetailLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [side, ownPairKey, oppPairKey, allMatches.length]);
+
+  const wins = targetMatches.filter(m => winnerSideOf(m)==="A").length;
+  const losses = targetMatches.filter(m => winnerSideOf(m)==="B").length;
+
+  // 集計（自分たち＝自チームペア、相手分析＝相手ペアの2人）
+  const statNames = side === "own"
+    ? (selectedOwnPair?.names ?? [])
+    : (selectedOppPair?.names ?? []);
+  const { pair: pairAgg, byPlayer } = useMemo(() => {
+    if (statNames.length < 2 || detailMatches.length === 0) return { pair:null, byPlayer:{} };
+    return aggregatePairStats(detailMatches, statNames[0], statNames[1], mySchoolName);
+  }, [detailMatches, statNames.join("|"), mySchoolName]);
+
+  const topWin = pairAgg ? Object.entries(pairAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
+  const topErr = pairAgg ? Object.entries(pairAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
+  const maxPlay = Math.max(1, ...topWin.map(x=>x[1]), ...topErr.map(x=>x[1]));
+
+  const Bar = ({ label, count, color }) => (
+    <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
+      <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
+      <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}>
+        <div style={{ height:"100%", width:`${count/maxPlay*100}%`, background:color, borderRadius:5 }}/>
+      </div>
+      <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
+    </div>
+  );
+
+  const selStyle = { width:"100%", padding:"11px 10px", borderRadius:9, border:`1.5px solid ${C.border}`,
+    background:C.white, fontSize:14.5, fontWeight:700, color:C.text, marginBottom:10, fontFamily:"inherit" };
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
+      </div>
+      <div style={{ padding:14 }}>
+
+        <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:5, gap:5, marginBottom:12 }}>
+          <div onClick={()=>onOpenPersonal && onOpenPersonal()} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>個人</div>
+          <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:800, borderRadius:9, background:C.white, color:C.navy, boxShadow:"0 1px 4px rgba(0,0,0,0.12)" }}>ペア</div>
+          <div onClick={()=>onOpenTeamStats && onOpenTeamStats()} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>チーム</div>
+        </div>
+
+        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+          {[["own","自分たち"],["opp","相手分析"]].map(([k,l])=>(
+            <div key={k} onClick={()=>{ setSide(k); setOppPairKey(""); }}
+              style={{ flex:1, textAlign:"center", padding:"12px 4px", borderRadius:9, fontSize:14.5, fontWeight:700, cursor:"pointer",
+                background: side===k ? C.navy : "#eef0f4", color: side===k ? C.white : C.textSec }}
+            >{l}</div>
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0" }}>読み込み中...</div>
+        ) : ownPairs.length === 0 ? (
+          <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0", fontSize:13.5 }}>終了した試合がまだありません</div>
+        ) : (
+          <>
+            {/* 自チームのペア選択（自分たち／相手分析で共通・連動） */}
+            <div style={{ fontSize:13, fontWeight:700, color:C.textSec, marginBottom:5 }}>自チームのペア</div>
+            <select style={selStyle} value={ownPairKey} onChange={e=>{ setOwnPairKey(e.target.value); setOppPairKey(""); }}>
+              {ownPairs.map(p => <option key={p.key} value={p.key}>{p.label}（{p.matches.length}試合）</option>)}
+              {side === "opp" && <option value="all">👥 すべて（チーム全体の対戦相手）</option>}
+            </select>
+
+            {side === "opp" && (
+              <>
+                <div style={{ fontSize:13, fontWeight:700, color:C.textSec, marginBottom:5 }}>相手ペア</div>
+                <select style={selStyle} value={oppPairKey} onChange={e=>setOppPairKey(e.target.value)}>
+                  <option value="">👥 すべて（一覧から選ぶ）</option>
+                  {oppPairs.map(p => <option key={p.key} value={p.key}>{p.club}　{p.label}</option>)}
+                </select>
+              </>
+            )}
+
+            {/* ============ 相手分析：一覧 ============ */}
+            {side === "opp" && !selectedOppPair && (
+              <>
+                <div style={{ background:"#fff4e5", border:"1px solid #f5c979", borderRadius:10, padding:11, fontSize:13, fontWeight:700, color:"#8a5a00", lineHeight:1.7, marginBottom:12 }}>
+                  {ownPairKey === "all"
+                    ? "東福岡のどのペアか問わず対戦したことがある相手です。勝敗はチーム全体の通算。"
+                    : `${selectedOwnPair?.label ?? ""} が実際に対戦した相手だけを表示しています。`}
+                </div>
+                <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:8 }}>
+                  {ownPairKey === "all" ? "チーム全体が対戦したペア" : "対戦した相手"}
+                </div>
+                {oppPairs.length === 0 && <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0", fontSize:13.5 }}>対戦した記録がありません</div>}
+                {oppPairs.map(p => {
+                  const col = p.w > p.l ? C.accent : p.w < p.l ? C.teamB : C.textSec;
+                  return (
+                    <div key={p.key} onClick={()=>setOppPairKey(p.key)}
+                      style={{ ...S.card, padding:"13px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:12.5, color:C.textSec, fontWeight:700 }}>{p.club || "（学校名なし）"}</div>
+                        <div style={{ fontSize:15, fontWeight:800, color:C.text, margin:"2px 0" }}>{p.label}</div>
+                        <div style={{ fontSize:12.5, color:C.textSec }}>
+                          対戦 {p.matches.length}試合
+                          {ownPairKey==="all" && p.ownPairKeys.size>1 && `（自チーム${p.ownPairKeys.size}ペアが対戦）`}
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
+                        <div style={{ fontSize:15, fontWeight:900, color:col }}>{p.w}勝{p.l}敗</div>
+                        <span style={{ color:C.textSec, fontSize:16, marginLeft:8 }}>›</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {/* ============ 集計（自分たち／相手ペア詳細） ============ */}
+            {(side === "own" || selectedOppPair) && (
+              <>
+                {side === "opp" && (
+                  <div onClick={()=>setOppPairKey("")} style={{ fontSize:13.5, fontWeight:700, color:C.navy, marginBottom:10, cursor:"pointer" }}>← 相手ペアの一覧に戻る</div>
+                )}
+
+                <div onClick={()=>setRecordOpen(v=>!v)} style={{ ...S.card, padding:14, marginBottom:12, cursor:"pointer" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      {side === "opp" && <div style={{ fontSize:12.5, color:C.textSec, fontWeight:700 }}>{selectedOppPair.club}</div>}
+                      <div style={{ fontSize:19, fontWeight:900, color:C.text, margin:"2px 0 6px" }}>
+                        {side === "own" ? selectedOwnPair?.label : selectedOppPair.label}
+                      </div>
+                      <div>
+                        <span style={{ fontSize:24, fontWeight:900, color:C.text }}>{wins}</span><span style={{ fontSize:14, color:C.textSec }}>勝</span>
+                        <span style={{ fontSize:24, fontWeight:900, color:C.text, marginLeft:4 }}>{losses}</span><span style={{ fontSize:14, color:C.textSec }}>敗</span>
+                        <span style={{ fontSize:13.5, color:C.textSec, marginLeft:8 }}>
+                          {targetMatches.length}試合{targetMatches.length>0 && `・勝率${Math.round(wins/targetMatches.length*100)}%`}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ color:C.textSec, fontSize:15 }}>{recordOpen?"▲":"▼"}</div>
+                  </div>
+
+                  {recordOpen && (
+                    <div style={{ marginTop:12, borderTop:`1px solid ${C.border}`, paddingTop:10 }}>
+                      {[...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
+                        const win = winnerSideOf(m)==="A";
+                        const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
+                        return (
+                          <div key={m.id} onClick={e=>{ e.stopPropagation(); onOpenMatch && onOpenMatch(m.id); }}
+                            style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid ${C.border}`, fontSize:13.5, cursor:"pointer" }}>
+                            <span style={{ color:C.textSec, fontSize:12.5, width:42, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
+                            <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {other ? `${other.club ? other.club+" " : ""}${other.label}` : ""}
+                            </span>
+                            <span style={{ fontWeight:800 }}>{m.match_score_a}-{m.match_score_b}</span>
+                            <span style={{ fontWeight:900, color:win?C.accent:C.red, width:26, textAlign:"right" }}>{win?"勝":"敗"}</span>
+                            <span style={{ color:C.textSec, fontSize:15 }}>›</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {detailLoading ? (
+                  <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0" }}>集計中...</div>
+                ) : !pairAgg || pairAgg.total === 0 ? (
+                  <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:13.5 }}>
+                    得点の記録がある試合がありません
+                  </div>
+                ) : (
+                  <>
+                    <div style={S.card}>
+                      <div style={{ padding:14 }}>
+                        <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>
+                          {side==="own" ? "📋 決めた・ミスの内訳" : "🔴 この相手の決めた・ミスの内訳"}
+                        </div>
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
+                          <div style={{ textAlign:"center", padding:"12px 2px", background:C.gray, borderRadius:10 }}>
+                            <div style={{ fontSize:21, fontWeight:800, color:C.navy }}>{pairAgg.winners}</div>
+                            <div style={{ fontSize:12, color:C.textSec, marginTop:3 }}>決めた</div>
+                          </div>
+                          <div style={{ textAlign:"center", padding:"12px 2px", background:C.gray, borderRadius:10 }}>
+                            <div style={{ fontSize:21, fontWeight:800, color:C.navy }}>{pairAgg.errors}</div>
+                            <div style={{ fontSize:12, color:C.textSec, marginTop:3 }}>ミス</div>
+                          </div>
+                          <div style={{ textAlign:"center", padding:"12px 2px", background:C.gray, borderRadius:10 }}>
+                            <div style={{ fontSize:21, fontWeight:800, color:C.navy }}>{pairAgg.total>0?Math.round(pairAgg.winners/pairAgg.total*100):0}%</div>
+                            <div style={{ fontSize:12, color:C.textSec, marginTop:3 }}>決定率</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:5 }}>✅ 決めた</div>
+                        {topWin.map(([l,c])=><Bar key={"w"+l} label={l} count={c} color={C.accent}/>)}
+                        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, margin:"12px 0 5px" }}>⚠️ ミス</div>
+                        {topErr.map(([l,c])=><Bar key={"e"+l} label={l} count={c} color={C.red}/>)}
+                      </div>
+                    </div>
+
+                    <div style={S.card}>
+                      <div style={{ padding:14 }}>
+                        <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>🤝 2人それぞれの成績</div>
+                        <div style={{ display:"flex", gap:8 }}>
+                          {statNames.map(n => {
+                            const a = byPlayer[n];
+                            return (
+                              <div key={n} style={{ flex:1, background:C.gray, borderRadius:10, padding:12, textAlign:"center" }}>
+                                <div style={{ fontSize:15, fontWeight:800, color:C.text, marginBottom:6 }}>{n}</div>
+                                <div style={{ fontSize:13, color:C.textSec }}>
+                                  決め <b style={{ fontSize:16, color:C.text }}>{a?.winners ?? 0}</b>
+                                  　ミス <b style={{ fontSize:16, color:C.text }}>{a?.errors ?? 0}</b>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={S.card}>
+                      <div style={{ padding:14 }}>
+                        <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>🎾 サーブ</div>
+                        {[["1stサーブ得点率", pairAgg.serve1st, pairAgg.serve1stWin],
+                          ["2ndサーブ得点率", pairAgg.serve2nd, pairAgg.serve2ndWin]].map(([label,tot,win])=>(
+                          <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:`1px solid ${C.border}`, fontSize:13.5 }}>
+                            <span style={{ color:C.textSec, fontWeight:700 }}>{label}</span>
+                            <span style={{ color:C.text, fontWeight:800 }}>{tot>0 ? `${win}／${tot}本（${Math.round(win/tot*100)}%）` : "記録なし"}</span>
+                          </div>
+                        ))}
+                        <div style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", fontSize:13.5 }}>
+                          <span style={{ color:C.textSec, fontWeight:700 }}>ダブルフォルト</span>
+                          <span style={{ color:C.text, fontWeight:800 }}>{pairAgg.serveDf}本</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+      <NavBar active="stats" onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStats, onOpenMatch }) {
   const [loading, setLoading] = useState(true);
   const [roster, setRoster] = useState([]);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
@@ -11334,7 +11710,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenTeamStats, onOpenMatch }) {
         {/* ★個人／ペア／チームのタブ。ペアは未実装のため準備中の案内を出す */}
         <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:5, gap:5, marginBottom:12 }}>
           <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:800, borderRadius:9, background:C.white, color:C.navy, boxShadow:"0 1px 4px rgba(0,0,0,0.12)" }}>個人</div>
-          <div onClick={()=>alert("ペアの分析は準備中です")} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>ペア</div>
+          <div onClick={()=>onOpenPairAnalysis && onOpenPairAnalysis()} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>ペア</div>
           <div onClick={onOpenTeamStats} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>チーム</div>
         </div>
 
@@ -12116,7 +12492,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
       <div style={{ padding:14, paddingBottom:90 }}>
         <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:5, gap:5, marginBottom:12 }}>
           <div onClick={()=>onNavigate&&onNavigate("stats")} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>個人</div>
-          <div onClick={()=>alert("ペアの分析は準備中です")} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>ペア</div>
+          <div onClick={()=>onNavigate && onNavigate("pairAnalysis")} style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:700, borderRadius:9, color:C.textSec, cursor:"pointer" }}>ペア</div>
           <div style={{ flex:1, textAlign:"center", padding:"12px 4px", fontSize:15, fontWeight:800, borderRadius:9, background:C.white, color:C.navy, boxShadow:"0 1px 4px rgba(0,0,0,0.12)" }}>チーム</div>
         </div>
         {loading ? (
@@ -18993,6 +19369,7 @@ export default function App() {
     else if (key==="stats") setScreen("personalAnalysis");
     else if (key==="master") setScreen("master");
     else if (key==="aiAnalysisList") { setAiAnalysisPlayer(null); setScreen("aiAnalysisList"); }
+    else if (key==="pairAnalysis") setScreen("pairAnalysis");
   }
 
   if (screen==="home") {
@@ -19099,8 +19476,19 @@ export default function App() {
     return (
       <PersonalAnalysisScreen
         onNavigate={goNav}
+        onOpenPairAnalysis={()=>setScreen("pairAnalysis")}
         onOpenTeamStats={()=>setScreen("stats")}
         onOpenMatch={id=>{ setMatchId(id); setPrevScreen("personalAnalysis"); setRecordInitialTab("stats"); setScreen("record"); }}
+      />
+    );
+  }
+  if (screen==="pairAnalysis") {
+    return (
+      <PairAnalysisScreen
+        onNavigate={goNav}
+        onOpenPersonal={()=>setScreen("personalAnalysis")}
+        onOpenTeamStats={()=>setScreen("stats")}
+        onOpenMatch={id=>{ setMatchId(id); setPrevScreen("pairAnalysis"); setRecordInitialTab("stats"); setScreen("record"); }}
       />
     );
   }
