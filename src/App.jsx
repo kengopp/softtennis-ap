@@ -12307,12 +12307,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       return roundProgressRank(a.round) - roundProgressRank(b.round);
     });
     const target = ordered.slice(-TREND_MAX);
+    // ★同じ日に何試合もあるので、その日の何試合目かを番号で表す（回戦名は長すぎて入らない）
+    const dayCount = {};
     const rows = target.map(m => {
+      const d = m.match_date || "";
+      dayCount[d] = (dayCount[d] ?? 0) + 1;
       const a = aggregatePlayerStats([m], selectedPlayer, effectiveSchoolName);
       const s1 = a.serve1st ?? 0, s2 = a.serve2nd ?? 0;
       return {
         id: m.id,
-        date: m.match_date,
+        date: d,
+        no: dayCount[d],
         round: m.round || "",
         r1: s1 > 0 ? Math.round((a.serve1stWin ?? 0) / s1 * 100) : null,
         r2: s2 > 0 ? Math.round((a.serve2ndWin ?? 0) / s2 * 100) : null,
@@ -12346,9 +12351,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         <div style={{ display:"flex", gap:6, marginTop:6 }}>
           {serveTrend.rows.map(r => (
             <div key={r.id} style={{ flex:1, textAlign:"center", minWidth:0 }}>
-              <div style={{ fontSize:12.5, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                {r.round || "—"}
-              </div>
+              <div style={{ fontSize:14, fontWeight:800, color:C.text }}>{r.no}</div>
               <div style={{ fontSize:11.5, color:C.textSec }}>
                 {r.date ? `${Number(r.date.slice(5,7))}/${Number(r.date.slice(8,10))}` : ""}
               </div>
@@ -12356,7 +12359,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           ))}
         </div>
         <div style={{ fontSize:12, color:"#8a92a0", marginTop:8, lineHeight:1.6 }}>
-          ※「—」はその試合にサーブの記録が無いことを表します
+          数字はその日の何試合目かを表します。「—」はサーブの記録が無い試合です。
         </div>
       </div>
     </div>
