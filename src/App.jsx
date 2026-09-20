@@ -602,6 +602,34 @@ function playerStatsInMatch(match, playerName, mySchoolName) {
 }
 
 // 複数の試合をまたいで、指定選手のスタッツを合算する
+// ============================================================
+// 相手ペアへのメモ（opponent_notes）
+// ・相手ペアに紐づけて何件でも残せる。試合への紐づけは任意。
+// ============================================================
+async function getOpponentNotes(schoolId, pairKey) {
+  if (!schoolId || !pairKey) return [];
+  const { data, error } = await supabase.from("opponent_notes")
+    .select("*").eq("school_id", schoolId).eq("pair_key", pairKey)
+    .is("deleted_at", null).order("created_at", { ascending:false });
+  if (error) { console.error(error); return []; }
+  return data ?? [];
+}
+async function saveOpponentNote({ id, school_id, opponent_club, pair_key, pair_label, note_text, match_id }) {
+  const payload = {
+    id: id || uid(), school_id, opponent_club: opponent_club || "",
+    pair_key, pair_label, note_text: note_text.trim(),
+    match_id: match_id || null, updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("opponent_notes").upsert(payload);
+  if (error) throw error;
+  return payload;
+}
+async function deleteOpponentNote(id) {
+  const { error } = await supabase.from("opponent_notes")
+    .update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+
 // ★回戦名をトーナメントの進行順に並べるための順位（1回戦→…→決勝）。
 //   同じ日に何試合もある大会で、試合を正しい順番に並べるために使う。
 function roundProgressRank(round) {
@@ -690,6 +718,63 @@ function aggregatePairStats(fullMatches, nameA, nameB, mySchoolName) {
   });
   sum.matchesCounted = fullMatches.length;
   return { pair: sum, byPlayer: { [nameA]: a, [nameB]: b } };
+}
+
+// ★コース分析の集計（個人・ペアの両方で使う）。aggはaggregatePlayerStats/aggregatePairStatsの結果。
+function buildCourseStats(agg) {
+    const cell = (key) => {
+      const win = agg.courseWin?.[key] ?? 0;
+      const err = agg.courseErr?.[key] ?? 0;
+      return { key, label: getCourseLabel(key), win, err, total: win + err };
+    };
+    const byKey = {};
+    COURSE_TYPES.forEach(ct => { byKey[ct.key] = cell(ct.key); });
+    const all = COURSE_TYPES.reduce((a, ct) => a + byKey[ct.key].total, 0);
+
+    // ① 立ち位置に関係なく、引っ張り／流しのどちらを多く打っているか
+    const pull = byKey.sei_pull.total + byKey.gyaku_pull.total;
+    const nagashi = byKey.sei_nagashi.total + byKey.gyaku_nagashi.total;
+
+    // ② 正クロス時・逆クロス時それぞれの中での引っ張り／流し
+    const positions = [
+      { pos:"正クロス", pullCell: byKey.sei_pull,   nagaCell: byKey.sei_nagashi   },
+      { pos:"逆クロス", pullCell: byKey.gyaku_pull, nagaCell: byKey.gyaku_nagashi },
+    ].map(p => ({ ...p, total: p.pullCell.total + p.nagaCell.total }));
+
+    // ③ フォア／バックそれぞれの中での引っ張り／流し
+    const scCell = (side, courseKey) => {
+      const k = side + "__" + courseKey;
+      const win = agg.sideCourseWin?.[k] ?? 0;
+      const err = agg.sideCourseErr?.[k] ?? 0;
+      return win + err;
+    };
+    const sides = SIDE_TYPES.map(st => {
+      const pullN   = scCell(st.key, "sei_pull")   + scCell(st.key, "gyaku_pull");
+      const nagashiN = scCell(st.key, "sei_nagashi") + scCell(st.key, "gyaku_nagashi");
+      const seiTotal   = scCell(st.key, "sei_pull")   + scCell(st.key, "sei_nagashi");
+      const gyakuTotal = scCell(st.key, "gyaku_pull") + scCell(st.key, "gyaku_nagashi");
+      return {
+        side: st.key, label: st.label, total: pullN + nagashiN, pull: pullN, nagashi: nagashiN,
+        positions: [
+          { pos:"正クロス", total: seiTotal,   pull: scCell(st.key,"sei_pull"),   nagashi: scCell(st.key,"sei_nagashi") },
+          { pos:"逆クロス", total: gyakuTotal, pull: scCell(st.key,"gyaku_pull"), nagashi: scCell(st.key,"gyaku_nagashi") },
+        ],
+      };
+    });
+
+    // ④ 4コースそれぞれの決めた／ミス
+    const rows = COURSE_TYPES.map(ct => byKey[ct.key]);
+
+    // 気づきの一文（本数が少ないと割合が極端に出るため3本以上のコースだけを対象にする）
+    let best = null, worst = null;
+    rows.forEach(r => {
+      if (r.total < 3) return;
+      const rate = r.win / r.total;
+      if (!best  || rate > best.rate)  best  = { ...r, rate };
+      if (!worst || rate < worst.rate) worst = { ...r, rate };
+    });
+
+  return { all, pull, nagashi, positions, sides, rows, best, worst };
 }
 
 // 合算スタッツから、画面表示用の主要指標（%）を計算する
@@ -10796,11 +10881,15 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [detailLoading, setDetailLoading] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);    // 通算成績の内訳の開閉
   const [breakdownDim, setBreakdownDim] = useState("play");
+  const [schoolId, setSchoolId] = useState(null);
+  const [notes, setNotes] = useState([]);
+  const [noteEditing, setNoteEditing] = useState(null); // {id?, text, match_id}
 
   useEffect(() => {
     (async () => {
       const [p, list, schools] = await Promise.all([getMyProfile(), getMatches(), getSchools()]);
       if (p?.school_id) {
+        setSchoolId(p.school_id);
         const s = (schools||[]).find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
       }
@@ -10862,6 +10951,35 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   const selectedOppPair = oppPairs.find(p => p.key === oppPairKey) || null;
 
+  // ★相手ペアを開いたら、そのペアのメモを読み込む
+  useEffect(() => {
+    if (!schoolId || !selectedOppPair) { setNotes([]); return; }
+    let cancelled = false;
+    getOpponentNotes(schoolId, selectedOppPair.key).then(rows => { if (!cancelled) setNotes(rows); });
+    return () => { cancelled = true; };
+  }, [schoolId, oppPairKey, selectedOppPair?.key]);
+
+  async function handleSaveNote() {
+    if (!noteEditing || !noteEditing.text.trim() || !schoolId || !selectedOppPair) return;
+    try {
+      await saveOpponentNote({
+        id: noteEditing.id, school_id: schoolId,
+        opponent_club: selectedOppPair.club, pair_key: selectedOppPair.key,
+        pair_label: selectedOppPair.label, note_text: noteEditing.text,
+        match_id: noteEditing.match_id,
+      });
+      setNoteEditing(null);
+      setNotes(await getOpponentNotes(schoolId, selectedOppPair.key));
+    } catch(e) { alert("保存に失敗しました: "+(e.message||e)); }
+  }
+  async function handleDeleteNote(id) {
+    if (!window.confirm("このメモを削除しますか？")) return;
+    try {
+      await deleteOpponentNote(id);
+      setNotes(await getOpponentNotes(schoolId, selectedOppPair.key));
+    } catch(e) { alert("削除に失敗しました: "+(e.message||e)); }
+  }
+
   // 表示対象の試合（自分たち＝そのペアの全試合／相手分析＝その相手ペアとの試合）
   const targetMatches = side === "own"
     ? (selectedOwnPair?.matches ?? [])
@@ -10899,6 +11017,46 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const topWin = pairAgg ? Object.entries(pairAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
   const topErr = pairAgg ? Object.entries(pairAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
   const maxPlay = Math.max(1, ...topWin.map(x=>x[1]), ...topErr.map(x=>x[1]));
+  const courseStats = pairAgg ? buildCourseStats(pairAgg) : null;
+
+  // ★試合展開：1ゲーム目を取れたかどうか、ファイナル、ストレート勝ちなど
+  const flowStats = useMemo(() => {
+    if (detailMatches.length === 0) return null;
+    // 相手分析のときは「相手から見た」展開にするため、勝ち側を入れ替える
+    const weAreA = side === "own";
+    let firstWon = { n:0, w:0 }, firstLost = { n:0, w:0 }, finalGame = { n:0, w:0 }, straight = 0;
+    detailMatches.forEach(m => {
+      const games = [...(m.games ?? [])].sort((a,b)=>(a.game_number??0)-(b.game_number??0));
+      if (games.length === 0) return;
+      const winA = winnerSideOf(m) === "A";
+      const won = weAreA ? winA : !winA;
+      const g1 = games[0];
+      if (g1 && g1.winner_team) {
+        const g1Mine = weAreA ? g1.winner_team === "A" : g1.winner_team === "B";
+        const bucket = g1Mine ? firstWon : firstLost;
+        bucket.n++; if (won) bucket.w++;
+      }
+      // ファイナルゲーム（最終ゲームまでもつれた試合）
+      const need = Math.ceil((m.game_format ?? 7) / 2) + 1;
+      const a = m.match_score_a ?? 0, b = m.match_score_b ?? 0;
+      if (Math.min(a,b) === need - 1) { finalGame.n++; if (won) finalGame.w++; }
+      if (won && Math.min(a,b) === 0) straight++;
+    });
+    return { firstWon, firstLost, finalGame, straight };
+  }, [detailMatches, side]);
+
+  const SplitBar = ({ pull, nagashi, total }) => (
+    <>
+      <div style={{ display:"flex", height:26, borderRadius:7, overflow:"hidden", background:"#eef0f3" }}>
+        {pull>0 && <div style={{ width:`${pull/total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white }}>{Math.round(pull/total*100)}%</div>}
+        {nagashi>0 && <div style={{ width:`${nagashi/total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white }}>{Math.round(nagashi/total*100)}%</div>}
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.textSec, marginTop:6 }}>
+        <span>引っ張り <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{pull}</b>本</span>
+        <span>流し <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{nagashi}</b>本</span>
+      </div>
+    </>
+  );
 
   const Bar = ({ label, count, color }) => (
     <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
@@ -11040,6 +11198,74 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                   )}
                 </div>
 
+                {/* ★相手ペアへのメモ */}
+                {side === "opp" && selectedOppPair && (
+                  <div style={S.card}>
+                    <div style={{ padding:14 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                        <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>📝 メモ（{notes.length}件）</div>
+                        {!noteEditing && (
+                          <button onClick={()=>setNoteEditing({ text:"", match_id:null })}
+                            style={{ background:C.gray, border:"none", borderRadius:8, fontSize:13.5, fontWeight:700, color:C.navy, padding:"7px 12px", cursor:"pointer" }}>＋ 追加</button>
+                        )}
+                      </div>
+
+                      {noteEditing && (
+                        <div style={{ background:C.gray, borderRadius:10, padding:12, marginBottom:10 }}>
+                          <textarea
+                            value={noteEditing.text}
+                            onChange={e=>setNoteEditing(v=>({ ...v, text:e.target.value }))}
+                            placeholder={"気づいたことを書いてください\n例：田中のポーチが速い。ロブで一度下げてから展開する。"}
+                            style={{ width:"100%", minHeight:110, padding:12, borderRadius:9, border:`1.5px solid ${C.border}`,
+                              fontSize:14.5, lineHeight:1.75, color:C.text, fontFamily:"inherit", resize:"vertical" }}
+                          />
+                          <div style={{ fontSize:13, fontWeight:700, color:C.text, margin:"10px 0 6px" }}>試合に紐づける（任意）</div>
+                          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+                            {[...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
+                              const on = noteEditing.match_id === m.id;
+                              return (
+                                <div key={m.id} onClick={()=>setNoteEditing(v=>({ ...v, match_id: on ? null : m.id }))}
+                                  style={{ padding:"9px 12px", borderRadius:9, fontSize:13, fontWeight:700, cursor:"pointer",
+                                    border:`1.5px solid ${on?C.navy:C.border}`, background:on?C.navy:C.white, color:on?C.white:C.textSec }}>
+                                  {(m.match_date||"").slice(5).replace("-","/")} {m.round||""} {m.match_score_a}-{m.match_score_b}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <button onClick={handleSaveNote} disabled={!noteEditing.text.trim()}
+                            style={{ width:"100%", padding:14, borderRadius:10, border:"none", fontSize:15, fontWeight:800, marginBottom:8,
+                              background: noteEditing.text.trim() ? C.navy : "#d5dae2", color:C.white, cursor:"pointer" }}>保存する</button>
+                          <button onClick={()=>setNoteEditing(null)}
+                            style={{ width:"100%", padding:12, borderRadius:10, border:`1.5px solid ${C.border}`, background:C.white, fontSize:14, fontWeight:700, color:C.textSec, cursor:"pointer" }}>キャンセル</button>
+                        </div>
+                      )}
+
+                      {notes.length === 0 && !noteEditing && (
+                        <div style={{ textAlign:"center", color:C.textSec, fontSize:13.5, padding:"16px 0" }}>
+                          まだメモがありません。次に当たるときのために書いておけます。
+                        </div>
+                      )}
+
+                      {notes.map(n => {
+                        const linked = n.match_id ? targetMatches.find(m=>m.id===n.match_id) : null;
+                        return (
+                          <div key={n.id} style={{ background:"#fffdf5", border:"1px solid #f0dfa8", borderRadius:10, padding:12, marginBottom:8 }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:12.5, color:C.textSec, fontWeight:700, marginBottom:6 }}>
+                              <span>{(n.created_at||"").slice(0,10).replace(/-/g,"/")}</span>
+                              <span style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                {linked && <span style={{ fontSize:12, fontWeight:800, color:"#8a5a00", background:"#fff4e5", border:"1px solid #f5c979", borderRadius:6, padding:"2px 7px" }}>{linked.round||"試合"}</span>}
+                                <span onClick={()=>setNoteEditing({ id:n.id, text:n.note_text, match_id:n.match_id })} style={{ color:C.navy, cursor:"pointer" }}>編集</span>
+                                <span onClick={()=>handleDeleteNote(n.id)} style={{ color:C.red, cursor:"pointer" }}>削除</span>
+                              </span>
+                            </div>
+                            <div style={{ fontSize:14, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap" }}>{n.note_text}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {detailLoading ? (
                   <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0" }}>集計中...</div>
                 ) : !pairAgg || pairAgg.total === 0 ? (
@@ -11110,6 +11336,89 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         </div>
                       </div>
                     </div>
+
+                    {courseStats && courseStats.all > 0 && (
+                      <div style={S.card}>
+                        <div style={{ padding:14 }}>
+                          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>🎯 コース傾向</div>
+
+                          <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:7 }}>① 引っ張り / 流し</div>
+                          <SplitBar pull={courseStats.pull} nagashi={courseStats.nagashi} total={courseStats.all} />
+
+                          <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>② 立ち位置ごと</div>
+                            {courseStats.positions.filter(p=>p.total>0).map(p => (
+                              <div key={p.pos} style={{ marginBottom:12 }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
+                                  <span>{p.pos}</span><span style={{ fontSize:13, fontWeight:400, color:C.textSec }}><b style={{ fontSize:15, fontWeight:800, color:C.text }}>{p.total}</b>本</span>
+                                </div>
+                                <SplitBar pull={p.pullCell.total} nagashi={p.nagaCell.total} total={p.total} />
+                              </div>
+                            ))}
+                          </div>
+
+                          <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>③ フォア / バック別</div>
+                            {courseStats.sides.filter(sd=>sd.total>0).map(sd => (
+                              <div key={sd.side} style={{ marginBottom:12 }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
+                                  <span>{sd.label}</span><span style={{ fontSize:13, fontWeight:400, color:C.textSec }}><b style={{ fontSize:15, fontWeight:800, color:C.text }}>{sd.total}</b>本</span>
+                                </div>
+                                <SplitBar pull={sd.pull} nagashi={sd.nagashi} total={sd.total} />
+                              </div>
+                            ))}
+                          </div>
+
+                          <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:10 }}>④ コース別の 決めた / ミス</div>
+                            {courseStats.rows.map(r => {
+                              const rate = r.total>0 ? Math.round(r.win/r.total*100) : 0;
+                              return (
+                                <div key={r.key} style={{ marginBottom:13 }}>
+                                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
+                                    <span>{r.label}</span>
+                                    {r.total>0
+                                      ? <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>{r.total}本中 <b style={{ fontSize:14.5, fontWeight:800, color:rate<40?C.red:C.text }}>決定率 {rate}%</b></span>
+                                      : <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>記録なし</span>}
+                                  </div>
+                                  {r.total>0 && (
+                                    <div style={{ display:"flex", height:26, borderRadius:7, overflow:"hidden", background:"#eef0f3" }}>
+                                      {r.win>0 && <div style={{ width:`${r.win/r.total*100}%`, background:C.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden" }}>決めた {r.win}</div>}
+                                      {r.err>0 && <div style={{ width:`${r.err/r.total*100}%`, background:C.red, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden" }}>ミス {r.err}</div>}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div style={{ fontSize:12, color:"#8a92a0", marginTop:6, lineHeight:1.6 }}>
+                            ※コースが入力された{courseStats.all}本をもとに集計しています。
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {flowStats && (
+                      <div style={S.card}>
+                        <div style={{ padding:14 }}>
+                          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>📈 試合展開</div>
+                          {[["1ゲーム目を取った試合", flowStats.firstWon],
+                            ["1ゲーム目を落とした試合", flowStats.firstLost],
+                            ["ファイナルゲームまでもつれた試合", flowStats.finalGame]].map(([label,v])=>(
+                            <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:`1px solid ${C.border}`, fontSize:13.5 }}>
+                              <span style={{ color:C.textSec, fontWeight:700 }}>{label}</span>
+                              <span style={{ color:C.text, fontWeight:800 }}>
+                                {v.n>0 ? `${v.n}試合 → ${v.w}勝${v.n-v.w}敗` : "なし"}
+                              </span>
+                            </div>
+                          ))}
+                          <div style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", fontSize:13.5 }}>
+                            <span style={{ color:C.textSec, fontWeight:700 }}>ストレート勝ち</span>
+                            <span style={{ color:C.text, fontWeight:800 }}>{flowStats.straight}試合</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -11608,61 +11917,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const topMissCombos = Object.entries(agg.missCombos ?? {}).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
   // ★コース分析（① 引っ張り/流し → ② 立ち位置ごとの引っ張り/流し → ③ コース別の決めた/ミス）
-  const courseStats = (() => {
-    const cell = (key) => {
-      const win = agg.courseWin?.[key] ?? 0;
-      const err = agg.courseErr?.[key] ?? 0;
-      return { key, label: getCourseLabel(key), win, err, total: win + err };
-    };
-    const byKey = {};
-    COURSE_TYPES.forEach(ct => { byKey[ct.key] = cell(ct.key); });
-    const all = COURSE_TYPES.reduce((a, ct) => a + byKey[ct.key].total, 0);
-
-    // ① 立ち位置に関係なく、引っ張り／流しのどちらを多く打っているか
-    const pull = byKey.sei_pull.total + byKey.gyaku_pull.total;
-    const nagashi = byKey.sei_nagashi.total + byKey.gyaku_nagashi.total;
-
-    // ② 正クロス時・逆クロス時それぞれの中での引っ張り／流し
-    const positions = [
-      { pos:"正クロス", pullCell: byKey.sei_pull,   nagaCell: byKey.sei_nagashi   },
-      { pos:"逆クロス", pullCell: byKey.gyaku_pull, nagaCell: byKey.gyaku_nagashi },
-    ].map(p => ({ ...p, total: p.pullCell.total + p.nagaCell.total }));
-
-    // ③ フォア／バックそれぞれの中での引っ張り／流し
-    const scCell = (side, courseKey) => {
-      const k = side + "__" + courseKey;
-      const win = agg.sideCourseWin?.[k] ?? 0;
-      const err = agg.sideCourseErr?.[k] ?? 0;
-      return win + err;
-    };
-    const sides = SIDE_TYPES.map(st => {
-      const pullN   = scCell(st.key, "sei_pull")   + scCell(st.key, "gyaku_pull");
-      const nagashiN = scCell(st.key, "sei_nagashi") + scCell(st.key, "gyaku_nagashi");
-      const seiTotal   = scCell(st.key, "sei_pull")   + scCell(st.key, "sei_nagashi");
-      const gyakuTotal = scCell(st.key, "gyaku_pull") + scCell(st.key, "gyaku_nagashi");
-      return {
-        side: st.key, label: st.label, total: pullN + nagashiN, pull: pullN, nagashi: nagashiN,
-        positions: [
-          { pos:"正クロス", total: seiTotal,   pull: scCell(st.key,"sei_pull"),   nagashi: scCell(st.key,"sei_nagashi") },
-          { pos:"逆クロス", total: gyakuTotal, pull: scCell(st.key,"gyaku_pull"), nagashi: scCell(st.key,"gyaku_nagashi") },
-        ],
-      };
-    });
-
-    // ④ 4コースそれぞれの決めた／ミス
-    const rows = COURSE_TYPES.map(ct => byKey[ct.key]);
-
-    // 気づきの一文（本数が少ないと割合が極端に出るため3本以上のコースだけを対象にする）
-    let best = null, worst = null;
-    rows.forEach(r => {
-      if (r.total < 3) return;
-      const rate = r.win / r.total;
-      if (!best  || rate > best.rate)  best  = { ...r, rate };
-      if (!worst || rate < worst.rate) worst = { ...r, rate };
-    });
-
-    return { all, pull, nagashi, positions, sides, rows, best, worst };
-  })();
+  const courseStats = buildCourseStats(agg);
   const hasMissDetail = (agg.missTyped ?? 0) > 0 || missSideTotal > 0;
 
   // ★サーブ分析（集計）：1st/2nd/DFの本数と、それぞれのサーブ時の得点率
