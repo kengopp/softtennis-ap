@@ -148,6 +148,30 @@ const today  = () => {
 // ★ログアウトなど「意図した画面遷移」の際は、beforeunloadの確認ダイアログ（アプリを終了しますか？）
 // を出さないようにするための共有フラグ。ログアウト確認→リロードの間に二重で確認が出る不具合を防ぐ。
 let skipUnloadConfirm = false;
+
+// ★戻るボタンでアプリを終了しようとしたときの確認を、自前の小さいポップアップで表示する。
+//   window.confirm()はブラウザ標準の無機質なダイアログしか出せずデザインを変えられないため、
+//   DOM操作で直接カード風のポップアップを作る（Reactの外側に一時的に差し込んで、選択されたら消す）。
+function showExitConfirmDialog() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(15,32,68,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;";
+    const box = document.createElement("div");
+    box.style.cssText = "background:#fff;border-radius:18px;padding:22px 20px 18px;max-width:260px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);text-align:center;font-family:'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;";
+    box.innerHTML = `
+      <div style="font-size:15px;font-weight:800;color:#0f2044;margin-bottom:16px;">アプリを終了しますか？</div>
+      <div style="display:flex;gap:8px;">
+        <button id="stExitCancel" style="flex:1;padding:11px 0;border-radius:10px;border:1px solid #dde2ea;background:#fff;color:#7a8499;font-size:13.5px;font-weight:700;">キャンセル</button>
+        <button id="stExitOk" style="flex:1;padding:11px 0;border-radius:10px;border:none;background:#00c27a;color:#fff;font-size:13.5px;font-weight:800;">終了する</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const cleanup = (result) => { document.body.removeChild(overlay); resolve(result); };
+    box.querySelector("#stExitCancel").onclick = () => cleanup(false);
+    box.querySelector("#stExitOk").onclick = () => cleanup(true);
+  });
+}
 // ============================================================
 // 画面共通のキャッシュ
 // ============================================================
@@ -744,15 +768,11 @@ function pairLabelOf(nameA, nameB) {
 function pairOnSide(m, team) {
   const list = m.players.filter(p => p.team === team).sort((a,b)=>(a.order_num??0)-(b.order_num??0));
   if (list.length < 2) return null;
-  const club = list[0].club_name || list[1].club_name || "";
   return {
     names: [list[0].player_name, list[1].player_name],
-    // ★学校名もキーに含める。団体戦などで実名未入力のまま「前衛・後衛」といった
-    //   仮の名前が入っていると、学校が違う別のペアでも名前だけ見ると同じになってしまい、
-    //   相手分析タブで別校のペアが1つにまとめられてしまう不具合があったため。
-    key: (club || "（不明）") + "__" + pairKeyOf(list[0].player_name, list[1].player_name),
+    key: pairKeyOf(list[0].player_name, list[1].player_name),
     label: pairLabelOf(list[0].player_name, list[1].player_name),
-    club,
+    club: list[0].club_name || list[1].club_name || "",
   };
 }
 // ★自チーム側／相手側のペアを取り出す（自チーム同士の試合ではA側を自チーム扱いにする）
@@ -12469,7 +12489,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           </div>
         )}
 
-        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:6 }}>選手はそのままで試合数だけ変える</div>
         <div style={{ display:"flex", gap:6, marginBottom:12 }}>
           {[1,3,5,10].map(n => {
             const active = scope.limit === n && (scope.pickedIds??[]).length===0;
@@ -12644,10 +12663,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
             {/* ★成長の推移：サーブ分析（合計）のすぐ下で、試合ごとの変化を見る */}
             {serveTrend && (
               <>
-                <div style={{ fontSize:15, fontWeight:800, color:C.navy, margin:"16px 0 2px" }}>📈 成長の推移</div>
-                <div style={{ fontSize:12.5, color:C.textSec, marginBottom:8 }}>
-                  いま集計している{displayedMatches.length}試合を1試合ずつ集計しています
-                </div>
                 {serveTrend.has1 && <TrendCard title="1stサーブ得点率（試合ごと）" pick={r=>r.r1} color={C.accent} />}
                 {serveTrend.has2 && <TrendCard title="2ndサーブ得点率（試合ごと）" pick={r=>r.r2} color="#8fdcbb" />}
                 {serveTrend.omitted > 0 && (
@@ -20083,8 +20098,8 @@ export default function App() {
       window.history.pushState({ stBackTrap: true }, "");
       window.__stBackTrapArmed = true;
     }
-    const onPop = () => {
-      const leave = window.confirm("アプリを終了しますか？\n\n前の画面に戻るときは、画面左上の「←」を押してください。");
+    const onPop = async () => {
+      const leave = await showExitConfirmDialog();
       if (leave) {
         skipUnloadConfirm = true;          // ②の確認を二重に出さない
         window.__stBackTrapArmed = false;
