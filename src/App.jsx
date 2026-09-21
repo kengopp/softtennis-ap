@@ -10414,7 +10414,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
 // ============================================================
 // 団体戦 詳細画面（リアルタイム観戦含む）
 // ============================================================
-function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onNavigate, onOpenAiAnalysis }) {
+function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStartMatch, onEdit, onEditPlayers, onNavigate, onOpenAiAnalysis }) {
   const isViewer = useIsViewer(); // ★閲覧専用アカウントには記録・編集系を出さない
   // ★AI動画分析の閲覧は本人・保護者・管理者だけ（AI分析メニューと同じ基準）
   const aiViewer = useAiAnalysisViewer();
@@ -10430,11 +10430,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [aiAnalyses, setAiAnalyses] = useState({}); // match_id -> AI分析行（あれば）
   const [serveSelectInfo, setServeSelectInfo] = useState(null); // サーブ選択モーダル用
   const [simpleResultFor, setSimpleResultFor] = useState(null); // ★結果だけ記録モーダル用（{orderNum, game, aLabel, bLabel, aPlayers, bPlayers}）
-  // ★番手の選手を後から編集する（相手が当日まで分からなかった場合など）
-  const [editPlayersFor, setEditPlayersFor] = useState(null); // { orderNum, matchId, isDoubles, aRows, bRows, aClub, bClub }
-  const [editNamesA, setEditNamesA] = useState([]);
-  const [editNamesB, setEditNamesB] = useState([]);
-  const [editPlayersSaving, setEditPlayersSaving] = useState(false);
   const [simpleResultScoreA, setSimpleResultScoreA] = useState("");
   const [simpleResultScoreB, setSimpleResultScoreB] = useState("");
   const [simpleResultNamesA, setSimpleResultNamesA] = useState([]); // ★結果だけ記録：自チーム選手名（編集可）
@@ -10658,26 +10653,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   <>
                     <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:2 }}>{(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム"}{tm.my_team_division ? `（${tm.my_team_division}）` : ""}: {aPlayers || "未登録"}</div>
                     <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:8 }}>{tm.opponent_name || "相手"}{tm.opponent_division ? `（${tm.opponent_division}）` : ""}: {bPlayers || "未登録"}</div>
-                    {/* ★選手の編集（未終了の番手のみ。相手が当日まで分からなかった場合などに使う） */}
+                    {/* ★選手の編集（未終了の番手のみ。相手が当日まで分からなかった場合などに使う）。
+                          試合作成時と同じ画面を編集モードで開く */}
                     {!isViewer && !isFinished && !isAbandoned && match?.id && canOperateGame(game) && (
                       <div
-                        onClick={()=>{
-                          const aRows = (match.match_players||[]).filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num);
-                          const bRows = (match.match_players||[]).filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num);
-                          const isDoubles = !!match.is_doubles || aRows.length>1 || bRows.length>1;
-                          const n = isDoubles ? 2 : 1;
-                          const pad = rows => Array.from({ length:n }, (_,i)=> {
-                            const v = rows[i]?.player_name ?? "";
-                            return PLACEHOLDER_NAMES.includes(v) ? "" : v; // 仮名は空欄として見せる
-                          });
-                          setEditPlayersFor({
-                            orderNum, matchId: match.id, isDoubles, aRows, bRows,
-                            aClub: aRows[0]?.club_name || (tm.my_school_id ? schoolMap[tm.my_school_id] : "") || "",
-                            bClub: bRows[0]?.club_name || tm.opponent_name || "",
-                          });
-                          setEditNamesA(pad(aRows));
-                          setEditNamesB(pad(bRows));
-                        }}
+                        onClick={()=>onEditPlayers && onEditPlayers(match.id, orderNum)}
                         style={{ display:"inline-block", fontSize:13, fontWeight:700, color:C.navy, background:C.gray,
                           borderRadius:8, padding:"7px 12px", marginBottom:8, cursor:"pointer" }}
                       >✏️ 選手を編集</div>
@@ -10814,81 +10794,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       </div>
       <NavBar active="list" onNavigate={onNavigate}/>
 
-      {/* ★番手の選手を編集するモーダル */}
-      {editPlayersFor && (
-        <Modal onClose={()=>!editPlayersSaving && setEditPlayersFor(null)}>
-          <div>
-            <div style={{ fontSize:16, fontWeight:800, marginBottom:4 }}>{editPlayersFor.orderNum}番手・選手を編集</div>
-            <div style={{ fontSize:12.5, color:C.textSec, marginBottom:14, lineHeight:1.7 }}>
-              相手が分からない場合は空欄のままで大丈夫です（「選手A／選手B」として記録されます）。
-            </div>
-            {[["A", editPlayersFor.aClub || "自チーム", editNamesA, setEditNamesA],
-              ["B", editPlayersFor.bClub || "相手", editNamesB, setEditNamesB]].map(([team,club,names,setNames])=>(
-              <div key={team} style={{ marginBottom:14 }}>
-                <div style={{ fontSize:13, fontWeight:800, color: team==="A"?C.teamA:C.teamB, marginBottom:6 }}>{club}</div>
-                {names.map((v,i)=>(
-                  <input key={i} value={v}
-                    onChange={e=>setNames(prev=>{ const nx=[...prev]; nx[i]=e.target.value; return nx; })}
-                    placeholder={team==="B" ? `${PLACEHOLDER_NAMES[i]}（未定なら空欄）` : `選手${i+1}`}
-                    style={{ width:"100%", padding:"11px 10px", borderRadius:9, border:`1.5px solid ${C.border}`, fontSize:15,
-                      marginBottom:6, color:C.text, boxSizing:"border-box", fontFamily:"inherit" }} />
-                ))}
-              </div>
-            ))}
-            <button disabled={editPlayersSaving}
-              style={{ width:"100%", padding:14, borderRadius:10, border:"none", background:C.navy, color:C.white, fontSize:15, fontWeight:800, marginBottom:8, cursor:"pointer" }}
-              onClick={async ()=>{
-                const ep = editPlayersFor;
-                setEditPlayersSaving(true);
-                try {
-                  // 自チーム・相手それぞれ、1人目／2人目を順に保存する
-                  const plan = [
-                    ["A", ep.aRows, editNamesA, ep.aClub],
-                    ["B", ep.bRows, editNamesB, ep.bClub],
-                  ];
-                  for (const [team, rows, names, club] of plan) {
-                    for (let i=0; i<names.length; i++) {
-                      const typed = (names[i]||"").trim();
-                      // 相手の空欄は仮名で保存（サーブ選択や得点入力で区別できるように）
-                      const newName = typed || (team==="B" ? PLACEHOLDER_NAMES[i] : "");
-                      const row = rows[i];
-                      if (row) {
-                        const oldName = row.player_name || "";
-                        if (oldName === newName) continue;
-                        const { error: e1 } = await supabase.from("match_players").update({ player_name:newName }).eq("id", row.id);
-                        if (e1) throw e1;
-                        // ★すでに記録したポイントの選手名も、この試合の分だけ書き換える
-                        if (oldName) {
-                          await supabase.from("points").update({ player_name:newName }).eq("match_id", ep.matchId).eq("player_name", oldName);
-                          await supabase.from("faults").update({ player_name:newName }).eq("match_id", ep.matchId).eq("player_name", oldName);
-                        }
-                      } else if (newName) {
-                        // 以前の不具合で2人目が保存されていなかった試合は、ここで追加する
-                        const { error: e2 } = await supabase.from("match_players").insert({
-                          id: uid(), match_id: ep.matchId, team, player_name:newName,
-                          club_name: club || null, position:null, order_num: i+1,
-                        });
-                        if (e2) throw e2;
-                      }
-                    }
-                  }
-                  setEditPlayersFor(null);
-                  await loadData({ markAsChanged:true });
-                } catch(e) {
-                  alert("保存に失敗しました: " + (e.message || e));
-                } finally {
-                  setEditPlayersSaving(false);
-                }
-              }}
-            >{editPlayersSaving ? "保存中..." : "保存する"}</button>
-            <button disabled={editPlayersSaving}
-              style={{ width:"100%", padding:12, borderRadius:10, border:`1px solid ${C.border}`, background:C.gray, color:C.textSec, fontSize:14, fontWeight:700, cursor:"pointer" }}
-              onClick={()=>setEditPlayersFor(null)}
-            >キャンセル</button>
-          </div>
-        </Modal>
-      )}
-
       {/* サーブ選択モーダル */}
       {serveSelectInfo && (() => {
         const { matchData, orderNum, game } = serveSelectInfo;
@@ -10988,7 +10893,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
 // ============================================================
 // 団体戦 番手ペア登録→試合開始（v1.0のMatchSetupFormを流用）
 // ============================================================
-function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOnly, onCancel }) {
+function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOnly, onCancel, editMatchId }) {
   const [tm, setTm] = useState(null);
   const [participantIds, setParticipantIds] = useState(null);
   const [ready, setReady] = useState(false);
@@ -11019,9 +10924,9 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOn
   return (
     <MatchSetup
       sourceMatchId={null}
-      editMatchId={null}
+      editMatchId={editMatchId || null}
       initialMatchType="tournament"
-      headerLabel={`🏆 団体戦 ${orderLabel} ペア登録`}
+      headerLabel={editMatchId ? `🏆 団体戦 ${orderLabel} 選手を編集` : `🏆 団体戦 ${orderLabel} ペア登録`}
       prefillTournament={tm?.tournament_name || ""}
       prefillRound={tm?.round || ""}
       prefillVenue={tm?.venue || ""}
@@ -11035,7 +10940,7 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOn
       tournamentParticipantIds={participantIds || undefined}
       onScheduled={null}
       onSave={onSave}
-      onSavePairOnly={onSavePairOnly}
+      onSavePairOnly={editMatchId ? undefined : onSavePairOnly}
       onCancel={onCancel}
     />
   );
@@ -20076,6 +19981,7 @@ export default function App() {
   const [teamMatchId,  setTeamMatchId]  = useState(null);
   const [teamMatchEditId, setTeamMatchEditId] = useState(null);
   const [teamMatchOrderNum, setTeamMatchOrderNum] = useState(null);
+  const [teamMatchGameEditMatchId, setTeamMatchGameEditMatchId] = useState(null); // ★番手の選手編集の対象
   const [teamMatchCopyId, setTeamMatchCopyId] = useState(null); // コピー元の団体戦ID
   const [listMatchMode, setListMatchMode] = useState("tournament");
   const [pendingOpenTrash, setPendingOpenTrash] = useState(false); // ★設定画面からゴミ箱を開く指示
@@ -20383,6 +20289,12 @@ export default function App() {
           setScreen("teamMatchRecord");
         }}
         onEdit={id=>{ setTeamMatchEditId(id); setScreen("teamMatchSetup"); }}
+        onEditPlayers={(matchIdToEdit, orderNum)=>{
+          setTeamMatchOrderNum(orderNum);
+          setTeamMatchGameEditMatchId(matchIdToEdit);
+          setPrevScreen("teamMatchDetail");
+          setScreen("teamMatchGameEdit");
+        }}
         onNavigate={key=>{ setTeamMatchId(null); goNav(key); }}
         onOpenAiAnalysis={(match, existing)=>{
           setAiAnalysisTargetMatch(match);
@@ -20427,6 +20339,23 @@ export default function App() {
           setTimeout(()=>setScreen("teamMatchDetail"), 50);
         }}
         onCancel={()=>{ setListMatchMode("team"); setScreen("teamMatchDetail"); }}
+      />
+    );
+  }
+  // ★番手の選手を編集（試合作成時と同じ画面を編集モードで開く。スコア・記録済みポイントは変えない）
+  if (screen==="teamMatchGameEdit") {
+    return (
+      <TeamMatchGameSetupWrapper
+        teamMatchId={teamMatchId}
+        orderNum={teamMatchOrderNum}
+        editMatchId={teamMatchGameEditMatchId}
+        onSave={()=>{
+          setTeamMatchGameEditMatchId(null);
+          setListMatchMode("team");
+          setTick(t=>t+1);
+          setScreen("teamMatchDetail");
+        }}
+        onCancel={()=>{ setTeamMatchGameEditMatchId(null); setListMatchMode("team"); setScreen("teamMatchDetail"); }}
       />
     );
   }
