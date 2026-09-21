@@ -3404,8 +3404,9 @@ function ServeOrderModal({ aLabel, bLabel, aP1, aP2, bP1, bP2, isDoubles, onCanc
         {team && isDoubles && (
           <div style={{ textAlign:"left", background:C.gray, borderRadius:10, padding:12, marginBottom:16 }}>
             <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>各ペアの1人目（通常はここから開始）</div>
-            <PairOrderRow p1={aP1} p2={aP2} color={C.teamA} order={orderA} setOrder={setOrderA} tag={tagA} />
-            <PairOrderRow p1={bP1} p2={bP2} color={C.teamB} order={orderB} setOrder={setOrderB} tag={tagB} />
+            {/* ★選手名が空欄のまま保存された試合でも枠だけにならないよう、仮名で表示する */}
+            <PairOrderRow p1={(aP1&&aP1.trim())||"選手1"} p2={(aP2&&aP2.trim())||"選手2"} color={C.teamA} order={orderA} setOrder={setOrderA} tag={tagA} />
+            <PairOrderRow p1={(bP1&&bP1.trim())||PLACEHOLDER_NAMES[0]} p2={(bP2&&bP2.trim())||PLACEHOLDER_NAMES[1]} color={C.teamB} order={orderB} setOrder={setOrderB} tag={tagB} />
           </div>
         )}
         <button disabled={!team} style={{
@@ -14817,8 +14818,11 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
                 const players = [
                   { id:uid(), match_id:mid, team:"A", player_name:aP1.trim(), club_name:aClub.trim(), position:null, order_num:1 },
                   ...(isDoubles && aP2.trim() ? [{ id:uid(), match_id:mid, team:"A", player_name:aP2.trim(), club_name:aClub.trim(), position:null, order_num:2 }] : []),
-                  { id:uid(), match_id:mid, team:"B", player_name:bP1.trim(), club_name:bClub.trim(), position:null, order_num:1 },
-                  ...(isDoubles && bP2.trim() ? [{ id:uid(), match_id:mid, team:"B", player_name:bP2.trim(), club_name:bClub.trim(), position:null, order_num:2 }] : []),
+                  // ★相手が未定（空欄）でも、他の保存処理と同じく仮名「選手A／選手B」で2人分を必ず保存する。
+                  //   以前は空欄のまま1人分しか保存しておらず、サーブ選択や得点入力の選手ボタンが空の枠になり、
+                  //   ダブルスでは相手2人のポイントを区別できなかった。仮名は後で本名を入れると記録ごと書き換えられる。
+                  { id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(bP1, "選手A"), club_name:bClub.trim(), position:null, order_num:1 },
+                  ...(isDoubles ? [{ id:uid(), match_id:mid, team:"B", player_name:withPlaceholder(bP2, "選手B"), club_name:bClub.trim(), position:null, order_num:2 }] : []),
                 ];
                 const match = {
                   id:mid, created_by:"me",
@@ -16287,7 +16291,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
               {scoreStep===3 && (()=>{
                 const targetTeam = selResult==="winner" ? pendingTeam : (pendingTeam==="A"?"B":"A");
-                const stepPlayers = allPlayers.filter(p=>p.team===targetTeam);
+                // ★選手名が空欄のまま保存された試合でも枠だけにならないよう、仮名（選手A／選手B）で表示・記録する。
+                //   仮名で記録したポイントは、後で本名を入れると記録ごと書き換えられる。
+                const stepPlayers = allPlayers.filter(p=>p.team===targetTeam)
+                  .map((p,i)=>({ ...p, name: (p.name && p.name.trim()) || (targetTeam==="B" ? PLACEHOLDER_NAMES[i] : `選手${i+1}`) }));
                 return (
                   <>
                     <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>③{selResult==="winner"?"誰が決めた？":"誰のミス？"}</div>
