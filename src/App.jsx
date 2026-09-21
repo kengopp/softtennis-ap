@@ -20162,6 +20162,30 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
+  // ③ スマホの「戻る」ボタン（戻るジェスチャーを含む）で、意図せずアプリが閉じるのを防ぐ。
+  //   このアプリは画面を切り替えてもブラウザの履歴を積まないため、戻るを押すとアプリの外へ出てしまう。
+  //   また②のbeforeunloadは、スマホで戻るを押したときにはほとんど発生しない。
+  //   そこで履歴に「見張り用」の1件を積んでおき、戻るが押されたらそこで止めて確認を出す。
+  useEffect(() => {
+    if (!window.__stBackTrapArmed) {
+      window.history.pushState({ stBackTrap: true }, "");
+      window.__stBackTrapArmed = true;
+    }
+    const onPop = () => {
+      const leave = window.confirm("アプリを終了しますか？\n\n前の画面に戻るときは、画面左上の「←」を押してください。");
+      if (leave) {
+        skipUnloadConfirm = true;          // ②の確認を二重に出さない
+        window.__stBackTrapArmed = false;
+        window.removeEventListener("popstate", onPop);
+        window.history.back();             // 本当に前のページへ（＝アプリを出る）
+      } else {
+        window.history.pushState({ stBackTrap: true }, ""); // 見張りを積み直して、アプリに留まる
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   // プロフィール（学校・男女区分が未設定だと試合・選手マスターを共有できないため、設定完了をチェック）
   const [profile, setProfile] = useState(null);
   const [profileChecked, setProfileChecked] = useState(false);
