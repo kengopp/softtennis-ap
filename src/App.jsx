@@ -10646,26 +10646,28 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   {(isFinished || match?.status === "finished") && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
                   {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>中断 {match?.match_score_a}-{match?.match_score_b}</span>}
                   {isAbandoned && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>途中終了 {match?.match_score_a}-{match?.match_score_b}</span>}
+                  {/* ★試合開始前も、終了・中断と同じくヘッダー右側に出す（本文の中で編集ボタンとぶつからないように） */}
+                  {isWaiting && (aPlayers || bPlayers) && <span style={{ fontSize:11,color:C.textSec,fontWeight:700,background:"#f0f0f0",padding:"2px 8px",borderRadius:20 }}>試合開始前</span>}
                 </div>
               </div>
               <div style={{ padding:"10px 14px" }}>
                 {aPlayers || bPlayers ? (
                   <>
-                    <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:2 }}>{(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム"}{tm.my_team_division ? `（${tm.my_team_division}）` : ""}: {aPlayers || "未登録"}</div>
-                    <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:8 }}>{tm.opponent_name || "相手"}{tm.opponent_division ? `（${tm.opponent_division}）` : ""}: {bPlayers || "未登録"}</div>
-                    {/* ★選手の編集（未終了の番手のみ。相手が当日まで分からなかった場合などに使う）。
-                          試合作成時と同じ画面を編集モードで開く */}
-                    {!isViewer && !isFinished && !isAbandoned && match?.id && canOperateGame(game) && (
-                      <div
-                        onClick={()=>onEditPlayers && onEditPlayers(match.id, orderNum)}
-                        style={{ display:"inline-block", fontSize:13, fontWeight:700, color:C.navy, background:C.gray,
-                          borderRadius:8, padding:"7px 12px", marginBottom:8, cursor:"pointer" }}
-                      >✏️ 選手を編集</div>
-                    )}
-                    {/* ペア登録済みで未開始 → 試合開始前 */}
-                    {isWaiting && (
-                      <div style={{ fontSize:11, color:C.textSec, marginBottom:8, padding:"4px 10px", background:"#f0f0f0", borderRadius:8, display:"inline-block" }}>試合開始前</div>
-                    )}
+                    <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10, marginBottom:10 }}>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:2 }}>{(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム"}{tm.my_team_division ? `（${tm.my_team_division}）` : ""}: {aPlayers || "未登録"}</div>
+                        <div style={{ fontSize:12, color:C.text, fontWeight:700 }}>{tm.opponent_name || "相手"}{tm.opponent_division ? `（${tm.opponent_division}）` : ""}: {bPlayers || "未登録"}</div>
+                      </div>
+                      {/* ★選手の編集（未終了の番手のみ）。試合作成時と同じ画面を編集モードで開く */}
+                      {!isViewer && !isFinished && !isAbandoned && match?.id && canOperateGame(game) && (
+                        <div
+                          onClick={()=>onEditPlayers && onEditPlayers(match.id, orderNum)}
+                          style={{ flexShrink:0, fontSize:12.5, fontWeight:700, color:C.navy, background:C.gray,
+                            borderRadius:8, padding:"7px 11px", cursor:"pointer", whiteSpace:"nowrap" }}
+                        >✏️ 編集</div>
+                      )}
+                    </div>
+
                     {match && !isWaiting && (
                       <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, marginBottom:8 }}>
                         <span style={{ fontSize:22,fontWeight:900,color:winnerSideOf(match)==="A"?C.teamA:C.textSec }}>{match.match_score_a}</span>
