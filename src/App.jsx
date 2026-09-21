@@ -13050,7 +13050,6 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const t = initialPrefs.tab ?? "players";
     return t === "opponents" ? "players" : t;
   });
-  const [pairMode, setPairMode] = useState(initialPrefs.pairMode ?? "own"); // own | opp
   const [oppMode, setOppMode] = useState(initialPrefs.oppMode ?? "team"); // team | pair
   const [sort, setSort] = useState("win"); // win(勝数順) | lose(負数順) | count(試合数順)
   // ★以前は勝率順だったが、1試合100%が7試合100%より上に来てしまい実力が分からなかったため、
@@ -13104,8 +13103,8 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   // ①の絞り込み条件が変わるたびに端末に保存（次回開いたときも保持される）
   useEffect(() => {
-    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, period, side, tab, pairMode, oppMode });
-  }, [statsCat, statsCatSub, statsCatTournament, period, tab, pairMode, oppMode]);
+    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, period, side, tab, oppMode });
+  }, [statsCat, statsCatSub, statsCatTournament, period, tab, oppMode]);
 
   function resetStatsFilter() {
     setStatsCat("all"); setStatsCatSub("allsub"); setStatsCatTournament(""); setPeriod("all");
@@ -13393,13 +13392,9 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 ))}
               </div>
             )}
-            {side==="own" && tab==="pairs" && (
-              <div style={{ display:"flex", gap:6, marginBottom:10 }}>
-                {[["own","自チームのペア"],["opp","相手チームのペア"]].map(([v,l])=>(
-                  <button key={v} style={{ ...S.togBtn(pairMode===v, C.accent), flex:1, fontSize:11.5, padding:"7px 4px" }} onClick={()=>setPairMode(v)}>{l}</button>
-                ))}
-              </div>
-            )}
+            {/* ★以前は「自チームのペア／相手チームのペア」の切り替えがあったが、「相手チームのペア」は
+                対戦チーム側の「相手ペア別」と全く同じ集計（oppPairRows）を重複して出していただけなので削除。
+                自チーム側は常に自チームのペア成績を出す。 */}
             {side==="opp" && (
               <div style={{ display:"flex", gap:6, marginBottom:10 }}>
                 {[["team","学校別"],["pair","相手ペア別"]].map(([v,l])=>(
@@ -13541,9 +13536,9 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
             )}
             {side==="own" && tab==="pairs" && (
               <>
-                {(pairMode==="own" ? pairRows : oppPairRows).length===0 ? (
+                {pairRows.length===0 ? (
                   <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この条件の試合記録がありません</div>
-                ) : (pairMode==="own" ? pairRows : oppPairRows).map(r=>(
+                ) : pairRows.map(r=>(
                   <div key={r.name} style={{ ...S.card, padding:"12px 14px", marginBottom:8 }}>
                     <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>{r.name}</div>
                     <div style={{ display:"flex", gap:12, alignItems:"center" }}>
