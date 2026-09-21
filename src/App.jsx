@@ -407,8 +407,8 @@ async function getFullMatchesByIds(ids) {
       { data: msChunk, error: mErr },
       { data: playersData, error: pErr },
       { data: gamesData, error: gErr },
-      { data: pointsData, error: ptErr, count: ptCount },
-      { data: faultsData, error: fErr, count: flCount },
+      { data: pointsData, error: ptErr },
+      { data: faultsData, error: fErr },
     ] = await Promise.all([
       supabase.from("matches").select("*").in("id", chunkIds),
       supabase.from("match_players").select("*").in("match_id", chunkIds),
@@ -416,27 +416,11 @@ async function getFullMatchesByIds(ids) {
       //   「そのゲームの何本目か」を配列の並び順で数えているため、順番が崩れると
       //   ダブルフォルトや1st/2ndの内訳がペアの別の選手に割り当てられてしまう。
       supabase.from("games").select("*").in("match_id", chunkIds).order("game_number"),
-      // ★count:"exact"を付けて、SupabaseのMax Rows設定（デフォルト1000件）で
-      //   黙って切り捨てられていないかを below で検知できるようにする。
-      supabase.from("points").select("*", { count: "exact" }).in("match_id", chunkIds).order("point_number"),
-      supabase.from("faults").select("*", { count: "exact" }).in("match_id", chunkIds).order("fault_number"),
+      supabase.from("points").select("*").in("match_id", chunkIds).order("point_number"),
+      supabase.from("faults").select("*").in("match_id", chunkIds).order("fault_number"),
     ]);
     const chunkErr = mErr || pErr || gErr || ptErr || fErr;
     if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
-    // ★Max Rowsの上限に引っかかって一部だけ取得された場合、件数がズレて検知できる。
-    //   ズレていたら集計結果自体が不正確になるため、開発者コンソールに警告を出す。
-    if (typeof ptCount === "number" && (pointsData ?? []).length < ptCount) {
-      console.warn(
-        `[getFullMatchesByIds] pointsデータが切り捨てられています: 取得${(pointsData ?? []).length}件 / 本来${ptCount}件` +
-        `（対象試合${chunkIds.length}件）。SupabaseのMax Rows設定を確認してください。`
-      );
-    }
-    if (typeof flCount === "number" && (faultsData ?? []).length < flCount) {
-      console.warn(
-        `[getFullMatchesByIds] faultsデータが切り捨てられています: 取得${(faultsData ?? []).length}件 / 本来${flCount}件` +
-        `（対象試合${chunkIds.length}件）。SupabaseのMax Rows設定を確認してください。`
-      );
-    }
     (msChunk ?? []).forEach(m => ms.push(m));
     (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
     (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
@@ -560,8 +544,8 @@ async function getRankingMatchDetails(ids) {
       { data: msChunk, error: mErr },
       { data: playersData, error: pErr },
       { data: gamesData, error: gErr },
-      { data: pointsData, error: ptErr, count: ptCount },
-      { data: faultsData, error: fErr, count: flCount },
+      { data: pointsData, error: ptErr },
+      { data: faultsData, error: fErr },
     ] = await Promise.all([
       supabase.from("matches")
         .select("id, match_date, tournament_name, status, order_a, order_b, match_score_a, match_score_b, walkover_winner")
@@ -576,30 +560,17 @@ async function getRankingMatchDetails(ids) {
       // ★重要：サーブを誰が打ったかは「そのゲームの何本目のサーブか」を配列の並び順で数えて割り出しているため、
       //   point_number順で取得しないと、DFや1st/2ndの内訳がペアの別の選手に割り当てられてしまう。
       //   （試合詳細のスタッツタブはorder指定済みなので、以前はこの分析メニューだけ数字が食い違っていた）
-      //   count:"exact"はSupabaseのMax Rows上限（デフォルト1000件）で黙って切り捨てられていないか検知するため。
       supabase.from("points")
-        .select("game_id, match_id, point_number, player_name, scoring_team, play_type, result_type, is_winner, fault_count", { count: "exact" })
+        .select("game_id, match_id, point_number, player_name, scoring_team, play_type, result_type, is_winner, fault_count")
         .in("match_id", chunkIds)
         .order("point_number"),
       supabase.from("faults")
-        .select("game_id, match_id, fault_number, player_name, server_team", { count: "exact" })
+        .select("game_id, match_id, fault_number, player_name, server_team")
         .in("match_id", chunkIds)
         .order("fault_number"),
     ]);
     const chunkErr = mErr || pErr || gErr || ptErr || fErr;
     if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
-    if (typeof ptCount === "number" && (pointsData ?? []).length < ptCount) {
-      console.warn(
-        `[getRankingMatchDetails] pointsデータが切り捨てられています: 取得${(pointsData ?? []).length}件 / 本来${ptCount}件` +
-        `（対象試合${chunkIds.length}件）。SupabaseのMax Rows設定を確認してください。`
-      );
-    }
-    if (typeof flCount === "number" && (faultsData ?? []).length < flCount) {
-      console.warn(
-        `[getRankingMatchDetails] faultsデータが切り捨てられています: 取得${(faultsData ?? []).length}件 / 本来${flCount}件` +
-        `（対象試合${chunkIds.length}件）。SupabaseのMax Rows設定を確認してください。`
-      );
-    }
     (msChunk ?? []).forEach(m => ms.push(m));
     (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
     (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
@@ -773,11 +744,15 @@ function pairLabelOf(nameA, nameB) {
 function pairOnSide(m, team) {
   const list = m.players.filter(p => p.team === team).sort((a,b)=>(a.order_num??0)-(b.order_num??0));
   if (list.length < 2) return null;
+  const club = list[0].club_name || list[1].club_name || "";
   return {
     names: [list[0].player_name, list[1].player_name],
-    key: pairKeyOf(list[0].player_name, list[1].player_name),
+    // ★学校名もキーに含める。団体戦などで実名未入力のまま「前衛・後衛」といった
+    //   仮の名前が入っていると、学校が違う別のペアでも名前だけ見ると同じになってしまい、
+    //   相手分析タブで別校のペアが1つにまとめられてしまう不具合があったため。
+    key: (club || "（不明）") + "__" + pairKeyOf(list[0].player_name, list[1].player_name),
     label: pairLabelOf(list[0].player_name, list[1].player_name),
-    club: list[0].club_name || list[1].club_name || "",
+    club,
   };
 }
 // ★自チーム側／相手側のペアを取り出す（自チーム同士の試合ではA側を自チーム扱いにする）
