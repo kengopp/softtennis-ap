@@ -11235,6 +11235,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [detailMatches, setDetailMatches] = useState([]); // 詳細（points込み）
   const [detailLoading, setDetailLoading] = useState(false);
   const [recordOpen, setRecordOpen] = useState(true);    // 通算成績の内訳の開閉（ペアを選んだ直後は開いた状態で見せる）
+  const [matchListExpanded, setMatchListExpanded] = useState(false); // 試合一覧を5件だけ／全件表示の切替
   const [breakdownDim, setBreakdownDim] = useState("play");
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
@@ -11306,9 +11307,11 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   const selectedOppPair = oppPairs.find(p => p.key === oppPairKey) || null;
 
-  // ★相手ペア（自分たちタブでは自チームのペア）を選び直すたびに、内訳を開いた状態で見せる
+  // ★相手ペア（自分たちタブでは自チームのペア）を選び直すたびに、内訳を開いた状態で見せ、
+  //   試合一覧は5件だけの表示に戻す
   useEffect(() => {
     setRecordOpen(true);
+    setMatchListExpanded(false);
   }, [side, ownPairKey, oppPairKey]);
 
   // ★相手ペアを「学校名」で先に絞り込むための一覧（対戦試合数の多い順）
@@ -11568,22 +11571,37 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
                   {recordOpen && (
                     <div style={{ marginTop:12, borderTop:`1px solid ${C.border}`, paddingTop:10 }}>
-                      {[...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
-                        const win = winnerSideOf(m)==="A";
-                        const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
+                      {(() => {
+                        const sorted = [...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date));
+                        const shown = matchListExpanded ? sorted : sorted.slice(0, 5);
+                        const restCount = sorted.length - shown.length;
                         return (
-                          <div key={m.id} onClick={e=>{ e.stopPropagation(); onOpenMatch && onOpenMatch(m.id); }}
-                            style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 0", borderBottom:`1px solid ${C.border}`, fontSize:14.5, cursor:"pointer" }}>
-                            <span style={{ color:C.textSec, fontSize:14, fontWeight:700, width:46, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
-                            <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {other ? `${other.club ? other.club+" " : ""}${other.label}` : ""}
-                            </span>
-                            <span style={{ fontWeight:800 }}>{m.match_score_a}-{m.match_score_b}</span>
-                            <span style={{ fontWeight:900, color:win?C.accent:C.red, width:26, textAlign:"right" }}>{win?"勝":"敗"}</span>
-                            <span style={{ color:C.textSec, fontSize:15 }}>›</span>
-                          </div>
+                          <>
+                            {shown.map(m => {
+                              const win = winnerSideOf(m)==="A";
+                              const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
+                              return (
+                                <div key={m.id} onClick={e=>{ e.stopPropagation(); onOpenMatch && onOpenMatch(m.id); }}
+                                  style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 0", borderBottom:`1px solid ${C.border}`, fontSize:14.5, cursor:"pointer" }}>
+                                  <span style={{ color:C.textSec, fontSize:14, fontWeight:700, width:46, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
+                                  <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                    {other ? `${other.club ? other.club+" " : ""}${other.label}` : ""}
+                                  </span>
+                                  <span style={{ fontWeight:800 }}>{m.match_score_a}-{m.match_score_b}</span>
+                                  <span style={{ fontWeight:900, color:win?C.accent:C.red, width:26, textAlign:"right" }}>{win?"勝":"敗"}</span>
+                                  <span style={{ color:C.textSec, fontSize:15 }}>›</span>
+                                </div>
+                              );
+                            })}
+                            {restCount > 0 && (
+                              <div onClick={e=>{ e.stopPropagation(); setMatchListExpanded(true); }}
+                                style={{ textAlign:"center", padding:"12px 0 2px", fontSize:14, fontWeight:800, color:C.navy, cursor:"pointer" }}>
+                                さらに表示（あと{restCount}件）▼
+                              </div>
+                            )}
+                          </>
                         );
-                      })}
+                      })()}
                     </div>
                   )}
                 </div>
