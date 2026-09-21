@@ -11234,7 +11234,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   const [detailMatches, setDetailMatches] = useState([]); // 詳細（points込み）
   const [detailLoading, setDetailLoading] = useState(false);
-  const [recordOpen, setRecordOpen] = useState(false);    // 通算成績の内訳の開閉
+  const [recordOpen, setRecordOpen] = useState(true);    // 通算成績の内訳の開閉（ペアを選んだ直後は開いた状態で見せる）
   const [breakdownDim, setBreakdownDim] = useState("play");
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
@@ -11305,6 +11305,11 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   }, [ownMatches, ownPairKey, selectedOwnPair, mySchoolName]);
 
   const selectedOppPair = oppPairs.find(p => p.key === oppPairKey) || null;
+
+  // ★相手ペア（自分たちタブでは自チームのペア）を選び直すたびに、内訳を開いた状態で見せる
+  useEffect(() => {
+    setRecordOpen(true);
+  }, [side, ownPairKey, oppPairKey]);
 
   // ★相手ペアを「学校名」で先に絞り込むための一覧（対戦試合数の多い順）
   const oppSchools = useMemo(() => {
@@ -11553,12 +11558,12 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                       <div>
                         <span style={{ fontSize:24, fontWeight:900, color:C.text }}>{wins}</span><span style={{ fontSize:14, color:C.textSec }}>勝</span>
                         <span style={{ fontSize:24, fontWeight:900, color:C.text, marginLeft:4 }}>{losses}</span><span style={{ fontSize:14, color:C.textSec }}>敗</span>
-                        <span style={{ fontSize:13.5, color:C.textSec, marginLeft:8 }}>
+                        <span style={{ fontSize:15, fontWeight:700, color:C.text, marginLeft:8 }}>
                           {targetMatches.length}試合{targetMatches.length>0 && `・勝率${Math.round(wins/targetMatches.length*100)}%`}
                         </span>
                       </div>
                     </div>
-                    <div style={{ color:C.textSec, fontSize:15 }}>{recordOpen?"▲":"▼"}</div>
+                    <div style={{ color:C.textSec, fontSize:20, fontWeight:900 }}>{recordOpen?"▲":"▼"}</div>
                   </div>
 
                   {recordOpen && (
@@ -11568,8 +11573,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
                         return (
                           <div key={m.id} onClick={e=>{ e.stopPropagation(); onOpenMatch && onOpenMatch(m.id); }}
-                            style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid ${C.border}`, fontSize:13.5, cursor:"pointer" }}>
-                            <span style={{ color:C.textSec, fontSize:12.5, width:42, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
+                            style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 0", borderBottom:`1px solid ${C.border}`, fontSize:14.5, cursor:"pointer" }}>
+                            <span style={{ color:C.textSec, fontSize:14, fontWeight:700, width:46, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
                             <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                               {other ? `${other.club ? other.club+" " : ""}${other.label}` : ""}
                             </span>
