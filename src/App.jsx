@@ -11229,6 +11229,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [side, setSide] = useState(() => readScreenCache("pairAnalysis")?.side ?? "own");
   const [ownPairKey, setOwnPairKey] = useState(() => readScreenCache("pairAnalysis")?.ownPairKey ?? "");
   const [oppPairKey, setOppPairKey] = useState(() => readScreenCache("pairAnalysis")?.oppPairKey ?? "");
+  // ★相手分析タブで、学校名で先に絞り込んでからペアを選べるようにするためのフィルタ
+  const [oppSchoolFilter, setOppSchoolFilter] = useState(() => readScreenCache("pairAnalysis")?.oppSchoolFilter ?? "");
 
   const [detailMatches, setDetailMatches] = useState([]); // 詳細（points込み）
   const [detailLoading, setDetailLoading] = useState(false);
@@ -11253,8 +11255,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   // ★試合スタッツを見て戻ってきたときに、選んでいたペアと画面の状態を復元する
   useEffect(() => {
-    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey });
-  }, [side, ownPairKey, oppPairKey]);
+    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, oppSchoolFilter });
+  }, [side, ownPairKey, oppPairKey, oppSchoolFilter]);
 
   // 自チームが出場した、終了済みの個人戦・団体戦の試合
   const ownMatches = useMemo(() => allMatches.filter(m =>
@@ -11303,6 +11305,29 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   }, [ownMatches, ownPairKey, selectedOwnPair, mySchoolName]);
 
   const selectedOppPair = oppPairs.find(p => p.key === oppPairKey) || null;
+
+  // ★相手ペアを「学校名」で先に絞り込むための一覧（対戦試合数の多い順）
+  const oppSchools = useMemo(() => {
+    const map = {};
+    oppPairs.forEach(p => {
+      const club = p.club || "（学校名なし）";
+      (map[club] ??= { club, matches: 0 }).matches += p.matches.length;
+    });
+    return Object.values(map).sort((a,b)=>b.matches-a.matches);
+  }, [oppPairs]);
+
+  // ★学校名で絞り込んだあとの相手ペア一覧（未選択なら全件のまま）
+  const filteredOppPairs = useMemo(() => {
+    if (!oppSchoolFilter) return oppPairs;
+    return oppPairs.filter(p => (p.club || "（学校名なし）") === oppSchoolFilter);
+  }, [oppPairs, oppSchoolFilter]);
+
+  // ★学校の絞り込みを変えたら、今選んでいるペアがその学校のものでなければ選択を解除する
+  useEffect(() => {
+    if (!oppSchoolFilter || !oppPairKey) return;
+    const stillValid = filteredOppPairs.some(p => p.key === oppPairKey);
+    if (!stillValid) setOppPairKey("");
+  }, [oppSchoolFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ★相手ペアを開いたら、そのペアのメモを読み込む
   useEffect(() => {
@@ -11439,7 +11464,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
         <div style={{ display:"flex", gap:6, marginBottom:12 }}>
           {[["own","自分たち"],["opp","相手分析"]].map(([k,l])=>(
-            <div key={k} onClick={()=>{ setSide(k); setOppPairKey(""); }}
+            <div key={k} onClick={()=>{ setSide(k); setOppPairKey(""); setOppSchoolFilter(""); }}
               style={{ flex:1, textAlign:"center", padding:"12px 4px", borderRadius:9, fontSize:14.5, fontWeight:700, cursor:"pointer",
                 background: side===k ? C.navy : "#eef0f4", color: side===k ? C.white : C.textSec }}
             >{l}</div>
@@ -11454,17 +11479,23 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
           <>
             {/* 自チームのペア選択（自分たち／相手分析で共通・連動） */}
             <div style={{ fontSize:13, fontWeight:700, color:C.textSec, marginBottom:5 }}>自チームのペア</div>
-            <select style={selStyle} value={ownPairKey} onChange={e=>{ setOwnPairKey(e.target.value); setOppPairKey(""); }}>
+            <select style={selStyle} value={ownPairKey} onChange={e=>{ setOwnPairKey(e.target.value); setOppPairKey(""); setOppSchoolFilter(""); }}>
               {ownPairs.map(p => <option key={p.key} value={p.key}>{p.label}（{p.matches.length}試合）</option>)}
               {side === "opp" && <option value="all">👥 すべて（チーム全体の対戦相手）</option>}
             </select>
 
             {side === "opp" && (
               <>
+                <div style={{ fontSize:13, fontWeight:700, color:C.textSec, marginBottom:5 }}>相手校</div>
+                <select style={selStyle} value={oppSchoolFilter} onChange={e=>{ setOppSchoolFilter(e.target.value); setOppPairKey(""); }}>
+                  <option value="">🏫 すべて（一覧から選ぶ）</option>
+                  {oppSchools.map(s => <option key={s.club} value={s.club}>{s.club}</option>)}
+                </select>
+
                 <div style={{ fontSize:13, fontWeight:700, color:C.textSec, marginBottom:5 }}>相手ペア</div>
                 <select style={selStyle} value={oppPairKey} onChange={e=>setOppPairKey(e.target.value)}>
                   <option value="">👥 すべて（一覧から選ぶ）</option>
-                  {oppPairs.map(p => <option key={p.key} value={p.key}>{p.club}　{p.label}</option>)}
+                  {filteredOppPairs.map(p => <option key={p.key} value={p.key}>{p.club}　{p.label}</option>)}
                 </select>
               </>
             )}
@@ -11479,9 +11510,10 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                 </div>
                 <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:8 }}>
                   {ownPairKey === "all" ? "チーム全体が対戦したペア" : "対戦した相手"}
+                  {oppSchoolFilter && <span style={{ color:C.textSec, fontWeight:700 }}>（{oppSchoolFilter}）</span>}
                 </div>
-                {oppPairs.length === 0 && <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0", fontSize:13.5 }}>対戦した記録がありません</div>}
-                {oppPairs.map(p => {
+                {filteredOppPairs.length === 0 && <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0", fontSize:13.5 }}>対戦した記録がありません</div>}
+                {filteredOppPairs.map(p => {
                   const col = p.w > p.l ? C.accent : p.w < p.l ? C.teamB : C.textSec;
                   return (
                     <div key={p.key} onClick={()=>setOppPairKey(p.key)}
