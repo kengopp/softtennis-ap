@@ -325,20 +325,20 @@ function MonthlyTrendCard({ finishedMatches, winFn, title="月別の勝率推移
     byMonth[month].total++;
     if (winFn(m)) byMonth[month].wins++;
   });
-  const months = Object.keys(byMonth).sort();
+  const months = Object.keys(byMonth).sort().reverse();
   if (months.length===0) return null;
   return (
     <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-      <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>{title}</div>
+      <div style={{ fontSize:14,fontWeight:800,color:C.navy,marginBottom:10 }}>{title}</div>
       {months.map(month=>{
         const { wins, total } = byMonth[month];
         const rate = Math.round(wins/total*100);
         const [y,mo] = month.split("-");
         return (
           <div key={month} style={{ marginBottom:10 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:C.textSec,marginBottom:3 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,color:C.textSec,marginBottom:3 }}>
               <span>{y}年{Number(mo)}月（{total}試合）</span>
-              <span style={{ fontWeight:700,color:C.text }}>{wins}勝{total-wins}敗・{rate}%</span>
+              <span style={{ fontWeight:800,color:C.text }}>{wins}勝{total-wins}敗・{rate}%</span>
             </div>
             <div style={{ height:8,background:"#e8edf3",borderRadius:4,overflow:"hidden" }}>
               <div style={{ width:`${rate}%`,height:"100%",background:C.accent,borderRadius:4 }}/>
