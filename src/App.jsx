@@ -10759,12 +10759,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   )}
                 </div>
               )}
-              {!isViewer && isFinished && match?.id && !aiAnalyses[match.id] && (
-                <div
-                  onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, null)}
-                  style={{ padding:"8px 14px", textAlign:"center", fontSize:11, color:C.textSec, cursor:"pointer", borderTop:"1px solid "+C.border }}
-                >🤖 AI動画分析を追加する</div>
-              )}
 
               <div style={{ padding: (!isFinished && !isAbandoned) ? "0 14px 10px" : 0 }}>
                 {/* ★終了済み・途中終了の番手は、そもそも「操作ロック」の対象外。
