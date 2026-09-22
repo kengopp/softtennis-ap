@@ -10692,6 +10692,20 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                     {isRecording && recorderName && match?.status !== "finished" && (
                       <span style={{ fontSize:11,color:"#dc2626",fontWeight:700,background:"#fdecea",padding:"2px 8px",borderRadius:20 }}>🔴 {recorderName} 記録中</span>
                     )}
+                    {/* ★動画・AIは個人戦一覧の🎥🤖と同じ小さいバッジで、見出し行にまとめて置く
+                          （専用の帯を1行使うと、埋めるボタンが無く不自然に空くため） */}
+                    {hasVideo && (
+                      <span
+                        onClick={e=>{ e.stopPropagation(); setVideoView({ video_links: boutVideoLinks }); }}
+                        style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#fdeceb", color:"#c4302b", fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, cursor:"pointer" }}
+                      >🎥 {boutVideoLinks.length}</span>
+                    )}
+                    {finishedNow && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer) && (
+                      <span
+                        onClick={e=>{ e.stopPropagation(); onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id]); }}
+                        style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#eef0ff", color:C.purple, fontSize:10.5, fontWeight:800, padding:"2px 8px", borderRadius:20, border:"1px solid #dcdffc", cursor:"pointer" }}
+                      >🤖 AI</span>
+                    )}
                     {finishedNow && <span style={{ fontSize:11,color:C.accent,fontWeight:700 }}>✅ 終了</span>}
                     {isSuspended && match?.status !== "finished" && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>中断 {match?.match_score_a}-{match?.match_score_b}</span>}
                     {isAbandoned && <span style={{ fontSize:11,color:C.textSec,fontWeight:700 }}>途中終了 {match?.match_score_a}-{match?.match_score_b}</span>}
@@ -10728,25 +10742,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   )}
                 </div>
               </div>
-
-              {/* ★個人戦一覧と同じ、小さいアイコン＋件数のバッジ（右寄せ）
-                    （スコア詳細を見る／記録し直すは、個人戦一覧と同じくこの一覧には置かず詳細画面側に統一） */}
-              {(hasVideo || (finishedNow && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer))) && (
-                <div style={{ display:"flex", justifyContent:"flex-end", borderTop:"1px solid "+C.border }}>
-                  {hasVideo && (
-                    <button
-                      style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
-                      onClick={()=>setVideoView({ video_links: boutVideoLinks })}
-                    >🎥{boutVideoLinks.length}</button>
-                  )}
-                  {finishedNow && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer) && (
-                    <button
-                      style={{ width:44, padding:"8px", background:"#eef0f6", color:"#3a4152", border:"none", borderLeft: hasVideo ? "1px solid "+C.border : "none", fontSize:12, fontWeight:700, cursor:"pointer" }}
-                      onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
-                    >🤖</button>
-                  )}
-                </div>
-              )}
 
               <div style={{ padding: (!isFinished && !isAbandoned) ? "0 14px 10px" : 0 }}>
                 {/* ★終了済み・途中終了の番手は、そもそも「操作ロック」の対象外。
