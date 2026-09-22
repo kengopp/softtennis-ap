@@ -2004,7 +2004,24 @@ async function getTournamentMatchesAndTeamMatches(tournamentName) {
   }
   const gamesByTeamMatch = {};
   tmGames.forEach(g => { (gamesByTeamMatch[g.team_match_id] ??= []).push(g); });
-  const teamMatches = teamRowsSafe.map(tm => ({ ...tm, games: gamesByTeamMatch[tm.id] ?? [] }));
+  // ★団体戦カードに🎥（動画リンク件数）を出すため、各番手の試合の動画リンクをまとめて集める。
+  //   番手の試合は大会名が入っていない場合もあるので、上で取得済みでないものだけ追加で取得する。
+  const videoLinksByMatch = {};
+  matchRowsSafe.forEach(m => { videoLinksByMatch[m.id] = normalizeVideoLinks(m.video_links); });
+  const missingBoutIds = tmGames.map(g => g.match_id).filter(id => id && !(id in videoLinksByMatch));
+  if (missingBoutIds.length > 0) {
+    const { data: boutRows, error: bErr } = await supabase.from("matches").select("id, video_links").in("id", missingBoutIds).is("deleted_at", null);
+    if (bErr) console.error(bErr);
+    (boutRows ?? []).forEach(m => { videoLinksByMatch[m.id] = normalizeVideoLinks(m.video_links); });
+  }
+  const teamMatches = teamRowsSafe.map(tm => {
+    const games = gamesByTeamMatch[tm.id] ?? [];
+    // ★この対戦（全番手）の動画を1つの一覧にまとめる。どの番手の動画か分かるようにタイトルに番手を付ける。
+    const video_links = games.flatMap(g =>
+      (g.match_id ? (videoLinksByMatch[g.match_id] ?? []) : []).map(v => ({ ...v, title: `${g.order_num}番手 ${v.title || "動画"}` }))
+    );
+    return { ...tm, games, video_links };
+  });
 
   return { matches, teamMatches };
 }
@@ -5570,8 +5587,10 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <span style={{ fontSize:10, color:C.textSec, marginLeft:8 }}>{tm.is_younger===false ? "遅番" : tm.is_younger===true ? "若番" : "若番/遅番未設定"}</span>
               </div>
               <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
-                {/* ★閲覧専用アカウントには作成・記録・削除系は出さない */}
-                {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピー</button>}
+                {/* ★閲覧専用アカウントには作成・記録・削除系は出さない。
+                      ボタンの並びは個人戦カードと同じ（左下🗑 → コピー → … → 右下🎥） */}
+                {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>}
+                {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピー</button>}
                 {!isViewer && notStarted && (
                   <button
                     style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
@@ -5592,7 +5611,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                     }}
                   >✏️ 結果を修正</button>
                 )}
-                {!isViewer && <button style={{ width:60, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>}
+                {/* ★どれか1つの番手にでも動画リンクがあれば件数付きで出す。タップでこの対戦の全動画を一覧表示 */}
+                {(tm.video_links || []).length > 0 && (
+                  <button
+                    style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
+                    onClick={e=>{ e.stopPropagation(); setVideoView(tm); }}
+                  >🎥{tm.video_links.length}</button>
+                )}
               </div>
             </div>
           );
