@@ -13398,7 +13398,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
             {side==="opp" && (
               <div style={{ display:"flex", gap:6, marginBottom:10 }}>
                 {[["team","学校別"],["pair","相手ペア別"]].map(([v,l])=>(
-                  <button key={v} style={{ ...S.togBtn(oppMode===v, C.accent), flex:1, fontSize:11.5, padding:"7px 4px" }} onClick={()=>setOppMode(v)}>{l}</button>
+                  <button key={v} style={{ ...S.togBtn(oppMode===v, C.accent), flex:1, fontSize:13, padding:"9px 4px" }} onClick={()=>setOppMode(v)}>{l}</button>
                 ))}
               </div>
             )}
