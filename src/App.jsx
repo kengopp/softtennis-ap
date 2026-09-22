@@ -10670,10 +10670,17 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           const hasVideo = boutVideoLinks.length > 0;
           const finishedNow = isFinished || match?.status === "finished";
           const canEditPlayers = !isViewer && !isFinished && !isAbandoned && match?.id && canOperateGame(game);
+          // ★個人戦一覧のカードと同じ「勝ち＝緑／負け＝オレンジ／進行中＝オレンジ／待機中～予定＝緑／中断・途中終了＝グレー」の色帯
+          const stripeColor = isRecording ? C.orange
+            : isSuspended ? C.textSec
+            : isAbandoned ? C.textSec
+            : finishedNow ? (match && winnerSideOf(match)==="A" ? C.teamA : match ? C.teamB : C.border)
+            : C.accent;
 
           return (
             <div key={orderNum} style={{ position:"relative" }}>
             <div style={{ ...S.card, marginBottom:10 }}>
+              <div style={{ height:4, background:stripeColor }}/>
               <div style={{ padding:"10px 14px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                 <span style={{ fontSize:13,fontWeight:700,color:C.navy }}>{orderNum}番手</span>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -10691,8 +10698,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 {aPlayers || bPlayers ? (
                   <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10 }}>
                     <div style={{ minWidth:0 }}>
-                      <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:2 }}>{(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム"}{tm.my_team_division ? `（${tm.my_team_division}）` : ""}: {aPlayers || "未登録"}</div>
-                      <div style={{ fontSize:12, color:C.text, fontWeight:700 }}>{tm.opponent_name || "相手"}{tm.opponent_division ? `（${tm.opponent_division}）` : ""}: {bPlayers || "未登録"}</div>
+                      <div style={{ fontSize:12, color:finishedNow && match && winnerSideOf(match)==="A" ? C.teamA : C.text, fontWeight:finishedNow && match && winnerSideOf(match)==="A" ? 800 : 700, marginBottom:2 }}>{(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム"}{tm.my_team_division ? `（${tm.my_team_division}）` : ""}: {aPlayers || "未登録"}</div>
+                      <div style={{ fontSize:12, color:finishedNow && match && winnerSideOf(match)==="B" ? C.teamB : C.text, fontWeight:finishedNow && match && winnerSideOf(match)==="B" ? 800 : 700 }}>{tm.opponent_name || "相手"}{tm.opponent_division ? `（${tm.opponent_division}）` : ""}: {bPlayers || "未登録"}</div>
                     </div>
                     {/* ★個人戦カードと同じく、終了済みの番手は選手名の右にスコアを横並びで置く */}
                     {finishedNow && match && (
