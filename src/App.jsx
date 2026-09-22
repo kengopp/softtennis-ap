@@ -4448,7 +4448,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                     {/* ★閲覧専用アカウントには削除・コピー（新規作成）は出さない */}
                     {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDelete(m.id);}}>🗑</button>}
-                    {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>}
+                    {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopy(m.id);}}>📋 コピーして新規作成</button>}
                     {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
                     {m.memo && (
                       <button
@@ -4529,7 +4529,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   {/* ★ボタン列は個人戦カードと同じ並び順（🗑→コピー→🎥→🤖）に揃える */}
                   <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                     {!isViewer && <button style={{ width:44, padding:"8px", background:"#fdecea", color:C.red, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();setConfirmDeleteTeam(tm.id);}}>🗑</button>}
-                    {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopyTeamMatch&&onCopyTeamMatch(tm.id);}}>📋 コピーして新規作成</button>}
+                    {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={e=>{e.stopPropagation();onCopyTeamMatch&&onCopyTeamMatch(tm.id);}}>📋 コピーして新規作成</button>}
                     {hasVideo && (
                       <button
                         style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
@@ -5713,7 +5713,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                   {/* ★閲覧専用アカウントには削除・コピー（新規作成）は出さない */}
                   {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>}
-                  {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>}
+                  {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>}
                   {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
                   {m.memo && (
                     <button
@@ -10472,7 +10472,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [simpleResultNamesB, setSimpleResultNamesB] = useState([]); // ★結果だけ記録：相手選手名（編集可）
   const [simpleResultSaving, setSimpleResultSaving] = useState(false);
   const [videoView, setVideoView] = useState(null); // ★番手カードの🎥バッジから開く動画リンク一覧
-  const [openBoutMenuOrderNum, setOpenBoutMenuOrderNum] = useState(null); // ★番手カードの「⋯その他」メニューの開閉
   const [memoView, setMemoView] = useState(null); // ★番手カードの📝から開く試合メモ
   const [confirmDeleteBout, setConfirmDeleteBout] = useState(null); // ★番手の試合の削除確認 { matchId, gameId, orderNum }
   const intervalRef = useRef(null);
@@ -10671,7 +10670,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           const boutVideoLinks = normalizeVideoLinks(match?.video_links);
           const hasVideo = boutVideoLinks.length > 0;
           const finishedNow = isFinished || match?.status === "finished";
-          const canEditPlayers = !isViewer && !isFinished && !isAbandoned && match?.id && canOperateGame(game);
+          // ★選手名の編集：終了済み・途中終了の番手はいつでも、進行前・中断中は操作ロックを持っている人だけ
+          const canEditPlayers = !isViewer && !!match?.id && ((isFinished || isAbandoned) || canOperateGame(game));
           const boutAWin = finishedNow && match && winnerSideOf(match)==="A";
           const boutBWin = finishedNow && match && winnerSideOf(match)==="B";
           const myClubLabel = ((tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム") + (tm.my_team_division || "");
@@ -10747,12 +10747,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                           setSimpleResultNamesB(bP.map(p=>p.player_name));
                         }}
                       >📝 結果だけ記録</button>
-                      {canEditPlayers && (
-                        <button
-                          style={{ width:80, padding:"8px", background:C.white, color:C.text, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
-                          onClick={()=>setOpenBoutMenuOrderNum(v => v===orderNum ? null : orderNum)}
-                        >⋯ その他</button>
-                      )}
                     </div>
                   )}
                   {(isWaiting && !(aPlayers || bPlayers)) && (
@@ -10772,12 +10766,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                           setServeSelectInfo({ matchData, orderNum, game });
                         }}
                       >🎾 試合を再開する</button>
-                      {canEditPlayers && (
-                        <button
-                          style={{ width:80, padding:"8px", background:C.white, color:C.text, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
-                          onClick={()=>setOpenBoutMenuOrderNum(v => v===orderNum ? null : orderNum)}
-                        >⋯ その他</button>
-                      )}
                     </div>
                   )}
                 </>
@@ -10806,7 +10794,13 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
               {match?.id && (
                 <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                   {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteBout({ matchId: match.id, gameId: game?.id, orderNum })}>🗑</button>}
-                  {!isViewer && <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch && onCopyMatch(match.id)}>📋 コピーして新規作成</button>}
+                  {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch && onCopyMatch(match.id)}>📋 コピーして新規作成</button>}
+                  {canEditPlayers && (
+                    <button
+                      style={{ width:44, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                      onClick={()=>onEditPlayers && onEditPlayers(match.id, orderNum)}
+                    >✏️</button>
+                  )}
                   {match.memo && (
                     <button
                       style={{ width:44, padding:"8px", background:C.accentL, color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
@@ -10834,18 +10828,6 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 </div>
               )}
             </div>
-            {/* ★選手名の編集メニュー（大会一覧の「⋯その他」と同じ形。⋯ボタンのすぐ上に出す） */}
-            {canEditPlayers && openBoutMenuOrderNum === orderNum && (
-              <>
-                <div style={{ position:"fixed", inset:0, zIndex:9 }} onClick={()=>setOpenBoutMenuOrderNum(null)} />
-                <div style={{ position:"absolute", right:0, bottom:78, width:150, background:C.white, border:`1px solid ${C.border}`, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", overflow:"hidden", zIndex:10 }}>
-                  <button
-                    style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                    onClick={()=>{ setOpenBoutMenuOrderNum(null); onEditPlayers && onEditPlayers(match.id, orderNum); }}
-                  >✏️ 編集</button>
-                </div>
-              </>
-            )}
             </div>
           );
         })}
