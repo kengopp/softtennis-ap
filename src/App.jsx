@@ -13503,7 +13503,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
                 {ownDetailLoading ? (
                   <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:13 }}>集計中...</div>
-                ) : ownAgg && ownAgg.total > 0 && (() => {
+                ) : selectedOwnNames.length===0 ? null : (ownAgg && ownAgg.total > 0) ? (() => {
                   const tw = Object.entries(ownAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5);
                   const te = Object.entries(ownAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5);
                   const mx = Math.max(1, ...tw.map(x=>x[1]), ...te.map(x=>x[1]));
@@ -13538,7 +13538,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                       )}
                     </div>
                   );
-                })()}
+                })() : (
+                  <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:13 }}>
+                    選んだ選手の分析データ（得点・ミスの記録）がありません
+                  </div>
+                )}
               </>
             )}
 
@@ -13977,7 +13981,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                 {/* ★この学校との得点・ミス（自チーム側） */}
                 {detailLoading ? (
                   <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:13 }}>集計中...</div>
-                ) : vsAgg && vsAgg.total > 0 && (() => {
+                ) : (vsAgg && vsAgg.total > 0) ? (() => {
                   const tw = Object.entries(vsAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5);
                   const te = Object.entries(vsAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5);
                   const mx = Math.max(1, ...tw.map(x=>x[1]), ...te.map(x=>x[1]));
@@ -14007,7 +14011,11 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                       {te.map(([l,c])=><Bar key={"e"+l} label={l} count={c} color={C.red}/>)}
                     </div>
                   );
-                })()}
+                })() : (
+                  <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:13, marginBottom:12 }}>
+                    この学校との分析データ（得点・ミスの記録）がありません
+                  </div>
+                )}
 
                 {/* ★相性：相手ペアごとに、自チームの誰が当たって何勝何敗か */}
                 {compatRows.length > 0 && (
