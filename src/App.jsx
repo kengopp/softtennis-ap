@@ -10689,81 +10689,84 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
               </div>
               <div style={{ padding:"10px 14px" }}>
                 {aPlayers || bPlayers ? (
-                  <>
-                    <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10, marginBottom:10 }}>
-                      <div style={{ minWidth:0 }}>
-                        <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:2 }}>{(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム"}{tm.my_team_division ? `（${tm.my_team_division}）` : ""}: {aPlayers || "未登録"}</div>
-                        <div style={{ fontSize:12, color:C.text, fontWeight:700 }}>{tm.opponent_name || "相手"}{tm.opponent_division ? `（${tm.opponent_division}）` : ""}: {bPlayers || "未登録"}</div>
-                      </div>
-                      {/* ★個人戦カードと同じく、終了済みの番手は選手名の右にスコアを横並びで置く */}
-                      {finishedNow && match && (
-                        <div style={{ flexShrink:0, fontSize:20, fontWeight:900, whiteSpace:"nowrap" }}>
-                          <span style={{ color:winnerSideOf(match)==="A"?C.teamA:C.textSec }}>{match.match_score_a}</span>
-                          <span style={{ fontSize:14, color:C.textSec }}> - </span>
-                          <span style={{ color:winnerSideOf(match)==="B"?C.teamB:C.textSec }}>{match.match_score_b}</span>
-                        </div>
-                      )}
+                  <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10 }}>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ fontSize:12, color:C.text, fontWeight:700, marginBottom:2 }}>{(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム"}{tm.my_team_division ? `（${tm.my_team_division}）` : ""}: {aPlayers || "未登録"}</div>
+                      <div style={{ fontSize:12, color:C.text, fontWeight:700 }}>{tm.opponent_name || "相手"}{tm.opponent_division ? `（${tm.opponent_division}）` : ""}: {bPlayers || "未登録"}</div>
                     </div>
-
-                    {match && !isWaiting && !finishedNow && (
-                      <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, marginBottom:8 }}>
-                        <span style={{ fontSize:22,fontWeight:900,color:winnerSideOf(match)==="A"?C.teamA:C.textSec }}>{match.match_score_a}</span>
-                        <span style={{ fontSize:14,color:C.textSec }}>-</span>
-                        <span style={{ fontSize:22,fontWeight:900,color:winnerSideOf(match)==="B"?C.teamB:C.textSec }}>{match.match_score_b}</span>
+                    {/* ★個人戦カードと同じく、終了済みの番手は選手名の右にスコアを横並びで置く */}
+                    {finishedNow && match && (
+                      <div style={{ flexShrink:0, fontSize:20, fontWeight:900, whiteSpace:"nowrap" }}>
+                        <span style={{ color:winnerSideOf(match)==="A"?C.teamA:C.textSec }}>{match.match_score_a}</span>
+                        <span style={{ fontSize:14, color:C.textSec }}> - </span>
+                        <span style={{ color:winnerSideOf(match)==="B"?C.teamB:C.textSec }}>{match.match_score_b}</span>
                       </div>
                     )}
-                    {(isFinished || isSuspended || isAbandoned || isRecording) && game?.match_id && (
-                      <div style={{ display:"flex", gap:8 }}>
-                        <button style={{ ...S.btn("#f0f0f0"), color:C.navy, fontSize:12, padding:"8px", flex:1 }} onClick={()=>onOpenMatch && onOpenMatch(game.match_id)}>
-                          📋 スコア詳細を見る
-                        </button>
-                        {isFinished && (
-                          <button
-                            style={{ ...S.btn("#f0f0f0"), color:C.textSec, fontSize:12, padding:"8px", flex:1 }}
-                            onClick={async ()=>{
-                              const { data: gamesData } = await supabase.from("games").select("id, points(id)").eq("match_id", game.match_id);
-                              const hasPoints = (gamesData||[]).some(g => (g.points||[]).length>0);
-                              const msg = hasPoints
-                                ? "すでに記録されたポイントがすべて消えます。ポイントから記録し直しますか？"
-                                : "スコアをリセットして、ポイントから記録し直しますか？";
-                              if (!window.confirm(msg)) return;
-                              try {
-                                await resetMatchToUnrecorded(game.match_id);
-                                await updateTeamMatchGame(game.id, { status:"waiting", recorder_id:null, recorder_name:null });
-                                await loadData({ markAsChanged:true });
-                              } catch(e) {
-                                alert("エラー: " + (e.message || e));
-                              }
-                            }}
-                          >
-                            🎾 点数から記録し直す
-                          </button>
-                        )}
-                        {/* ★動画リンクは一覧のバッジと同じ形で、この番手のものだけを開く */}
-                        {hasVideo && (
-                          <button
-                            style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", borderRadius:9, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
-                            onClick={()=>setVideoView({ video_links: boutVideoLinks })}
-                          >🎥{boutVideoLinks.length}</button>
-                        )}
-                        {finishedNow && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer) && (
-                          <button
-                            style={{ width:44, padding:"8px", background:"#eef0f6", color:"#3a4152", border:"none", borderRadius:9, fontSize:12, fontWeight:700, cursor:"pointer" }}
-                            onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
-                          >🤖</button>
-                        )}
-                      </div>
-                    )}
-                    {!isViewer && isFinished && match?.id && !aiAnalyses[match.id] && (
-                      <div
-                        onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, null)}
-                        style={{ marginTop:8, textAlign:"center", fontSize:11, color:C.textSec, cursor:"pointer" }}
-                      >🤖 AI動画分析を追加する</div>
-                    )}
-                  </>
+                  </div>
                 ) : (
-                  <div style={{ fontSize:12,color:C.textSec,marginBottom:8 }}>ペア未登録</div>
+                  <div style={{ fontSize:12,color:C.textSec }}>ペア未登録</div>
                 )}
+
+                {match && !isWaiting && !finishedNow && (
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12, marginTop:10 }}>
+                    <span style={{ fontSize:22,fontWeight:900,color:winnerSideOf(match)==="A"?C.teamA:C.textSec }}>{match.match_score_a}</span>
+                    <span style={{ fontSize:14,color:C.textSec }}>-</span>
+                    <span style={{ fontSize:22,fontWeight:900,color:winnerSideOf(match)==="B"?C.teamB:C.textSec }}>{match.match_score_b}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* ★ここから下は個人戦カードと同じ「枠いっぱいに並ぶボタン列」(角丸なし・区切り線のみ) */}
+              {(isFinished || isSuspended || isAbandoned || isRecording) && game?.match_id && (
+                <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                  <button style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onOpenMatch && onOpenMatch(game.match_id)}>
+                    📋 スコア詳細を見る
+                  </button>
+                  {isFinished && (
+                    <button
+                      style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.textSec, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
+                      onClick={async ()=>{
+                        const { data: gamesData } = await supabase.from("games").select("id, points(id)").eq("match_id", game.match_id);
+                        const hasPoints = (gamesData||[]).some(g => (g.points||[]).length>0);
+                        const msg = hasPoints
+                          ? "すでに記録されたポイントがすべて消えます。ポイントから記録し直しますか？"
+                          : "スコアをリセットして、ポイントから記録し直しますか？";
+                        if (!window.confirm(msg)) return;
+                        try {
+                          await resetMatchToUnrecorded(game.match_id);
+                          await updateTeamMatchGame(game.id, { status:"waiting", recorder_id:null, recorder_name:null });
+                          await loadData({ markAsChanged:true });
+                        } catch(e) {
+                          alert("エラー: " + (e.message || e));
+                        }
+                      }}
+                    >
+                      🎾 記録し直す
+                    </button>
+                  )}
+                  {/* ★動画リンクは一覧のバッジと同じ形で、この番手のものだけを開く */}
+                  {hasVideo && (
+                    <button
+                      style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
+                      onClick={()=>setVideoView({ video_links: boutVideoLinks })}
+                    >🎥{boutVideoLinks.length}</button>
+                  )}
+                  {finishedNow && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer) && (
+                    <button
+                      style={{ width:44, padding:"8px", background:"#eef0f6", color:"#3a4152", border:"none", borderLeft:"1px solid "+C.border, fontSize:12, fontWeight:700, cursor:"pointer" }}
+                      onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
+                    >🤖</button>
+                  )}
+                </div>
+              )}
+              {!isViewer && isFinished && match?.id && !aiAnalyses[match.id] && (
+                <div
+                  onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, null)}
+                  style={{ padding:"8px 14px", textAlign:"center", fontSize:11, color:C.textSec, cursor:"pointer", borderTop:"1px solid "+C.border }}
+                >🤖 AI動画分析を追加する</div>
+              )}
+
+              <div style={{ padding: (!isFinished && !isAbandoned) ? "0 14px 10px" : 0 }}>
                 {/* ★終了済み・途中終了の番手は、そもそも「操作ロック」の対象外。
                       recorder_idは記録者の履歴として残るだけなので、他の人が見ても
                       「ロック解除」ボタンは出さない（まだ進行中に見えてしまうバグ対策）。 */}
@@ -10805,7 +10808,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                     {/* ペア未登録 → ペア登録して試合開始 */}
                     {(isWaiting && !(aPlayers || bPlayers)) && (
                       <button
-                        style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13, marginTop:0 }}
+                        style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), fontSize:13, marginTop:8 }}
                         onClick={()=>onNewMatch && onNewMatch(tm, orderNum, game)}
                       >
                         🎾 ペアを登録して試合開始
