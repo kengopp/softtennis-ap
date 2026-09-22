@@ -10729,21 +10729,21 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 </div>
               </div>
 
-              {/* ★個人戦一覧と同じく、🎥・🤖のバッジだけを枠いっぱいのボタン列で出す
+              {/* ★個人戦一覧と同じ、小さいアイコン＋件数のバッジ（右寄せ）
                     （スコア詳細を見る／記録し直すは、個人戦一覧と同じくこの一覧には置かず詳細画面側に統一） */}
               {(hasVideo || (finishedNow && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer))) && (
-                <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
+                <div style={{ display:"flex", justifyContent:"flex-end", borderTop:"1px solid "+C.border }}>
                   {hasVideo && (
                     <button
-                      style={{ flex:1, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
+                      style={{ width:52, padding:"8px", background:"#fdeceb", color:"#c4302b", border:"none", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
                       onClick={()=>setVideoView({ video_links: boutVideoLinks })}
-                    >🎥 動画リンク（{boutVideoLinks.length}）</button>
+                    >🎥{boutVideoLinks.length}</button>
                   )}
                   {finishedNow && match?.id && aiAnalyses[match.id] && canViewAiAnalysisFor(match, aiViewer) && (
                     <button
-                      style={{ flex:1, padding:"8px", background:"#eef0f6", color:"#3a4152", border:"none", borderLeft: hasVideo ? "1px solid "+C.border : "none", fontSize:11, fontWeight:700, cursor:"pointer" }}
+                      style={{ width:44, padding:"8px", background:"#eef0f6", color:"#3a4152", border:"none", borderLeft: hasVideo ? "1px solid "+C.border : "none", fontSize:12, fontWeight:700, cursor:"pointer" }}
                       onClick={()=>onOpenAiAnalysis && onOpenAiAnalysis(match, aiAnalyses[match.id])}
-                    >🤖 AI分析を見る</button>
+                    >🤖</button>
                   )}
                 </div>
               )}
