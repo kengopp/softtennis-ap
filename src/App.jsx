@@ -298,6 +298,11 @@ function withinLastDays(matchList, days) {
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-days);
   return matchList.filter(m => m.match_date && new Date(m.match_date) >= cutoff);
 }
+// ★シーズン設定の起点日（例：26-27チーム）以降の試合だけに絞る
+function withinSeasonStart(matchList, seasonStart) {
+  if (!seasonStart) return matchList;
+  return matchList.filter(m => m.match_date && m.match_date >= seasonStart);
+}
 // 期間チップ＋勝率ソートチップ（一覧画面で共通使用）
 function PeriodSortBar({ period, setPeriod, sort, setSort }) {
   return (
@@ -13060,6 +13065,9 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [breakdownFilter, setBreakdownFilter] = useState("all"); // ★総合成績の内訳：all | win | lose
   const [deletedTournamentNames, setDeletedTournamentNames] = useState([]); // ゴミ箱に入っている大会名（絞り込み選択肢から除外用）
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
+  // ★シーズン設定の起点日（分析の「◯◯以降」で使う。設定 → シーズン設定 で登録）
+  const [seasonStart, setSeasonStart] = useState(null);
+  const [seasonLabel, setSeasonLabel] = useState("");
 
   // ★以前は「試合」「選手マスター」「プロフィール→学校」「ゴミ箱の大会」「団体戦」を
   //   別々のuseEffectでバラバラに取得していた。取得自体は同時に走るものの、
@@ -13067,12 +13075,14 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   //   全部を取り直して「読み込み中...」で待たされていた。
   //   ここでは①まとめて同時取得し、②前回の内容をキャッシュから即表示してから
   //   裏で最新に差し替える、という動きにする。
-  const apply = useCallback(({ list, simpleList, rosterList, schoolName, deletedNames, teamIds }) => {
+  const apply = useCallback(({ list, simpleList, rosterList, schoolName, deletedNames, teamIds, seasonStartDate, seasonStartLabel }) => {
     setAllMatches([...list, ...simpleList]);
     setRoster(rosterList);
     setMySchoolName(schoolName);
     setDeletedTournamentNames(deletedNames);
     setTeamMatchIds(new Set(teamIds));
+    setSeasonStart(seasonStartDate ?? null);
+    setSeasonLabel(seasonStartLabel ?? "");
     setLoading(false);
   }, []);
 
@@ -13095,6 +13105,9 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
         //   絞り込みプルダウンには削除済みの大会名を出さないようにするため。
         deletedNames: (deletedList || []).map(t => t.name),
         teamIds,
+        // ★シーズン設定の起点日（分析の「◯◯以降」で使う）
+        seasonStartDate: school?.season_start_date || null,
+        seasonStartLabel: school?.season_start_label || "",
       };
       writeScreenCache("teamStats", snapshot);
       apply(snapshot);
@@ -13143,9 +13156,10 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
     const periodMatches = period==="month1" ? withinLastDays(categoryMatches, 30)
       : period==="month3" ? withinLastDays(categoryMatches, 90)
+      : period==="season" ? withinSeasonStart(categoryMatches, seasonStart)
       : categoryMatches;
     return periodMatches.filter(m=>m.status==="finished");
-  }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period]);
+  }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period, seasonStart]);
 
   const teamRecord = useMemo(() => recordOf(finished, m=>winnerSideOf(m)==="A"), [finished]);
 
@@ -13299,7 +13313,8 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   }, [ownDetail, selectedOwnNames.join("|"), mySchoolName]);
 
   const subLabel = statsCat!=="all" ? (statsCatSub==="specific" && statsCatTournament ? `（${statsCatTournament}）` : "（すべて）") : "";
-  const filterSummary = `${STATS_CAT_LABELS[statsCat]}${subLabel}・${STATS_PERIOD_LABELS[period]}`;
+  const periodLabel = period==="season" ? `${seasonLabel || "起点日"}以降` : STATS_PERIOD_LABELS[period];
+  const filterSummary = `${STATS_CAT_LABELS[statsCat]}${subLabel}・${periodLabel}`;
 
   return (
     <div style={S.page}>
@@ -13364,9 +13379,12 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                       )}
                     </div>
                   )}
-                  <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                  <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" }}>
+                    {seasonStart && (
+                      <button style={{ ...S.togBtn(period==="season", C.navy), flex:1, minWidth:110, fontSize:11.5, padding:"8px 2px" }} onClick={()=>setPeriod("season")}>📌 {seasonLabel||"起点日"}以降</button>
+                    )}
                     {[["all","全期間"],["month1","直近1ヶ月"],["month3","直近3ヶ月"]].map(([v,l])=>(
-                      <button key={v} style={{ ...S.togBtn(period===v, C.navy), flex:1, fontSize:11.5, padding:"8px 2px" }} onClick={()=>setPeriod(v)}>{l}</button>
+                      <button key={v} style={{ ...S.togBtn(period===v, C.navy), flex:1, minWidth:70, fontSize:11.5, padding:"8px 2px" }} onClick={()=>setPeriod(v)}>{l}</button>
                     ))}
                   </div>
                   <div style={{ textAlign:"right" }}>
