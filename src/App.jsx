@@ -13038,7 +13038,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [statsCat, setStatsCat] = useState(initialPrefs.statsCat ?? "all");
   const [statsCatSub, setStatsCatSub] = useState(initialPrefs.statsCatSub ?? "allsub"); // allsub | specific
   const [statsCatTournament, setStatsCatTournament] = useState(initialPrefs.statsCatTournament ?? "");
-  const [period, setPeriod] = useState(initialPrefs.period ?? "all"); // all | month1 | month3
+  const [period, setPeriod] = useState(null); // all | month1 | month3 | season（画面を開くたびに、起点日があれば必ず「◯◯以降」から始める。前回の選択は保存しない）
   const [filterOpen, setFilterOpen] = useState(false);
 
   // ②見る内容タブ：players(選手別) | pairs(ペア別) | opponents(対戦別)
@@ -13083,6 +13083,9 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     setTeamMatchIds(new Set(teamIds));
     setSeasonStart(seasonStartDate ?? null);
     setSeasonLabel(seasonStartLabel ?? "");
+    // ★保存された条件が無い初回は、起点日が設定されていれば「◯◯チーム以降」を初期値にする
+    //   （既に選んだ条件があるとき（保存済みprefs／自分で選び直した後）は上書きしない）
+    setPeriod(prev => prev ?? (seasonStartDate ? "season" : "all"));
     setLoading(false);
   }, []);
 
@@ -13116,11 +13119,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   // ①の絞り込み条件が変わるたびに端末に保存（次回開いたときも保持される）
   useEffect(() => {
-    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, period, side, tab, oppMode });
-  }, [statsCat, statsCatSub, statsCatTournament, period, tab, oppMode]);
+    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, side, tab, oppMode });
+  }, [statsCat, statsCatSub, statsCatTournament, tab, oppMode]);
 
   function resetStatsFilter() {
-    setStatsCat("all"); setStatsCatSub("allsub"); setStatsCatTournament(""); setPeriod("all");
+    setStatsCat("all"); setStatsCatSub("allsub"); setStatsCatTournament(""); setPeriod(seasonStart ? "season" : "all");
   }
 
   // ★以前は下記の絞り込み・集計を「毎回の再描画」で全試合ぶん計算し直していたため、
@@ -13313,7 +13316,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   }, [ownDetail, selectedOwnNames.join("|"), mySchoolName]);
 
   const subLabel = statsCat!=="all" ? (statsCatSub==="specific" && statsCatTournament ? `（${statsCatTournament}）` : "（すべて）") : "";
-  const periodLabel = period==="season" ? `${seasonLabel || "起点日"}以降` : STATS_PERIOD_LABELS[period];
+  const periodLabel = period==="season" ? `${seasonLabel || "起点日"}以降` : (STATS_PERIOD_LABELS[period] ?? STATS_PERIOD_LABELS.all);
   const filterSummary = `${STATS_CAT_LABELS[statsCat]}${subLabel}・${periodLabel}`;
 
   return (
@@ -13381,10 +13384,10 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                   )}
                   <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" }}>
                     {seasonStart && (
-                      <button style={{ ...S.togBtn(period==="season", C.navy), flex:1, minWidth:110, fontSize:11.5, padding:"8px 2px" }} onClick={()=>setPeriod("season")}>📌 {seasonLabel||"起点日"}以降</button>
+                      <button style={{ ...S.togBtn(period==="season", C.navy), flex:1, minWidth:110, height:36, fontSize:11.5, padding:"0 4px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }} onClick={()=>setPeriod("season")}>📌 {seasonLabel||"起点日"}以降</button>
                     )}
                     {[["all","全期間"],["month1","直近1ヶ月"],["month3","直近3ヶ月"]].map(([v,l])=>(
-                      <button key={v} style={{ ...S.togBtn(period===v, C.navy), flex:1, minWidth:70, fontSize:11.5, padding:"8px 2px" }} onClick={()=>setPeriod(v)}>{l}</button>
+                      <button key={v} style={{ ...S.togBtn(period===v, C.navy), flex:1, minWidth:70, height:36, fontSize:11.5, padding:"0 2px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }} onClick={()=>setPeriod(v)}>{l}</button>
                     ))}
                   </div>
                   <div style={{ textAlign:"right" }}>
