@@ -14967,6 +14967,14 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
           </button>
         )}
+        {/* ★画面の一番下まで入力したあと、上まで戻らずに抜けられるようにする（大会詳細の「← 戻る」と同じ見た目） */}
+        {onCancel && (
+          <button
+            style={{ ...S.btn("#fff"), border:`1px solid ${C.border}`, color:C.navy, fontSize:13, marginTop:8, marginBottom:24 }}
+            disabled={saving}
+            onClick={onCancel}
+          >← 戻る</button>
+        )}
       </div>
 
       {/* サーブ選択モーダル */}
