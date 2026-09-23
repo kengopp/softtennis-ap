@@ -6071,6 +6071,89 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 // 日別 選手ランキング（大会×日付を指定し、その日に出場した自チーム選手を
 // 「勝敗／1stサーブ率／レシーブミス／得点／ミス／得失点差」でランキング表示）
 // ============================================================
+// ============================================================
+// ★日別選手ランキングの選手別集計（画面表示とCSV出力で同じ計算を使う）
+//   dayGroups: [{ date: "YYYY-MM-DD", matches: [試合...] }]
+//   自チーム側の選手が対象。東福岡 対 東福岡 のような自チーム同士の対戦では、
+//   club_nameが自校名と一致するB側の選手もそれぞれの視点で集計対象に含める。
+//   「前衛」「後衛」は本来ポジション名であり、選手名として誤登録された場合に紛れ込むため除外する。
+// ============================================================
+function aggregateRankingPlayers(dayGroups, mySchoolName) {
+  const PLACEHOLDER_NAMES = new Set(["前衛", "後衛"]);
+  const playerAgg = {};
+  const ensure = (name, date) => {
+    const r = (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0, firstDate:null, lastDate:null });
+    // ★その選手が実際に出場した最初と最後の日（CSVの「開始日」「終了日」に使う）
+    if (date) {
+      if (!r.firstDate || date < r.firstDate) r.firstDate = date;
+      if (!r.lastDate  || date > r.lastDate)  r.lastDate  = date;
+    }
+    return r;
+  };
+  const isMyClub = (clubName) => !!mySchoolName && !!clubName && clubName.trim() === mySchoolName.trim();
+  (dayGroups || []).forEach(({ date, matches }) => {
+    (matches || []).forEach(m => {
+        // ★このB側が自チーム(東福岡)自身かどうか（自チーム同士の対戦のときだけtrueになる）
+        const bIsMine = (Array.isArray(m.players) ? m.players : []).some(p => p.team === "B" && isMyClub(p.club_name));
+        const targetTeams = bIsMine ? ["A", "B"] : ["A"];
+
+        const stats = calcPlayerStats(m).filter(s => targetTeams.includes(s.team) && !PLACEHOLDER_NAMES.has(s.player_name));
+        const winnerTeam = winnerSideOf(m);
+        const isFinished = m.status === "finished";
+        const seenThisMatch = new Map(); // player_name -> team（勝敗判定に使うそのチーム）
+        stats.forEach(s => {
+          const r = ensure(s.player_name, date);
+          r.winners += s.winners; r.errors += s.errors;
+          r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
+          r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
+          seenThisMatch.set(s.player_name, s.team);
+        });
+        // ★「結果だけ記録」の試合はポイントデータが無くcalcPlayerStatsに出てこないため、
+        //   match_players（実際に出場した対象チームの選手）から直接、勝敗の対象に含める
+        (Array.isArray(m.players) ? m.players : []).forEach(p => {
+          if (targetTeams.includes(p.team) && p.player_name && !PLACEHOLDER_NAMES.has(p.player_name)) {
+            if (!seenThisMatch.has(p.player_name)) seenThisMatch.set(p.player_name, p.team);
+          }
+        });
+        if (isFinished) {
+          seenThisMatch.forEach((team, name) => {
+            const r = ensure(name, date);
+            r.matches++;
+            if (winnerTeam === team) r.wins++; else r.losses++;
+          });
+        }
+      });
+
+  });
+  return Object.values(playerAgg);
+}
+
+// ★日別選手ランキングのCSV（選手1人1行。複数日のときは日ごとではなく合算し、開始日・終了日の2列で期間を表す）
+function buildRankingCsv(players) {
+  const headers = ["開始日","終了日","選手名","試合数","勝","敗","1stサーブ率(%)","1stサーブ入","サーブ本数","レシーブミス","決めた","ミス","得失点差"];
+  const rows = players
+    .slice()
+    .sort((a, b) => (b.wins - a.wins) || (a.losses - b.losses) || (b.matches - a.matches) || a.name.localeCompare(b.name, "ja"))
+    .map(p => [
+      fmtDate(p.firstDate), fmtDate(p.lastDate), p.name,
+      p.matches, p.wins, p.losses,
+      p.serveTotal > 0 ? Math.round((p.serveTotal - p.serveFault) / p.serveTotal * 100) : "",
+      p.serveTotal - p.serveFault, p.serveTotal, p.receiveMiss,
+      p.winners, p.errors, p.winners - p.errors,
+    ]);
+  const esc = v => { const s = String(v == null ? "" : v); return /[",\n]/.test(s) ? '"' + s.split('"').join('""') + '"' : s; };
+  return "\uFEFF" + [headers, ...rows].map(r => r.map(esc).join(",")).join("\n");
+}
+function downloadTextFile(text, fileName) {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   const [loading, setLoading] = useState(true);       // ★大会内の日付一覧を取得するまでのローディング（軽量）
   const [dateLoading, setDateLoading] = useState(false); // ★選択中の日の詳細データを取得するまでのローディング
@@ -6078,6 +6161,9 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   const [detailsByDate, setDetailsByDate] = useState({}); // { "YYYY-MM-DD": [match, match, ...] }（選択済みの日だけフル取得してキャッシュ）
   const [selectedDate, setSelectedDate] = useState(null);
   const [expandedMetric, setExpandedMetric] = useState(null); // 「11位以降を見る」で開く項目キー
+  const [csvSheetOpen, setCsvSheetOpen] = useState(false);     // ★CSV保存の範囲選択シート
+  const [csvRange, setCsvRange] = useState("day");             // "day"＝この日だけ ／ "all"＝大会の全日程
+  const [csvExporting, setCsvExporting] = useState(false);
 
   const [loadError, setLoadError] = useState(null);
   const [roundBreakdown, setRoundBreakdown] = useState([]); // ★診断用：団体戦(ラウンド)ごとのteam_match_games内訳
@@ -6164,45 +6250,10 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   //   その試合の勝敗・スタッツが集計から漏れてしまっていた。club_nameが自校名と
   //   一致する場合は、B側の選手もそれぞれの視点で集計対象に含める。）
   // 「前衛」「後衛」は本来ポジション名であり、選手名として誤登録された場合に紛れ込むため除外する
-  const PLACEHOLDER_NAMES = new Set(["前衛", "後衛"]);
   let players = [];
   let computeError = null;
   try {
-    const playerAgg = {};
-    const ensure = (name) => (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0 });
-    const isMyClub = (clubName) => !!mySchoolName && !!clubName && clubName.trim() === mySchoolName.trim();
-    matchesOfDay.forEach(m => {
-      // ★このB側が自チーム(東福岡)自身かどうか（自チーム同士の対戦のときだけtrueになる）
-      const bIsMine = (Array.isArray(m.players) ? m.players : []).some(p => p.team === "B" && isMyClub(p.club_name));
-      const targetTeams = bIsMine ? ["A", "B"] : ["A"];
-
-      const stats = calcPlayerStats(m).filter(s => targetTeams.includes(s.team) && !PLACEHOLDER_NAMES.has(s.player_name));
-      const winnerTeam = winnerSideOf(m);
-      const isFinished = m.status === "finished";
-      const seenThisMatch = new Map(); // player_name -> team（勝敗判定に使うそのチーム）
-      stats.forEach(s => {
-        const r = ensure(s.player_name);
-        r.winners += s.winners; r.errors += s.errors;
-        r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
-        r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
-        seenThisMatch.set(s.player_name, s.team);
-      });
-      // ★「結果だけ記録」の試合はポイントデータが無くcalcPlayerStatsに出てこないため、
-      //   match_players（実際に出場した対象チームの選手）から直接、勝敗の対象に含める
-      (Array.isArray(m.players) ? m.players : []).forEach(p => {
-        if (targetTeams.includes(p.team) && p.player_name && !PLACEHOLDER_NAMES.has(p.player_name)) {
-          if (!seenThisMatch.has(p.player_name)) seenThisMatch.set(p.player_name, p.team);
-        }
-      });
-      if (isFinished) {
-        seenThisMatch.forEach((team, name) => {
-          const r = ensure(name);
-          r.matches++;
-          if (winnerTeam === team) r.wins++; else r.losses++;
-        });
-      }
-    });
-    players = Object.values(playerAgg);
+    players = aggregateRankingPlayers([{ date: selectedDate, matches: matchesOfDay }], mySchoolName);
   } catch (e) {
     computeError = e;
   }
@@ -6220,6 +6271,39 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
         </div>
       </div>
     );
+  }
+
+  // ★CSV保存：選手1人1行。「大会の全日程」のときは全日を合算し、開始日・終了日で期間を表す。
+  //   まだ開いていない日の試合は、ここでまとめて読み込む（読み込んだ分は画面のキャッシュにも入れる）。
+  async function handleExportCsv(range) {
+    if (csvExporting) return;
+    setCsvExporting(true);
+    try {
+      const targetDates = range === "all" ? availableDates : [selectedDate];
+      const missing = targetDates.filter(d => !detailsByDate[d]);
+      const fetched = {};
+      for (const d of missing) {
+        fetched[d] = await getRankingMatchDetails(dateIndex[d] || []);
+      }
+      if (missing.length) setDetailsByDate(prev => ({ ...prev, ...fetched }));
+      const groups = targetDates.map(d => ({ date: d, matches: detailsByDate[d] || fetched[d] || [] }));
+      const list = aggregateRankingPlayers(groups, mySchoolName);
+      if (list.length === 0) { alert("保存できるデータがありません"); return; }
+      const safeName = String(tournament.name || "大会").replace(/[\\/:*?"<>|\s]+/g, "_");
+      const suffix = range === "all" ? "全日程" : String(selectedDate || "").replace(/-/g, "");
+      downloadTextFile(buildRankingCsv(list), `日別ランキング_${safeName}_${suffix}.csv`);
+      setCsvSheetOpen(false);
+    } catch (e) {
+      alert("CSVの作成に失敗しました。もう一度お試しください。\n" + (e?.message || e));
+    } finally {
+      setCsvExporting(false);
+    }
+  }
+  function openCsv() {
+    // 開催日が1日だけの大会は、選ぶ必要がないのでそのまま保存する
+    if (availableDates.length <= 1) { handleExportCsv("day"); return; }
+    setCsvRange("day");
+    setCsvSheetOpen(true);
   }
 
   const metrics = [
@@ -6292,7 +6376,14 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
                   <button key={d} style={{ ...S.togBtn(selectedDate===d, C.navy), fontSize:12, padding:"7px 12px" }} onClick={()=>setSelectedDate(d)}>{fmtDate(d)}</button>
                 ))}
               </div>
-              <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{matchesOfDay.length}試合</div>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:10 }}>
+                <div style={{ fontSize:11, color:C.textSec }}>{matchesOfDay.length}試合</div>
+                <button
+                  disabled={dateLoading || csvExporting}
+                  onClick={openCsv}
+                  style={{ fontSize:12, fontWeight:800, color:C.navy, background:C.gray, border:`1px solid ${C.border}`, borderRadius:9, padding:"7px 12px", cursor:"pointer", opacity:(dateLoading||csvExporting)?0.5:1 }}
+                >{csvExporting && !csvSheetOpen ? "作成中..." : "📄 CSVで保存"}</button>
+              </div>
             </div>
 
             {/* ★診断用：重複除去(dedup)で件数が減っていないか確認する（通常は非表示。確認したい時だけ dedupDiag && ... の前に false && を外す） */}
@@ -6388,6 +6479,37 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
           </>
         )}
       </div>
+      {csvSheetOpen && (() => {
+        const dayPlayers = players.length;
+        const opts = [
+          { key:"day", title:`この日だけ（${fmtDate(selectedDate)}）`, sub:`${matchesOfDay.length}試合・選手${dayPlayers}人` },
+          { key:"all", title:"大会の全日程", sub:`${availableDates.length}日分を合算・選手1人1行（開始日〜終了日）` },
+        ];
+        return (
+          <div style={{ position:"fixed", inset:0, zIndex:50, display:"flex", flexDirection:"column", justifyContent:"flex-end" }}>
+            <div style={{ position:"absolute", inset:0, background:"rgba(15,32,68,0.45)" }} onClick={()=>{ if(!csvExporting) setCsvSheetOpen(false); }}/>
+            <div style={{ position:"relative", background:C.white, borderRadius:"18px 18px 0 0", padding:"18px 16px", paddingBottom:"calc(20px + env(safe-area-inset-bottom, 0px))", maxWidth:520, width:"100%", margin:"0 auto" }}>
+              <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:4 }}>📄 CSVで保存</div>
+              <div style={{ fontSize:12, color:C.textSec, marginBottom:14, lineHeight:1.6 }}>選手ごとの成績を1人1行で保存します。Excelやスプレッドシートで開けます。</div>
+              {opts.map(o => {
+                const on = csvRange === o.key;
+                return (
+                  <div key={o.key} onClick={()=>setCsvRange(o.key)} style={{ display:"flex", alignItems:"center", gap:10, padding:12, borderRadius:12, border:`2px solid ${on?C.navy:C.border}`, background:on?"#f3f6fb":C.white, marginBottom:8, cursor:"pointer" }}>
+                    <div style={{ width:18, height:18, borderRadius:"50%", boxSizing:"border-box", border: on ? `6px solid ${C.navy}` : `2px solid ${C.border}`, flexShrink:0 }}/>
+                    <div>
+                      <div style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{o.title}</div>
+                      <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>{o.sub}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {csvRange === "all" && <div style={{ fontSize:11, color:C.textSec, margin:"2px 2px 6px" }}>※まだ開いていない日の試合も読み込むため、少し時間がかかります</div>}
+              <button disabled={csvExporting} onClick={()=>handleExportCsv(csvRange)} style={{ width:"100%", padding:13, border:"none", borderRadius:12, background:C.navy, color:C.white, fontSize:14, fontWeight:800, marginTop:6, cursor:"pointer", opacity:csvExporting?0.6:1 }}>{csvExporting ? "作成中..." : "保存する"}</button>
+              <button disabled={csvExporting} onClick={()=>setCsvSheetOpen(false)} style={{ width:"100%", padding:12, border:`1px solid ${C.border}`, borderRadius:12, background:C.white, color:C.navy, fontSize:13, fontWeight:700, marginTop:8, cursor:"pointer" }}>← 戻る</button>
+            </div>
+          </div>
+        );
+      })()}
       <NavBar active="" onNavigate={()=>{}} />
     </div>
   );
