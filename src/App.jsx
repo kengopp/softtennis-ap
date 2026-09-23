@@ -5396,6 +5396,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     return filteredIndividualMatches.filter(m => keepIds.has(m.id));
   }, [filteredIndividualMatches, individualResultFilter, individualRoundFilter, mySchoolName, pairLossMap]);
 
+  // ★団体戦も個人戦と同じ並び順にする：回戦が新しい方（決勝→準決勝→…→2回戦）を上に。
+  //   同じ回戦が複数ある場合（リーグなど）は日付が新しい方を上に。
+  const sortedTeamMatches = [...teamMatches].sort((a, b) => {
+    const ra = roundSortRank(a.round), rb = roundSortRank(b.round);
+    if (ra !== rb) return rb - ra;
+    return String(b.match_date || "").localeCompare(String(a.match_date || ""));
+  });
+
   const sortedIndividualMatches = [...displayIndividualMatches].sort((a, b) => {
     const ra = roundSortRank(a.round), rb = roundSortRank(b.round);
     if (ra !== rb) return rb - ra; // 回戦が新しい方を上に
@@ -5610,10 +5618,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const matchById = {};
           matches.forEach(m => { matchById[m.id] = m; });
           const rows = [];
-          teamMatches.forEach(tm => {
+          // ★試合カードと同じ回戦順。番手は1番手→2番手→3番手の順に並べる
+          sortedTeamMatches.forEach(tm => {
             const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
             const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("") || "相手";
-            (tm.games || []).forEach(g => {
+            [...(tm.games || [])].sort((x, y) => (x.order_num ?? 0) - (y.order_num ?? 0)).forEach(g => {
               const m = g.match_id ? matchById[g.match_id] : null;
               if (!m || m.status !== "finished") return; // 記録済みの試合のみ対象
               const aNames = (m.players || []).filter(p => p.team === "A").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
@@ -5665,7 +5674,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         )}
 
         {!loading && seg==="team" && teamListMode==="card" && teamMatches.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>🏆</div>この大会の団体戦記録がありません</div>}
-        {!loading && seg==="team" && teamListMode==="card" && teamMatches.map(tm => {
+        {!loading && seg==="team" && teamListMode==="card" && sortedTeamMatches.map(tm => {
           const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
           const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
