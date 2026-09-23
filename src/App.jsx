@@ -192,6 +192,39 @@ async function getAuthUserFast() {
   return user ?? null;
 }
 
+// ★スマホ本体の「戻る」用：画面に出ているボタンを探すヘルパー
+//   ・findOverlayCloseButton：画面に重なって表示されている小窓・シートの ✕／閉じる／キャンセル／←（一番手前のもの）
+//   ・findPageBackButton：画面左上の「←」（無ければ画面内の「← 戻る」）
+const BACK_BUTTON_LABELS = new Set(["←", "← 戻る", "✕", "×", "閉じる", "キャンセル", "戻る"]);
+function collectBackCandidates() {
+  const labelOf = (el) => (el.textContent || "").replace(/\s+/g, " ").trim();
+  const inOverlay = (el) => {
+    for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      if (getComputedStyle(n).position === "fixed") return true;
+    }
+    return false;
+  };
+  // ★一部の画面（AI分析など）は「←」をbuttonではなくspanで作っているため、文字が「←」だけのspanも対象にする
+  const els = Array.from(document.querySelectorAll("button, span"))
+    .filter(el => el.tagName === "BUTTON" || labelOf(el) === "←")
+    .filter(el => el.getClientRects().length > 0 && !el.disabled);
+  return { els, labelOf, inOverlay };
+}
+function findOverlayCloseButton() {
+  try {
+    const { els, labelOf, inOverlay } = collectBackCandidates();
+    const list = els.filter(b => { const t = labelOf(b); return (BACK_BUTTON_LABELS.has(t) || t.startsWith("← ")) && inOverlay(b); });
+    return list.length ? list[list.length - 1] : null;
+  } catch (e) { console.error(e); return null; }
+}
+function findPageBackButton() {
+  try {
+    const { els, labelOf, inOverlay } = collectBackCandidates();
+    const page = els.filter(b => !inOverlay(b));
+    return page.find(b => labelOf(b) === "←") ?? page.find(b => labelOf(b) === "← 戻る") ?? null;
+  } catch (e) { console.error(e); return null; }
+}
+
 // ★ログアウト処理を1箇所に共通化（確認ダイアログの表示 → 実際のログアウト → リロード）
 async function performLogout() {
   if (!window.confirm("ログアウトしますか？")) return;
@@ -20374,7 +20407,20 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  const [screen,       setScreen]       = useState("home");
+  const [screen,       setScreenState]  = useState("home");
+  // ★スマホ本体の「戻る」で「一個前の画面」に戻すための仕組み（下の「画面の履歴」を参照）。
+  //   本体の戻るが押された直後に、画面の「←」の処理が別の画面へ移動しようとした場合は、
+  //   その移動先の代わりに履歴の一個前の画面を開く（「←」の後始末＝記録者ロックの解除などはそのまま行われる）。
+  const backIntentRef = useRef(null);     // { until } 本体の戻るが押された直後だけセットされる
+  const restorePrevRef = useRef(null);    // 一個前の画面を開く関数（下で定義）
+  const setScreen = (v) => {
+    const bi = backIntentRef.current;
+    if (bi && Date.now() < bi.until && restorePrevRef.current) {
+      backIntentRef.current = null;
+      if (restorePrevRef.current()) return;
+    }
+    setScreenState(v);
+  };
   const [prevScreen,   setPrevScreen]   = useState("list"); // 戻るボタン用
   // ★試合を開いたときに最初に表示するタブ（分析の試合一覧からは「スタッツ」で開く）
   const [recordInitialTab, setRecordInitialTab] = useState(null);
@@ -20483,28 +20529,135 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
-  // ③ スマホの「戻る」ボタン（戻るジェスチャーを含む）で、意図せずアプリが閉じるのを防ぐ。
-  //   このアプリは画面を切り替えてもブラウザの履歴を積まないため、戻るを押すとアプリの外へ出てしまう。
-  //   また②のbeforeunloadは、スマホで戻るを押したときにはほとんど発生しない。
-  //   そこで履歴に「見張り用」の1件を積んでおき、戻るが押されたらそこで止めて確認を出す。
+  // ③ スマホ本体の「戻る」ボタン（戻るジェスチャーを含む）
+  //   このアプリは画面を切り替えてもブラウザの履歴を積まないため、そのままだと戻るでアプリの外へ出てしまう。
+  //   そこで履歴に「見張り用」の1件を積んでおき、戻るが押されたらそこで受け止めて appBack() を行う。
+  //   ホーム画面で戻る先が無いときだけ、これまで通り「アプリを終了しますか？」を出す。
+  // ------------------------------------------------------------
+  // ★画面の履歴：画面が切り替わるたびに「どの画面を見ていたか（大会・試合なども含めて）」を積んでおく。
+  //   ・入力フォーム（試合作成・団体戦作成・番手の選手設定・AI分析の入力）は履歴に残さない。
+  //     保存後に戻るでフォームへ戻ると、同じ試合を二重に作ってしまう恐れがあるため。
+  //   ・画面の「←」などで一個前の画面に戻った場合は、履歴からもその分を取り除く（行ったり来たりで履歴が膨らまない）。
+  // ------------------------------------------------------------
+  const NO_HISTORY_SCREENS = new Set(["setup", "teamMatchSetup", "teamMatchGameSetup", "teamMatchGameEdit", "aiAnalysisAdd"]);
+  const navSnap = {
+    screen, prevScreen, recordInitialTab, initMatchType, listFilter, matchId, copySourceId, editTargetId,
+    statsPlayerName, statsOpponentName, playerStatsFrom,
+    teamMatchId, teamMatchEditId, teamMatchOrderNum, teamMatchGameEditMatchId, teamMatchCopyId, listMatchMode,
+    tournamentContext, creatingFromTournament, tournamentSeg,
+    aiAnalysisPlayer, aiAnalysisTargetMatch, aiAnalysisEditRow, aiAnalysisReturnScreen, aiAnalysisEditReturnScreen,
+  };
+  // 「同じ画面か」の判定：画面の種類＋その画面で開いている対象（試合・大会・選手など）
+  const navKeyOf = (sn) => {
+    if (!sn) return "";
+    switch (sn.screen) {
+      case "record": case "teamMatchRecord": return `${sn.screen}|${sn.matchId}`;
+      case "teamMatchDetail": return `${sn.screen}|${sn.teamMatchId}`;
+      case "tournamentDetail": case "dailyRanking": case "drawSetup": case "pairMaster":
+        return `${sn.screen}|${sn.tournamentContext?.id ?? ""}`;
+      case "playerStats": return `${sn.screen}|${sn.statsPlayerName ?? ""}`;
+      case "opponentStats": return `${sn.screen}|${sn.statsOpponentName ?? ""}`;
+      case "aiAnalysisDetail": return `${sn.screen}|${sn.aiAnalysisTargetMatch?.id ?? ""}`;
+      default: return sn.screen;
+    }
+  };
+  const navHistoryRef = useRef([]);   // 一個前、二個前…の画面
+  const lastSnapRef = useRef(null);   // 今の画面（最新の状態）
+  const restoringRef = useRef(false); // 履歴から戻している最中は、履歴に積まない
+  useEffect(() => {
+    const prev = lastSnapRef.current;
+    const curKey = navKeyOf(navSnap);
+    if (prev && navKeyOf(prev) !== curKey) {
+      const hist = navHistoryRef.current;
+      if (restoringRef.current) {
+        restoringRef.current = false;
+      } else if (hist.length && navKeyOf(hist[hist.length - 1]) === curKey) {
+        hist.pop(); // 画面の「←」などで一個前の画面に戻った
+      } else if (!NO_HISTORY_SCREENS.has(prev.screen)) {
+        hist.push(prev);
+        if (hist.length > 50) hist.shift();
+      }
+    }
+    lastSnapRef.current = navSnap; // 同じ画面の中での変化（大会詳細のタブなど）も、最新の状態として覚えておく
+  });
+
+  // 一個前の画面を開く（履歴が無ければ false）
+  restorePrevRef.current = () => {
+    const snap = navHistoryRef.current.pop();
+    if (!snap) return false;
+    const apply = () => {
+      setPrevScreen(snap.prevScreen); setRecordInitialTab(snap.recordInitialTab); setInitMatchType(snap.initMatchType);
+      setListFilter(snap.listFilter); setMatchId(snap.matchId); setCopySourceId(snap.copySourceId); setEditTargetId(snap.editTargetId);
+      setStatsPlayerName(snap.statsPlayerName); setStatsOpponentName(snap.statsOpponentName); setPlayerStatsFrom(snap.playerStatsFrom);
+      setTeamMatchId(snap.teamMatchId); setTeamMatchEditId(snap.teamMatchEditId); setTeamMatchOrderNum(snap.teamMatchOrderNum);
+      setTeamMatchGameEditMatchId(snap.teamMatchGameEditMatchId); setTeamMatchCopyId(snap.teamMatchCopyId); setListMatchMode(snap.listMatchMode);
+      setTournamentContext(snap.tournamentContext); setCreatingFromTournament(snap.creatingFromTournament); setTournamentSeg(snap.tournamentSeg);
+      setAiAnalysisPlayer(snap.aiAnalysisPlayer); setAiAnalysisTargetMatch(snap.aiAnalysisTargetMatch); setAiAnalysisEditRow(snap.aiAnalysisEditRow);
+      setAiAnalysisReturnScreen(snap.aiAnalysisReturnScreen); setAiAnalysisEditReturnScreen(snap.aiAnalysisEditReturnScreen);
+      setPendingOpenTrash(false); setAutoOpenBulkImport(false);
+      setScreenState(snap.screen);
+    };
+    restoringRef.current = true;
+    apply();
+    setTick(t => t + 1); // 戻った先の画面は最新の内容で表示し直す
+    // 「←」の処理が、画面の切り替えの後に別の値をセットしていても上書きされないよう、もう一度同じ内容をセットする
+    setTimeout(apply, 0);
+    return true;
+  };
+
+  // スマホ本体の「戻る」が押されたときの動き
+  //   ① 小窓・シートが開いていれば閉じる
+  //   ② 画面の「←」を押す（「←」の後始末はそのまま行い、行き先だけ履歴の一個前の画面に差し替える。
+  //      「11位以降を見る」のような画面内の切り替えは、そのまま「←」の動きで戻る）
+  //   ③ 「←」の無い画面（試合一覧・分析・設定などのタブ）は、履歴の一個前の画面へ
+  //   ④ 履歴が無ければホームへ。ホームで戻る先が無ければ false（終了確認を出す）
+  const appBackRef = useRef(null);
+  appBackRef.current = () => {
+    const closeBtn = findOverlayCloseButton();
+    if (closeBtn) { closeBtn.click(); return true; }
+    const hasHistory = navHistoryRef.current.length > 0;
+    const backBtn = findPageBackButton();
+    if (backBtn) {
+      if (hasHistory) backIntentRef.current = { until: Date.now() + 3000 }; // 通信を待ってから移動する「←」もあるため少し長めに
+      backBtn.click();
+      return true;
+    }
+    if (hasHistory && restorePrevRef.current()) return true;
+    if (screen !== "home") { goNav("home"); return true; }
+    return false;
+  };
+
   useEffect(() => {
     if (!window.__stBackTrapArmed) {
       window.history.pushState({ stBackTrap: true }, "");
       window.__stBackTrapArmed = true;
     }
     const onPop = () => {
-      const leave = window.confirm("アプリを終了しますか？\n\n前の画面に戻るときは、画面左上の「←」を押してください。");
+      let handled = false;
+      try { handled = appBackRef.current ? appBackRef.current() : false; } catch (e) { console.error(e); }
+      if (handled) {
+        window.history.pushState({ stBackTrap: true }, ""); // 見張りを積み直して、アプリに留まる
+        return;
+      }
+      const leave = window.confirm("アプリを終了しますか？");
       if (leave) {
         skipUnloadConfirm = true;          // ②の確認を二重に出さない
         window.__stBackTrapArmed = false;
         window.removeEventListener("popstate", onPop);
         window.history.back();             // 本当に前のページへ（＝アプリを出る）
       } else {
-        window.history.pushState({ stBackTrap: true }, ""); // 見張りを積み直して、アプリに留まる
+        window.history.pushState({ stBackTrap: true }, "");
       }
     };
+    // ★本体の戻るの直後に画面をタップした場合（確認ダイアログのボタン・下部ナビなど）は、
+    //   そのタップの操作を優先する（一個前の画面への差し替えはしない）
+    const clearIntent = () => { backIntentRef.current = null; };
     window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    document.addEventListener("pointerdown", clearIntent, true);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      document.removeEventListener("pointerdown", clearIntent, true);
+    };
   }, []);
 
   // プロフィール（学校・男女区分が未設定だと試合・選手マスターを共有できないため、設定完了をチェック）
