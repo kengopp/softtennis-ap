@@ -84,7 +84,8 @@ const playTypesFor = (resultType) =>
 // shot_typeキー（DB保存用：プレイ内容_結果 の組み合わせで生成）
 const buildShotKey = (play, result) => play && result ? `${play}_${result}` : play ?? result ?? null;
 
-const getPlayLabel   = (key) => PLAY_TYPES.find(p => p.key === key)?.label ?? key ?? "—";
+// ★ダブルフォルトはプレー選択肢には無いが、ミス集計ではサーブを打った選手の「ミスしたプレイ」として数えるため表示名を持たせる
+const getPlayLabel   = (key) => key === "double_fault" ? "ダブルフォルト" : (PLAY_TYPES.find(p => p.key === key)?.label ?? key ?? "—");
 // 成功率を5段階の色に変換（90%〜緑／70-89%黄緑／50-69%黄／30-49%橙／〜29%赤）
 const getRateTierColor = (rate) => {
   if (rate>=90) return C.accent;
@@ -158,7 +159,38 @@ let skipUnloadConfirm = false;
 const screenCache = {};
 const readScreenCache  = (key) => screenCache[key] ?? null;
 const writeScreenCache = (key, data) => { screenCache[key] = data; };
-const clearScreenCache = () => { Object.keys(screenCache).forEach(k => { delete screenCache[k]; }); };
+const clearScreenCache = () => { Object.keys(screenCache).forEach(k => { delete screenCache[k]; }); clearDataCaches(); };
+
+// ★データ取得のキャッシュ（処理速度改善）
+//   分析画面を開くたび・条件を変えるたびに、全試合一覧やポイント明細を毎回サーバーから取り直していたため、
+//   タップしてから表示までに時間がかかっていた。取得結果を短時間だけ覚えておき、同じ内容はすぐ返す。
+//   ・自分が保存・削除した試合は、その場でキャッシュを捨てるので古い内容は出ない
+//   ・他の人が記録した内容は、下の有効期限が切れた時点で最新になる
+const MATCH_LIST_CACHE_MS   = 60 * 1000;      // 全試合一覧（分析画面用）：1分
+const FULL_MATCH_CACHE_MS   = 5 * 60 * 1000;  // 終了済み試合のポイント明細：5分
+const PROFILE_CACHE_MS      = 5 * 60 * 1000;  // 自分のプロフィール：5分
+let _matchListCache = null;      // { at, promise }
+const _fullMatchCache = new Map(); // matchId -> { at, data }
+let _profileCache = null;        // { at, promise }
+function clearDataCaches() {
+  _matchListCache = null;
+  _fullMatchCache.clear();
+  _profileCache = null;
+}
+// ★試合を保存・削除したときに呼ぶ（その試合の明細と、全試合一覧のキャッシュを捨てる）
+function invalidateMatchCaches(matchId) {
+  _matchListCache = null;
+  if (matchId) _fullMatchCache.delete(matchId); else _fullMatchCache.clear();
+}
+// ★ログイン中のユーザー。supabase.auth.getUser()は毎回サーバーに問い合わせるため、
+//   画面表示の判定用には端末内に保存されているセッションから読む（通信なし）。
+//   データの読み書きの権限は、これまで通りサーバー側（RLS）で守られている。
+async function getAuthUserFast() {
+  const { data } = await supabase.auth.getSession();
+  if (data?.session?.user) return data.session.user;
+  const { data: { user } } = await supabase.auth.getUser();
+  return user ?? null;
+}
 
 // ★ログアウト処理を1箇所に共通化（確認ダイアログの表示 → 実際のログアウト → リロード）
 async function performLogout() {
@@ -383,9 +415,25 @@ async function getSimpleRecordedDrawMatches(tournamentId) {
 
 // ★複数の試合IDから、games/points/faultsまで含めた完全な試合データを一括取得する
 // 　（個人分析画面で選ばれた複数の試合をまとめて集計するために使う）
+// ★キャッシュから返すときは複製を渡す（呼び出し側が中身を書き換えてもキャッシュが壊れないように）
+const cloneMatchData = (m) => (typeof structuredClone === "function" ? structuredClone(m) : JSON.parse(JSON.stringify(m)));
+
 async function getFullMatchesByIds(ids) {
-  const uniqueIds = Array.from(new Set((ids ?? []).filter(Boolean)));
-  if (uniqueIds.length === 0) return [];
+  const allIds = Array.from(new Set((ids ?? []).filter(Boolean)));
+  if (allIds.length === 0) return [];
+
+  // ★終了済みの試合の明細は5分間キャッシュする。分析画面で条件や選手を切り替えるたびに
+  //   同じ試合のポイントを取り直していたのが、表示が遅い一番の原因だったため。
+  //   進行中の試合は刻々と変わるので、キャッシュせず毎回取得する。
+  const now = Date.now();
+  const cachedResults = [];
+  const uniqueIds = [];
+  allIds.forEach(id => {
+    const hit = _fullMatchCache.get(id);
+    if (hit && now - hit.at < FULL_MATCH_CACHE_MS) cachedResults.push(cloneMatchData(hit.data));
+    else uniqueIds.push(id);
+  });
+  if (uniqueIds.length === 0) return cachedResults;
 
   // ★試合数が多い大会だと、.in()に渡すID一覧が長くなりすぎて
   //   リクエストが失敗したり、スマホの通信・メモリ負荷が大きくなり画面が固まる
@@ -402,7 +450,9 @@ async function getFullMatchesByIds(ids) {
   const pointsByMatch = {};
   const faultsByMatch = {};
 
-  for (const chunkIds of chunks) {
+  // ★以前は40件ずつ「順番に」取得していたため、試合数が多いほど待ち時間が積み上がっていた。
+  //   サーバーに負荷をかけすぎないよう、同時に3チャンクまで並行して取得する。
+  const fetchChunk = async (chunkIds) => {
     const [
       { data: msChunk, error: mErr },
       { data: playersData, error: pErr },
@@ -420,12 +470,16 @@ async function getFullMatchesByIds(ids) {
       supabase.from("faults").select("*").in("match_id", chunkIds).order("fault_number"),
     ]);
     const chunkErr = mErr || pErr || gErr || ptErr || fErr;
-    if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
+    if (chunkErr) { console.error(chunkErr); return; } // 1チャンク失敗しても他は続行する
     (msChunk ?? []).forEach(m => ms.push(m));
     (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
     (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
     (pointsData ?? []).forEach(pt => { (pointsByMatch[pt.match_id] ??= []).push(pt); });
     (faultsData ?? []).forEach(f => { (faultsByMatch[f.match_id] ??= []).push(f); });
+  };
+  const PARALLEL = 3;
+  for (let i = 0; i < chunks.length; i += PARALLEL) {
+    await Promise.all(chunks.slice(i, i + PARALLEL).map(fetchChunk));
   }
 
   // ★チャンクごとに取得しているため、詰め直した後にも必ず番号順へ並べ直しておく
@@ -434,13 +488,19 @@ async function getFullMatchesByIds(ids) {
   Object.values(pointsByMatch).forEach(list => list.sort(byNumFull("point_number")));
   Object.values(faultsByMatch).forEach(list => list.sort(byNumFull("fault_number")));
 
-  return ms.map(m => rowToMatchFull(
+  const fetched = ms.map(m => rowToMatchFull(
     m,
     playersByMatch[m.id] ?? [],
     gamesByMatch[m.id] ?? [],
     pointsByMatch[m.id] ?? [],
     faultsByMatch[m.id] ?? [],
   ));
+  // ★終了済み・削除されていない試合だけ覚えておく
+  const savedAt = Date.now();
+  ms.forEach((row, i) => {
+    if (row.status === "finished" && !row.deleted_at) _fullMatchCache.set(row.id, { at: savedAt, data: cloneMatchData(fetched[i]) });
+  });
+  return [...cachedResults, ...fetched];
 }
 
 // ============================================================
@@ -887,6 +947,18 @@ function keyRatesFromAgg(agg) {
 // 　あわせて、以前は分割取得(チャンク)をforループ内でawaitしていたため、
 // 　チャンクの数だけ通信の往復を「順番待ち」していた（例：600試合＝10回分の
 // 　待ち時間の合計）。同時に投げることで待ち時間はほぼ1回分で済む。
+// ★分析画面用：全試合一覧を1分間だけ使い回す（分析タブの切り替えや、試合を見て戻ったときに再取得しない）。
+//   試合一覧画面など「今の状態」を必ず見せたい画面は、これまで通り getMatches() を使う。
+async function getMatchesCached() {
+  const now = Date.now();
+  if (_matchListCache && now - _matchListCache.at < MATCH_LIST_CACHE_MS) return _matchListCache.promise;
+  const promise = getMatches();
+  _matchListCache = { at: now, promise };
+  const list = await promise;
+  if ((!list || list.length === 0) && _matchListCache?.promise === promise) _matchListCache = null; // 失敗・空は覚えない
+  return list;
+}
+
 async function getMatches() {
   const { data, error } = await supabase
     .from("matches")
@@ -995,20 +1067,22 @@ async function getHomeScreenData(linkedPlayerName) {
 // 試合1件を、関連テーブルすべて含めて取得
 async function getMatch(id) {
   if (!id) return null;
-  const { data: m, error } = await supabase.from("matches").select("*").eq("id", id).single();
-  if (error || !m) { console.error(error); return null; }
-
+  // ★試合本体と明細（選手・ゲーム・ポイント・フォルト）を同時に取得する。
+  //   以前は試合本体を取ってから明細を取っていたため、通信の往復が2回かかっていた。
   const [
+    { data: m, error },
     { data: players, error: playersErr },
     { data: games, error: gamesErr },
     { data: points, error: pointsErr },
     { data: faults, error: faultsErr },
   ] = await Promise.all([
+    supabase.from("matches").select("*").eq("id", id).single(),
     supabase.from("match_players").select("*").eq("match_id", id).order("team").order("order_num"),
     supabase.from("games").select("*").eq("match_id", id).order("game_number"),
     supabase.from("points").select("*").eq("match_id", id).order("point_number"),
     supabase.from("faults").select("*").eq("match_id", id).order("fault_number"),
   ]);
+  if (error || !m) { console.error(error); return null; }
   // ★重要：ここでエラーを握りつぶして空配列のまま先に進めてしまうと、
   // 　その後に何らかの保存操作（メモ編集・中断/途中終了フラグなど）が行われた際、
   // 　saveMatch()の「クライアント側に無い行を削除する」処理により、
@@ -1132,6 +1206,7 @@ async function resolveRecorderFields(match, user) {
 
 // 試合1件を関連テーブルごと保存（新規・更新どちらも対応）
 async function saveMatch(match) {
+  invalidateMatchCaches(match?.id); // ★分析画面のキャッシュに古い内容が残らないように
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
 
@@ -1288,6 +1363,7 @@ async function saveMatch(match) {
 
 // ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする
 async function deleteMatch(id) {
+  invalidateMatchCaches(id);
   const { error } = await supabase.from("matches").update({ deleted_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
 }
@@ -1295,6 +1371,7 @@ async function deleteMatch(id) {
 // ★「結果だけ記録」で終えた試合を、後からポイントごとの詳細記録に切り替えたい時に使う。
 //   既存のgames/points/faultsを消し、スコアと状態を未開始に戻す（recorder_idも解放する）。
 async function resetMatchToUnrecorded(matchId) {
+  invalidateMatchCaches(matchId);
   const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", matchId);
   const gameIds = (existingGames ?? []).map(g => g.id);
   if (gameIds.length) {
@@ -1316,10 +1393,12 @@ async function getDeletedMatches() {
   return data ?? [];
 }
 async function restoreMatch(id) {
+  invalidateMatchCaches(id);
   const { error } = await supabase.from("matches").update({ deleted_at: null }).eq("id", id);
   if (error) throw error;
 }
 async function permanentlyDeleteMatch(id) {
+  invalidateMatchCaches(id);
   const { error } = await supabase.from("matches").delete().eq("id", id);
   if (error) throw error;
 }
@@ -1396,6 +1475,7 @@ async function getAiAnalysesWithMatches(sinceDate) {
 
 // 予定 → 進行中に切り替え
 async function startScheduledMatch(id, firstServer, orderA, orderB) {
+  invalidateMatchCaches(id);
   const updates = { status:"active" };
   if (firstServer) updates.first_server = firstServer;
   if (orderA) updates.order_a = orderA;
@@ -1452,6 +1532,7 @@ function countPlaceholderRecords(match) {
 
 // ★チーム内の全試合をまとめて修正する（1試合ずつ開いて直すのは大変なため）
 async function repairAllPlaceholderPlayerNames() {
+  invalidateMatchCaches();
   // 仮名が残っているポイント・フォルトから、対象の試合を洗い出す
   const [{ data: pRows, error: pErr }, { data: fRows, error: fErr }] = await Promise.all([
     supabase.from("points").select("match_id").in("player_name", PLACEHOLDER_NAMES),
@@ -1478,6 +1559,7 @@ async function repairAllPlaceholderPlayerNames() {
 }
 
 async function repairPlaceholderPlayerNames(match) {
+  invalidateMatchCaches(match?.id);
   const map = findPlaceholderRenameMap(match);
   if (Object.keys(map).length === 0) return 0;
   let fixed = 0;
@@ -1499,8 +1581,19 @@ async function repairPlaceholderPlayerNames(match) {
 // ============================================================
 // プロフィール
 // ============================================================
+// ★プロフィールはほぼ全画面の最初に読むため、短時間キャッシュして同じ問い合わせを繰り返さない。
+//   取得に失敗した（null）場合は覚えずに、次回また取りに行く。
 async function getMyProfile() {
-  const { data: { user } } = await supabase.auth.getUser();
+  const now = Date.now();
+  if (_profileCache && now - _profileCache.at < PROFILE_CACHE_MS) return _profileCache.promise;
+  const promise = getMyProfileFresh();
+  _profileCache = { at: now, promise };
+  const data = await promise;
+  if (!data && _profileCache?.promise === promise) _profileCache = null;
+  return data;
+}
+async function getMyProfileFresh() {
+  const user = await getAuthUserFast();
   if (!user) return null;
   const { data, error } = await supabase.from("users").select("*").eq("id", user.id).single();
   if (error) { console.error(error); return null; }
@@ -1527,6 +1620,7 @@ async function uploadAvatarImage(file) {
   return data.publicUrl;
 }
 async function updateMyAvatar(avatarUrl) {
+  _profileCache = null;
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
   const { error } = await supabase.from("users").update({ avatar_url: avatarUrl }).eq("id", user.id);
@@ -1546,6 +1640,7 @@ async function uploadTournamentGuideline(file) {
 }
 
 async function saveMyProfile(profile) {
+  _profileCache = null;
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
   if (!profile.school_id) throw new Error("学校を選択してください。");
@@ -1673,6 +1768,7 @@ async function getGroupMembers() {
 
 // 管理者を移譲
 async function transferAdmin(schoolId, toUserId) {
+  _profileCache = null;
   const { error } = await supabase.from("schools").update({ admin_user_id: toUserId }).eq("id", schoolId);
   if (error) throw error;
 }
@@ -1848,6 +1944,7 @@ async function savePlayer(player) {
 // 　同姓の別選手（相手チームなど）を誤って巻き込まないよう、対象を絞り込んでから更新する。
 // 　戻り値は更新した試合数（0件やエラーの場合は原因を呼び出し元で分かるようにする）。
 async function renamePlayerEverywhere(oldName, newName, team, clubName) {
+  invalidateMatchCaches();
   if (!oldName || !newName || oldName === newName) return 0;
   let q = supabase.from("match_players").select("id, match_id, club_name").eq("player_name", oldName);
   if (team) q = q.eq("team", team);
@@ -1949,9 +2046,12 @@ async function getTeamMatches() {
 }
 
 async function getTeamMatch(id) {
-  const { data: m, error } = await supabase.from("team_matches").select("*").eq("id", id).is("deleted_at", null).maybeSingle();
+  // ★団体戦本体と番手を同時に取得する（以前は順番に取得していて通信の往復が2回かかっていた）
+  const [{ data: m, error }, { data: games }] = await Promise.all([
+    supabase.from("team_matches").select("*").eq("id", id).is("deleted_at", null).maybeSingle(),
+    supabase.from("team_match_games").select("*").eq("team_match_id", id).order("order_num"),
+  ]);
   if (error || !m) { if (error) console.error(error); return null; }
-  const { data: games } = await supabase.from("team_match_games").select("*").eq("team_match_id", id).order("order_num");
   return { ...m, games: games ?? [] };
 }
 
@@ -3131,7 +3231,16 @@ function calcPlayerStats(match) {
       if (hadFault) r.serveFault++;
       if (pt.fault_count===0)      { r.serve1st++; if (pt.scoring_team===serverTeam) r.serve1stWin++; }
       else if (pt.fault_count===1) { r.serve2nd++; if (pt.scoring_team===serverTeam) r.serve2ndWin++; }
-      else if (pt.fault_count===2) { r.serveDf++; }
+      else if (pt.fault_count===2) {
+        r.serveDf++;
+        // ★ダブルフォルトはサーブを打った選手のミスとして数える（決定率・ミス数・得失点差に反映）。
+        //   DFのポイントは選手名なしで記録されるため、ここでサーブ順から割り出した選手に付ける。
+        //   後から編集でミスの選手名が入っているDFは、上のループですでにミスとして数えているので二重に数えない。
+        if (!pt.player_name) {
+          r.total++; r.errors++;
+          r.playsErr["double_fault"] = (r.playsErr["double_fault"] ?? 0) + 1;
+        }
+      }
     }
     if (receiverPlayer) {
       const r = ensure(receiveTeam, receiverPlayer);
@@ -3189,6 +3298,7 @@ function calcMatchSummary(match) {
     Object.entries(s.playsErr).forEach(([k,n])=>{ if(k==="fault") return; playAgg[k]=playAgg[k]||{win:0,err:0}; playAgg[k].err+=n; });
   });
   const playRates = Object.entries(playAgg)
+    .filter(([k])=>k!=="double_fault") // ★DFは決めることがないプレーなので成功率の一覧には出さない
     .map(([k,v])=>({ key:k, label:getPlayLabel(k), total:v.win+v.err, win:v.win, err:v.err, rate:(v.win+v.err)>0?Math.round(v.win/(v.win+v.err)*100):0, isRef:(v.win+v.err)<3 }))
     .filter(p=>p.total>=1);
   // ★参考（サンプル数が少ない）プレーは、決め率に関係なく必ず一覧の下に来るようにする
@@ -10508,9 +10618,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const INACTIVITY_MS = 20 * 60 * 1000; // 20分
 
   async function loadData({ markAsChanged = true } = {}) {
-    // 先に必要な場合だけ団体戦スコアを再集計し、その後で画面表示用データを取得する。
-    // 並列実行にすると、再集計前の古いスコアを表示してしまうことがあるため順序を固定する。
-    await recalcTeamMatchScore(teamMatchId);
+    // ★処理速度改善：以前は「団体戦スコアの再集計（通信3〜4往復）」が終わるまで画面の取得を始めなかったため、
+    //   団体戦をタップしてから表示までに時間がかかっていた。再集計は裏で同時に走らせ、画面は先に表示する。
+    //   再集計でスコアや状態が変わった場合は、終わった時点で表示を差し替える（下の「再集計の反映」）。
+    const recalcPromise = recalcTeamMatchScore(teamMatchId).catch(e => { console.error(e); return null; });
     const [data, schools] = await Promise.all([
       getTeamMatch(teamMatchId),
       getSchools(),
@@ -10532,19 +10643,29 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
         setAiAnalyses(aiMap);
       });
     }
-    // ★不整合データの自動修復：どの番手も実際には開始されていないのに
-    // 団体戦全体のstatusだけが"active"のまま残っているケースを検知し、"scheduled"に戻す。
-    // （放置すると本当は始まっていない試合でLIVE自動更新が動き続けてしまう）
-    if (data.status === "active" && !(data.games || []).some(g => g.status === "active" || g.status === "finished")) {
-      await supabase.from("team_matches").update({ status:"scheduled" }).eq("id", teamMatchId).eq("status","active");
-      data.status = "scheduled";
-    }
     setTm(data);
     setLoading(false);
     if (markAsChanged) {
       lastChangeAtRef.current = Date.now();
     }
     setLastUpdated(Date.now());
+
+    // ★再集計の反映：裏で走らせた再集計の結果を待ち、スコア・状態・番手の状態を最新にする
+    const r = await recalcPromise;
+    let latest = data;
+    if (r && r.changed) {
+      const fresh = await getTeamMatch(teamMatchId); // 番手の状態も同期されるので取り直す（変化があった時だけ）
+      if (fresh) latest = fresh;
+    }
+    // ★不整合データの自動修復：どの番手も実際には開始されていないのに
+    // 団体戦全体のstatusだけが"active"のまま残っているケースを検知し、"scheduled"に戻す。
+    // （放置すると本当は始まっていない試合でLIVE自動更新が動き続けてしまう）
+    // 　再集計が"active"に書き換えることがあるため、再集計が終わった後に行う（以前と同じ順序）。
+    if (latest.status === "active" && !(latest.games || []).some(g => g.status === "active" || g.status === "finished")) {
+      await supabase.from("team_matches").update({ status:"scheduled" }).eq("id", teamMatchId).eq("status","active");
+      latest = { ...latest, status: "scheduled" };
+    }
+    if (latest !== data) setTm(latest);
     // 今回取得した内容を基準に、次回以降の「変化なし」判定用シグネチャを更新しておく
     lastSignatureRef.current = await getTeamMatchChangeSignature(teamMatchId, matchIds);
   }
@@ -10571,8 +10692,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   }
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setMyUserId(data.user?.id ?? null);
+    getAuthUserFast().then(user => {
+      setMyUserId(user?.id ?? null);
     });
     getMyProfile().then(p => { setMyUserName(p?.name || ""); });
     loadData();
@@ -11346,7 +11467,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   useEffect(() => {
     (async () => {
-      const [p, list, schools] = await Promise.all([getMyProfile(), getMatches(), getSchools()]);
+      const [p, list, schools] = await Promise.all([getMyProfile(), getMatchesCached(), getSchools()]);
       if (p?.school_id) {
         setSchoolId(p.school_id);
         const s = (schools||[]).find(s => s.id === p.school_id);
@@ -11519,7 +11640,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   const Bar = ({ label, count, color }) => (
     <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
-      <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
+      <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
       <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}>
         <div style={{ height:"100%", width:`${count/maxPlay*100}%`, background:color, borderRadius:5 }}/>
       </div>
@@ -11997,7 +12118,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       //   さらに学校一覧をもう1往復かけて取りに行っていた（その分まるまる待たされていた）。
       //   学校一覧は他の取得結果に依存しないので、最初から同時に取得する。
       const fresh = await Promise.all([
-        getMyProfile(), getPlayerRoster(), getMatches(), getSchools(),
+        getMyProfile(), getPlayerRoster(), getMatchesCached(), getSchools(),
       ]);
       writeScreenCache("personalAnalysis", fresh);
       apply(fresh);
@@ -12817,7 +12938,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                 {breakdownDim==="play" && (<>
                 {topPlaysWin.map(([label,count])=>(
                   <div key={"w"+label} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
-                    <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
+                    <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
                     <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.accent, borderRadius:5 }}/></div>
                     <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
                   </div>
@@ -12825,7 +12946,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                 {topPlaysWin.length>0 && topPlaysErr.length>0 && <div style={{ height:8 }}/>}
                 {topPlaysErr.map(([label,count])=>(
                   <div key={"e"+label} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
-                    <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
+                    <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
                     <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.red, borderRadius:5 }}/></div>
                     <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
                   </div>
@@ -13138,7 +13259,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     if (cached) apply(cached); // まず前回の内容を即表示（裏で最新化を続ける）
     (async () => {
       const [list, simpleList, rosterList, p, schools, deletedList, teamList] = await Promise.all([
-        getMatches(), getSimpleRecordedDrawMatches(), getPlayerRoster(),
+        getMatchesCached(), getSimpleRecordedDrawMatches(), getPlayerRoster(),
         getMyProfile(), getSchools(), getDeletedTournaments(), getTeamMatches(),
       ]);
       const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
@@ -13549,7 +13670,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                   const mx = Math.max(1, ...tw.map(x=>x[1]), ...te.map(x=>x[1]));
                   const Bar = ({label,count,color}) => (
                     <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
-                      <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel(label)}</div>
+                      <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel(label)}</div>
                       <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}>
                         <div style={{ height:"100%", width:`${count/mx*100}%`, background:color, borderRadius:5 }}/>
                       </div>
@@ -13725,7 +13846,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
         const s = schools.find(s => s.id === profile.school_id);
         if (s) setMySchoolName(s.name);
       }
-      const list = await getMatches();
+      const list = await getMatchesCached();
       setMatches(list);
       setLoading(false);
     })();
@@ -13869,7 +13990,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const [detail, setDetail] = useState([]);       // points込みの詳細
   const [detailLoading, setDetailLoading] = useState(false);
 
-  useEffect(() => { getMatches().then(list=>{ setMatches(list); setLoading(false); }); }, []);
+  useEffect(() => { getMatchesCached().then(list=>{ setMatches(list); setLoading(false); }); }, []);
   useEffect(() => {
     (async () => {
       const [p, schools] = await Promise.all([getMyProfile(), getSchools()]);
@@ -14023,7 +14144,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                   const mx = Math.max(1, ...tw.map(x=>x[1]), ...te.map(x=>x[1]));
                   const Bar = ({label,count,color}) => (
                     <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
-                      <div style={{ width:88, color:C.text, fontWeight:700 }}>{getPlayLabel(label)}</div>
+                      <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel(label)}</div>
                       <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}>
                         <div style={{ height:"100%", width:`${count/mx*100}%`, background:color, borderRadius:5 }}/>
                       </div>
@@ -15093,9 +15214,14 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
     setInitialMatch(null);
     (async () => {
       try {
-        const [m, { data: { user } }] = await Promise.all([
+        // ★試合データ・ログイン中のユーザー・（団体戦なら）番手の記録者を同時に取得する。
+        //   以前は「試合＋ユーザー」→「番手の記録者」と順番に待っていたため、開くまでに時間がかかっていた。
+        const [m, user, tmgRes] = await Promise.all([
           getMatch(matchId),
-          supabase.auth.getUser(),
+          getAuthUserFast(),
+          teamMatchId
+            ? supabase.from("team_match_games").select("recorder_id, status").eq("match_id", matchId).single()
+            : Promise.resolve({ data: null }),
         ]);
         if (cancelled) return;
         setInitialMatch(m);
@@ -15103,11 +15229,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
           const suspendedLike = m.status === "abandoned" || m.status === "suspended";
           if (teamMatchId) {
             // 団体戦：team_match_gamesのrecorder_idと自分のIDを比較
-            const { data: tmg } = await supabase
-              .from("team_match_games")
-              .select("recorder_id, status")
-              .eq("match_id", matchId)
-              .single();
+            const tmg = tmgRes?.data ?? null;
             // recorder_idが設定されていて自分以外 → 観戦モード
             // recorder_idがnull（誰も記録していない）→ 観戦モード（スコア詳細から入った場合）
             // ★毎回true/falseを確定させる（一度観戦モードになった後、自分が記録者になっても
