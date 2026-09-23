@@ -9674,7 +9674,168 @@ function PracticeScreen({ onNavigate }) {
 
 // マスター管理ハブ画面（選手マスター・学校マスターへの入口）
 // ============================================================
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onTrash, onProfile, onLogout, textScale, onChangeTextScale }) {
+// ============================================================
+// ★利用規約・利用ルール
+//   TERMS_VERSION を変えると、全員に「もう一度同意」を求める（文面を改訂したとき用）。
+//   同意の記録は users.terms_agreed_at（同意日時）と users.terms_version（同意した版）。
+// ============================================================
+const TERMS_VERSION = "2026-09-24";
+const TERMS_INTRO = [
+  "本アプリは、自チームの競技力向上と試合での勝利を目的として、試合のスコア、選手のプレー内容、分析結果、動画、コメント等のチーム内で必要な情報を記録・共有するためのものです。",
+  "本アプリを利用する方は、以下のルールを理解し、同意したうえで利用してください。",
+];
+// 段落は文字列、箇条書きは配列、太字にしたい部分は { b: "..." } を含む配列で表す
+const TERMS_SECTIONS = [
+  { title: "1．利用目的について", body: [
+    "本アプリに記録される情報は、自チームの競技力向上および試合で勝つために必要な情報として利用します。",
+    "記録されたスコア、分析結果、動画リンク、コメント等には、チーム内で共有すべき重要な情報が含まれる場合があります。",
+  ]},
+  { title: "2．利用できる人について", body: [
+    "本アプリを利用できるのは、自チームの選手およびその保護者に限定します。",
+    "利用を許可されていない人に、本アプリを利用させてはいけません。",
+    "また、利用を許可されていない人に、アプリの画面や記録内容を見せたり、アプリ内の情報を説明したりしないでください。",
+    "特に、他校の選手・保護者・関係者等に対しては、アプリの内容を見せない、話さないことを徹底してください。",
+  ]},
+  { title: "3．アプリの利用について外部で話さないこと", body: [
+    "本アプリを利用していることや、アプリでどのような情報を記録・分析しているかについて、他校などの外部の人に自ら話してはいけません。",
+    { rich: ["他校の選手や関係者等から、「何をしているのか」「何のアプリを使っているのか」などと聞かれた場合は、", { b: "「スコアを付けています」" }, "と回答することを基本としてください。"] },
+    "アプリの機能、分析方法、記録内容、チーム内での利用方法などを外部の人に説明しないでください。",
+  ]},
+  { title: "4．アプリ内の情報を外部に漏らさないこと", body: [
+    "以下の情報は、チーム外の人に絶対に漏らしてはいけません。",
+    { list: ["試合の詳細なスコアや記録", "データ分析の内容", "選手ごとの分析結果", "動画および動画へのリンク", "試合メモ、コメント", "チーム内で共有されているその他の情報"] },
+    "また、アプリ内の情報をスクリーンショット、コピー、ダウンロード等によって取得し、本人の判断でSNS、LINE、メール、クラウドストレージ等へ外部共有してはいけません。",
+    "情報を共有する必要がある場合は、チーム内で認められた範囲で行ってください。",
+  ]},
+  { title: "5．アカウント・ログイン情報について", body: [
+    "自分のアカウントやログイン情報を、利用を許可されていない人に貸したり、教えたりしてはいけません。",
+    "また、他人のアカウントを使用して本アプリを利用してはいけません。",
+  ]},
+  { title: "6．本アプリの終了について", body: [
+    "本アプリは、正式な学校公式システムではなく、チーム内での競技力向上を目的として運用するものです。",
+    { rich: ["本アプリの利用は、", { b: "2027年のインターハイ後に終了" }, "する予定です。"] },
+    "利用者は、本アプリが2027年のインターハイ後に終了することについて、あらかじめ了承するものとします。",
+  ]},
+  { title: "7．利用ルールに違反した場合", body: [
+    "本利用規約・利用ルールに違反して、チーム外への情報漏えい、不正利用、アカウントの貸し借り等が確認された場合は、アプリの利用を停止することがあります。",
+    "本アプリは、チーム内の信頼関係を前提として運用しています。利用者一人ひとりが情報管理を徹底してください。",
+  ]},
+];
+
+// ★同意を記録する（自分のusers行に日時と版を保存）
+async function agreeToTerms() {
+  const user = await getAuthUserFast();
+  if (!user) throw new Error("ログインしていません");
+  const { error } = await supabase.from("users")
+    .update({ terms_agreed_at: new Date().toISOString(), terms_version: TERMS_VERSION })
+    .eq("id", user.id);
+  if (error) throw error;
+  _profileCache = null;
+}
+
+const fmtAgreedDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// ★規約本文（読みにくいという声を受けて、他の画面より大きな文字にしている：本文17px・見出し18.5px）
+function TermsBody() {
+  const pStyle = { margin: "0 0 10px" };
+  const renderItem = (item, i) => {
+    if (typeof item === "string") return <p key={i} style={pStyle}>{item}</p>;
+    if (item.list) return (
+      <div key={i} style={{ margin: "0 0 10px", paddingLeft: 4 }}>
+        {item.list.map((li, j) => <div key={j}>・{li}</div>)}
+      </div>
+    );
+    if (item.rich) return (
+      <p key={i} style={pStyle}>
+        {item.rich.map((r, j) => typeof r === "string" ? <Fragment key={j}>{r}</Fragment> : <b key={j} style={{ fontWeight: 800 }}>{r.b}</b>)}
+      </p>
+    );
+    return null;
+  };
+  return (
+    <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 14, padding: "16px 14px", fontSize: 17, lineHeight: 1.9, letterSpacing: "0.02em", color: C.text }}>
+      {TERMS_INTRO.map((t, i) => <p key={i} style={pStyle}>{t}</p>)}
+      {TERMS_SECTIONS.map((sec, i) => (
+        <div key={i} style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 18.5, fontWeight: 800, color: C.navy, marginBottom: 6, paddingBottom: 4, borderBottom: `2px solid ${C.border}` }}>■ {sec.title}</div>
+          {sec.body.map(renderItem)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ★同意画面（未同意の人はログイン後、ホームより前にこの画面に固定される）
+function TermsAgreeScreen({ onAgreed, onLogout }) {
+  const [checked, setChecked] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const handleAgree = async () => {
+    if (!checked || saving) return;
+    setSaving(true);
+    try {
+      await agreeToTerms();
+      await onAgreed();
+    } catch (e) {
+      console.error(e);
+      alert("同意の保存に失敗しました。通信状態を確認して、もう一度お試しください。\n" + (e?.message || e));
+      setSaving(false);
+    }
+  };
+  return (
+    <div style={S.page}>
+      <div style={S.hdr}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.white }}>📜 利用規約・利用ルール</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>ソフトテニススコアアプリ</div>
+        </div>
+      </div>
+      <div style={{ padding: 14, paddingBottom: 40 }}>
+        <TermsBody />
+        <div
+          onClick={() => setChecked(v => !v)}
+          style={{ display: "flex", alignItems: "center", gap: 12, background: checked ? "#f3f6fb" : C.white, border: `2px solid ${checked ? C.navy : C.border}`, borderRadius: 12, padding: 14, marginTop: 16, fontSize: 17, lineHeight: 1.6, fontWeight: 800, color: C.text, cursor: "pointer" }}
+        >
+          <div style={{ width: 28, height: 28, borderRadius: 6, border: `2px solid ${checked ? C.navy : C.border}`, background: checked ? C.navy : C.white, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: C.white, fontSize: 18 }}>{checked ? "✓" : ""}</div>
+          利用規約・利用ルールを確認し、内容に同意します。
+        </div>
+        <button
+          disabled={!checked || saving}
+          onClick={handleAgree}
+          style={{ width: "100%", padding: 17, border: "none", borderRadius: 12, background: checked ? C.accent : "#c9ced8", color: C.white, fontSize: 18, fontWeight: 800, marginTop: 12, cursor: checked ? "pointer" : "default" }}
+        >{saving ? "保存中..." : "利用を開始する"}</button>
+        <div style={{ fontSize: 14, lineHeight: 1.6, color: C.textSec, textAlign: "center", marginTop: 10 }}>※同意いただけない場合、本アプリを利用することはできません。</div>
+        <div onClick={onLogout} style={{ fontSize: 15, color: C.textSec, textAlign: "center", marginTop: 14, textDecoration: "underline", cursor: "pointer" }}>同意しない（ログアウト）</div>
+      </div>
+    </div>
+  );
+}
+
+// ★設定から開く確認用の画面（読むだけ）
+function TermsViewScreen({ agreedAt, onBack }) {
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display: "flex", alignItems: "center", gap: 10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
+        <span style={{ fontSize: 18, fontWeight: 800, color: C.white }}>📜 利用規約・利用ルール</span>
+      </div>
+      <div style={{ padding: 14, paddingBottom: 40 }}>
+        {agreedAt && (
+          <div style={{ background: "#e8f8f1", border: "1px solid #bfe9d5", color: "#0a7a4d", borderRadius: 12, padding: "12px 14px", fontSize: 16, fontWeight: 700, marginBottom: 12 }}>
+            ✓ {fmtAgreedDate(agreedAt)} に同意済み
+          </div>
+        )}
+        <TermsBody />
+      </div>
+    </div>
+  );
+}
+
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onTrash, onTerms, termsAgreedAt, onProfile, onLogout, textScale, onChangeTextScale }) {
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
@@ -9770,6 +9931,16 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           <div>
             <div style={{ fontSize:14,fontWeight:700 }}>🗑 ゴミ箱</div>
             <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>削除した大会・試合を確認（24時間以内なら復元可）</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
+        <div
+          style={{ ...S.card, padding:"16px 14px", marginTop:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onTerms}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>📜 利用規約・利用ルール</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>{termsAgreedAt ? `${fmtAgreedDate(termsAgreedAt)} に同意済み` : "アプリの利用ルールを確認"}</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
@@ -20785,6 +20956,16 @@ export default function App() {
     return <AuthScreen onAuthed={()=>{ getMyProfile().then(setProfile); }} />;
   }
 
+  // ★利用規約に同意していない（または規約の版が新しくなった）人は、同意するまでこの画面に固定する
+  if (profile.terms_version !== TERMS_VERSION) {
+    return (
+      <TermsAgreeScreen
+        onAgreed={async () => { const p = await getMyProfile(); if (p) setProfile(p); setScreen("home"); }}
+        onLogout={performLogout}
+      />
+    );
+  }
+
   if (screen==="profile") {
     return <ProfileScreen onBack={()=>setScreen("home")} onSaved={()=>{ getMyProfile().then(setProfile); }} />;
   }
@@ -21041,11 +21222,16 @@ export default function App() {
         onSeasonSettings={()=>setScreen("seasonSettings")}
         onProfile={()=>setScreen("profile")}
         onTrash={()=>{ setPendingOpenTrash(true); setListMatchMode("tournament"); setScreen("list"); }}
+        onTerms={()=>setScreen("terms")}
+        termsAgreedAt={profile?.terms_agreed_at}
         onLogout={performLogout}
         textScale={textScale}
         onChangeTextScale={setTextScale}
       />
     );
+  }
+  if (screen==="terms") {
+    return <TermsViewScreen agreedAt={profile?.terms_agreed_at} onBack={()=>setScreen("master")} />;
   }
   if (screen==="goalSettings") {
     return <GoalSettingsScreen onBack={()=>setScreen("master")} />;
