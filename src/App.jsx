@@ -5627,7 +5627,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             <button
               style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="pair" ? C.accentL : "none", color: teamListMode==="pair" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
               onClick={()=>setTeamListMode("pair")}
-            >📋 ペア別一覧</button>
+            >📋 ペア別対戦</button>
           </div>
         )}
 
@@ -5645,7 +5645,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         )}
 
         {!loading && seg==="team" && teamListMode==="pair" && (() => {
-          // ★団体戦タブの「ペア別一覧」：大会内の全団体戦から1番手・2番手…を横断してフラットに一覧表示。
+          // ★団体戦タブの「ペア別対戦」：大会内の全団体戦から1番手・2番手…を横断してフラットに一覧表示。
           //   team_match_gamesにはmatch_idしか無いため、実際の選手名・スコアは対応するmatchesレコードから取得する。
           //   色はその団体戦全体の勝敗ではなく、そのペア自身の勝敗で決める。
           const matchById = {};
@@ -5688,7 +5688,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <button
                 style={{ flex:1, padding:"10px 0", border:"none", background: drawViewMode==="list" ? C.accentL : "none", color: drawViewMode==="list" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
                 onClick={()=>setDrawViewMode("list")}
-              >📋 ペア別一覧</button>
+              >📋 ペア別対戦</button>
             </div>
             {drawViewMode==="draw" && (
               <div style={{ marginBottom: 12 }}>
@@ -5937,7 +5937,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       </div>
 
       {/* ★閲覧専用アカウントには試合作成ボタンを出さない */}
-      {!isViewer && (
+      {/* ★団体戦の「ペア別対戦」タブは一覧を見るための画面なので、試合作成ボタンを出さない */}
+      {!isViewer && !(seg==="team" && teamListMode==="pair") && (
       <button
         style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:seg==="team"?`linear-gradient(135deg,${C.navy},${C.navyMid})`:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center" }}
         onClick={()=>seg==="team" ? onNewTeam() : onNewIndividual()}
