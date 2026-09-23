@@ -5742,7 +5742,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 {/* ★閲覧専用アカウントには作成・記録・削除系は出さない。
                       ボタンの並びは個人戦カードと同じ（左下🗑 → コピー → … → 右下🎥） */}
                 {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteTeamMatch(tm.id)}>🗑</button>}
-                {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピー</button>}
+                {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyTeamMatch(tm.id)}>📋 コピーして新規作成</button>}
                 {!isViewer && notStarted && (
                   <button
                     style={{ flex:1, padding:"8px", background:"#f5f5f5", color:C.navy, border:"none", borderLeft:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }}
