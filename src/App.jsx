@@ -8256,7 +8256,15 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
       // （選手2しか入力されていないケースにも対応）
       const winnerSide = side === "A" ? "B" : "A";
       const winnerEntry = winnerSide === "A" ? (entryA || drawMatch.sideA) : (entryB || drawMatch.sideB);
-      if (winnerEntry && (winnerEntry.player1_name || winnerEntry.player2_name)) {
+      if (category === "team") {
+        // ★団体戦のドローでは個人戦用の試合を作らない。棄権は「結果だけ記録」の勝者として残し、勝ち上がりに使う
+        if (winnerEntry) {
+          const { error: woErr } = await supabase.from("draw_matches")
+            .update({ simple_result_winner: winnerSide, updated_at: new Date().toISOString() })
+            .eq("id", drawMatch.id).is("match_id", null);
+          if (woErr) console.error(woErr);
+        }
+      } else if (winnerEntry && (winnerEntry.player1_name || winnerEntry.player2_name)) {
         await createWalkoverMatch({ ...drawMatch, sideA: entryA || drawMatch.sideA, sideB: entryB || drawMatch.sideB }, tournament.name, roundLabel, winnerSide);
       }
       clearDraft();
@@ -8837,6 +8845,14 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       onClick={() => {
                         if (longPressFiredRef.current) { longPressFiredRef.current = false; return; } // ★長押しでシートを開いた場合は通常タップを無視
                         if (startingId) return; // ★作成処理中は他の操作を無視（連打対策）
+                        // ★団体戦のドローは「勝ち上がりを見る表」。枠から試合は作らず、両チームが入っていれば「結果だけ記録」を開く。
+                        //   （以前は個人戦用の試合が作られてしまい、団体戦の画面も正しく開けなかった。
+                        //    個々の試合の記録は、これまで通り大会画面の「＋」から団体戦を作って行う）
+                        if (category === "team") {
+                          if (filled) { openSimpleResultModal(dm); return; }
+                          openEditingSlot(dm);
+                          return;
+                        }
                         if (dm.match_id) { onOpenMatch(dm.match_id); return; }
                         if (filled) {
                           startMatch(dm);
@@ -8901,7 +8917,11 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
           <div style={{ position:"absolute", top:0, right:0, bottom:4, width:26, background:"linear-gradient(to right, rgba(244,246,249,0), rgba(244,246,249,0.9))", pointerEvents:"none" }} />
         )}
       </div>
-      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合画面が開きます（実際のスコア入力は「第1ゲーム開始」を押すまで始まりません）。作成済みの試合は長押しでコピー・削除ができます。</div>
+      <div style={{ fontSize: 11, color: C.textSec, marginTop: 4 }}>
+        {category === "team"
+          ? "未定の枠をタップして対戦チームを入力。両チームが決まった枠をタップすると「結果だけ記録」が開きます（勝ち上がりに使います）。1番手・2番手などの詳しい記録は、大会画面の「＋」から団体戦を作って行ってください。"
+          : "未定の枠をタップして対戦情報を入力。両サイド決まったらタップすると試合画面が開きます（実際のスコア入力は「第1ゲーム開始」を押すまで始まりません）。作成済みの試合は長押しでコピー・削除ができます。"}
+      </div>
 
       {editingSlot && (() => {
         // ★このエントリーが「前の回戦の勝者として進出してきたもの（＝同じdraw_entries.idを
