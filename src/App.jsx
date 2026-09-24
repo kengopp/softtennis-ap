@@ -6770,15 +6770,46 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
             <div style={{ fontSize:40, marginBottom:12 }}>👥</div>
             まだペアが登録されていません<br/>
             <span style={{ fontSize:11 }}>右下の「＋」から登録できます</span>
-            <div style={{ marginTop:16, display:"flex", flexDirection:"column", gap:8, alignItems:"center" }}>
-              <button
-                style={{ padding:"10px 18px", borderRadius:20, border:`1px solid ${C.navy}`, background:C.white, color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
-                onClick={() => setView("bulk")}
-              >🔢 1番から連番でまとめて登録する</button>
-              <button
-                style={{ padding:"10px 18px", borderRadius:20, border:`1px solid ${C.navy}`, background:C.white, color:C.navy, fontSize:12.5, fontWeight:700, cursor:"pointer" }}
-                onClick={() => setView("import")}
-              >📋 一覧から一括登録する</button>
+            {/* ★2つの登録方法の違い（画面で1組ずつ打つ／コピーして貼り付ける）が分かるよう、
+                「入力のしかた」「どう動くか」「使う場面」を書いたカードにする */}
+            <div style={{ marginTop:16, textAlign:"left" }}>
+              <div style={{ fontSize:14, fontWeight:800, color:C.navy, textAlign:"center", marginBottom:10 }}>どちらの方法で登録しますか？</div>
+              {[
+                {
+                  key:"bulk", icon:"✍️", title:"画面で1組ずつ入力する",
+                  desc:<>チーム名と選手名を入力して「登録して次へ」。<b>番号は1→2→3…と自動で進む</b>ので、続けて入力できます。</>,
+                  extra:(
+                    <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:8, fontSize:11, fontWeight:700, color:C.text, flexWrap:"wrap" }}>
+                      {["1番を入力","2番を入力","3番…"].map((t,i)=>(
+                        <Fragment key={t}>{i>0 && <span>→</span>}<span style={{ background:C.gray, border:`1px solid ${C.border}`, borderRadius:6, padding:"3px 7px" }}>{t}</span></Fragment>
+                      ))}
+                    </div>
+                  ),
+                  when:"紙の対戦表を見ながら入力するとき", go:"1番から入力を始める",
+                },
+                {
+                  key:"import", icon:"📋", title:"コピーして貼り付ける",
+                  desc:<>対戦表・エントリー表の文字をコピーして貼り付けると、<b>何組でも一度に登録</b>できます。1行が1ペアです。</>,
+                  extra:(
+                    <div style={{ background:C.gray, border:`1px dashed ${C.border}`, borderRadius:8, padding:"7px 9px", fontSize:11, fontFamily:"ui-monospace,Menlo,monospace", color:C.text, marginTop:8, lineHeight:1.6 }}>
+                      262　玄界　和多 湊音　堺 壮太郎<br/>263　玄界　田中 陸　山本 蓮
+                    </div>
+                  ),
+                  when:"PDF・Excel・Webの対戦表があるとき", go:"貼り付け画面を開く",
+                },
+              ].map(o => (
+                <div key={o.key} onClick={() => setView(o.key)}
+                  style={{ background:C.white, border:`1.5px solid ${C.border}`, borderRadius:14, padding:14, marginBottom:10, cursor:"pointer" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:15, fontWeight:800, color:C.navy }}>
+                    <span style={{ fontSize:22 }}>{o.icon}</span>{o.title}
+                  </div>
+                  <div style={{ fontSize:12, lineHeight:1.7, marginTop:6, color:C.text }}>{o.desc}</div>
+                  {o.extra}
+                  <div style={{ display:"inline-block", fontSize:11, fontWeight:800, color:"#0a7a4d", background:"#e8f8f1", borderRadius:6, padding:"3px 8px", marginTop:8 }}>こんな時に：{o.when}</div>
+                  <div style={{ textAlign:"center", marginTop:10, padding:10, borderRadius:10, background:C.navy, color:C.white, fontSize:13, fontWeight:800 }}>{o.go}</div>
+                </div>
+              ))}
+              <div style={{ height:56 }} />
             </div>
           </div>
         ) : filtered.length === 0 ? (
@@ -6811,22 +6842,21 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
 
       {showAddChoice && (
         <Modal onClose={() => setShowAddChoice(false)}>
-          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:14 }}>登録方法を選んでください</h3>
-          <div style={{ fontSize:12, color:C.textSec, marginBottom:14, lineHeight:1.6 }}>
-            出場番号がバラバラな場合は「1件ずつ登録」、1番から順番に並んでいる場合は「連番でまとめて登録」、対戦表など一覧のデータがあるなら「一覧から一括登録」が便利です。
-          </div>
-          <button
-            style={{ width:"100%", padding:13, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.text, fontSize:13.5, fontWeight:700, marginBottom:8, textAlign:"left", cursor:"pointer" }}
-            onClick={() => { setShowAddChoice(false); setEditingPair({ entry_no: String(nextFreeNo) }); }}
-          >🔢 1件ずつ登録（番号を毎回指定）</button>
-          <button
-            style={{ width:"100%", padding:13, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.text, fontSize:13.5, fontWeight:700, marginBottom:8, textAlign:"left", cursor:"pointer" }}
-            onClick={() => { setShowAddChoice(false); setView("bulk"); }}
-          >🔢 連番でまとめて登録（1→2→3…）</button>
-          <button
-            style={{ width:"100%", padding:13, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:C.white, fontSize:13.5, fontWeight:700, textAlign:"left", cursor:"pointer" }}
-            onClick={() => { setShowAddChoice(false); setView("import"); }}
-          >📋 一覧から一括登録（複数行まとめて貼り付け）</button>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:12, color:C.navy }}>登録方法を選んでください</h3>
+          {/* ★0件時のカードと同じ言葉にそろえ、それぞれに一言の説明を付ける */}
+          {[
+            { label:"➕ 1組だけ登録する", sub:"番号を指定して1組だけ追加・修正", onClick:() => { setShowAddChoice(false); setEditingPair({ entry_no: String(nextFreeNo) }); } },
+            { label:"✍️ 画面で1組ずつ入力する", sub:"番号は1→2→3…と自動で進む。紙の対戦表を見ながら入力するとき", onClick:() => { setShowAddChoice(false); setView("bulk"); } },
+            { label:"📋 コピーして貼り付ける", sub:"何組でも一度に登録。PDF・Excel・Webの対戦表があるとき", onClick:() => { setShowAddChoice(false); setView("import"); } },
+          ].map(o => (
+            <button key={o.label} onClick={o.onClick}
+              style={{ width:"100%", padding:12, borderRadius:12, border:`1.5px solid ${C.border}`, background:C.white, marginBottom:8, textAlign:"left", cursor:"pointer" }}>
+              <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>{o.label}</div>
+              <div style={{ fontSize:11.5, color:C.textSec, marginTop:3, lineHeight:1.6, fontWeight:400 }}>{o.sub}</div>
+            </button>
+          ))}
+          <button onClick={() => setShowAddChoice(false)}
+            style={{ width:"100%", padding:10, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, color:C.navy, fontSize:13, fontWeight:700, marginTop:4, cursor:"pointer" }}>キャンセル</button>
         </Modal>
       )}
 
@@ -6998,7 +7028,7 @@ function TournamentPairBulkAddScreen({ tournament, existingPairs, schools, onBac
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>連番でまとめて登録</div>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>✍️ 画面で1組ずつ入力</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
         </div>
       </div>
@@ -7125,7 +7155,7 @@ function TournamentPairBulkImportScreen({ tournament, existingPairs, onBack }) {
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack} disabled={importing}>←</button>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>一覧から一括登録</div>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>📋 コピーして貼り付けて登録</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
         </div>
       </div>
