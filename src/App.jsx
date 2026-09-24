@@ -3633,7 +3633,7 @@ function ServeReceiveOrderEditor({ aName, bName, aP1, aP2, bP1, bP2, value, onCh
 // ★「最初のサーブを選択」モーダル本体：チーム選択後にだけ、各ペアの1人目/2人目選択欄を表示する（Pattern1）
 // aP1/aP2, bP1/bP2 はダブルスの場合の各選手名（シングルスならaP2/bP2はnull）
 function ServeOrderModal({ aLabel, bLabel, aP1, aP2, bP1, bP2, isDoubles, initialOrders, onCancel, onConfirm }) {
-  const [team, setTeam] = useState(null);   // "A" | "B"
+  const [team, setTeam] = useState(initialOrders?.first_server === "B" ? "B" : "A"); // ★自チーム（A）が選ばれた状態から始める
   // ★サーブの1人目・レシーブの1人目は試合情報の値から始める（無ければ登録順の1人目。レシーブはnull＝サーブと同じ人）
   const [orders, setOrders] = useState({
     order_a: initialOrders?.order_a === "p2" ? "p2" : "p1",
@@ -16477,7 +16477,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   第1ゲームで分かる2つ（サーブ側のサーブの1人目・レシーブ側のレシーブの1人目）だけを並べる。
                   ここで変えると試合情報の値も変わる。残りの2つは試合情報（✏️）で確認・修正する */}
               {(() => {
-                const fs = match.first_server;
+                // ★最初にサーブするペアが未設定の試合は、自チーム（A）が選ばれた状態から始める
+                const fs = match.first_server || "A";
                 const COLORS = { A: C.teamA, B: C.orange };
                 const pairShort = (t) => familyNamesOf(t) || (t==="A" ? teamALabel : teamBLabel) || (t==="A" ? "自チーム" : "相手");
                 const isDoublesMatch = match.players.filter(p=>p.team==="A").length>1;
@@ -16513,8 +16514,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                         >{pairShort(t)}</button>
                       ))}
                     </div>
-                    {!fs && <div style={{ fontSize:11.5, color:C.textSec, textAlign:"center", marginTop:8 }}>サーブするペアを選んでください</div>}
-                    {fs && isDoublesMatch && (
+                    {isDoublesMatch && (
                       <>
                         {pickRow(fs, "serve")}
                         {pickRow(other, "receive")}
@@ -16525,7 +16525,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 );
               })()}
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                <button disabled={startingGame} style={{ width:"100%", padding:"15px 16px", background:startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:14, fontSize:16, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame()}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
+                <button disabled={startingGame} style={{ width:"100%", padding:"15px 16px", background:startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:14, fontSize:16, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame(match.first_server ? match : { ...match, first_server:"A" })}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
                 <div style={{ display:"flex", gap:8 }}>
                   <button
                     style={{ flex:1, padding:"13px 16px", background:"#fff", border:"1px solid "+C.border, color:C.navy, borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" }}
