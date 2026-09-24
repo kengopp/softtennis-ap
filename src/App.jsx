@@ -6795,7 +6795,8 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
                       262　玄界　和多 湊音　堺 壮太郎<br/>263　玄界　田中 陸　山本 蓮
                     </div>
                   ),
-                  when:"PDF・Excel・Webの対戦表があるとき", go:"貼り付け画面を開く",
+                  when:"対戦表をデータで持っていて、文字をコピーできるとき", go:"貼り付け画面を開く",
+                  caution:"※ファイルをそのまま取り込む機能ではありません。対戦表から文字をコピーして貼り付けます",
                 },
               ].map(o => (
                 <div key={o.key} onClick={() => setView(o.key)}
@@ -6806,6 +6807,7 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
                   <div style={{ fontSize:12, lineHeight:1.7, marginTop:6, color:C.text }}>{o.desc}</div>
                   {o.extra}
                   <div style={{ display:"inline-block", fontSize:11, fontWeight:800, color:"#0a7a4d", background:"#e8f8f1", borderRadius:6, padding:"3px 8px", marginTop:8 }}>こんな時に：{o.when}</div>
+                  {o.caution && <div style={{ fontSize:10.5, color:C.textSec, marginTop:6, lineHeight:1.6 }}>{o.caution}</div>}
                   <div style={{ textAlign:"center", marginTop:10, padding:10, borderRadius:10, background:C.navy, color:C.white, fontSize:13, fontWeight:800 }}>{o.go}</div>
                 </div>
               ))}
@@ -6847,7 +6849,7 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
           {[
             { label:"➕ 1組だけ登録する", sub:"番号を指定して1組だけ追加・修正", onClick:() => { setShowAddChoice(false); setEditingPair({ entry_no: String(nextFreeNo) }); } },
             { label:"✍️ 画面で1組ずつ入力する", sub:"番号は1→2→3…と自動で進む。紙の対戦表を見ながら入力するとき", onClick:() => { setShowAddChoice(false); setView("bulk"); } },
-            { label:"📋 コピーして貼り付ける", sub:"何組でも一度に登録。PDF・Excel・Webの対戦表があるとき", onClick:() => { setShowAddChoice(false); setView("import"); } },
+            { label:"📋 コピーして貼り付ける", sub:"何組でも一度に登録。対戦表をデータで持っていて、文字をコピーできるとき（ファイルの取り込みではありません）", onClick:() => { setShowAddChoice(false); setView("import"); } },
           ].map(o => (
             <button key={o.label} onClick={o.onClick}
               style={{ width:"100%", padding:12, borderRadius:12, border:`1.5px solid ${C.border}`, background:C.white, marginBottom:8, textAlign:"left", cursor:"pointer" }}>
