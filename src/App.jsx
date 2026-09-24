@@ -16472,49 +16472,70 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             </div>
           )}
           {!correctMode&&match.games.length===0&&match.status!=="finished"&&!viewOnly&&(
-            <div style={{ textAlign:"center",padding:"40px 0" }}>
-              <div style={{ fontSize:36,marginBottom:12 }}>🎾</div>
-              <p style={{ color:C.textSec,marginBottom:8 }}>第1ゲームを開始してください</p>
-              {match.first_server ? (
-                <>
-                  <p style={{ fontSize:13,color:match.first_server==="A"?C.teamA:C.teamB,fontWeight:700,marginBottom:8 }}>最初のサーブ: {match.first_server==="A"?teamALabel:teamBLabel}</p>
-                  <button
-                    style={{ border:"1px solid "+C.border, background:C.gray, borderRadius:8, fontSize:11, color:C.textSec, cursor:"pointer", padding:"5px 10px", fontWeight:700, marginBottom:12 }}
-                    onClick={()=>persist({ ...match, first_server: match.first_server==="A" ? "B" : "A" })}
-                  >🔄 サーブを入れ替える</button>
-                  {match.players.filter(p=>p.team==="A").length>1 && (
-                    <div style={{ marginTop:4, marginBottom:20, maxWidth:360, marginLeft:"auto", marginRight:"auto" }}>
-                      {/* ★第1ゲームで分かる2つ（サーブ側のサーブの1人目・レシーブ側のレシーブの1人目）だけを表示。
-                          ここで変えると試合情報の値も変わる。残りの2つは試合情報（✏️）で確認・修正する */}
-                      <ServeReceiveOrderEditor
-                        aName={orderEditorName("A")} bName={orderEditorName("B")}
-                        aP1={sortedTeamNames("A")[0]} aP2={sortedTeamNames("A")[1]}
-                        bP1={sortedTeamNames("B")[0]} bP2={sortedTeamNames("B")[1]}
-                        value={match} onChange={(next)=>persist({ ...match, order_a: next.order_a, order_b: next.order_b, receive_order_a: next.receive_order_a ?? null, receive_order_b: next.receive_order_b ?? null })}
-                        mode="start" firstServer={match.first_server}
-                      />
-                      <div style={{ fontSize:11, color:C.textSec, marginTop:2, lineHeight:1.6 }}>第2ゲーム以降の順番は、右上の✏️（試合情報）から確認・修正できます</div>
+            <div style={{ padding:"4px 0 0" }}>
+              {/* ★第1ゲームの準備カード（案A）：最初にサーブするペアを切り替えボタンで選び、
+                  第1ゲームで分かる2つ（サーブ側のサーブの1人目・レシーブ側のレシーブの1人目）だけを並べる。
+                  ここで変えると試合情報の値も変わる。残りの2つは試合情報（✏️）で確認・修正する */}
+              {(() => {
+                const fs = match.first_server;
+                const COLORS = { A: C.teamA, B: C.orange };
+                const pairShort = (t) => familyNamesOf(t) || (t==="A" ? teamALabel : teamBLabel) || (t==="A" ? "自チーム" : "相手");
+                const isDoublesMatch = match.players.filter(p=>p.team==="A").length>1;
+                const other = fs==="A" ? "B" : "A";
+                const saveOrders = (key, v) => persist({ ...match, [key]: v });
+                const pickRow = (team, role) => {
+                  const names = sortedTeamNames(team);
+                  const key = role==="serve" ? (team==="A"?"order_a":"order_b") : (team==="A"?"receive_order_a":"receive_order_b");
+                  const cur = role==="serve" ? ((team==="A"?match.order_a:match.order_b)==="p2"?"p2":"p1") : effectiveReceiveOrder(match, team);
+                  return (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:13.5, fontWeight:800, marginBottom:6 }}>
+                        <span style={{ fontSize:11.5, fontWeight:800, color:C.white, background:COLORS[team], borderRadius:5, padding:"2px 6px" }}>{role==="serve"?"サーブ":"レシーブ"}</span>
+                        <span style={{ color:COLORS[team] }}>{pairShort(team)} の1人目</span>
+                      </div>
+                      <div style={{ display:"flex", gap:8 }}>
+                        <OrderSegBtn active={cur!=="p2"} color={COLORS[team]} onClick={()=>saveOrders(key,"p1")}>{names[0] || "選手1"}</OrderSegBtn>
+                        <OrderSegBtn active={cur==="p2"} color={COLORS[team]} onClick={()=>saveOrders(key,"p2")}>{names[1] || "選手2"}</OrderSegBtn>
+                      </div>
                     </div>
-                  )}
-                </>
-              ) : (
-                <p style={{ fontSize:13,color:C.textSec,marginBottom:20 }}>最初のサーブは次の画面で選択します</p>
-              )}
-              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  );
+                };
+                return (
+                  <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:14, marginBottom:12, textAlign:"left" }}>
+                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:12 }}>🎾 第1ゲームの準備</div>
+                    <div style={{ fontSize:15, fontWeight:800, color:C.text, marginBottom:8, textAlign:"center" }}>最初にサーブするペア</div>
+                    <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:4, gap:4 }}>
+                      {["A","B"].map(t => (
+                        <button key={t}
+                          onClick={()=>{ if (fs !== t) persist({ ...match, first_server: t }); }}
+                          style={{ flex:1, border:"none", borderRadius:9, padding:"13px 4px", fontSize:16, fontWeight:800, cursor:"pointer",
+                            background: fs===t ? COLORS[t] : "transparent", color: fs===t ? C.white : C.textSec }}
+                        >{pairShort(t)}</button>
+                      ))}
+                    </div>
+                    {!fs && <div style={{ fontSize:11.5, color:C.textSec, textAlign:"center", marginTop:8 }}>サーブするペアを選んでください</div>}
+                    {fs && isDoublesMatch && (
+                      <>
+                        {pickRow(fs, "serve")}
+                        {pickRow(other, "receive")}
+                        <div style={{ fontSize:10.5, color:C.textSec, marginTop:12, lineHeight:1.6 }}>第2ゲーム以降の順番は、右上の✏️（試合情報）で確認・修正できます</div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <button disabled={startingGame} style={{ width:"100%", padding:"15px 16px", background:startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:14, fontSize:16, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame()}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
                 <div style={{ display:"flex", gap:8 }}>
-                  <button disabled={startingGame} style={{ flex:1, padding:"13px 16px", background:startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame()}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
+                  <button
+                    style={{ flex:1, padding:"13px 16px", background:"#fff", border:"1px solid "+C.border, color:C.navy, borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" }}
+                    onClick={()=>{ setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true); }}
+                  >📝 結果だけ記録</button>
                   <button
                     style={{ flex:"0 0 48px", width:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
                     onClick={()=>shareToLine("試合開始")}
                     aria-label="LINEで共有"
                   ><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg></button>
-                </div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <button
-                    style={{ flex:1, padding:"13px 16px", background:"#fff", border:"1px solid "+C.border, color:C.navy, borderRadius:10, fontSize:14, fontWeight:700, cursor:"pointer" }}
-                    onClick={()=>{ setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true); }}
-                  >📝 結果だけ記録</button>
-                  <div style={{ flex:"0 0 48px", width:48 }} />
                 </div>
                 {match.status==="scheduled" && (
                   <div style={{ display:"flex", gap:8 }}>
