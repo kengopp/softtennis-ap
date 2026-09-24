@@ -4107,8 +4107,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       const tour = (tm.tournament_name || "").toLowerCase();
       if (!opp.includes(searchQuery) && !tour.includes(searchQuery)) return false;
     }
+    // ★動画・AI分析の絞り込み（どれか1つの番手にあれば残す）
+    if (filterHasVideo && !((tm.video_links || []).length > 0)) return false;
+    if (filterHasAi && !(tm.games || []).some(g => g.match_id && aiAnalysesMap[g.match_id])) return false;
     return true;
-  }), [allTeamMatches, filterStatus, dateFilterApplied, childOnly, linkedPlayerName, teamMatchHasPlayer, tmMySchoolOnly, mySchoolId, searchQuery]);
+  }), [allTeamMatches, filterStatus, dateFilterApplied, childOnly, linkedPlayerName, teamMatchHasPlayer, tmMySchoolOnly, mySchoolId, searchQuery, filterHasVideo, filterHasAi, aiAnalysesMap]);
 
   // ★大会カードの集計（試合数・終了数・会場数・勝敗）を、全試合の1回の走査でまとめて作る。
   //   以前は大会1件ごとに全試合を走査し直していたため、
@@ -4383,8 +4386,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           ) : (
             <button onClick={()=>setDateFilterOpen(v=>!v)} style={{ padding:"4px 12px", borderRadius:20, border:"1px solid "+C.border, background:"transparent", fontSize:12, fontWeight:700, color:C.textSec, cursor:"pointer" }}>日付</button>
           )}
-          {/* ★個人戦タブだけ：動画リンクがある試合だけ／AI分析がある試合だけを絞り込むアイコントグル。テキストなしで正方形のボタンにし、既存チップの右に区切り線を挟んで並べる */}
-          {timeTab === "individual" && (
+          {/* ★個人戦・団体戦タブ：動画リンクがある試合だけ／AI分析がある試合だけを絞り込むアイコントグル。テキストなしで正方形のボタンにし、既存チップの右に区切り線を挟んで並べる
+              団体戦では「どれか1つの番手に動画（AI分析）がある団体戦」を残す（カードの🎥・🤖ボタンが出る条件と同じ） */}
+          {(timeTab === "individual" || timeTab === "team") && (
             <>
               <div style={{ width:1, height:20, background:C.border, margin:"0 2px" }} />
               <button
