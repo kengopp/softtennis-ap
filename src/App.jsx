@@ -5603,8 +5603,23 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 {!isViewer && (
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                  onClick={()=>{ setShowMoreMenu(false); setDrawViewMode("draw"); onRequestBulkImport && onRequestBulkImport(); }}
-                >📋 一覧から一括登録</button>
+                  onClick={()=>{
+                    setShowMoreMenu(false);
+                    // ★この機能は「ドロー表の枠」に対戦カードを貼り付けて登録するもの。
+                    //   開いているタブ（団体戦／個人戦）にドローが無いと貼り付け先が無く、以前は何も起きなかった
+                    //   （しかも開く予約だけが残り、後でドロー表を開いたときに急に貼り付け画面が出ていた）。
+                    //   ドローが無いときは理由を伝え、ドロー設定へ案内する。
+                    const segLabel = seg==="team" ? "団体戦" : "個人戦";
+                    if (!(drawSummary[seg] > 0)) {
+                      if (window.confirm(`この大会の${segLabel}には、まだドロー表がありません。\n\n「ドローにデータ登録」は、ドロー表の枠に対戦カードを貼り付けて登録する機能です。先にドロー表を作成してください。\n\n「ドロー設定」を開きますか？`)) {
+                        onOpenDrawSetup && onOpenDrawSetup(seg);
+                      }
+                      return;
+                    }
+                    if (seg==="team") setTeamListMode("draw"); else setDrawViewMode("draw");
+                    onRequestBulkImport && onRequestBulkImport();
+                  }}
+                >📋 ドローにデータ登録</button>
                 )}
               </div>
             </>
@@ -7772,7 +7787,7 @@ function DrawSetup({ tournament, category, onBack }) {
         }
         if (unblockedRemaining === 0) {
           if (openBulkDirectly) {
-            // ★「一覧から一括登録へ」ボタンから来た場合は、確認ダイアログを挟まず直接遷移する
+            // ★「ドローにデータ登録へ」ボタンから来た場合は、確認ダイアログを挟まず直接遷移する
             onBack({ openBulkImport: true });
           } else {
             // ★作成した直後に、続けて出場チーム・選手をまとめて登録できるようにする
@@ -7888,7 +7903,7 @@ function DrawSetup({ tournament, category, onBack }) {
             style={{ width: "100%", padding: 12, marginTop: 8, background: C.white, color: C.navy, border: "1px solid " + C.navy, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.7 : 1 }}
             disabled={saving}
             onClick={()=>handleCreate(true)}
-          >📋 この内容で作成して、一覧から一括登録へ</button>
+          >📋 この内容で作成して、ドローにデータ登録へ</button>
           <div style={{ fontSize: 11, color: C.textSec, textAlign: "center", marginTop: 10 }}>
             作成すると「未定 vs 未定・予定」の空枠が各回戦に設定した試合数ぶん自動生成されます。棄権・不戦勝は、枠をタップして開く対戦情報入力画面から個別に設定できます。
           </div>
@@ -9039,7 +9054,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         <Modal onClose={() => !bulkImporting && closeBulkImport()}>
           <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
-              <div style={{ fontSize: 15, fontWeight: 800 }}>一覧から一括登録</div>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>📋 ドローにデータ登録</div>
               <button
                 style={{ border: "none", background: "none", fontSize: 20, color: C.textSec, cursor: "pointer", lineHeight: 1, padding: 0, marginLeft: 8, marginRight: 10, flex: "none" }}
                 onClick={() => !bulkImporting && closeBulkImport()}
