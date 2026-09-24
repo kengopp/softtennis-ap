@@ -15939,6 +15939,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const bClub = match.players.find(p=>p.team==="B")?.club_name??"";
   const leftClub   = isYounger ? aClub : bClub;
   const rightClub  = isYounger ? bClub : aClub;
+  // ★得点ボタン（+1）の下の表示。同校対決（両チームの学校名が同じ）のときは、
+  //   学校名だと両方「東福岡」になり区別できないため、選手の名字（例：豊福/木場）を表示する
+  const isSameSchoolMatch = !!aClub.trim() && aClub.trim() === bClub.trim();
+  const familyNamesOf = (t) => match.players.filter(p=>p.team===t).sort((x,y)=>(x.order_num??0)-(y.order_num??0))
+    .map(p => (p.player_name || "").trim().split(/[\s　]+/)[0]).filter(Boolean).join("/");
+  const leftBtnLabel  = isSameSchoolMatch ? (familyNamesOf(leftTeam)  || leftClub)  : leftClub;
+  const rightBtnLabel = isSameSchoolMatch ? (familyNamesOf(rightTeam) || rightClub) : rightClub;
   const leftScore  = (g) => isYounger ? g.score_a : g.score_b;
   const rightScore = (g) => isYounger ? g.score_b : g.score_a;
   const leftMatchScore  = isYounger ? match.match_score_a : match.match_score_b;
@@ -17010,12 +17017,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                           {/* 左ボタン：若番=自チーム(緑)、遅番=相手(赤) */}
                           <button disabled={leftDisabled} style={{ height:70,background:isYounger?"#2ecc71":"#f97316",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:leftDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(46,204,113,0.35)":"0 3px 10px rgba(249,115,22,0.35)",opacity:leftDisabled?0.35:1 }} onClick={()=>{ if(!leftDisabled){ if(fault===2){ addPoint(leftTeam);} else { wizardChooseTeam(leftTeam);} } }}>
                             <span style={{ fontSize:22,fontWeight:800 }}>+1</span>
-                            <span style={{ fontSize:11,opacity:0.9 }}>{leftClub||(isYounger?"自チーム":"相手")}</span>
+                            <span style={{ fontSize:11,opacity:0.9 }}>{leftBtnLabel||(isYounger?"自チーム":"相手")}</span>
                           </button>
                           {/* 右ボタン：若番=相手(オレンジ)、遅番=自チーム(緑) */}
                           <button disabled={rightDisabled} style={{ height:70,background:isYounger?"#f97316":"#2ecc71",color:C.white,border:"none",borderRadius:14,fontSize:16,fontWeight:700,cursor:rightDisabled?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,boxShadow:isYounger?"0 3px 10px rgba(249,115,22,0.35)":"0 3px 10px rgba(46,204,113,0.35)",opacity:rightDisabled?0.35:1 }} onClick={()=>{ if(!rightDisabled){ if(fault===2){ addPoint(rightTeam);} else { wizardChooseTeam(rightTeam);} } }}>
                             <span style={{ fontSize:22,fontWeight:800 }}>+1</span>
-                            <span style={{ fontSize:11,opacity:0.9 }}>{rightClub||(isYounger?"相手":"自チーム")}</span>
+                            <span style={{ fontSize:11,opacity:0.9 }}>{rightBtnLabel||(isYounger?"相手":"自チーム")}</span>
                           </button>
                         </>
                       );
