@@ -641,7 +641,7 @@ async function getRankingMatchDetails(ids) {
       { data: faultsData, error: fErr },
     ] = await Promise.all([
       supabase.from("matches")
-        .select("id, match_date, tournament_name, status, order_a, order_b, match_score_a, match_score_b, walkover_winner")
+        .select("id, match_date, tournament_name, status, order_a, order_b, receive_order_a, receive_order_b, match_score_a, match_score_b, walkover_winner")
         .in("id", chunkIds),
       supabase.from("match_players")
         .select("id, match_id, team, player_name, order_num, club_name")
@@ -681,6 +681,7 @@ async function getRankingMatchDetails(ids) {
   return ms.map(m => ({
     id: m.id, match_date: m.match_date, tournament_name: m.tournament_name ?? "", status: m.status,
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
+    receive_order_a: m.receive_order_a === "p2" ? "p2" : m.receive_order_a === "p1" ? "p1" : null, receive_order_b: m.receive_order_b === "p2" ? "p2" : m.receive_order_b === "p1" ? "p1" : null,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b, walkover_winner: m.walkover_winner ?? null,
     players: (playersByMatch[m.id] ?? []).map(p => ({
       id: p.id, team: p.team, player_name: p.player_name, order_num: p.order_num, club_name: p.club_name ?? null,
@@ -1163,6 +1164,7 @@ function rowToMatchSummary(m, players=[], games=[]) {
     match_type: m.match_type, game_format: m.game_format,
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
+    receive_order_a: m.receive_order_a === "p2" ? "p2" : m.receive_order_a === "p1" ? "p1" : null, receive_order_b: m.receive_order_b === "p2" ? "p2" : m.receive_order_b === "p1" ? "p1" : null,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
     video_links: normalizeVideoLinks(m.video_links),
@@ -1193,6 +1195,7 @@ function rowToMatchFull(m, players, games, points, faults) {
     match_type: m.match_type, game_format: m.game_format,
     is_doubles: m.is_doubles, first_server: m.first_server, status: m.status,
     order_a: m.order_a === "p2" ? "p2" : "p1", order_b: m.order_b === "p2" ? "p2" : "p1",
+    receive_order_a: m.receive_order_a === "p2" ? "p2" : m.receive_order_a === "p1" ? "p1" : null, receive_order_b: m.receive_order_b === "p2" ? "p2" : m.receive_order_b === "p1" ? "p1" : null,
     match_score_a: m.match_score_a, match_score_b: m.match_score_b,
     memo: m.memo ?? "",
     video_links: normalizeVideoLinks(m.video_links),
@@ -1251,6 +1254,9 @@ async function saveMatch(match) {
     match_type: match.match_type, game_format: match.game_format,
     is_doubles: match.is_doubles, first_server: match.first_server, status: match.status,
     order_a: match.order_a === "p2" ? "p2" : "p1", order_b: match.order_b === "p2" ? "p2" : "p1",
+    // ★レシーブの1人目（サーブとは別）。未設定(null)の古い試合は、サーブの1人目と同じ人として扱う
+    receive_order_a: match.receive_order_a === "p2" ? "p2" : match.receive_order_a === "p1" ? "p1" : null,
+    receive_order_b: match.receive_order_b === "p2" ? "p2" : match.receive_order_b === "p1" ? "p1" : null,
     match_score_a: match.match_score_a, match_score_b: match.match_score_b,
     memo: match.memo || null,
     court_number: match.court_number || null,
@@ -1507,12 +1513,14 @@ async function getAiAnalysesWithMatches(sinceDate) {
 }
 
 // 予定 → 進行中に切り替え
-async function startScheduledMatch(id, firstServer, orderA, orderB) {
+async function startScheduledMatch(id, firstServer, orderA, orderB, recvA, recvB) {
   invalidateMatchCaches(id);
   const updates = { status:"active" };
   if (firstServer) updates.first_server = firstServer;
   if (orderA) updates.order_a = orderA;
   if (orderB) updates.order_b = orderB;
+  if (recvA) updates.receive_order_a = recvA; // ★レシーブの1人目（サーブとは別）
+  if (recvB) updates.receive_order_b = recvB;
   // ★試合を開始した人がそのまま記録者になる（作成者とは別に管理する）
   const { data: { user } } = await supabase.auth.getUser();
   if (user) {
@@ -3105,6 +3113,12 @@ function buildServeReceiveRows(match) {
   // ★どちらの選手が先に始めるか（通常は選手1＝配列[0]から）。稀に選手2から始まるケースがあるため、
   // 　match.order_a / match.order_b（"p1" | "p2"）で入れ替え可能にしている。
   const orderFlags = { A: match?.order_a === "p2" ? "p2" : "p1", B: match?.order_b === "p2" ? "p2" : "p1" };
+  // ★レシーブの1人目はサーブとは別に設定できる（receive_order_a/b）。
+  //   未設定(null)の古い試合は、これまで通りサーブの1人目と同じ人から始まるものとして扱う（数字は変わらない）。
+  const recvFlags = {
+    A: match?.receive_order_a === "p2" ? "p2" : match?.receive_order_a === "p1" ? "p1" : orderFlags.A,
+    B: match?.receive_order_b === "p2" ? "p2" : match?.receive_order_b === "p1" ? "p1" : orderFlags.B,
+  };
   const orderedPlayers = (players, flag) => {
     if (!Array.isArray(players) || players.length<=1) return players;
     return flag==="p2" ? [players[1], players[0]] : players;
@@ -3138,7 +3152,7 @@ function buildServeReceiveRows(match) {
       const serveTurn   = serverTeam==="A" ? serveTurnA : serveTurnB;
       const serverPlayer   = serverIndividualAt(teamPlayers[serverTeam], serveTurn, orderFlags[serverTeam]);
       // ★レシーブ側は「そのゲームで何点目か（idx）」で1ポイントごとに交代する（サーブ側の通算カウントとは別）
-      const receiverPlayer = receiverIndividualAt(teamPlayers[receiveTeam], idx, orderFlags[receiveTeam]);
+      const receiverPlayer = receiverIndividualAt(teamPlayers[receiveTeam], idx, recvFlags[receiveTeam]);
       const fc = pt.fault_count ?? 0;
       const serveResult = fc===0 ? "1st" : fc===1 ? "2nd" : fc===2 ? "df" : null;
       out.push({
@@ -3555,14 +3569,78 @@ function PairOrderRow({ p1, p2, color, order, setOrder, tag }) {
     </div>
   );
 }
+// ============================================================
+// ★サーブ・レシーブ順の設定（各ペアの「サーブの1人目」と「レシーブの1人目」を別々に持つ）
+//   ・順番は「試合情報」で管理する（作成・✏️編集の画面）。試合の途中では変えない前提。
+//   ・初期値はサーブもレシーブも登録順の1人目。レシーブを一度も選び直していない間（receive_* が null）は、
+//     サーブの1人目を変えるとレシーブも同じ人に付いていく。
+//   ・第1ゲーム開始前は、第1ゲームで分かる2つ（サーブ側のサーブ・レシーブ側のレシーブ）だけを表示する。
+//   ・成績は保存せず表示のたびに計算しているため、順番を直すと試合の最初から新しい順番で集計される。
+//   value: { order_a, receive_order_a, order_b, receive_order_b }（"p1" | "p2" | null）
+//   mode:
+//     "info"  … 試合情報：両ペアとも「サーブの1人目」（上）→「レシーブの1人目」（下）
+//     "start" … 第1ゲーム開始前：firstServer側の「サーブの1人目」と、相手側の「レシーブの1人目」だけ
+// ============================================================
+function effectiveReceiveOrder(value, team) {
+  const r = team === "A" ? value?.receive_order_a : value?.receive_order_b;
+  if (r === "p1" || r === "p2") return r;
+  const s = team === "A" ? value?.order_a : value?.order_b;
+  return s === "p2" ? "p2" : "p1";
+}
+function nextOrderValue(value, key, v) {
+  return { ...value, [key]: v };
+}
+function ServeReceiveOrderEditor({ aName, bName, aP1, aP2, bP1, bP2, value, onChange, mode = "info", firstServer = null, inset = false }) {
+  const players = { A: [aP1 || "選手1", aP2 || "選手2"], B: [bP1 || "選手1", bP2 || "選手2"] };
+  const names = { A: aName, B: bName };
+  const colors = { A: C.teamA, B: C.orange };
+  const serveOf = (t) => ((t === "A" ? value?.order_a : value?.order_b) === "p2" ? "p2" : "p1");
+  const recvIsFollowing = (t) => { const r = t === "A" ? value?.receive_order_a : value?.receive_order_b; return r !== "p1" && r !== "p2"; };
+  const set = (key, v) => onChange(nextOrderValue(value, key, v));
+  const row = (team, role) => {
+    const key = role === "serve" ? (team === "A" ? "order_a" : "order_b") : (team === "A" ? "receive_order_a" : "receive_order_b");
+    const cur = role === "serve" ? serveOf(team) : effectiveReceiveOrder(value, team);
+    return (
+      <div key={role} style={{ marginTop: role === "receive" && mode === "info" ? 10 : 0 }}>
+        <div style={{ fontSize:12.5, fontWeight:800, color:colors[team], marginBottom:5 }}>{role === "serve" ? "🎾 サーブの1人目" : "レシーブの1人目"}</div>
+        <div style={{ display:"flex", gap:8 }}>
+          <OrderSegBtn active={cur !== "p2"} color={colors[team]} onClick={()=>set(key, "p1")}>{players[team][0]}</OrderSegBtn>
+          <OrderSegBtn active={cur === "p2"} color={colors[team]} onClick={()=>set(key, "p2")}>{players[team][1]}</OrderSegBtn>
+        </div>
+        {role === "receive" && mode === "info" && recvIsFollowing(team) && (
+          <div style={{ display:"inline-block", fontSize:10.5, fontWeight:700, color:C.textSec, background:C.gray, borderRadius:6, padding:"3px 7px", marginTop:5 }}>サーブと同じ人（サーブを変えると一緒に変わります）</div>
+        )}
+      </div>
+    );
+  };
+  const block = (team, roles) => (
+    <div key={team} style={{ background: inset ? C.gray : C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:12, marginBottom:10, textAlign:"left" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:13, fontWeight:800, color:C.text, marginBottom:10 }}>
+        <span style={{ width:10, height:10, borderRadius:"50%", background:colors[team], flexShrink:0 }} />
+        <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{names[team]}</span>
+      </div>
+      {roles.map(r => row(team, r))}
+    </div>
+  );
+  if (mode === "start") {
+    if (!firstServer) return null;
+    const other = firstServer === "A" ? "B" : "A";
+    return <div>{block(firstServer, ["serve"])}{block(other, ["receive"])}</div>;
+  }
+  return <div>{block("A", ["serve", "receive"])}{block("B", ["serve", "receive"])}</div>;
+}
+
 // ★「最初のサーブを選択」モーダル本体：チーム選択後にだけ、各ペアの1人目/2人目選択欄を表示する（Pattern1）
 // aP1/aP2, bP1/bP2 はダブルスの場合の各選手名（シングルスならaP2/bP2はnull）
-function ServeOrderModal({ aLabel, bLabel, aP1, aP2, bP1, bP2, isDoubles, onCancel, onConfirm }) {
+function ServeOrderModal({ aLabel, bLabel, aP1, aP2, bP1, bP2, isDoubles, initialOrders, onCancel, onConfirm }) {
   const [team, setTeam] = useState(null);   // "A" | "B"
-  const [orderA, setOrderA] = useState("p1");
-  const [orderB, setOrderB] = useState("p1");
-  const tagA = !team ? null : (team==="B" ? "レシーブ" : "🎾 サーブ");
-  const tagB = !team ? null : (team==="A" ? "レシーブ" : "🎾 サーブ");
+  // ★サーブの1人目・レシーブの1人目は試合情報の値から始める（無ければ登録順の1人目。レシーブはnull＝サーブと同じ人）
+  const [orders, setOrders] = useState({
+    order_a: initialOrders?.order_a === "p2" ? "p2" : "p1",
+    receive_order_a: initialOrders?.receive_order_a ?? null,
+    order_b: initialOrders?.order_b === "p2" ? "p2" : "p1",
+    receive_order_b: initialOrders?.receive_order_b ?? null,
+  });
   return (
     <Modal onClose={onCancel}>
       <div style={{ textAlign:"center" }}>
@@ -3579,17 +3657,20 @@ function ServeOrderModal({ aLabel, bLabel, aP1, aP2, bP1, bP2, isDoubles, onCanc
         </div>
         {/* ★チームを選ぶまでは非表示。稀に選手2から始まるケースだけここで入れ替える */}
         {team && isDoubles && (
-          <div style={{ textAlign:"left", background:C.gray, borderRadius:10, padding:12, marginBottom:16 }}>
-            <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>各ペアの1人目（通常はここから開始）</div>
+          <div style={{ textAlign:"left", background:C.gray, borderRadius:10, padding:10, marginBottom:16 }}>
             {/* ★選手名が空欄のまま保存された試合でも枠だけにならないよう、仮名で表示する */}
-            <PairOrderRow p1={(aP1&&aP1.trim())||"選手1"} p2={(aP2&&aP2.trim())||"選手2"} color={C.teamA} order={orderA} setOrder={setOrderA} tag={tagA} />
-            <PairOrderRow p1={(bP1&&bP1.trim())||PLACEHOLDER_NAMES[0]} p2={(bP2&&bP2.trim())||PLACEHOLDER_NAMES[1]} color={C.teamB} order={orderB} setOrder={setOrderB} tag={tagB} />
+            <ServeReceiveOrderEditor
+              aName={aLabel} bName={bLabel}
+              aP1={(aP1&&aP1.trim())||"選手1"} aP2={(aP2&&aP2.trim())||"選手2"}
+              bP1={(bP1&&bP1.trim())||PLACEHOLDER_NAMES[0]} bP2={(bP2&&bP2.trim())||PLACEHOLDER_NAMES[1]}
+              value={orders} onChange={setOrders} mode="start" firstServer={team}
+            />
           </div>
         )}
         <button disabled={!team} style={{
           width:"100%", padding:13, borderRadius:10, border:"none", cursor:team?"pointer":"default",
           background:team?C.navy:C.border, color:C.white, fontWeight:800, fontSize:14, marginBottom:8,
-        }} onClick={()=>team && onConfirm(team, orderA, orderB)}>試合開始</button>
+        }} onClick={()=>team && onConfirm(team, orders.order_a, orders.order_b, orders.receive_order_a ?? null, orders.receive_order_b ?? null)}>試合開始</button>
         <button style={{ width:"100%", padding:12, borderRadius:10, border:`1px solid ${C.border}`, background:C.gray, color:C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
       </div>
     </Modal>
@@ -4728,10 +4809,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             aLabel={aPlayers.join("/") || "自チーム"} bLabel={bPlayers.join("/") || "相手チーム"}
             aP1={aPlayers[0]} aP2={aPlayers[1]} bP1={bPlayers[0]} bP2={bPlayers[1]}
             isDoubles={aPlayers.length>1 || bPlayers.length>1}
+            initialOrders={serveSelectMatch}
             onCancel={()=>setServeSelectMatch(null)}
-            onConfirm={async (team, orderA, orderB)=>{
+            onConfirm={async (team, orderA, orderB, recvA, recvB)=>{
               const m = serveSelectMatch; setServeSelectMatch(null);
-              await onStartScheduled(m.id, team, orderA, orderB);
+              await onStartScheduled(m.id, team, orderA, orderB, recvA, recvB);
             }}
           />
         );
@@ -10969,7 +11051,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
     setSchoolMap(smap);
     const matchIds = (data.games || []).filter(g => g.match_id).map(g => g.match_id);
     if (matchIds.length > 0) {
-      const { data: matches } = await supabase.from("matches").select("id,match_score_a,match_score_b,status,is_doubles,video_links,memo,match_players(id,team,player_name,club_name,order_num)").in("id", matchIds);
+      const { data: matches } = await supabase.from("matches").select("id,match_score_a,match_score_b,status,is_doubles,video_links,memo,order_a,order_b,receive_order_a,receive_order_b,match_players(id,team,player_name,club_name,order_num)").in("id", matchIds);
       const map = {};
       (matches || []).forEach(m => { map[m.id] = m; });
       setMatchDetails(map);
@@ -11328,10 +11410,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
             aLabel={aP} bLabel={bP}
             aP1={aPlayers[0]} aP2={aPlayers[1]} bP1={bPlayers[0]} bP2={bPlayers[1]}
             isDoubles={aPlayers.length>1 || bPlayers.length>1}
+            initialOrders={matchData}
             onCancel={()=>setServeSelectInfo(null)}
-            onConfirm={(team, orderA, orderB)=>{
+            onConfirm={(team, orderA, orderB, recvA, recvB)=>{
               setServeSelectInfo(null);
-              onStartMatch && onStartMatch(matchData.id, orderNum, game, team, orderA, orderB);
+              onStartMatch && onStartMatch(matchData.id, orderNum, game, team, orderA, orderB, recvA, recvB);
             }}
           />
         );
@@ -14862,6 +14945,18 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [gameFormat,     setGameFormat]     = useState(base?.game_format ?? 7);
   const [isDoubles,      setIsDoubles]      = useState(base?.is_doubles ?? true);
   const [firstServer,    setFirstServer]    = useState(base?.first_server ?? null);
+  // ★サーブ・レシーブ順（各ペアの「サーブの1人目」「レシーブの1人目」）。試合情報で管理する。
+  //   初期値は登録順の1人目。レシーブがnullの間は「サーブと同じ人」。
+  const [orders, setOrders] = useState({
+    order_a: base?.order_a === "p2" ? "p2" : "p1",
+    receive_order_a: base?.receive_order_a ?? null,
+    order_b: base?.order_b === "p2" ? "p2" : "p1",
+    receive_order_b: base?.receive_order_b ?? null,
+  });
+  // 保存時にA/Bを入れ替える場合（自チームが相手欄に入っていた時）は、順番も一緒に入れ替える
+  const ordersFor = (swap) => swap
+    ? { order_a: orders.order_b, receive_order_a: orders.receive_order_b ?? null, order_b: orders.order_a, receive_order_b: orders.receive_order_a ?? null }
+    : { order_a: orders.order_a, receive_order_a: orders.receive_order_a ?? null, order_b: orders.order_b, receive_order_b: orders.receive_order_b ?? null };
   const [aClub,  setAClub]  = useState(aBase?.club_name ?? "");
   const [aP1,    setAP1]    = useState(aBase?.player_name ?? "");
   const [aP2,    setAP2]    = useState(aBase2?.player_name ?? "");
@@ -15045,6 +15140,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fFirstServer,
         status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+        ...ordersFor(swap),
       };
       await saveMatch(match);
       setScheduledId(mid);
@@ -15118,6 +15214,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null, match_type:matchType, court_number:courtNumber||null,
           players: updatedPlayers,
           games: renamedGames,
+          ...ordersFor(false), // ★サーブ・レシーブ順（記録中に直した場合は、試合の最初から新しい順番で集計される）
           // 予定の場合は形式設定も更新可能
           ...((editing.status === "scheduled" || editing.status === "waiting") ? { game_format:gameFormat, is_doubles:isDoubles, first_server:firstServer, is_younger:isYounger } : { is_younger:isYounger }),
         };
@@ -15152,6 +15249,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null,
         match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server:fServer || fFirstServer || "A",
         status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+        ...ordersFor(swap),
       };
       await saveMatch(match);
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
@@ -15397,6 +15495,26 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           )}
         </FormSec>
 
+        {/* ★サーブ・レシーブ順：各ペアの「サーブの1人目」「レシーブの1人目」。
+            試合情報の時点では最初のサーブは決まっていないので、ここでは順番だけを設定する。
+            記録中に違っていたと気付いたら、記録画面右上の✏️からこの画面を開いて直す（試合の最初から集計し直される） */}
+        {isDoubles && (
+          <FormSec title="🎾 サーブ・レシーブ順">
+            <div style={{ padding:"12px 12px 2px" }}>
+            <div style={{ fontSize:11.5, color:C.textSec, lineHeight:1.6, marginBottom:10 }}>
+              各ゲームで最初にサーブ・レシーブする人です。分からないところは、そのままで大丈夫です（試合の途中でも、ここから直せます）。
+            </div>
+            <ServeReceiveOrderEditor
+              aName={[aClub.trim(), [aP1.trim(), aP2.trim()].filter(Boolean).join("/")].filter(Boolean).join("　") || "自チーム"}
+              bName={[bClub.trim(), [bP1.trim(), bP2.trim()].filter(Boolean).join("/")].filter(Boolean).join("　") || "相手チーム"}
+              aP1={aP1.trim() || "選手1"} aP2={aP2.trim() || "選手2"}
+              bP1={bP1.trim() || "選手A"} bP2={bP2.trim() || "選手B"}
+              value={orders} onChange={setOrders} mode="info" inset
+            />
+            </div>
+          </FormSec>
+        )}
+
         <button
           style={{ ...S.btn((canSave&&!saving) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (canSave&&!saving) ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
           disabled={!canSave || saving}
@@ -15427,6 +15545,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
                   match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null,
                   match_type:matchType, game_format:gameFormat, is_doubles:isDoubles, first_server: "A",
                   status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
+                  ...ordersFor(false),
                 };
                 await saveMatch(match);
                 onSavePairOnly(mid, { aP1: aP1.trim(), aP2: aP2.trim(), bP1: bP1.trim(), bP2: bP2.trim() });
@@ -15631,7 +15750,6 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [fault,  setFault]  = useState(0);
   const [modal,  setModal]  = useState(null);
   const [serveSelectModal, setServeSelectModal] = useState(false); // サーブ選択モーダル
-  const [orderEditOpen, setOrderEditOpen] = useState(false); // サーブ・レシーブ順の途中変更シート
   // 4段階選択状態
   const [selPlay,   setSelPlay]   = useState(null);   // プレイ内容
   const [selSide,   setSelSide]   = useState(null);   // フォア / バック
@@ -15784,6 +15902,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const teamBPlayers = match.players.filter(p=>p.team==="B");
   const teamALabel = teamAPlayers.map(p=>p.player_name).join("/");
   const teamBLabel = teamBPlayers.map(p=>p.player_name).join("/");
+  // ★サーブ・レシーブ順の設定欄で使う：選手を登録順に並べた名前と、「学校名　選手/選手」の見出し
+  const sortedTeamNames = (t) => match.players.filter(p=>p.team===t).sort((a,b)=>a.order_num-b.order_num).map(p=>p.player_name);
+  const orderEditorName = (t) => {
+    const club = (t==="A" ? teamAPlayers : teamBPlayers)[0]?.club_name || "";
+    const names = t==="A" ? teamALabel : teamBLabel;
+    return club ? `${club}　${names}` : names;
+  };
   // ★LINE共有：待機中／試合開始／試合中のタイミングで、自チームのペア名・コート番号・状況・スコアをワンタップで共有する
   //   「自チーム／相手」ではなく学校名を見出しにし、ペア出場番号が入っていれば併記する
   const teamASchool = teamAPlayers[0]?.club_name || "";
@@ -16351,22 +16476,17 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     onClick={()=>persist({ ...match, first_server: match.first_server==="A" ? "B" : "A" })}
                   >🔄 サーブを入れ替える</button>
                   {match.players.filter(p=>p.team==="A").length>1 && (
-                    <div style={{ textAlign:"left", background:C.gray, borderRadius:10, padding:12, marginBottom:20, maxWidth:320, marginLeft:"auto", marginRight:"auto" }}>
-                      <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10 }}>各ペアの1人目（通常はここから開始）</div>
-                      <PairOrderRow
-                        p1={match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num)[0]?.player_name}
-                        p2={match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num)[1]?.player_name}
-                        color={C.teamA} order={match.order_a==="p2"?"p2":"p1"}
-                        setOrder={(v)=>persist({ ...match, order_a: v })}
-                        tag={match.first_server==="B" ? "レシーブ" : "🎾 サーブ"}
+                    <div style={{ marginTop:4, marginBottom:20, maxWidth:360, marginLeft:"auto", marginRight:"auto" }}>
+                      {/* ★第1ゲームで分かる2つ（サーブ側のサーブの1人目・レシーブ側のレシーブの1人目）だけを表示。
+                          ここで変えると試合情報の値も変わる。残りの2つは試合情報（✏️）で確認・修正する */}
+                      <ServeReceiveOrderEditor
+                        aName={orderEditorName("A")} bName={orderEditorName("B")}
+                        aP1={sortedTeamNames("A")[0]} aP2={sortedTeamNames("A")[1]}
+                        bP1={sortedTeamNames("B")[0]} bP2={sortedTeamNames("B")[1]}
+                        value={match} onChange={(next)=>persist({ ...match, order_a: next.order_a, order_b: next.order_b, receive_order_a: next.receive_order_a ?? null, receive_order_b: next.receive_order_b ?? null })}
+                        mode="start" firstServer={match.first_server}
                       />
-                      <PairOrderRow
-                        p1={match.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num)[0]?.player_name}
-                        p2={match.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num)[1]?.player_name}
-                        color={C.teamB} order={match.order_b==="p2"?"p2":"p1"}
-                        setOrder={(v)=>persist({ ...match, order_b: v })}
-                        tag={match.first_server==="A" ? "レシーブ" : "🎾 サーブ"}
-                      />
+                      <div style={{ fontSize:11, color:C.textSec, marginTop:2, lineHeight:1.6 }}>第2ゲーム以降の順番は、右上の✏️（試合情報）から確認・修正できます</div>
                     </div>
                   )}
                 </>
@@ -16851,9 +16971,6 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <div style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10 }}>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
                   <div style={{ fontSize:13,fontWeight:800,color:"#c9740b",display:"flex",alignItems:"center",gap:6 }}>🎾 {serverLabel}</div>
-                  {match.players.filter(p=>p.team==="A").length>1 && (
-                    <button onClick={()=>setOrderEditOpen(true)} style={{ border:"none", background:"none", color:C.textSec, fontSize:11, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}>順番を修正</button>
-                  )}
                 </div>
                 <div style={{ fontSize:11,color:C.textSec,fontWeight:700,textAlign:"center",marginBottom:8 }}>サービス</div>
                 <div style={{ display:"flex",gap:8 }}>
@@ -17124,32 +17241,6 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         </Modal>
       )}
 
-      {/* サーブ・レシーブ順の途中修正シート：match.order_a/order_bを直接書き換えるので、
-          統計（calcPlayerStats）は次に表示される時に試合の最初から新しい順番で再集計される */}
-      {orderEditOpen && (
-        <Modal onClose={()=>setOrderEditOpen(false)}>
-          <div>
-            <h4 style={{ fontSize:14, fontWeight:800, margin:"0 0 4px", color:C.text }}>サーブ・レシーブ順を修正</h4>
-            <p style={{ fontSize:11.5, color:C.textSec, margin:"0 0 14px" }}>変更すると、この試合の最初からのポイントすべてが新しい順番で再集計されます</p>
-            <PairOrderRow
-              p1={match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num)[0]?.player_name}
-              p2={match.players.filter(p=>p.team==="A").sort((a,b)=>a.order_num-b.order_num)[1]?.player_name}
-              color={C.teamA} order={match.order_a==="p2"?"p2":"p1"}
-              setOrder={(v)=>persist({ ...match, order_a: v })}
-              tag={curServer==="B" ? "レシーブ" : "🎾 サーブ"}
-            />
-            <PairOrderRow
-              p1={match.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num)[0]?.player_name}
-              p2={match.players.filter(p=>p.team==="B").sort((a,b)=>a.order_num-b.order_num)[1]?.player_name}
-              color={C.teamB} order={match.order_b==="p2"?"p2":"p1"}
-              setOrder={(v)=>persist({ ...match, order_b: v })}
-              tag={curServer==="A" ? "レシーブ" : "🎾 サーブ"}
-            />
-            <button onClick={()=>setOrderEditOpen(false)} style={{ width:"100%", padding:13, borderRadius:10, border:"none", background:C.navy, color:C.white, fontWeight:800, fontSize:14, cursor:"pointer", marginTop:6 }}>閉じる</button>
-          </div>
-        </Modal>
-      )}
-
       {/* サーブ未設定時の選択モーダル */}
       {serveSelectModal && (() => {
         const aPlayers = match.players.filter(p=>p.team==="A").map(p=>p.player_name);
@@ -17159,11 +17250,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             aLabel={aPlayers.join("/") || "自チーム"} bLabel={bPlayers.join("/") || "相手チーム"}
             aP1={aPlayers[0]} aP2={aPlayers[1]} bP1={bPlayers[0]} bP2={bPlayers[1]}
             isDoubles={aPlayers.length>1 || bPlayers.length>1}
+            initialOrders={match}
             onCancel={()=>{ setServeSelectModal(false); startingGameRef.current = false; setStartingGame(false); }}
-            onConfirm={async (team, orderA, orderB)=>{
+            onConfirm={async (team, orderA, orderB, recvA, recvB)=>{
               setServeSelectModal(false);
-              // DBのfirst_server・order_a・order_bを更新してからゲーム開始
-              const updated = {...match, first_server: team, order_a: orderA, order_b: orderB};
+              // DBのfirst_server・order_a・order_b・receive_order_a・receive_order_bを更新してからゲーム開始
+              const updated = {...match, first_server: team, order_a: orderA, order_b: orderB, receive_order_a: recvA, receive_order_b: recvB};
               try {
                 await saveMatch(updated);
                 setMatch(updated);
@@ -21026,11 +21118,11 @@ export default function App() {
           setPrevScreen("teamMatchDetail");
           setScreen("teamMatchGameSetup");
         }}
-        onStartMatch={async (matchId, orderNum, existingGame, firstServer, orderA, orderB)=>{
+        onStartMatch={async (matchId, orderNum, existingGame, firstServer, orderA, orderB, recvA, recvB)=>{
           // サーブ選択済み → 試合開始
           const { data:{ user } } = await supabase.auth.getUser();
           const profile = await getMyProfile();
-          await startScheduledMatch(matchId, firstServer, orderA, orderB);
+          await startScheduledMatch(matchId, firstServer, orderA, orderB, recvA, recvB);
           await updateTeamMatchGame(existingGame.id, { status:"active", recorder_id: user?.id, recorder_name: profile?.name || "" });
           await supabase.from("team_matches").update({ status:"active" }).eq("id", teamMatchId).eq("status","scheduled");
           setMatchId(matchId);
@@ -21429,7 +21521,7 @@ export default function App() {
       onNew={f=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
       onOpen={id=>openMatchSmart(id, { prevScreen:"list", listMatchMode:"individual" })}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
-      onStartScheduled={async (id, firstServer, orderA, orderB)=>{ try { await startScheduledMatch(id, firstServer, orderA, orderB); setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setRecordInitialTab(null); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
+      onStartScheduled={async (id, firstServer, orderA, orderB, recvA, recvB)=>{ try { await startScheduledMatch(id, firstServer, orderA, orderB, recvA, recvB); setMatchId(id); setListMatchMode("individual"); setPrevScreen("list"); setRecordInitialTab(null); setScreen("record"); setTick(t=>t+1); } catch(e) { alert("試合開始エラー: " + (e?.message || e)); } }}
       onProfile={()=>setScreen("profile")}
       onRoster={()=>setScreen("roster")}
       onSchoolAdmin={()=>setScreen("schoolAdmin")}
