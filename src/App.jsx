@@ -1401,10 +1401,20 @@ async function saveMatch(match) {
 }
 
 // ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする
+// ★削除したものを、スマホ本体の「戻る」用の画面履歴から取り除くための通知。
+//   これが無いと、削除した試合の記録画面などが履歴に残っていて、戻るで開けてしまう。
+function notifyDeleted(kind, ids) {
+  try { window.dispatchEvent(new CustomEvent("st:deleted", { detail: { kind, ids: (Array.isArray(ids) ? ids : [ids]).filter(Boolean) } })); } catch (e) { /* 通知できなくても削除自体は続ける */ }
+}
+// ★ゴミ箱から元に戻したときは、「削除済み」の印を外す（また履歴に残せるように）
+function notifyRestored(kind, id) {
+  try { window.dispatchEvent(new CustomEvent("st:restored", { detail: { kind, id } })); } catch (e) {}
+}
 async function deleteMatch(id) {
   invalidateMatchCaches(id);
   const { error } = await supabase.from("matches").update({ deleted_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
+  notifyDeleted("match", id);
 }
 
 // ★「結果だけ記録」で終えた試合を、後からポイントごとの詳細記録に切り替えたい時に使う。
@@ -1432,6 +1442,7 @@ async function getDeletedMatches() {
   return data ?? [];
 }
 async function restoreMatch(id) {
+  notifyRestored("match", id);
   invalidateMatchCaches(id);
   const { error } = await supabase.from("matches").update({ deleted_at: null }).eq("id", id);
   if (error) throw error;
@@ -2228,6 +2239,8 @@ async function saveTeamMatch(tm) {
 async function deleteTeamMatch(id) {
   const { data: games } = await supabase.from("team_match_games").select("match_id").eq("team_match_id", id);
   const matchIds = (games ?? []).map(g => g.match_id).filter(Boolean);
+  notifyDeleted("teamMatch", id);
+  notifyDeleted("match", matchIds);
   if (matchIds.length > 0) {
     await supabase.from("matches").update({ deleted_at: new Date().toISOString() }).in("id", matchIds);
   }
@@ -2245,6 +2258,7 @@ async function getDeletedTeamMatches() {
   return data ?? [];
 }
 async function restoreTeamMatch(id) {
+  notifyRestored("teamMatch", id);
   const { data: games } = await supabase.from("team_match_games").select("match_id").eq("team_match_id", id);
   const matchIds = (games ?? []).map(g => g.match_id).filter(Boolean);
   if (matchIds.length > 0) {
@@ -2485,10 +2499,12 @@ async function renameTournamentCascade(oldName, newName) {
 async function deleteTournament(id) {
   const { error } = await supabase.from("tournaments").update({ deleted_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
+  notifyDeleted("tournament", id);
 }
 
 // ゴミ箱から元に戻す
 async function restoreTournament(id) {
+  notifyRestored("tournament", id);
   const { error } = await supabase.from("tournaments").update({ deleted_at: null }).eq("id", id);
   if (error) throw error;
 }
@@ -20854,6 +20870,17 @@ export default function App() {
     }
   };
   const navHistoryRef = useRef([]);   // 一個前、二個前…の画面
+  const deletedNavRef = useRef(new Set()); // 削除された "match:ID" / "teamMatch:ID" / "tournament:ID"
+  // ★削除済みの試合・団体戦・大会を開いていた画面か
+  const isDeletedSnap = (sn) => {
+    const d = deletedNavRef.current;
+    if (!sn || d.size === 0) return false;
+    if ((sn.screen === "record" || sn.screen === "teamMatchRecord") && d.has(`match:${sn.matchId}`)) return true;
+    if ((sn.screen === "aiAnalysisDetail" || sn.screen === "aiAnalysisAdd") && d.has(`match:${sn.aiAnalysisTargetMatch?.id}`)) return true;
+    if ((sn.screen === "teamMatchDetail" || sn.screen === "teamMatchRecord") && d.has(`teamMatch:${sn.teamMatchId}`)) return true;
+    if (["tournamentDetail","dailyRanking","drawSetup","pairMaster"].includes(sn.screen) && d.has(`tournament:${sn.tournamentContext?.id}`)) return true;
+    return false;
+  };
   const lastSnapRef = useRef(null);   // 今の画面（最新の状態）
   const restoringRef = useRef(false); // 履歴から戻している最中は、履歴に積まない
   useEffect(() => {
@@ -20865,13 +20892,38 @@ export default function App() {
         restoringRef.current = false;
       } else if (hist.length && navKeyOf(hist[hist.length - 1]) === curKey) {
         hist.pop(); // 画面の「←」などで一個前の画面に戻った
-      } else if (!NO_HISTORY_SCREENS.has(prev.screen)) {
+      } else if (!NO_HISTORY_SCREENS.has(prev.screen) && !isDeletedSnap(prev)) {
+        // ★削除した試合の画面から移動した場合（記録画面の中で試合を削除した時など）は履歴に積まない
         hist.push(prev);
         if (hist.length > 50) hist.shift();
       }
     }
     lastSnapRef.current = navSnap; // 同じ画面の中での変化（大会詳細のタブなど）も、最新の状態として覚えておく
   });
+
+  // ★削除された試合・団体戦・大会を開いていた画面を、履歴から取り除く
+  //   （戻るで削除済みの試合の記録画面などが開いてしまわないように）
+  useEffect(() => {
+    const onDeleted = (e) => {
+      const { kind, ids } = e.detail || {};
+      if (!ids || ids.length === 0) return;
+      ids.forEach(id => deletedNavRef.current.add(`${kind}:${id}`));
+      const kept = navHistoryRef.current.filter(sn => !isDeletedSnap(sn));
+      // 取り除いた結果、同じ画面が続いた場合は1つにまとめる（戻るを2回押さないと進まない状態を防ぐ）
+      const merged = [];
+      kept.forEach(sn => { if (!merged.length || navKeyOf(merged[merged.length - 1]) !== navKeyOf(sn)) merged.push(sn); });
+      // 今いる画面と同じものが一番上に残った場合も取り除く
+      while (merged.length && lastSnapRef.current && navKeyOf(merged[merged.length - 1]) === navKeyOf(lastSnapRef.current)) merged.pop();
+      navHistoryRef.current = merged;
+    };
+    const onRestored = (e) => { const { kind, id } = e.detail || {}; if (kind && id) deletedNavRef.current.delete(`${kind}:${id}`); };
+    window.addEventListener("st:deleted", onDeleted);
+    window.addEventListener("st:restored", onRestored);
+    return () => {
+      window.removeEventListener("st:deleted", onDeleted);
+      window.removeEventListener("st:restored", onRestored);
+    };
+  }, []);
 
   // 一個前の画面を開く（履歴が無ければ false）
   restorePrevRef.current = () => {
