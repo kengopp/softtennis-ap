@@ -16432,9 +16432,11 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               {curServer && curServer===leftTeam && <span style={{ position:"absolute",right:2,top:"50%",transform:"translateY(-50%)",width:6,height:44,borderRadius:3,background:C.serve }}/>}
             </div>
             {/* 中央：ゲームカウント */}
-            <div style={{ textAlign:"center" }}>
+            {/* ★「▮ サーブ」の説明は枠の上にはみ出す形（absolute）で置き、行の高さに含めない。
+                 こうすると左右のポイント数字と黄色いバーが、ゲームカウントの枠の上下中央にそろう。 */}
+            <div style={{ textAlign:"center",position:"relative" }}>
               {curServer && (
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:5,marginBottom:4 }}>
+                <div style={{ position:"absolute",left:0,right:0,bottom:"100%",paddingBottom:4,display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>
                   <span style={{ width:4,height:12,borderRadius:2,background:C.serve }}/>
                   <span style={{ fontSize:11,fontWeight:700,color:C.serve }}>サーブ</span>
                 </div>
