@@ -17913,14 +17913,21 @@ function MatchSummaryPanel({ match, part="all" }) {
           <summary style={summaryBtn}>📈 得点推移（1ゲーム目）</summary>
           <div style={{ padding:"0 14px 14px" }}>
             {(() => {
-              const PLAY_ICONS = { serve:"🎾", receive:"🖐", volley:"🖐", smash:"⚡", stroke:"🎾", attack:"⚡", shoot:"⚡", lob:"🖐", drop:"🖐" };
+              // ★アイコンは「自チームの得点＝緑の○」「失点＝赤の×」の2種類だけにする。
+              //   右側にはそのポイント時点のカウント（自チーム-相手）を出す。
+              let a = 0, b = 0;
               return sum.timeline.map((p,i)=>{
                 const isWin = p.team==="A";
-                const icon = isWin ? (p.play ? (PLAY_ICONS[p.play]??"🎾") : "✅") : "❌";
+                if (isWin) a++; else b++;
                 return (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, padding:"4px 0" }}>
-                    <span style={{ width:24, height:24, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, background:isWin?"#e3f5ea":"#fbe6ea", flexShrink:0 }}>{icon}</span>
-                    <span>{p.player ? `${p.player}${p.play?`（${getPlayLabel(p.play)}）`:""}` : (isWin?"相手ミス":"相手の攻撃/自分ミス")}</span>
+                    <span style={{ width:24, height:24, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:900, color:isWin?C.accent:C.red, background:isWin?"#e3f5ea":"#fbe6ea", flexShrink:0 }}>{isWin?"○":"×"}</span>
+                    <span style={{ flex:1, minWidth:0 }}>{p.player ? `${p.player}${p.play?`（${getPlayLabel(p.play)}）`:""}` : (isWin?"相手ミス":"相手の攻撃/自分ミス")}</span>
+                    <span style={{ flexShrink:0, fontSize:14, fontWeight:800, fontVariantNumeric:"tabular-nums" }}>
+                      <span style={{ color:isWin?C.teamA:C.textSec }}>{a}</span>
+                      <span style={{ color:C.textSec, margin:"0 3px" }}>-</span>
+                      <span style={{ color:isWin?C.textSec:C.teamB }}>{b}</span>
+                    </span>
                   </div>
                 );
               });
