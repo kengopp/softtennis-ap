@@ -294,6 +294,20 @@ const fmtDateRange = (start, end) => {
   const e = end ? fmtDate(end) : s;
   return s === e ? s : `${s} 〜 ${e}`;
 };
+// ★大会一覧用：曜日付きの日付（例：2026/10/04（日）、2026/10/10（土）〜10/11（日））。
+//   終了日は同じ年なら年を省く。
+const fmtDateDow = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d.getTime())) return fmtDate(iso);
+  return `${fmtDate(iso)}（${"日月火水木金土"[d.getDay()]}）`;
+};
+const fmtDateRangeDow = (start, end) => {
+  if (!start) return "";
+  if (!end || end === start) return fmtDateDow(start);
+  const e = fmtDateDow(end);
+  return `${fmtDateDow(start)}〜${start.slice(0,4) === end.slice(0,4) ? e.slice(5) : e}`;
+};
 
 // ============================================================
 // 統計集計用 共通ヘルパー
@@ -3490,11 +3504,11 @@ const S = {
   page:   { background: C.gray, minHeight:"100vh", paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" },
   hdr:    { background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, padding:"12px 16px", position:"sticky", top:0, zIndex:10 },
   card:   { background:C.white, borderRadius:12, border:`1px solid ${C.border}`, overflow:"hidden", marginBottom:10 },
-  inp:    { width:"100%", padding:"8px 0", background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`, fontSize:14, color:C.text, outline:"none", boxSizing:"border-box" },
+  inp:    { width:"100%", padding:"8px 0", background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`, fontSize:16, color:C.text, outline:"none", boxSizing:"border-box" },
   lbl:    { display:"block", fontSize:11, color:C.textSec, marginBottom:4 },
   btn:    (bg,color="white")=>({ padding:"13px 16px", background:bg, color, border:"none", borderRadius:10, fontSize:14, fontWeight:700, cursor:"pointer", width:"100%" }),
   togBtn: (active,ac=C.navy)=>({ padding:"8px 14px", borderRadius:8, border:`1px solid ${C.border}`, background:active?ac:C.white, color:active?C.white:C.text, fontWeight:active?700:400, fontSize:13, cursor:"pointer" }),
-  chip:   (sel)=>({ display:"inline-block", padding:"5px 12px", borderRadius:20, border:`1px solid ${sel?C.navy:C.border}`, background:sel?C.navy:C.white, color:sel?C.white:C.text, fontSize:12, fontWeight:sel?700:400, cursor:"pointer", margin:"2px" }),
+  chip:   (sel)=>({ display:"inline-block", padding:"7px 14px", borderRadius:20, border:`1px solid ${sel?C.navy:C.border}`, background:sel?C.navy:C.white, color:sel?C.white:C.text, fontSize:14, fontWeight:sel?700:400, cursor:"pointer", margin:"2px" }),
   row:    { padding:"10px 14px", borderBottom:`1px solid ${C.border}` },
 };
 
@@ -3756,7 +3770,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         <h3 style={{ fontSize:16,fontWeight:800,marginBottom:14,textAlign:"center" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>得点チーム</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>得点チーム</div>
           <div style={{ display:"flex",gap:8 }}>
             <button style={{ ...S.togBtn(team==="A"),flex:1 }} onClick={()=>setTeam("A")}>{teamALabel||"自チーム"}</button>
             <button style={{ ...S.togBtn(team==="B"),flex:1 }} onClick={()=>setTeam("B")}>{teamBLabel||"相手"}</button>
@@ -3764,7 +3778,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>① プレイ内容</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>① プレイ内容</div>
           <div>
             {playTypesFor(result).map(p=>(
               <span key={p.key} style={S.chip(play===p.key)} onClick={()=>setPlay(play===p.key?null:p.key)}>{p.label}</span>
@@ -3773,7 +3787,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>サーブ本数</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>サーブ本数</div>
           <div style={{ display:"flex",gap:8 }}>
             <button style={{ ...S.togBtn(fault===0),flex:1,fontSize:12 }} onClick={()=>setFault(0)}>1stイン</button>
             <button style={{ ...S.togBtn(fault===1),flex:1,fontSize:12 }} onClick={()=>setFault(1)}>2ndイン</button>
@@ -3784,7 +3798,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>② フォア / バック</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>② フォア / バック</div>
           <div>
             {SIDE_TYPES.map(s=>(
               <span key={s.key} style={S.chip(side===s.key)} onClick={()=>setSide(side===s.key?null:s.key)}>{s.label}</span>
@@ -3795,7 +3809,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         {/* ★③ミスの種類は「相手ミス」を選んだときだけ表示する。コースは入力の負担が大きいので最後に置く */}
         {isMiss && (
           <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>③ ミスの種類</div>
+            <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>③ ミスの種類</div>
             <div>
               {MISS_TYPES.map(m=>(
                 <span key={m.key} style={S.chip(miss===m.key)} onClick={()=>setMiss(miss===m.key?null:m.key)}>{m.label}</span>
@@ -3805,12 +3819,12 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         )}
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>{isMiss ? "④" : "③"} コース</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>{isMiss ? "④" : "③"} コース</div>
           <CoursePicker value={course} onChange={setCourse}/>
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>結果</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>結果</div>
           <div>
             {RESULT_TYPES.map(r=>(
               <span key={r.key} style={S.chip(result===r.key)} onClick={()=>{
@@ -3825,7 +3839,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         </div>
 
         <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>選手</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>選手</div>
           <div>
             {players.map(p=>(
               <span key={p.id} style={S.chip(playerName===p.name)} onClick={()=>setPlayerName(playerName===p.name?null:p.name)}>{p.name}</span>
@@ -4561,18 +4575,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                 <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: isPast ? `6px solid ${C.textSec}` : `1px solid ${C.border}` }}>
                   <div style={{ height:4, background: isPast ? "transparent" : C.navy }}/>
                   <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                    {/* ★文字が見えにくいという声への対応：日付は大会名の上に、大会名と同じ大きさ・曜日付きで表示する */}
+                    {t.start_date && <div style={{ fontSize:16, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:2 }}>{fmtDateRangeDow(t.start_date, t.end_date)}</div>}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                       <div style={{ fontSize:16, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
                       {isPast && <span style={{ flexShrink:0, fontSize:11, fontWeight:800, color:C.textSec, background:C.border, borderRadius:20, padding:"3px 10px" }}>終了</span>}
                     </div>
-                    <div style={{ marginTop:8 }}>
-                      <span style={{ fontSize:11, color:C.textSec, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📅</span>
-                      <span style={{ fontSize:11, color:C.textSec }}> {fmtDateRange(t.start_date, t.end_date)}</span>
-                      {t.venue && <>
-                        <span style={{ fontSize:11, color:C.textSec, marginLeft:8, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</span>
-                        <span style={{ fontSize:11, color:C.textSec }}> {t.venue}</span>
-                      </>}
-                    </div>
+                    {t.venue && (
+                      <div style={{ marginTop:6, fontSize:13, lineHeight:1.5, color: isPast ? C.textSec : "#5a6478" }}>
+                        <span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</span> {t.venue}
+                      </div>
+                    )}
                     {(teamRecord.win+teamRecord.loss>0 || individualRecord.win+individualRecord.loss>0) && (
                       <div style={{ display:"flex", flexDirection:"column", gap:2, marginTop:6 }}>
                         {teamRecord.win+teamRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}>🏆 団体戦：{teamRecord.win}勝{teamRecord.loss}敗</span>}
@@ -4700,8 +4713,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     </div>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                       <div style={{ flex:1 }}>
-                        <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{aClub}</span>}{aNames}</div>
-                        <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{bClub}</span>}{bNames}</div>
+                        <div style={{ fontSize:13, fontWeight:aWin?800:600, color:aWin?C.teamA:C.text }}>{aClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{aClub}</span>}{aNames}</div>
+                        <div style={{ fontSize:13, fontWeight:bWin?800:600, color:bWin?C.teamB:C.text, marginTop:2 }}>{bClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{bClub}</span>}{bNames}</div>
                       </div>
                       {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:aWin?C.teamA:bWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{m.match_score_a}-{m.match_score_b}</div>}
                     </div>
@@ -5993,11 +6006,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:13, fontWeight:myWin?800:600, color:C.teamA }}>
                       {myEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{myEntryNo}</span>}
-                      {myClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{myClub}</span>}{myNames}
+                      {myClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClub}</span>}{myNames}
                     </div>
                     <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:2 }}>
                       {oppEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{oppEntryNo}</span>}
-                      {oppClub && <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
+                      {oppClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
                     </div>
                   </div>
                   {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
@@ -7983,7 +7996,7 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        <label style={{ fontSize: 11, color: C.textSec }}>エントリー番号</label>
+        <label style={{ fontSize: 13, fontWeight: 700, color: "#5a6478" }}>エントリー番号</label>
       </div>
       <input
         style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 10 }}
@@ -7994,7 +8007,7 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       />
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        <label style={{ fontSize: 11, color: C.textSec }}>チーム名 / 学校名</label>
+        <label style={{ fontSize: 13, fontWeight: 700, color: "#5a6478" }}>チーム名 / 学校名</label>
         <PrefMiniFilter value={pref} onChange={setPref} options={knownPrefsFrom(schools)} />
       </div>
       <SchoolField value={value.schoolName} onChange={v => set({ schoolName: v })} schools={schools} placeholder="例：東福岡" prefFilter={pref} />
@@ -8002,7 +8015,7 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
       {category !== "team" && (
         <>
           <div style={{ marginTop: 10 }}>
-            <label style={{ fontSize: 11, color: C.textSec }}>選手1</label>
+            <label style={{ fontSize: 13, fontWeight: 700, color: "#5a6478" }}>選手1</label>
             <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
               <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p1.sei} onChange={e => set({ player1: joinName(e.target.value, p1.mei) })} />
               <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p1.mei} onChange={e => set({ player1: joinName(p1.sei, e.target.value) })} />
@@ -8017,7 +8030,7 @@ function DrawSideEditor({ label, value, onChange, onWithdrawToggle, roster, scho
           </div>
 
           <div style={{ marginTop: 10 }}>
-            <label style={{ fontSize: 11, color: C.textSec }}>選手2（ペア）</label>
+            <label style={{ fontSize: 13, fontWeight: 700, color: "#5a6478" }}>選手2（ペア）</label>
             <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
               <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="姓" value={p2.sei} onChange={e => set({ player2: joinName(e.target.value, p2.mei) })} />
               <input style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + C.border, borderRadius: 8, padding: "8px 10px", fontSize: 13 }} placeholder="名" value={p2.mei} onChange={e => set({ player2: joinName(p2.sei, e.target.value) })} />
@@ -9089,7 +9102,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
               2　久留米商業　田中 一郎　佐藤 健
             </div>
 
-            <label style={{ fontSize: 11, color: C.textSec }}>登録先の回戦</label>
+            <label style={{ fontSize: 13, fontWeight: 700, color: "#5a6478" }}>登録先の回戦</label>
             <select
               value={bulkTargetRound}
               onChange={e => updateBulkTargetRound(Number(e.target.value))}
@@ -11275,10 +11288,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       <div style={{ padding:"12px 14px", paddingBottom:90 }}>
         {/* 試合情報カード */}
         <div style={{ ...S.card, padding:"12px 14px", marginBottom:12 }}>
-          <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:4 }}>{tm.tournament_name||"団体戦"}{tm.round ? ` · ${tm.round}` : ""}</div>
+          <div style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:4 }}>{tm.tournament_name||"団体戦"}{tm.round ? ` · ${tm.round}` : ""}</div>
           {tm.match_date && <div style={{ fontSize:11,color:C.textSec }}>{fmtDate(tm.match_date)}{tm.venue ? ` · ${tm.venue}` : ""}</div>}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:8 }}>
-            <span style={{ fontSize:13,fontWeight:700,color:tm.status==="finished"?(tm.my_score>tm.opponent_score?C.teamA:C.teamB):C.navy }}>{statusLabel}</span>
+            <span style={{ fontSize:15,fontWeight:800,color:tm.status==="finished"?(tm.my_score>tm.opponent_score?C.teamA:C.teamB):C.navy }}>{statusLabel}</span>
             <span style={{ fontSize:11,color:C.textSec }}>{tm.format==="best2" ? "2勝先取" : "3試合全部"}</span>
           </div>
         </div>
@@ -11363,10 +11376,10 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:boutAWin?800:600, color:C.teamA }}>
-                      <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{myClubLabel}</span>{aPlayers || "未登録"}
+                      <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClubLabel}</span>{aPlayers || "未登録"}
                     </div>
                     <div style={{ fontSize:13, fontWeight:boutBWin?800:600, color:bPlayers?(boutBWin?C.teamB:C.text):C.textSec, marginTop:2 }}>
-                      <span style={{ fontSize:11, color:C.textSec, marginRight:6 }}>{oppClubLabel}</span>{bPlayers || "未登録"}
+                      <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClubLabel}</span>{bPlayers || "未登録"}
                     </div>
                   </div>
                   {match && !isWaiting && (
@@ -14741,16 +14754,16 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
 function FormSec({ title, children }) {
   return (
     <div style={{ marginBottom:14 }}>
-      <div style={{ fontSize:11,fontWeight:700,color:C.navy,marginBottom:6,letterSpacing:"0.05em" }}>{title}</div>
+      <div style={{ fontSize:14,fontWeight:800,color:C.navy,marginBottom:7 }}>{title}</div>
       <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,overflow:"visible" }}>{children}</div>
     </div>
   );
 }
 function FormRow({ label, labelRight, children }) {
   return (
-    <div style={{ padding:"10px 14px",borderBottom:`1px solid ${C.border}` }}>
+    <div style={{ padding:"12px 14px",borderBottom:`1px solid ${C.border}` }}>
       <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
-        <label style={{ fontSize:11,color:C.textSec }}>{label}</label>
+        <label style={{ fontSize:13,fontWeight:700,color:"#5a6478" }}>{label}</label>
         {labelRight}
       </div>
       {children}
@@ -14870,7 +14883,7 @@ function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
         </div>
       )}
       {value && (
-        <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>✎ 「{value}A」のように自由に文字を足すこともできます</div>
+        <div style={{ fontSize:12, color:"#5a6478", marginTop:5 }}>✎ 「{value}A」のように自由に文字を足すこともできます</div>
       )}
     </div>
   );
@@ -16196,7 +16209,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     return (
       <div style={{ textAlign:"left",marginTop:14,paddingTop:14,borderTop:`1px solid ${C.border}` }}>
         <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:4 }}>最後の1点の詳細を追加（任意）</div>
-        <div style={{ fontSize:10,color:"#5b8bc9",marginBottom:8 }}>{detailParts.length>0?detailParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
+        <div style={{ fontSize:13,fontWeight:700,color:"#2f64a8",marginBottom:8 }}>{detailParts.length>0?detailParts.join("・"):"選手・結果・プレイ内容は未選択"}</div>
         <div style={{ marginBottom:8 }}>
           {allPlayers.map(p=>{ const isSel=lp.player_name===p.name; return <span key={p.id} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"player_name",p.name)}>{p.name}</span>; })}
         </div>
@@ -16204,22 +16217,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           {RESULT_TYPES.map(r=>{ const isSel=lp.result_type===r.key; return <span key={r.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"result_type",r.key)}>{r.label}</span>; })}
         </div>
         <div style={{ marginBottom:8 }}>
-          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>① プレー内容</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>① プレー内容</div>
           {playTypesFor(lp.result_type).map(p=>{ const isSel=lp.play_type===p.key; return <span key={p.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"play_type",p.key)}>{p.label}</span>; })}
         </div>
         <div style={{ marginBottom:8 }}>
-          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>② フォア / バック</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>② フォア / バック</div>
           {SIDE_TYPES.map(s=>{ const isSel=lp.side_type===s.key; return <span key={s.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"side_type",s.key)}>{s.label}</span>; })}
         </div>
         {/* ★コースまで入力するのは負担が大きいという声があったため、コースは最後に置く */}
         {isMiss && (
           <div style={{ marginBottom:8 }}>
-            <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
+            <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>③ ミスの種類</div>
             {MISS_TYPES.map(m=>{ const isSel=lp.miss_type===m.key; return <span key={m.key} style={S.chip(isSel)} onClick={()=>updatePointDetail(gameId,"miss_type",m.key)}>{m.label}</span>; })}
           </div>
         )}
         <div>
-          <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>{isMiss ? "④" : "③"} コース</div>
+          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>{isMiss ? "④" : "③"} コース</div>
           <CoursePicker value={lp.course_type ?? null} onChange={v=>updatePointDetail(gameId,"course_type",v)}/>
         </div>
       </div>
@@ -16386,60 +16399,61 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
         {/* スコアボード: 行ごとgridで左右高さを統一 */}
         <div style={{ background:"rgba(0,0,0,0.25)",borderRadius:14,padding:"10px 8px" }}>
-          {/* サーブ行（固定高さ16px） */}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 88px 1fr",gap:8,marginBottom:2 }}>
-            <div style={{ textAlign:"center",height:16,display:"flex",alignItems:"center",justifyContent:"center" }}>
-              {curServer===leftTeam && <span style={{ fontSize:9,color:C.serve,fontWeight:700 }}>&#127934; サーブ</span>}
+          {/* ★文字が見えにくいという声への対応（学校名・選手名・ゲームカウントを大きく）。
+               サーブ側は、学校名の上の「🎾 サーブ」の文字ではなく、ポイント数字の横（中央の枠のすぐ横）の黄色いバーで示す。
+               バーの意味が分かるよう、ゲームカウントの枠の上に「▮ サーブ」の説明を出す。 */}
+          {/* チーム名行 */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 100px 1fr",gap:6,marginBottom:2 }}>
+            <div style={{ textAlign:"center",minHeight:18,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden" }}>
+              <span style={{ fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap",textOverflow:"ellipsis",overflow:"hidden" }}>{leftClub}</span>
             </div>
             <div/>
-            <div style={{ textAlign:"center",height:16,display:"flex",alignItems:"center",justifyContent:"center" }}>
-              {curServer===rightTeam && <span style={{ fontSize:9,color:C.serve,fontWeight:700 }}>&#127934; サーブ</span>}
+            <div style={{ textAlign:"center",minHeight:18,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden" }}>
+              <span style={{ fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.85)",whiteSpace:"nowrap",textOverflow:"ellipsis",overflow:"hidden" }}>{rightClub}</span>
             </div>
           </div>
-          {/* チーム名行（固定高さ16px） */}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 88px 1fr",gap:8,marginBottom:2 }}>
-            <div style={{ textAlign:"center",height:16,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden" }}>
-              <span style={{ fontSize:10,color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap",textOverflow:"ellipsis",overflow:"hidden" }}>{leftClub}</span>
-            </div>
-            <div/>
-            <div style={{ textAlign:"center",height:16,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden" }}>
-              <span style={{ fontSize:10,color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap",textOverflow:"ellipsis",overflow:"hidden" }}>{rightClub}</span>
-            </div>
-          </div>
-          {/* 選手名行（固定高さ20px） */}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 88px 1fr",gap:8,marginBottom:6 }}>
+          {/* 選手名行（ダブルスは1人1行） */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 100px 1fr",gap:6,marginBottom:6 }}>
             <div style={{ textAlign:"center",minHeight:20,display:"flex",alignItems:"center",justifyContent:"center" }}>
-              <span style={{ fontSize:11,fontWeight:700,color:C.white,lineHeight:1.3 }}>{leftLabel}</span>
+              <div style={{ fontSize:14,fontWeight:800,color:C.white,lineHeight:1.3 }}>{(leftLabel||"").split("/").map((n,i)=><div key={i}>{n}</div>)}</div>
             </div>
             <div/>
             <div style={{ textAlign:"center",minHeight:20,display:"flex",alignItems:"center",justifyContent:"center" }}>
-              <span style={{ fontSize:11,fontWeight:700,color:C.white,lineHeight:1.3 }}>{rightLabel}</span>
+              <div style={{ fontSize:14,fontWeight:800,color:C.white,lineHeight:1.3 }}>{(rightLabel||"").split("/").map((n,i)=><div key={i}>{n}</div>)}</div>
             </div>
           </div>
-          {/* 左右=ゲーム内ポイント（大きく）、中央=ゲームカウント（小さく） */}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 88px 1fr",gap:8,alignItems:"center" }}>
+          {/* 左右=ゲーム内ポイント（大きく）、中央=ゲームカウント */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 100px 1fr",gap:6,alignItems:"center" }}>
             {/* 左 */}
-            <div style={{ textAlign:"center" }}>
+            <div style={{ position:"relative",textAlign:"center" }}>
               <div style={{ fontSize:56,fontWeight:900,color:C.white,lineHeight:1 }}>
                 {currentGame ? leftScore(currentGame) : "—"}
               </div>
+              {curServer && curServer===leftTeam && <span style={{ position:"absolute",right:2,top:"50%",transform:"translateY(-50%)",width:6,height:44,borderRadius:3,background:C.serve }}/>}
             </div>
             {/* 中央：ゲームカウント */}
             <div style={{ textAlign:"center" }}>
+              {curServer && (
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:5,marginBottom:4 }}>
+                  <span style={{ width:4,height:12,borderRadius:2,background:C.serve }}/>
+                  <span style={{ fontSize:11,fontWeight:700,color:C.serve }}>サーブ</span>
+                </div>
+              )}
               <div style={{ background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"6px 4px" }}>
-                <div style={{ fontSize:9,color:"rgba(255,255,255,0.6)",marginBottom:3 }}>
+                <div style={{ fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.75)",marginBottom:2 }}>
                   {currentGame ? ("G" + currentGame.game_number + (currentGame.is_final ? " F" : "")) : ""}
                 </div>
-                <div style={{ display:"flex",gap:3,alignItems:"center",justifyContent:"center" }}>
-                  <span style={{ fontSize:18,fontWeight:900,color:leftMatchScore>=winGames?"#fbbf24":C.white }}>{leftMatchScore}</span>
-                  <span style={{ color:"rgba(255,255,255,0.4)",fontSize:11 }}>-</span>
-                  <span style={{ fontSize:18,fontWeight:900,color:rightMatchScore>=winGames?"#fbbf24":C.white }}>{rightMatchScore}</span>
+                <div style={{ display:"flex",gap:4,alignItems:"center",justifyContent:"center" }}>
+                  <span style={{ fontSize:28,fontWeight:900,lineHeight:1.1,color:leftMatchScore>=winGames?"#fbbf24":C.white }}>{leftMatchScore}</span>
+                  <span style={{ color:"rgba(255,255,255,0.5)",fontSize:14 }}>-</span>
+                  <span style={{ fontSize:28,fontWeight:900,lineHeight:1.1,color:rightMatchScore>=winGames?"#fbbf24":C.white }}>{rightMatchScore}</span>
                 </div>
-                {fault===1 && <div style={{ fontSize:9,color:C.serve,marginTop:2,fontWeight:700 }}>1st F</div>}
+                {fault===1 && <div style={{ fontSize:11,color:C.serve,marginTop:2,fontWeight:700 }}>1st F</div>}
               </div>
             </div>
             {/* 右 */}
-            <div style={{ textAlign:"center" }}>
+            <div style={{ position:"relative",textAlign:"center" }}>
+              {curServer && curServer===rightTeam && <span style={{ position:"absolute",left:2,top:"50%",transform:"translateY(-50%)",width:6,height:44,borderRadius:3,background:C.serve }}/>}
               <div style={{ fontSize:56,fontWeight:900,color:C.white,lineHeight:1 }}>
                 {currentGame ? rightScore(currentGame) : "—"}
               </div>
@@ -17180,7 +17194,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <div style={{ background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
                     {/* ★見出し行：左が説明、右が大きな開閉ボタン */}
                     <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                      <span style={{ fontSize:12,color:C.textSec,fontWeight:700,flex:1 }}>＋ どんなプレー？（任意）</span>
+                      <span style={{ fontSize:15,color:"#5a6478",fontWeight:800,flex:1 }}>＋ どんなプレー？（任意）</span>
                       <button
                         onClick={()=>setPlayDetailOpen(v=>!v)}
                         style={{
@@ -17194,19 +17208,19 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       >{playDetailOpen ? "▲ 閉じる" : "▼ 開く"}</button>
                     </div>
                     {playDetailOpen && (<>
-                    <div style={{ marginTop:8,fontSize:10,color:"#5b8bc9" }}>対象：{detailParts.length>0?detailParts.join("・"):"（未選択）"}</div>
+                    <div style={{ marginTop:8,fontSize:13,fontWeight:700,color:"#2f64a8" }}>対象：{detailParts.length>0?detailParts.join("・"):"（未選択）"}</div>
                     {/* ★①プレー内容 → ②フォア/バック → ③ミスの種類 → ④コース の順。
                         「決めた」のときはミスの種類を表示せず、「相手ミス」のときは①からサーブを除く。
                         コースは入力の負担が大きいという声があったため、いちばん最後に置いている。 */}
                     <div style={{ marginTop:10 }}>
-                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>① プレー内容</div>
+                      <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>① プレー内容</div>
                       {playTypesFor(lp?.result_type).map(p=>{
                         const isSel = lp?.play_type===p.key;
                         return <span key={p.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("play_type",p.key)}>{p.label}</span>;
                       })}
                     </div>
                     <div style={{ marginTop:10 }}>
-                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>② フォア / バック</div>
+                      <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>② フォア / バック</div>
                       {SIDE_TYPES.map(s=>{
                         const isSel = lp?.side_type===s.key;
                         return <span key={s.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("side_type",s.key)}>{s.label}</span>;
@@ -17215,7 +17229,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     {/* ★コースまで入力するのは負担が大きいという声があったため、コースは最後に置く */}
                     {isMiss && (
                       <div style={{ marginTop:10 }}>
-                        <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>③ ミスの種類</div>
+                        <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>③ ミスの種類</div>
                         {MISS_TYPES.map(m=>{
                           const isSel = lp?.miss_type===m.key;
                           return <span key={m.key} style={S.chip(isSel)} onClick={()=>updateLastPoint("miss_type",m.key)}>{m.label}</span>;
@@ -17223,7 +17237,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       </div>
                     )}
                     <div style={{ marginTop:10 }}>
-                      <div style={{ fontSize:10.5,color:C.textSec,fontWeight:700,marginBottom:5 }}>{isMiss ? "④" : "③"} コース</div>
+                      <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>{isMiss ? "④" : "③"} コース</div>
                       <CoursePicker value={lp?.course_type ?? null} onChange={v=>updateLastPoint("course_type",v)}/>
                     </div>
                     </>)}
