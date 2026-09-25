@@ -13041,6 +13041,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
   // ★勝敗フィルター：すべて／勝った試合／負けた試合で下の集計を絞り込む
   const displayedMatches = resultFilter==="win" ? wonMatches : resultFilter==="lose" ? lostMatches : resultMatches;
+  // ★一覧表示用：新しい試合を上にする。同じ日の試合は、あとに記録された試合（元の並びで後ろ）を上にする。
+  const newestFirst = (list) => list
+    .map((m,i)=>({ m, i }))
+    .sort((x,y)=> (new Date(y.m.match_date) - new Date(x.m.match_date)) || (y.i - x.i))
+    .map(x=>x.m);
+  const displayedMatchesNewest = newestFirst(displayedMatches);
 
   const agg = aggregatePlayerStats(displayedMatches, selectedPlayer, effectiveSchoolName);
   const topPlaysWin = Object.entries(agg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,4);
@@ -13274,9 +13280,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         {!resultLoading && resultMatches.length>0 && (
           <div style={{ background:C.white, border:`1.5px solid ${C.accent}`, borderRadius:12, padding:"11px 13px", marginBottom:12 }}>
             <div style={{ fontSize:13, fontWeight:800, color:C.accent, marginBottom:7 }}>✓ いま集計している試合（{resultMatches.length}件）</div>
-            {resultMatches
-              .slice()
-              .sort((a,b)=> new Date(b.match_date)-new Date(a.match_date))
+            {newestFirst(resultMatches)
               .slice(0,3)
               .map((m,i,arr)=>{
                 const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
@@ -13331,7 +13335,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   <div style={{ marginTop:10 }}>
                     {displayedMatches.length===0 ? (
                       <div style={{ fontSize:12, color:C.textSec }}>該当する試合がありません</div>
-                    ) : displayedMatches.map(m=>{
+                    ) : displayedMatchesNewest.map(m=>{
                       const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
                       const oppTeam = team==="A" ? "B" : "A";
                       const oppClub = m.players.find(p=>p.team===oppTeam)?.club_name || "";
