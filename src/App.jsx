@@ -16437,8 +16437,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <div style={{ textAlign:"center",position:"relative" }}>
               {curServer && (
                 <div style={{ position:"absolute",left:0,right:0,bottom:"100%",paddingBottom:4,display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>
-                  <span style={{ width:4,height:12,borderRadius:2,background:C.serve }}/>
+                  {/* ★小さいバーはサーブ側に置く（左がサーブ「▮ サーブ」／右がサーブ「サーブ ▮」） */}
+                  {curServer===leftTeam && <span style={{ width:4,height:12,borderRadius:2,background:C.serve }}/>}
                   <span style={{ fontSize:11,fontWeight:700,color:C.serve }}>サーブ</span>
+                  {curServer===rightTeam && <span style={{ width:4,height:12,borderRadius:2,background:C.serve }}/>}
                 </div>
               )}
               <div style={{ background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"6px 4px" }}>
