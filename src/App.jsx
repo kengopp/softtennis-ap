@@ -17653,7 +17653,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 // ============================================================
 // ★試合サマリー／AI総評／改善優先順位／詳細分析パネル
 // ============================================================
-function MatchSummaryPanel({ match }) {
+// ★part："summary"＝①試合サマリーだけ／"details"＝②詳細分析だけ／"all"＝両方
+//   スタッツタブでは、詳細分析を選手ごとの内訳の下（LINE共有ボタンの上）に置くため分けて使う。
+function MatchSummaryPanel({ match, part="all" }) {
   const sum = calcMatchSummary(match);
   const highlights = buildHighlights(sum);
   const teamALabel = match.players.find(p=>p.team==="A")?.club_name || "自チーム";
@@ -17676,6 +17678,7 @@ function MatchSummaryPanel({ match }) {
 
   return (
     <div style={{ marginBottom:14 }}>
+      {part!=="details" && (<>
       {/* ①試合サマリー（試合結果／決定率・総得点・決めた数・自分のミス／最多得点） */}
       <div style={{ ...detailBox, padding:14 }}>
         <div style={{ fontSize:13, fontWeight:800, marginBottom:12, display:"flex", alignItems:"center", gap:6 }}>
@@ -17731,6 +17734,9 @@ function MatchSummaryPanel({ match }) {
         )}
       </div>
 
+      </>)}
+
+      {part!=="summary" && (<>
       {/* ②詳細分析（折りたたみ） */}
       <div style={{ fontSize:11, color:C.textSec, fontWeight:700, margin:"14px 2px 6px" }}>▼ 詳細分析</div>
 
@@ -17922,6 +17928,7 @@ function MatchSummaryPanel({ match }) {
           </div>
         </details>
       )}
+      </>)}
     </div>
   );
 }
@@ -18155,7 +18162,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
 
   return (
     <div style={{ padding:14 }}>
-      <MatchSummaryPanel match={match} />
+      <MatchSummaryPanel match={match} part="summary" />
 
       {/* チーム比較 */}
       <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,padding:14,marginBottom:12 }}>
@@ -18336,6 +18343,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         );
       })}
 
+      {/* ★詳細分析は選手ごとの内訳の下に置く */}
+      <MatchSummaryPanel match={match} part="details" />
 
       <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
         <button style={S.btn("#06c755")} onClick={onShareLine}>💬 LINEで結果を共有</button>
