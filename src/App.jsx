@@ -13657,7 +13657,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                       <div style={{ fontSize:13, color:C.textSec, fontWeight:700, margin:"10px 0 4px" }}>フォア / バック</div>
                       {missSideRows.map(([label,count]) => (
                         <MissRow key={label} label={label} count={count} total={missSideTotal}
-                          max={Math.max(...missSideRows.map(r=>r[1]))} color="#8fb4dd"/>
+                          max={Math.max(...missSideRows.map(r=>r[1]))} color={C.red}/>
                       ))}
                     </>
                   )}
@@ -18281,7 +18281,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                           title="フォア / バック別のミス"
                           entries={SIDE_TYPES.map(sd => [sd.label, p.sideErr?.[sd.key] ?? 0])}
                           total={Object.values(p.sideErr ?? {}).reduce((a,b)=>a+b,0)}
-                          color="#8fb4dd"
+                          color="#f0a49c"
                         />
                         {/* ★コース別のミス */}
                         <Breakdown
