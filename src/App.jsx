@@ -18198,12 +18198,23 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     );
                   })()}
                   {/* ★レシーブミス率（%）は算出方法が複雑で誤差が出やすいため、実際に記録された回数のみ表示する */}
-                  {(p.playsErr["receive"]||0)>0&&(
-                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
-                      <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス</span>
-                      <span style={{ fontSize:11,fontWeight:700,color:C.red,whiteSpace:"nowrap",flexShrink:0 }}>{p.playsErr["receive"]}回</span>
-                    </div>
-                  )}
+                  {/* ★自チームは「レシーブミス0回」を目標とし、0回でも表示して達成／1回でもあれば未達を付ける。
+                       （レシーブの機会があった選手のみ。相手チームは従来どおりミスがあったときだけ回数を表示） */}
+                  {(()=>{
+                    const rMiss = p.playsErr["receive"]||0;
+                    const isOwn = p.team==="A";
+                    if (isOwn ? !(p.receiveTotal>0 || rMiss>0) : rMiss===0) return null;
+                    const good = rMiss===0;
+                    return (
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
+                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス</span>
+                        <span style={{ fontSize:11,fontWeight:700,color:good?C.accent:C.red,whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
+                          {rMiss}回
+                          {isOwn&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
 
