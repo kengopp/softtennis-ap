@@ -16938,7 +16938,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                                 }}
                                 style={{ width:"100%",border:"none",background:"transparent",fontSize:12,fontWeight:700,color:C.navy,padding:"2px 0",fontFamily:"inherit" }}
                               />
-                              <div style={{ fontSize:10,color:C.textSec,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{v.url}</div>
+                              {/* ★動画のURLは画面に表示しない（他校・外部SNSへの無断転載をできるだけ防ぐため） */}
+                              <div style={{ fontSize:10,color:C.textSec }}>YouTube動画</div>
                             </div>
                             <button
                               style={{ background:"none",border:"none",color:C.red,fontSize:15,cursor:"pointer",padding:4 }}
@@ -20548,7 +20549,7 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
         {analysis.youtube_url && (
           <a href={analysis.youtube_url} target="_blank" rel="noreferrer"
             style={{ display:"flex", alignItems:"center", gap:8, background:"#eef0ff", color:C.purple, fontWeight:700, fontSize:13, padding:"12px 14px", borderRadius:10, textDecoration:"none", marginBottom:14, wordBreak:"break-all" }}
-          >▶ {analysis.youtube_url}</a>
+          >▶ YouTubeで動画を見る</a>
         )}
         <div style={{ background:C.white, border:"1px solid "+C.border, borderRadius:12, padding:16, fontSize:13, lineHeight:1.8, color:C.text, whiteSpace:"pre-wrap" }}>
           {renderAiComment(analysis.comment_text)}
