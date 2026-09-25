@@ -16481,9 +16481,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 <div style={{ fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.75)",marginBottom:2 }}>
                   {currentGame ? ("G" + currentGame.game_number + (currentGame.is_final ? " F" : "")) : ""}
                 </div>
-                <div style={{ display:"flex",gap:4,alignItems:"center",justifyContent:"center" }}>
+                <div style={{ display:"flex",gap:6,alignItems:"center",justifyContent:"center" }}>
                   <span style={{ fontSize:28,fontWeight:900,lineHeight:1.1,color:leftMatchScore>=winGames?"#fbbf24":C.white }}>{leftMatchScore}</span>
-                  <span style={{ color:"rgba(255,255,255,0.5)",fontSize:14 }}>-</span>
+                  {/* ★ハイフンが小さく見えにくかったため、数字とバランスが取れる太さ・大きさにする */}
+                  <span style={{ color:"rgba(255,255,255,0.8)",fontSize:24,fontWeight:900,lineHeight:1 }}>-</span>
                   <span style={{ fontSize:28,fontWeight:900,lineHeight:1.1,color:rightMatchScore>=winGames?"#fbbf24":C.white }}>{rightMatchScore}</span>
                 </div>
                 {fault===1 && <div style={{ fontSize:11,color:C.serve,marginTop:2,fontWeight:700 }}>1st F</div>}
