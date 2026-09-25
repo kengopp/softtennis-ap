@@ -14354,10 +14354,21 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState("win");
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
+  // ★シーズン設定（起点日・呼び名）。設定されていれば「📌◯◯以降」を初期表示の期間にする
+  const [seasonStart, setSeasonStart] = useState(null);
+  const [seasonLabel, setSeasonLabel] = useState("");
 
   useEffect(() => {
     (async () => {
       const profile = await getMyProfile();
+      if (profile?.school_id) {
+        const season = await getSchoolSeason(profile.school_id);
+        if (season?.season_start_date) {
+          setSeasonStart(season.season_start_date);
+          setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
+          setPeriod("season");
+        }
+      }
       const rosterList = await getPlayerRoster();
       setRoster(rosterList);
       if (profile?.linked_player_id) {
@@ -14379,7 +14390,9 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   // 画面の途中までスクロールしたままになるのを防ぎ、常にページ先頭から表示する
   useEffect(() => { window.scrollTo(0, 0); }, [playerName]);
 
-  const periodMatches = period==="month1" ? withinLastDays(matches, 30) : matches;
+  const periodMatches = period==="month1" ? withinLastDays(matches, 30)
+    : (period==="season" && seasonStart) ? matches.filter(m => (m.match_date||"") >= seasonStart)
+    : matches;
   const ownRoster = roster.filter(p=>p.is_own_team!==false);
   const myMatches = playerName ? periodMatches.filter(m => ownSideFor(m, playerName, mySchoolName)) : [];
   const finished = myMatches.filter(m => m.status === "finished");
@@ -14431,7 +14444,14 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
           )
         ) : (
           <>
-            <PeriodSortBar period={period} setPeriod={setPeriod} sort={sort} setSort={setSort} />
+            {/* ★一番上は期間の切り替えだけ（並び替えは「ペア別の成績」の枠内に移動） */}
+            <div style={{ display:"flex",gap:6,marginBottom:12 }}>
+              {seasonStart && (
+                <button style={{ ...S.togBtn(period==="season",C.navy),flex:1.4,fontSize:13,padding:"9px 4px" }} onClick={()=>setPeriod("season")}>📌 {seasonLabel}以降</button>
+              )}
+              <button style={{ ...S.togBtn(period==="month1",C.navy),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setPeriod("month1")}>直近1ヶ月</button>
+              <button style={{ ...S.togBtn(period==="all",C.navy),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setPeriod("all")}>全期間</button>
+            </div>
 
             {finished.length===0 ? (
               <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この期間の試合記録がありません</div>
@@ -14456,7 +14476,17 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
 
                 {/* ペア別成績 */}
                 <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>ペア別の成績</div>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10 }}>
+                    <div style={{ fontSize:13,fontWeight:800,color:C.navy }}>ペア別の成績</div>
+                    {/* ★並び替えはペアが2組以上のときだけ出す（1組では並び替える意味がないため） */}
+                    {partnerRows.length>=2 && (
+                      <div style={{ display:"flex",gap:4 }}>
+                        {[["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+                          <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:11.5,padding:"5px 8px" }} onClick={()=>setSort(k)}>{l}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   {partnerRows.map(r=>(
                     <div key={r.name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}` }}>
                       <span style={{ fontSize:13 }}>{r.name}</span>
@@ -14465,11 +14495,11 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                   ))}
                 </div>
 
-                <MonthlyTrendCard finishedMatches={allFinishedForTrend} winFn={m=>winForPlayer(m,playerName)} />
+                <MonthlyTrendCard finishedMatches={allFinishedForTrend} winFn={m=>winForPlayer(m,playerName,mySchoolName)} />
 
                 <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>試合一覧</div>
                 {myMatches.map(m=>{
-                  const win = m.status==="finished" ? winForPlayer(m,playerName) : null;
+                  const win = m.status==="finished" ? winForPlayer(m,playerName,mySchoolName) : null;
                   const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
                   const bC = m.players.find(p=>p.team==="B")?.club_name??"";
                   const bP = m.players.filter(p=>p.team==="B").map(p=>p.player_name).join("/");
