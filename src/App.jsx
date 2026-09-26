@@ -12795,11 +12795,11 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           </div>
         </div>
         <div style={{ padding:14 }}>
-          <div style={{ fontSize:11.5, fontWeight:700, color:C.text, marginBottom:6 }}>チーム・学校</div>
+          <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:7 }}>チーム・学校</div>
           <div onClick={()=>setSchoolPickerOpen(true)} style={{ ...S.card, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
             <div>
-              <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>{effectiveSchoolName || "（未設定）"}</div>
-              <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{isOwnSchool ? "自分の所属チーム（デフォルト）" : "相手チーム"}</div>
+              <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{effectiveSchoolName || "（未設定）"}</div>
+              <div style={{ fontSize:13, color:"#5a6478", marginTop:2 }}>{isOwnSchool ? "自分の所属チーム（デフォルト）" : "相手チーム"}</div>
             </div>
             {/* ★押せることが分かるよう、文字だけでなくボタンの形にする */}
             <div style={{ flexShrink:0, marginLeft:10, fontSize:14, fontWeight:800, color:C.white, background:C.navy, borderRadius:20, padding:"8px 14px", whiteSpace:"nowrap" }}>変更する ›</div>
