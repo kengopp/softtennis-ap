@@ -379,19 +379,19 @@ function MonthlyTrendCard({ finishedMatches, winFn, title="月別の勝率推移
   if (months.length===0) return null;
   return (
     <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-      <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>{title}</div>
+      <div style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:12 }}>{title}</div>
       {months.map(month=>{
         const { wins, total } = byMonth[month];
         const rate = Math.round(wins/total*100);
         const [y,mo] = month.split("-");
         return (
-          <div key={month} style={{ marginBottom:10 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:C.textSec,marginBottom:3 }}>
+          <div key={month} style={{ marginBottom:12 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",fontSize:13.5,color:"#5a6478",marginBottom:5 }}>
               <span>{y}年{Number(mo)}月（{total}試合）</span>
-              <span style={{ fontWeight:700,color:C.text }}>{wins}勝{total-wins}敗・{rate}%</span>
+              <span style={{ fontSize:14,fontWeight:800,color:C.text }}>{wins}勝{total-wins}敗・{rate}%</span>
             </div>
-            <div style={{ height:8,background:"#e8edf3",borderRadius:4,overflow:"hidden" }}>
-              <div style={{ width:`${rate}%`,height:"100%",background:C.accent,borderRadius:4 }}/>
+            <div style={{ height:10,background:"#e8edf3",borderRadius:5,overflow:"hidden" }}>
+              <div style={{ width:`${rate}%`,height:"100%",background:C.accent,borderRadius:5 }}/>
             </div>
           </div>
         );
@@ -10720,15 +10720,15 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
                     <div>
                       <div style={{ fontSize:18,fontWeight:800,color:C.navy }}>{linkedFinished.length}</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>試合数</div>
                     </div>
                     <div>
                       <div style={{ fontSize:18,fontWeight:800,color:C.accent }}>{linkedWinRate}%</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>勝率</div>
                     </div>
                     <div>
                       <div style={{ fontSize:18,fontWeight:800,color:C.navy }}>{linkedWins}勝{linkedFinished.length-linkedWins}敗</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>戦績</div>
                     </div>
                   </div>
                 )}
@@ -14126,15 +14126,15 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center", cursor:"pointer" }} onClick={()=>{ setBreakdownFilter("all"); setShowBreakdown(true); }}>
                 <div>
                   <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.total}</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                  <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>試合数</div>
                 </div>
                 <div>
                   <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                  <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>勝率</div>
                 </div>
                 <div>
                   <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.wins}勝{teamRecord.losses}敗</div>
-                  <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                  <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>戦績</div>
                 </div>
               </div>
               <div style={{ display:"flex", gap:6, marginTop:12 }}>
@@ -14433,14 +14433,14 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
             <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>選手マスター(自チーム)に選手が登録されていません。</div>
           ) : (
             <>
-              <div style={{ fontSize:12,color:C.textSec,marginBottom:10 }}>戦績を見たい選手を選んでください</div>
+              <div style={{ fontSize:14,fontWeight:700,color:"#5a6478",marginBottom:10 }}>戦績を見たい選手を選んでください</div>
               {ownRoster.map(p=>(
                 <div
                   key={p.id}
                   style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
                   onClick={()=>setPlayerName(p.player_name)}
                 >
-                  <span style={{ fontSize:14,fontWeight:700 }}>{p.player_name}{p.player_name===linkedPlayerName ? "（自分／お子さん）" : ""}</span>
+                  <span style={{ fontSize:16,fontWeight:700 }}>{p.player_name}{p.player_name===linkedPlayerName ? "（自分／お子さん）" : ""}</span>
                   <span style={{ fontSize:14,color:C.textSec }}>→</span>
                 </div>
               ))}
@@ -14464,16 +14464,16 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                 <div style={{ ...S.card, padding:16, marginBottom:16 }}>
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
                     <div>
-                      <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{rec.total}</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                      <div style={{ fontSize:26,fontWeight:800,color:C.navy }}>{rec.total}</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>試合数</div>
                     </div>
                     <div>
-                      <div style={{ fontSize:22,fontWeight:800,color:C.accent }}>{rec.rate}%</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                      <div style={{ fontSize:26,fontWeight:800,color:C.accent }}>{rec.rate}%</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>勝率</div>
                     </div>
                     <div>
-                      <div style={{ fontSize:22,fontWeight:800,color:C.navy }}>{rec.wins}勝{rec.losses}敗</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                      <div style={{ fontSize:26,fontWeight:800,color:C.navy }}>{rec.wins}勝{rec.losses}敗</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>戦績</div>
                     </div>
                   </div>
                 </div>
@@ -14481,27 +14481,27 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                 {/* ペア別成績 */}
                 <div style={{ ...S.card, padding:16, marginBottom:16 }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10 }}>
-                    <div style={{ fontSize:13,fontWeight:800,color:C.navy }}>ペア別の成績</div>
+                    <div style={{ fontSize:15,fontWeight:800,color:C.navy }}>ペア別の成績</div>
                     {/* ★並び替えはペアが2組以上のときだけ出す（1組では並び替える意味がないため） */}
                     {partnerRows.length>=2 && (
                       <div style={{ display:"flex",gap:4 }}>
                         {[["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
-                          <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:11.5,padding:"5px 8px" }} onClick={()=>setSort(k)}>{l}</button>
+                          <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:13,padding:"6px 9px" }} onClick={()=>setSort(k)}>{l}</button>
                         ))}
                       </div>
                     )}
                   </div>
                   {partnerRows.map(r=>(
                     <div key={r.name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}` }}>
-                      <span style={{ fontSize:13 }}>{r.name}</span>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
+                      <span style={{ fontSize:15,fontWeight:700 }}>{r.name}</span>
+                      <span style={{ fontSize:14,color:"#5a6478" }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontSize:15,fontWeight:800,color:C.accent }}>{r.rate}%</span></span>
                     </div>
                   ))}
                 </div>
 
                 <MonthlyTrendCard finishedMatches={allFinishedForTrend} winFn={m=>winForPlayer(m,playerName,mySchoolName)} />
 
-                <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>試合一覧</div>
+                <div style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:8 }}>試合一覧</div>
                 {myMatches.map(m=>{
                   const win = m.status==="finished" ? winForPlayer(m,playerName,mySchoolName) : null;
                   const aP = m.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
@@ -14510,18 +14510,18 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                   return (
                     <div key={m.id} style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer" }} onClick={()=>onOpen(m.id)}>
                       <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
-                        <span style={{ fontSize:12,fontWeight:700 }}>{m.tournament_name||"試合"}</span>
-                        <span style={{ fontSize:11,color:C.textSec }}>{fmtDate(m.match_date)}</span>
+                        <span style={{ fontSize:14.5,fontWeight:800 }}>{m.tournament_name||"試合"}</span>
+                        <span style={{ fontSize:13,color:"#5a6478",flexShrink:0,marginLeft:8 }}>{fmtDate(m.match_date)}</span>
                       </div>
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:m.memo?6:0 }}>
-                        <span style={{ fontSize:12,color:C.textSec }}>{aP} vs {bC} {bP}</span>
-                        <span style={{ fontSize:14,fontWeight:800,color:m.status==="finished"?(win?C.teamA:C.teamB):C.textSec }}>
+                        <span style={{ fontSize:14,color:"#5a6478",lineHeight:1.5,minWidth:0 }}>{aP} vs {bC} {bP}</span>
+                        <span style={{ fontSize:19,fontWeight:900,flexShrink:0,marginLeft:8,color:m.status==="finished"?(win?C.teamA:C.teamB):C.textSec }}>
                           {matchStatusShortLabel(m)}
                         </span>
                       </div>
                       {/* ★「途中終了」は記録中の画面から押すものに統一したため、ここには置かない */}
                       {m.memo && (
-                        <div style={{ fontSize:11,color:C.navy,background:C.accentL,borderRadius:6,padding:"6px 8px",marginTop:4 }}>📝 {m.memo}</div>
+                        <div style={{ fontSize:13,color:C.navy,background:C.accentL,borderRadius:6,padding:"7px 9px",marginTop:4,lineHeight:1.5 }}>📝 {m.memo}</div>
                       )}
                     </div>
                   );
@@ -14657,15 +14657,15 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center" }}>
                     <div>
                       <div style={{ fontSize:20,fontWeight:800 }}>{rec.total}</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>試合数</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>試合数</div>
                     </div>
                     <div>
                       <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{rec.rate}%</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>勝率</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>勝率</div>
                     </div>
                     <div>
                       <div style={{ fontSize:20,fontWeight:800 }}>{rec.wins}勝{rec.losses}敗</div>
-                      <div style={{ fontSize:11,color:C.textSec }}>戦績</div>
+                      <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>戦績</div>
                     </div>
                   </div>
                 </div>
