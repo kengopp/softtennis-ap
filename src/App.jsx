@@ -848,6 +848,14 @@ function roundProgressRank(round) {
 function pairKeyOf(nameA, nameB) {
   return [nameA, nameB].filter(Boolean).sort().join(" / ");
 }
+// ★ペアの表示名を「選手1（後衛）／選手2（前衛）」の順にそろえる。
+//   同じペアでも試合ごとに入力順が違うことがあるため、そのペアの試合で一番多かった並び順を採用する。
+//   votes は { "後衛名\t前衛名": 回数 } の形。
+function majorityPairOrder(votes) {
+  let best = null, bestN = -1;
+  Object.entries(votes || {}).forEach(([k, n]) => { if (n > bestN) { best = k; bestN = n; } });
+  return best ? best.split("\t") : [];
+}
 // ★ペアの表示名（キーと同じ並び順にして、画面ごとに前後が入れ替わらないようにする）
 function pairLabelOf(nameA, nameB) {
   return [nameA, nameB].filter(Boolean).sort().join("・");
@@ -12098,9 +12106,15 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     ownMatches.forEach(m => {
       const pr = ownPairOf(m, mySchoolName);
       if (!pr) return;
-      (map[pr.key] ??= { ...pr, matches: [] }).matches.push(m);
+      const rec = (map[pr.key] ??= { ...pr, matches: [], votes: {} });
+      rec.matches.push(m);
+      rec.votes[pr.names.join("\t")] = (rec.votes[pr.names.join("\t")] ?? 0) + 1;
     });
-    return Object.values(map).sort((a,b)=>b.matches.length-a.matches.length);
+    // ★表示は「選手1（後衛）・選手2（前衛）」の順（そのペアの試合で一番多い入力順）
+    return Object.values(map).map(r => {
+      const o = majorityPairOrder(r.votes);
+      return o.length ? { ...r, names: o, label: o.join("・") } : r;
+    }).sort((a,b)=>b.matches.length-a.matches.length);
   }, [ownMatches, mySchoolName]);
 
   useEffect(() => {
@@ -12123,14 +12137,18 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
       if (mySchoolName && bClub && bClub.trim() === mySchoolName.trim()) return;
       const op = oppPairOf(m);
       if (!op || !op.names[0]) return;
-      const rec = (map[op.key] ??= { ...op, matches: [], w:0, l:0, ownPairKeys:new Set() });
+      const rec = (map[op.key] ??= { ...op, matches: [], w:0, l:0, ownPairKeys:new Set(), votes: {} });
       rec.matches.push(m);
+      rec.votes[op.names.join("\t")] = (rec.votes[op.names.join("\t")] ?? 0) + 1;
       const ourSide = winnerSideOf(m);
       if (ourSide === "A") rec.w++; else if (ourSide === "B") rec.l++;
       const mine = ownPairOf(m, mySchoolName);
       if (mine) rec.ownPairKeys.add(mine.key);
     });
-    return Object.values(map).sort((a,b)=>b.matches.length-a.matches.length);
+    return Object.values(map).map(r => {
+      const o = majorityPairOrder(r.votes);
+      return o.length ? { ...r, names: o, label: o.join("・") } : r;
+    }).sort((a,b)=>b.matches.length-a.matches.length);
   }, [ownMatches, ownPairKey, selectedOwnPair, mySchoolName]);
 
   const selectedOppPair = oppPairs.find(p => p.key === oppPairKey) || null;
@@ -13975,28 +13993,34 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const byPair = {};
   finished.forEach(m => {
     const aPlayers = m.players.filter(p => p.team === "A").sort((a,b) => a.order_num - b.order_num);
-    // ★名前の並び順が試合ごとに違っても同じペアとして数える（ペアタブと同じく名前順にそろえる）
-    const aNames = aPlayers.map(p => (p.player_name||"").trim()).filter(Boolean).sort();
+    // ★名前の並び順が試合ごとに違っても同じペアとして数える（集計は名前順のキーでまとめ、
+    //   表示は「選手1（後衛）／選手2（前衛）」の順。並び順は各試合の入力順を記録しておく）
+    const aOrdered = aPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
+    const aNames = [...aOrdered].sort();
     if (aNames.length && aNames.every(n => ownNameSet.has(n))) {
       const pairKey = aNames.join("／") || "（不明）";
-      (byPair[pairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="A" });
+      (byPair[pairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="A", order: aOrdered.join("\t") });
     }
     const bPlayers = m.players.filter(p => p.team === "B").sort((a,b) => a.order_num - b.order_num);
     const bClub = bPlayers[0]?.club_name;
     if (mySchoolName && bClub && bClub.trim()===mySchoolName.trim()) {
-      const bNames = bPlayers.map(p => (p.player_name||"").trim()).filter(Boolean).sort();
+      const bOrdered = bPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
+      const bNames = [...bOrdered].sort();
       if (bNames.length && bNames.every(n => ownNameSet.has(n))) {
         const bPairKey = bNames.join("／") || "（不明）";
-        (byPair[bPairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="B" });
+        (byPair[bPairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="B", order: bOrdered.join("\t") });
       }
     }
   });
   return byPair;
   }, [finished, ownNameSet, mySchoolName]);
   const pairRows = useMemo(() => {
-    const rows = Object.entries(byPair).map(([name, list]) => ({
-      name, ...recordOf(list, x => x.win),
-    }));
+    const rows = Object.entries(byPair).map(([key, list]) => {
+      const votes = {};
+      list.forEach(x => { if (x.order) votes[x.order] = (votes[x.order] ?? 0) + 1; });
+      const ordered = majorityPairOrder(votes);
+      return { name: ordered.length ? ordered.join("／") : key, ...recordOf(list, x => x.win) };
+    });
     rows.sort(sortRows);
     return rows;
   }, [byPair, sort]);
