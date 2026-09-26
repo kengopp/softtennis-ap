@@ -12893,6 +12893,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
             <div style={{ flexShrink:0, marginLeft:10, fontSize:14, fontWeight:800, color:C.white, background:C.navy, borderRadius:20, padding:"8px 14px", whiteSpace:"nowrap" }}>変更する ›</div>
           </div>
 
+          {/* ★「チーム・学校」と区別できるよう、選手の一覧にも見出しを付ける */}
+          <div style={{ fontSize:14, fontWeight:800, color:C.text, margin:"18px 0 7px" }}>👤 選手一覧<span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginLeft:8 }}>分析する選手を選んでください</span></div>
           <div style={{ display:"flex", alignItems:"center", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:"9px 12px", marginBottom:10, fontSize:13, gap:6 }}>
             🔍<input value={teamSearch} onChange={e=>setTeamSearch(e.target.value)} placeholder="選手名で検索" style={{ flex:1, border:"none", outline:"none", fontSize:13, background:"transparent" }} />
           </div>
