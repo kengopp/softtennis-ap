@@ -12801,7 +12801,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
               <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>{effectiveSchoolName || "（未設定）"}</div>
               <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{isOwnSchool ? "自分の所属チーム（デフォルト）" : "相手チーム"}</div>
             </div>
-            <div style={{ fontSize:11, color:C.accent, fontWeight:700 }}>変更する ›</div>
+            {/* ★押せることが分かるよう、文字だけでなくボタンの形にする */}
+            <div style={{ flexShrink:0, marginLeft:10, fontSize:14, fontWeight:800, color:C.white, background:C.navy, borderRadius:20, padding:"8px 14px", whiteSpace:"nowrap" }}>変更する ›</div>
           </div>
 
           <div style={{ display:"flex", alignItems:"center", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:"9px 12px", marginBottom:10, fontSize:13, gap:6 }}>
