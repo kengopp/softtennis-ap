@@ -4537,14 +4537,25 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 大会タブ */}
       {timeTab === "tournament" && (
         <>
+          {(() => {
+            // ★大会を一覧から選んで絞り込んだあとでも、▼を押せば全大会から選び直せるようにする。
+            //   入力欄の文字が大会名とぴったり一致している＝一覧から選んだ状態とみなし、
+            //   その場合は候補を絞らずに全大会を出す（選択中の大会には✓を付ける）。
+            //   文字を打っている途中（キーワード検索）のときだけ、候補をその文字で絞る。
+            const kw = tournamentSearch.trim();
+            const picked = !!kw && tournaments.some(t => t.name === kw);
+            const candidates = (!kw || picked) ? tournaments : tournaments.filter(t => t.name.toLowerCase().includes(kw.toLowerCase()));
+            const pick = (name) => { setTournamentSearch(name); setTournamentDropdownOpen(false); };
+            return (
           <div style={{ position:"relative", margin:"10px 14px 8px" }}>
             <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
               <span style={{ fontSize:14, color:C.textSec }}>🔍</span>
               <input
                 value={tournamentSearch}
-                onChange={e=>setTournamentSearch(e.target.value)}
+                onChange={e=>{ setTournamentSearch(e.target.value); setTournamentDropdownOpen(true); }}
+                onFocus={e=>{ if (picked) e.target.select(); setTournamentDropdownOpen(true); }}
                 placeholder="キーワード／大会一覧から選択"
-                style={{ flex:1, marginLeft:6, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+                style={{ flex:1, marginLeft:6, border:"none", outline:"none", fontSize:16, color:C.text, background:"transparent" }}
               />
               {tournamentSearch && (
                 <button onClick={()=>{ setTournamentSearch(""); setTournamentDropdownOpen(false); }} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"2px 6px" }} title="絞り込みをクリア">✕</button>
@@ -4552,17 +4563,30 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               <button onClick={()=>setTournamentDropdownOpen(v=>!v)} style={{ border:"none", background:"none", color:C.textSec, fontSize:14, cursor:"pointer", padding:"2px 4px" }}>{tournamentDropdownOpen ? "▲" : "▼"}</button>
             </div>
             {tournamentDropdownOpen && (
-              <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:20, maxHeight:220, overflowY:"auto" }}>
+              <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:20, maxHeight:300, overflowY:"auto" }}>
                 {tournaments.length===0 ? (
-                  <div style={{ padding:"12px 14px", fontSize:12, color:C.textSec }}>大会がまだありません</div>
-                ) : tournaments.filter(t => !tournamentSearch.trim() || t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())).length===0 ? (
-                  <div style={{ padding:"12px 14px", fontSize:12, color:C.textSec }}>一致する大会がありません</div>
-                ) : tournaments.filter(t => !tournamentSearch.trim() || t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())).map(t => (
-                  <div key={t.id} onClick={()=>{ setTournamentSearch(t.name); setTournamentDropdownOpen(false); }} style={{ padding:"11px 14px", fontSize:13, color:C.text, cursor:"pointer", borderBottom:"1px solid "+C.border }}>{t.name}</div>
-                ))}
+                  <div style={{ padding:"12px 14px", fontSize:14, color:C.textSec }}>大会がまだありません</div>
+                ) : (<>
+                  {kw && (
+                    <div onClick={()=>pick("")} style={{ padding:"12px 14px", fontSize:14.5, fontWeight:700, color:C.navy, cursor:"pointer", borderBottom:"1px solid "+C.border, background:"#f7f9fc" }}>すべての大会を表示</div>
+                  )}
+                  {candidates.length===0 ? (
+                    <div style={{ padding:"12px 14px", fontSize:14, color:C.textSec }}>一致する大会がありません</div>
+                  ) : candidates.map(t => {
+                    const isCur = picked && t.name===kw;
+                    return (
+                      <div key={t.id} onClick={()=>pick(t.name)} style={{ display:"flex", alignItems:"center", gap:8, padding:"12px 14px", fontSize:14.5, fontWeight:isCur?800:500, color:isCur?C.navy:C.text, background:isCur?C.accentL:C.white, cursor:"pointer", borderBottom:"1px solid "+C.border }}>
+                        <span style={{ width:16, flexShrink:0, color:C.accent, fontWeight:900 }}>{isCur ? "✓" : ""}</span>
+                        <span style={{ flex:1, minWidth:0 }}>{t.name}</span>
+                      </div>
+                    );
+                  })}
+                </>)}
               </div>
             )}
           </div>
+            );
+          })()}
           <div style={{ padding:"0 14px", paddingBottom:90 }}>
             {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {!loading && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
