@@ -11930,10 +11930,11 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
           <>
             {/* ★他校（対戦相手）の選手も分析できることが分かるよう、見出しの右に案内を出す */}
             <Group title="選手" note="他チームの選手も選べます">
-              <div onClick={onChangePlayer} style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
-                border:`1.5px solid ${C.border}`, borderRadius:10, padding:"13px 14px", cursor:"pointer" }}>
-                <span style={{ fontSize:15, fontWeight:800, color:C.text }}>{playerLabel}</span>
-                <span style={{ fontSize:13.5, fontWeight:700, color:C.navy }}>変更する ›</span>
+              {/* ★気づかれにくかったため、色付きの背景＋太い枠＋ボタン形の「変更する」で目立たせる */}
+              <div onClick={onChangePlayer} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10,
+                background:"#eaf1ff", border:`2px solid ${C.navy}`, borderRadius:12, padding:"12px 14px", cursor:"pointer" }}>
+                <span style={{ fontSize:17, fontWeight:800, color:C.navy, minWidth:0 }}>{playerLabel}</span>
+                <span style={{ flexShrink:0, fontSize:14, fontWeight:800, color:C.white, background:C.navy, borderRadius:20, padding:"8px 14px", whiteSpace:"nowrap" }}>変更する ›</span>
               </div>
             </Group>
             <div style={divider}/>
@@ -12880,9 +12881,11 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           </div>
         </div>
         <div style={{ padding:14 }}>
-          <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:7 }}>チーム・学校</div>
-          <div onClick={()=>setSchoolPickerOpen(true)} style={{ ...S.card, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
-            <div>
+          {/* ★「学校やチームはどこで切り替えるの？」と気づかれにくかったため、
+               色付きの背景＋太い枠で囲み、切り替えられることを文章でも示す */}
+          <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:7 }}>🏫 チーム・学校<span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginLeft:8 }}>他校の選手もここで切り替え</span></div>
+          <div onClick={()=>setSchoolPickerOpen(true)} style={{ background:"#eaf1ff", border:`2px solid ${C.navy}`, borderRadius:12, marginBottom:12, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}>
+            <div style={{ minWidth:0 }}>
               <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{effectiveSchoolName || "（未設定）"}</div>
               <div style={{ fontSize:13, color:"#5a6478", marginTop:2 }}>{isOwnSchool ? "自分の所属チーム（デフォルト）" : "相手チーム"}</div>
             </div>
