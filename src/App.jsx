@@ -780,7 +780,8 @@ function applyScope(matches, scope, { seasonStart, teamMatchIds } = {}) {
     return roundProgressRank(b.round) - roundProgressRank(a.round);
   });
   const want = scope.limit > 0 ? Math.min(scope.limit, SCOPE_MAX) : SCOPE_MAX;
-  const capped = Math.max(0, list.length - want);
+  // ★「直近5試合」などで自分から数を絞った場合は、上限（100試合）で切ったわけではないので警告を出さない
+  const capped = (scope.limit > 0 && scope.limit <= SCOPE_MAX) ? 0 : Math.max(0, list.length - want);
   list = list.slice(0, want);
   list.sort((a,b) => {
     const d = new Date(a.match_date) - new Date(b.match_date);
@@ -12701,6 +12702,27 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   // ★得点・ミスの内訳の切り替え：play=プレイ別（ストローク/ボレー…） course=コース別（引っ張り/流し…）
   const [breakdownDim, setBreakdownDim] = useState("play");
   const [resultListOpen, setResultListOpen] = useState(false); // ★勝敗内訳一覧の開閉（初期は閉じた状態）
+  // ★選手選択画面を開いた時点の「選手・学校」を覚えておく。
+  //   学校を切り替えると選手が一旦未選択になるため、そのまま「←」（スマホの戻る）で戻ると
+  //   選手名が空のまま結果画面に戻り、勝敗も0勝0敗になってしまっていた。
+  //   選び直さずに戻ったときは、開いた時点の選手・学校に戻す。
+  const wizardSnapRef = useRef(null);
+  useEffect(() => {
+    if (mode === "wizardPlayer") wizardSnapRef.current = { player: selectedPlayer, school: selectedSchoolName };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+  function cancelWizard() {
+    const snap = wizardSnapRef.current;
+    setSchoolPickerOpen(false);
+    if (snap?.player) {
+      setSelectedPlayer(snap.player);
+      setSelectedSchoolName(snap.school);
+      setMode("results");
+    } else {
+      // まだ誰も選んでいない（結果画面に戻っても表示するものがない）ときはホームへ
+      onNavigate && onNavigate("home");
+    }
+  }
 
   // ★画面を開くたびに全部を取り直して「読み込み中...」で待つのをやめ、
   //   前回開いたときの内容をすぐ表示してから、裏で最新に差し替える。
@@ -12873,7 +12895,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ background:C.navy, color:C.white, padding:16 }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("results")}>←</span>
+            <span style={{ cursor:"pointer", fontSize:18 }} onClick={cancelWizard}>←</span>
             <div>
               <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
               <div style={{ fontSize:11, color:"#b9c2d6" }}>選手を選択</div>
