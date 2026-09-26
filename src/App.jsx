@@ -869,6 +869,41 @@ function ownPairOf(m, mySchoolName) {
   return pairOnSide(m, aIsOwn ? "A" : "A"); // 自チームは常にA側に保存されている
 }
 function oppPairOf(m) { return pairOnSide(m, "B"); }
+// ★自チームがB側に記録されている試合（部内戦のB側・トーナメント表の簡易記録でB側）を、
+//   A側＝自チームになるように左右を入れ替えた複製を作る（勝敗の集計用。idはそのまま）
+function flipMatchSides(m) {
+  const sw = (t) => t==="A" ? "B" : t==="B" ? "A" : t;
+  return {
+    ...m,
+    players: (m.players||[]).map(p => ({ ...p, team: sw(p.team) })),
+    match_score_a: m.match_score_b, match_score_b: m.match_score_a,
+    walkover_winner: sw(m.walkover_winner),
+    games: (m.games||[]).map(g => ({ ...g, winner_team: sw(g.winner_team) })),
+    _flipped: true,
+  };
+}
+// ★ペア・選手の勝敗集計に使う「自チーム側から見た試合」の一覧を作る。
+//   ・通常の試合は自チームがA側に保存されているのでそのまま
+//   ・部内戦（両側とも自チーム）は、B側のペアの分も入れ替えた複製を追加
+//   ・トーナメント表の簡易記録は、自チームの学校名の側をA側にそろえる（どちらも他校なら除外）
+function ownPerspectiveMatches(list, mySchoolName) {
+  const my = (mySchoolName||"").trim();
+  const clubOf = (m, t) => (m.players.find(p=>p.team===t && p.club_name)?.club_name || "").trim();
+  const out = [];
+  list.forEach(m => {
+    if (m.status !== "finished") return;
+    const aClub = clubOf(m, "A"), bClub = clubOf(m, "B");
+    if (m.is_simple_draw_result) {
+      if (my && aClub === my) out.push(m);
+      if (my && bClub === my) out.push(flipMatchSides(m));
+      return;
+    }
+    if (!m.players.some(p => p.team==="A")) return;
+    out.push(m);
+    if (my && bClub === my) out.push(flipMatchSides(m));
+  });
+  return out;
+}
 
 function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
   const agg = {
@@ -12015,29 +12050,47 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
   const [noteEditing, setNoteEditing] = useState(null); // {id?, text, match_id}
+  // ★期間（チームタブ・選手の戦績画面とそろえる）。シーズン設定があれば「📌◯◯以降」が初期値
+  // ★開いた時点で前回の期間が保存されていたか（保存処理が先に走って上書きされる前に覚えておく）
+  const cachedPeriodRef = useRef(readScreenCache("pairAnalysis")?.period);
+  const [period, setPeriod] = useState(() => cachedPeriodRef.current ?? "all");
+  const [seasonStart, setSeasonStart] = useState(null);
+  const [seasonLabel, setSeasonLabel] = useState("");
 
   useEffect(() => {
     (async () => {
-      const [p, list, schools] = await Promise.all([getMyProfile(), getMatchesCached(), getSchools()]);
+      // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブと同じ数え方にする）
+      const [p, list, schools, simpleList] = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches()]);
       if (p?.school_id) {
         setSchoolId(p.school_id);
         const s = (schools||[]).find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
+        const season = await getSchoolSeason(p.school_id);
+        if (season?.season_start_date) {
+          setSeasonStart(season.season_start_date);
+          setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
+          if (!cachedPeriodRef.current) setPeriod("season");
+        } else {
+          setPeriod(v => v==="season" ? "all" : v);
+        }
       }
-      setAllMatches(list);
+      setAllMatches([...list, ...(simpleList||[])]);
       setLoading(false);
     })();
   }, []);
 
   // ★試合スタッツを見て戻ってきたときに、選んでいたペアと画面の状態を復元する
   useEffect(() => {
-    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey });
-  }, [side, ownPairKey, oppPairKey]);
+    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, period });
+  }, [side, ownPairKey, oppPairKey, period]);
 
-  // 自チームが出場した、終了済みの個人戦・団体戦の試合
-  const ownMatches = useMemo(() => allMatches.filter(m =>
-    m.status === "finished" && m.players.some(p => p.team==="A")
-  ), [allMatches]);
+  // 自チームが出場した、終了済みの試合（自チーム側をA側にそろえたもの。期間で絞り込み）
+  const ownMatches = useMemo(() => {
+    const list = ownPerspectiveMatches(allMatches, mySchoolName);
+    if (period === "month1") return withinLastDays(list, 30);
+    if (period === "season" && seasonStart) return list.filter(m => (m.match_date||"") >= seasonStart);
+    return list;
+  }, [allMatches, mySchoolName, period, seasonStart]);
 
   // 自チームのペア一覧（出場試合数の多い順）
   const ownPairs = useMemo(() => {
@@ -12118,7 +12171,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   // ★points込みの詳細は、見る対象が決まったタイミングでその分だけ読み込む
   useEffect(() => {
-    const ids = targetMatches.map(m=>m.id);
+    // ★簡易記録（ポイントなし）の試合は詳細の読み込み対象から外す
+    const ids = targetMatches.filter(m=>!m.is_simple_draw_result).map(m=>m.id);
     if (ids.length === 0) { setDetailMatches([]); return; }
     let cancelled = false;
     (async () => {
@@ -12131,7 +12185,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [side, ownPairKey, oppPairKey, allMatches.length]);
+  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart]);
 
   const wins = targetMatches.filter(m => winnerSideOf(m)==="A").length;
   const losses = targetMatches.filter(m => winnerSideOf(m)==="B").length;
@@ -12224,10 +12278,19 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
           ))}
         </div>
 
+        {/* ★期間（チームタブ・選手の戦績画面とそろえる） */}
+        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+          {seasonStart && (
+            <button style={{ ...S.togBtn(period==="season",C.navy),flex:1.4,fontSize:13,padding:"9px 4px" }} onClick={()=>setPeriod("season")}>📌 {seasonLabel}以降</button>
+          )}
+          <button style={{ ...S.togBtn(period==="month1",C.navy),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setPeriod("month1")}>直近1ヶ月</button>
+          <button style={{ ...S.togBtn(period==="all",C.navy),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setPeriod("all")}>全期間</button>
+        </div>
+
         {loading ? (
           <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0" }}>読み込み中...</div>
         ) : ownPairs.length === 0 ? (
-          <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0", fontSize:13.5 }}>終了した試合がまだありません</div>
+          <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0", fontSize:13.5 }}>この期間の試合記録がありません</div>
         ) : (
           <>
             {/* 自チームのペア選択（自分たち／相手分析で共通・連動） */}
@@ -12313,7 +12376,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         const win = winnerSideOf(m)==="A";
                         const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
                         return (
-                          <div key={m.id} onClick={e=>{ e.stopPropagation(); onOpenMatch && onOpenMatch(m.id); }}
+                          <div key={m.id} onClick={e=>{ e.stopPropagation(); if (!m.is_simple_draw_result) onOpenMatch && onOpenMatch(m.id); }}
                             style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid ${C.border}`, fontSize:13.5, cursor:"pointer" }}>
                             <span style={{ color:C.textSec, fontSize:12.5, width:42, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
                             <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
@@ -13912,7 +13975,8 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const byPair = {};
   finished.forEach(m => {
     const aPlayers = m.players.filter(p => p.team === "A").sort((a,b) => a.order_num - b.order_num);
-    const aNames = aPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
+    // ★名前の並び順が試合ごとに違っても同じペアとして数える（ペアタブと同じく名前順にそろえる）
+    const aNames = aPlayers.map(p => (p.player_name||"").trim()).filter(Boolean).sort();
     if (aNames.length && aNames.every(n => ownNameSet.has(n))) {
       const pairKey = aNames.join("／") || "（不明）";
       (byPair[pairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="A" });
@@ -13920,7 +13984,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const bPlayers = m.players.filter(p => p.team === "B").sort((a,b) => a.order_num - b.order_num);
     const bClub = bPlayers[0]?.club_name;
     if (mySchoolName && bClub && bClub.trim()===mySchoolName.trim()) {
-      const bNames = bPlayers.map(p => (p.player_name||"").trim()).filter(Boolean);
+      const bNames = bPlayers.map(p => (p.player_name||"").trim()).filter(Boolean).sort();
       if (bNames.length && bNames.every(n => ownNameSet.has(n))) {
         const bPairKey = bNames.join("／") || "（不明）";
         (byPair[bPairKey] ??= []).push({ match: m, win: winnerSideOf(m)==="B" });
@@ -14405,8 +14469,9 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
         const s = schools.find(s => s.id === profile.school_id);
         if (s) setMySchoolName(s.name);
       }
-      const list = await getMatchesCached();
-      setMatches(list);
+      // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブ・ペアタブと同じ数え方にする）
+      const [list, simpleList] = await Promise.all([getMatchesCached(), getSimpleRecordedDrawMatches()]);
+      setMatches([...list, ...(simpleList||[])]);
       setLoading(false);
     })();
   }, []);
