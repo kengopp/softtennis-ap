@@ -366,7 +366,8 @@ function PeriodSortBar({ period, setPeriod, sort, setSort }) {
   );
 }
 // 月別の勝率推移カード（複数画面で共通使用）
-function MonthlyTrendCard({ finishedMatches, winFn, title="月別の勝率推移" }) {
+// ★onToggle を渡すと、見出しをタップして開閉できる折りたたみ表示になる（open＝開いているか）
+function MonthlyTrendCard({ finishedMatches, winFn, title="月別の勝率推移", open=true, onToggle }) {
   const byMonth = {};
   finishedMatches.forEach(m=>{
     const month = (m.match_date||"").slice(0,7);
@@ -378,9 +379,12 @@ function MonthlyTrendCard({ finishedMatches, winFn, title="月別の勝率推移
   const months = Object.keys(byMonth).sort();
   if (months.length===0) return null;
   return (
-    <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-      <div style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:12 }}>{title}</div>
-      {months.map(month=>{
+    <div style={{ ...S.card, padding:onToggle?"13px 14px":16, marginBottom:onToggle?12:16 }}>
+      <div onClick={onToggle} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:15,fontWeight:800,color:C.navy,marginBottom:open?12:0,cursor:onToggle?"pointer":"default" }}>
+        <span>{title}</span>
+        {onToggle && <span style={{ fontSize:14,color:C.textSec }}>{open?"▲":"▼"}</span>}
+      </div>
+      {open && months.map(month=>{
         const { wins, total } = byMonth[month];
         const rate = Math.round(wins/total*100);
         const [y,mo] = month.split("-");
@@ -11756,7 +11760,7 @@ function saveStatsFilterPrefs(prefs) {
   try { localStorage.setItem(STATS_FILTER_STORAGE_KEY, JSON.stringify(prefs)); } catch (e) {}
 }
 const STATS_CAT_LABELS = { all: "すべて", tournament: "大会", team: "団体戦", individual: "個人戦" };
-const STATS_PERIOD_LABELS = { all: "全期間", month1: "直近1ヶ月", month3: "直近3ヶ月" };
+const STATS_PERIOD_LABELS = { all: "全期間", month1: "直近1ヶ月", month3: "直近3ヶ月", season: "シーズン" };
 
 // ============================================================
 // 個人分析画面：①選手選択 → ②試合選択 → ③分析結果
@@ -13762,7 +13766,13 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [statsCat, setStatsCat] = useState(initialPrefs.statsCat ?? "all");
   const [statsCatSub, setStatsCatSub] = useState(initialPrefs.statsCatSub ?? "allsub"); // allsub | specific
   const [statsCatTournament, setStatsCatTournament] = useState(initialPrefs.statsCatTournament ?? "");
-  const [period, setPeriod] = useState(initialPrefs.period ?? "all"); // all | month1 | month3
+  // ★以前の版で保存された期間が残っていると「undefined」と表示されていたため、知らない値は全期間に戻す
+  const [period, setPeriod] = useState(() => ["all","month1","month3","season"].includes(initialPrefs.period) ? initialPrefs.period : "all"); // all | month1 | month3 | season
+  // ★シーズン設定（起点日・呼び名）。設定されていれば「📌◯◯以降」を初期表示の期間にする
+  const [seasonStart, setSeasonStart] = useState(null);
+  const [seasonLabel, setSeasonLabel] = useState("");
+  const [trendOpen, setTrendOpen] = useState(false); // 月別の勝率推移（折りたたみ）
+  const [scoreOpen, setScoreOpen] = useState(false); // 得点・ミス（折りたたみ）
   const [filterOpen, setFilterOpen] = useState(false);
 
   // ②見る内容タブ：players(選手別) | pairs(ペア別) | opponents(対戦別)
@@ -13775,9 +13785,10 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [ownDetail, setOwnDetail] = useState([]);
   const [ownDetailLoading, setOwnDetailLoading] = useState(false);
   // ★以前の設定に "opponents" が保存されている場合があるので、自チーム側では選手別に寄せる
+  // ★見る内容は「players（自チーム選手）｜pairs（自チームペア）｜opponents（対戦校）」の3つ
   const [tab, setTab] = useState(() => {
-    const t = initialPrefs.tab ?? "players";
-    return t === "opponents" ? "players" : t;
+    if (initialPrefs.side === "opp") return "opponents";
+    return ["players","pairs","opponents"].includes(initialPrefs.tab) ? initialPrefs.tab : "players";
   });
   const [pairMode, setPairMode] = useState(initialPrefs.pairMode ?? "own"); // own | opp
   const [oppMode, setOppMode] = useState(initialPrefs.oppMode ?? "team"); // team | pair
@@ -13815,6 +13826,17 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
         getMyProfile(), getSchools(), getDeletedTournaments(), getTeamMatches(),
       ]);
       const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
+      if (p?.school_id) {
+        getSchoolSeason(p.school_id).then(season => {
+          if (season?.season_start_date) {
+            setSeasonStart(season.season_start_date);
+            setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
+            setPeriod("season");
+          } else {
+            setPeriod(v => v==="season" ? "all" : v);
+          }
+        });
+      }
       // ★団体戦の一戦として作成された試合（match）のIDを集めておく（個人戦との区別に使う）
       const teamIds = [];
       (teamList || []).forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamIds.push(g.match_id); }));
@@ -13833,11 +13855,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   // ①の絞り込み条件が変わるたびに端末に保存（次回開いたときも保持される）
   useEffect(() => {
-    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, period, side, tab, pairMode, oppMode });
+    saveStatsFilterPrefs({ statsCat, statsCatSub, statsCatTournament, period, side: tab==="opponents" ? "opp" : "own", tab, pairMode, oppMode });
   }, [statsCat, statsCatSub, statsCatTournament, period, tab, pairMode, oppMode]);
 
   function resetStatsFilter() {
-    setStatsCat("all"); setStatsCatSub("allsub"); setStatsCatTournament(""); setPeriod("all");
+    setStatsCat("all"); setStatsCatSub("allsub"); setStatsCatTournament(""); setPeriod(seasonStart ? "season" : "all");
   }
 
   // ★以前は下記の絞り込み・集計を「毎回の再描画」で全試合ぶん計算し直していたため、
@@ -13873,9 +13895,10 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
     const periodMatches = period==="month1" ? withinLastDays(categoryMatches, 30)
       : period==="month3" ? withinLastDays(categoryMatches, 90)
+      : (period==="season" && seasonStart) ? categoryMatches.filter(m => (m.match_date||"") >= seasonStart)
       : categoryMatches;
     return periodMatches.filter(m=>m.status==="finished");
-  }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period]);
+  }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period, seasonStart]);
 
   const teamRecord = useMemo(() => recordOf(finished, m=>winnerSideOf(m)==="A"), [finished]);
 
@@ -13990,7 +14013,8 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   // ★自チームの得点・ミス：集計対象の試合だけポイントを読み込む（自チームタブを開いたときだけ）
   const ownIdsKey = finished.map(m=>m.id).sort().join(",");
   useEffect(() => {
-    if (side !== "own") return;
+    // ★得点・ミスを開いたときだけポイントを読み込む（重いため）
+    if (!(tab === "players" && scoreOpen)) return;
     const ids = ownIdsKey ? ownIdsKey.split(",") : [];
     if (ids.length === 0) { setOwnDetail([]); return; }
     let cancelled = false;
@@ -14002,7 +14026,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
       if (!cancelled) { setOwnDetail(full); setOwnDetailLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [ownIdsKey, side]);
+  }, [ownIdsKey, tab, scoreOpen]);
 
   // 集計対象に出場している自チームの選手（チェックボックスの候補）
   const ownPlayerNames = useMemo(() => {
@@ -14029,7 +14053,8 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   }, [ownDetail, selectedOwnNames.join("|"), mySchoolName]);
 
   const subLabel = statsCat!=="all" ? (statsCatSub==="specific" && statsCatTournament ? `（${statsCatTournament}）` : "（すべて）") : "";
-  const filterSummary = `${STATS_CAT_LABELS[statsCat]}${subLabel}・${STATS_PERIOD_LABELS[period]}`;
+  const periodLabel = period==="season" && seasonStart ? `📌 ${seasonLabel}以降` : (STATS_PERIOD_LABELS[period] ?? "全期間");
+  const filterSummary = `${periodLabel}・${statsCat==="all" ? "すべての試合" : STATS_CAT_LABELS[statsCat]}${subLabel}`;
 
   return (
     <div style={S.page}>
@@ -14049,22 +14074,22 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
         ) : (
           <>
             {/* 折りたたみ式：①試合対象・期間フィルター */}
-            <div style={{ background:C.white, border:"1px solid "+C.border, borderRadius:10, marginBottom:14, overflow:"hidden" }}>
+            <div style={{ background:C.white, border:"1px solid "+C.border, borderRadius:12, marginBottom:12, overflow:"hidden" }}>
               <div
-                style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"11px 12px", cursor:"pointer" }}
+                style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, padding:"12px 14px", cursor:"pointer" }}
                 onClick={()=>setFilterOpen(v=>!v)}
               >
-                <span style={{ fontSize:12.5, fontWeight:700, color:C.text }}>{filterSummary}</span>
-                <span style={{ fontSize:11, color:C.textSec }}>{filterOpen ? "非表示 ▲" : "表示 ▼"}</span>
+                <span style={{ fontSize:15, fontWeight:800, color:C.text, minWidth:0 }}>{filterSummary}</span>
+                <span style={{ fontSize:13, fontWeight:700, color:C.navy, flexShrink:0 }}>{filterOpen ? "条件 ▲" : "条件 ▼"}</span>
               </div>
               {filterOpen && (
-                <div style={{ padding:"0 12px 12px", borderTop:"1px solid "+C.border, paddingTop:12 }}>
-                  <div style={{ fontSize:11,color:C.textSec,fontWeight:700,marginBottom:6 }}>① 試合対象</div>
+                <div style={{ padding:"12px 14px 14px", borderTop:"1px solid "+C.border }}>
+                  <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>試合の種類</div>
                   <div style={{ display:"flex", gap:6, marginBottom:8 }}>
                     {[["all","すべて"],["tournament","大会"],["team","団体戦"],["individual","個人戦"]].map(([v,l])=>(
                       <button
                         key={v}
-                        style={{ ...S.togBtn(statsCat===v, C.purple), flex:1, fontSize:12, padding:"9px 2px" }}
+                        style={{ ...S.togBtn(statsCat===v, C.navy), flex:1, fontSize:13.5, padding:"9px 2px" }}
                         onClick={()=>{ setStatsCat(v); setStatsCatSub("allsub"); }}
                       >{l}</button>
                     ))}
@@ -14075,7 +14100,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                         {[["allsub","すべて"],["specific","大会を指定"]].map(([v,l])=>(
                           <button
                             key={v}
-                            style={{ ...S.togBtn(statsCatSub===v, C.purple), flex:1, fontSize:12, padding:"8px 4px" }}
+                            style={{ ...S.togBtn(statsCatSub===v, C.navy), flex:1, fontSize:13.5, padding:"8px 4px" }}
                             onClick={()=>setStatsCatSub(v)}
                           >{l}</button>
                         ))}
@@ -14084,7 +14109,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                         <select
                           value={statsCatTournament}
                           onChange={e=>setStatsCatTournament(e.target.value)}
-                          style={{ width:"100%", padding:"9px 10px", borderRadius:8, border:"1px solid "+C.border, fontSize:12.5, color:C.text, background:C.white }}
+                          style={{ width:"100%", padding:"10px", borderRadius:8, border:"1px solid "+C.border, fontSize:16, color:C.text, background:C.white }}
                         >
                           <option value="">大会を選択してください</option>
                           {tournamentOptions.map(name => (
@@ -14094,89 +14119,108 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                       )}
                     </div>
                   )}
-                  <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-                    {[["all","全期間"],["month1","直近1ヶ月"],["month3","直近3ヶ月"]].map(([v,l])=>(
-                      <button key={v} style={{ ...S.togBtn(period===v, C.navy), flex:1, fontSize:11.5, padding:"8px 2px" }} onClick={()=>setPeriod(v)}>{l}</button>
+                  <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,margin:"10px 0 6px" }}>期間</div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
+                    {[
+                      ...(seasonStart ? [["season",`📌 ${seasonLabel}以降`]] : []),
+                      ["month1","直近1ヶ月"],["month3","直近3ヶ月"],["all","全期間"],
+                    ].map(([v,l])=>(
+                      <button key={v} style={{ ...S.togBtn(period===v, C.navy), flex:"1 1 auto", fontSize:13.5, padding:"9px 8px" }} onClick={()=>setPeriod(v)}>{l}</button>
                     ))}
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <span style={{ fontSize:11, color:C.textSec, textDecoration:"underline", cursor:"pointer" }} onClick={resetStatsFilter}>リセット</span>
+                    <span style={{ fontSize:13, fontWeight:700, color:C.navy, textDecoration:"underline", cursor:"pointer" }} onClick={resetStatsFilter}>条件をリセット</span>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* ②見る内容タブ：自チーム（選手別／ペア別）と対戦チーム（対戦別）に分ける */}
-            <div style={{ display:"flex",gap:6,marginBottom:10 }}>
-              {[["own","自チーム"],["opp","対戦チーム"]].map(([v,l])=>(
-                <button key={v}
-                  style={{ ...S.togBtn(side===v,C.navy),flex:1,fontSize:14.5,padding:"12px 4px" }}
-                  onClick={()=>{ setSide(v); setTab(v==="opp" ? "opponents" : (tab==="opponents" ? "players" : tab)); }}
-                >{l}</button>
-              ))}
-            </div>
-            {side==="own" && (
-              <div style={{ display:"flex",gap:6,marginBottom:10 }}>
-                {[["players","選手別"],["pairs","ペア別"]].map(([v,l])=>(
-                  <button key={v} style={{ ...S.togBtn(tab===v,C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setTab(v)}>{l}</button>
-                ))}
-              </div>
-            )}
-            {side==="own" && tab==="pairs" && (
-              <div style={{ display:"flex", gap:6, marginBottom:10 }}>
-                {[["own","自チームのペア"],["opp","相手チームのペア"]].map(([v,l])=>(
-                  <button key={v} style={{ ...S.togBtn(pairMode===v, C.accent), flex:1, fontSize:11.5, padding:"7px 4px" }} onClick={()=>setPairMode(v)}>{l}</button>
-                ))}
-              </div>
-            )}
-            {side==="opp" && (
-              <div style={{ display:"flex", gap:6, marginBottom:10 }}>
-                {[["team","学校別"],["pair","相手ペア別"]].map(([v,l])=>(
-                  <button key={v} style={{ ...S.togBtn(oppMode===v, C.accent), flex:1, fontSize:11.5, padding:"7px 4px" }} onClick={()=>setOppMode(v)}>{l}</button>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display:"flex",gap:6,marginBottom:12 }}>
-              <button style={{ ...S.togBtn(sort==="win",C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setSort("win")}>勝数順</button>
-              <button style={{ ...S.togBtn(sort==="lose",C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setSort("lose")}>負数順</button>
-              <button style={{ ...S.togBtn(sort==="count",C.accent),flex:1,fontSize:13,padding:"9px 4px" }} onClick={()=>setSort("count")}>試合数順</button>
-            </div>
-
-            <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, cursor:"pointer" }} onClick={()=>{ setBreakdownFilter("all"); setShowBreakdown(true); }}>
-                <div style={{ fontSize:12,fontWeight:700,color:C.navy }}>総合成績</div>
-                <div style={{ fontSize:10,color:C.textSec }}>タップして試合一覧を見る ›</div>
-              </div>
+            {/* 総合成績（チーム全体） */}
+            <div style={{ ...S.card, padding:16, marginBottom:12 }}>
+              <div style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:10 }}>総合成績</div>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",textAlign:"center", cursor:"pointer" }} onClick={()=>{ setBreakdownFilter("all"); setShowBreakdown(true); }}>
                 <div>
-                  <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.total}</div>
+                  <div style={{ fontSize:24,fontWeight:800 }}>{teamRecord.total}</div>
                   <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>試合数</div>
                 </div>
                 <div>
-                  <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
+                  <div style={{ fontSize:24,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
                   <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>勝率</div>
                 </div>
                 <div>
-                  <div style={{ fontSize:20,fontWeight:800 }}>{teamRecord.wins}勝{teamRecord.losses}敗</div>
+                  <div style={{ fontSize:24,fontWeight:800 }}>{teamRecord.wins}勝{teamRecord.losses}敗</div>
                   <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>戦績</div>
                 </div>
               </div>
+              {/* ★ここのボタンで試合一覧を開けるため、「タップして試合一覧を見る ›」の文字は削除 */}
               <div style={{ display:"flex", gap:6, marginTop:12 }}>
-                {[["all",`すべて（${teamRecord.total}）`,C.navy,C.navy],["win",`○ 勝った試合（${teamRecord.wins}）`,C.accent,C.accentL],["lose",`× 負けた試合（${teamRecord.losses}）`,C.red,C.redL]].map(([key,label,fg,bg])=>(
+                {[["all",`すべて（${teamRecord.total}）`,C.navy,C.navy],["win",`○ 勝ち（${teamRecord.wins}）`,C.accent,C.accentL],["lose",`× 負け（${teamRecord.losses}）`,C.red,C.redL]].map(([key,label,fg,bg])=>(
                   <button
                     key={key}
                     onClick={()=>{ setBreakdownFilter(key); setShowBreakdown(true); }}
-                    style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:10.5, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
-                      border:`1px solid ${C.border}`, background:key==="all"?"#fff":bg, color:key==="all"?C.textSec:fg }}
+                    style={{ flex:1, padding:"10px 2px", borderRadius:9, fontSize:13, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap",
+                      border:`1px solid ${C.border}`, background:key==="all"?"#fff":bg, color:key==="all"?C.navy:fg }}
                   >{label}</button>
                 ))}
               </div>
             </div>
-            <MonthlyTrendCard finishedMatches={finished} winFn={m=>winnerSideOf(m)==="A"} />
+            <MonthlyTrendCard finishedMatches={finished} winFn={m=>winnerSideOf(m)==="A"} open={trendOpen} onToggle={()=>setTrendOpen(v=>!v)} />
 
+            {/* ★見る内容：3つに統一（相手ペアの一覧はペアタブと同じ内容のため、ペアタブに任せる） */}
+            <div style={{ display:"flex",gap:6,margin:"4px 0 8px" }}>
+              {[["players","自チーム選手"],["pairs","自チームペア"],["opponents","対戦校"]].map(([v,l])=>(
+                <button key={v}
+                  style={{ ...S.togBtn(tab===v,C.navy),flex:1,fontSize:14.5,fontWeight:800,padding:"11px 2px" }}
+                  onClick={()=>setTab(v)}
+                >{l}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, margin:"0 2px 8px" }}>
+              <span style={{ fontSize:13, color:"#5a6478", minWidth:0 }}>
+                {tab==="players" ? "タップで選手の戦績へ" : tab==="pairs" ? "タップでペアの詳細へ" : "タップで学校の詳細へ"}
+              </span>
+              <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                {[["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+                  <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12.5,padding:"6px 8px" }} onClick={()=>setSort(k)}>{l}</button>
+                ))}
+              </div>
+            </div>
+
+            {(() => {
+              const rows = tab==="players" ? playerRows : tab==="pairs" ? pairRows : opponentRows;
+              if (rows.length===0) return <div style={{ textAlign:"center",color:C.textSec,margin:"30px 0",fontSize:14 }}>この条件の試合記録がありません</div>;
+              return rows.map(r=>(
+                <div key={r.name}
+                  style={{ ...S.card, padding:"13px 14px", marginBottom:8, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}
+                  onClick={()=>{
+                    if (tab==="players") onOpenPlayer(r.name);
+                    else if (tab==="opponents") onOpenOpponent(r.name);
+                    else {
+                      // ★ペアタブのそのペアを開く（ペアタブは開いたときに前回の選択を読み込むので、先に書き込んでおく）
+                      const [n1, n2] = r.name.split("／");
+                      writeScreenCache("pairAnalysis", { side:"own", ownPairKey: pairKeyOf(n1, n2), oppPairKey:"" });
+                      onNavigate && onNavigate("pairAnalysis");
+                    }
+                  }}>
+                  <span style={{ fontSize:15,fontWeight:700,minWidth:0 }}>{r.name}</span>
+                  <span style={{ fontSize:14,color:"#5a6478",flexShrink:0 }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontSize:15,fontWeight:800,color:C.accent }}>{r.rate}%</span></span>
+                </div>
+              ));
+            })()}
+
+            {/* ★得点・ミス（対象選手を選んで合算）は「自チーム選手」のときだけ、一覧の下に折りたたみで出す */}
+            {tab==="players" && (
+              <>
+                <div onClick={()=>setScoreOpen(v=>!v)}
+                  style={{ ...S.card, padding:"13px 14px", margin:"12px 0 8px", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+                  <span style={{ fontSize:15, fontWeight:800, color:C.navy }}>📊 得点・ミス（対象選手を選べます）</span>
+                  <span style={{ fontSize:14, color:C.textSec }}>{scoreOpen?"▲":"▼"}</span>
+                </div>
+                {scoreOpen && (ownDetailLoading && ownDetail.length===0
+                  ? <div style={{ ...S.card, padding:20, textAlign:"center", color:C.textSec, fontSize:14 }}>集計中...</div>
+                  : (<>
             {/* ★自チームの得点・ミス：対象選手をチェックで絞って集計する */}
-            {side==="own" && ownPlayerNames.length>0 && (
+            {ownPlayerNames.length>0 && (
               <>
                 <div onClick={()=>setPickOpen(v=>!v)}
                   style={{ ...S.card, padding:13, marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
@@ -14255,55 +14299,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
               </>
             )}
 
-            {side==="own" && tab==="players" && (
-              <>
-                <div style={{ fontSize:11,color:C.textSec,marginBottom:8 }}>タップすると、その選手のペア別成績を見られます</div>
-                {playerRows.length===0 ? (
-                  <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この条件の試合記録がありません</div>
-                ) : playerRows.map(r=>(
-                  <div key={r.name} style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }} onClick={()=>onOpenPlayer(r.name)}>
-                    <span style={{ fontSize:14,fontWeight:700 }}>{r.name}</span>
-                    <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
-                  </div>
-                ))}
-              </>
-            )}
-            {side==="own" && tab==="pairs" && (
-              <>
-                {(pairMode==="own" ? pairRows : oppPairRows).length===0 ? (
-                  <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この条件の試合記録がありません</div>
-                ) : (pairMode==="own" ? pairRows : oppPairRows).map(r=>(
-                  <div key={r.name} style={{ ...S.card, padding:"12px 14px", marginBottom:8 }}>
-                    <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>{r.name}</div>
-                    <div style={{ display:"flex", gap:12, alignItems:"center" }}>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.total}試合</span>
-                      <span style={{ fontSize:14,fontWeight:700,color:C.accent }}>{r.rate}%</span>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗</span>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-            {side==="opp" && (
-              <>
-                {oppMode==="team" && <div style={{ fontSize:11,color:C.textSec,marginBottom:8 }}>タップすると、相手選手・ペア別の成績を見られます</div>}
-                {(oppMode==="team" ? opponentRows : oppPairRows).length===0 ? (
-                  <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}>この条件の試合記録がありません</div>
-                ) : oppMode==="team" ? opponentRows.map(r=>(
-                  <div key={r.name} style={{ ...S.card, padding:"12px 14px", marginBottom:8, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }} onClick={()=>onOpenOpponent(r.name)}>
-                    <span style={{ fontSize:14,fontWeight:700 }}>{r.name}</span>
-                    <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
-                  </div>
-                )) : oppPairRows.map(r=>(
-                  <div key={r.name} style={{ ...S.card, padding:"12px 14px", marginBottom:8 }}>
-                    <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>{r.name}</div>
-                    <div style={{ display:"flex", gap:12, alignItems:"center" }}>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.total}試合</span>
-                      <span style={{ fontSize:14,fontWeight:700,color:C.accent }}>{r.rate}%</span>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗</span>
-                    </div>
-                  </div>
-                ))}
+                  </>))}
               </>
             )}
           </>
