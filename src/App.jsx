@@ -11786,9 +11786,12 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
     <div onClick={onClick} style={{ padding:"11px 14px", borderRadius:9, fontSize:14, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
       border:`1.5px solid ${on?C.navy:C.border}`, background:on?C.navy:C.white, color:on?C.white:C.textSec }}>{children}</div>
   );
-  const Group = ({ title, children }) => (
+  const Group = ({ title, note, children }) => (
     <div style={{ marginBottom:14 }}>
-      <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:9 }}>{title}</div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:8, marginBottom:9 }}>
+        <div style={{ fontSize:14, fontWeight:800, color:C.text }}>{title}</div>
+        {note && <div style={{ fontSize:13, fontWeight:700, color:"#5a6478" }}>{note}</div>}
+      </div>
       {children}
     </div>
   );
@@ -11854,7 +11857,8 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
 
         {onChangePlayer && (
           <>
-            <Group title="選手">
+            {/* ★他校（対戦相手）の選手も分析できることが分かるよう、見出しの右に案内を出す */}
+            <Group title="選手" note="他チームの選手も選べます">
               <div onClick={onChangePlayer} style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
                 border:`1.5px solid ${C.border}`, borderRadius:10, padding:"13px 14px", cursor:"pointer" }}>
                 <span style={{ fontSize:15, fontWeight:800, color:C.text }}>{playerLabel}</span>
