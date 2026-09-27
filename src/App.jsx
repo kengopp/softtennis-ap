@@ -3694,7 +3694,7 @@ function ServeReceiveOrderEditor({ aName, bName, aP1, aP2, bP1, bP2, value, onCh
   const block = (team, roles) => (
     <div key={team} style={{ background: inset ? C.gray : C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:12, marginBottom:10, textAlign:"left" }}>
       <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:13, fontWeight:800, color:C.text, marginBottom:10 }}>
-        <span style={{ width:10, height:10, borderRadius:"50%", background:colors[team], flexShrink:0 }} />
+        {/* ★チーム名の前の色付き丸は、必須項目の「●」と紛らわしいため表示しない */}
         <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{names[team]}</span>
       </div>
       {roles.map(r => row(team, r))}
