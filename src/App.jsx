@@ -11069,6 +11069,10 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           )}
         </div>
 
+        <div style={{ display:"flex", alignItems:"center", fontSize:11.5, color:C.textSec, marginBottom:10 }}>
+          <RequiredDot />は必須項目です（それ以外は空欄でも作成できます）
+        </div>
+
         <FormSec title="チーム情報">
           <FormRow label="自チーム名">
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -11105,7 +11109,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
           <FormRow label="コート番号（任意）">
             <VenueField value={courtNumber} onChange={setCourtNumber} venues={pastCourtNumbers} placeholder="例：3番コート"/>
           </FormRow>
-          <FormRow label="若番 / 遅番（必須）">
+          <FormRow label="若番 / 遅番（必須）" required>
             {teamBothEntryNosNumeric ? (
               <div style={{ fontSize:11.5, color:C.textSec, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
                 ✓ 出場番号（{myEntryNo} と {opponentEntryNo}）から自動判定：<b style={{ color:C.navy }}>{isYounger ? "若番" : "遅番"}</b>
@@ -14934,11 +14938,16 @@ function FormSec({ title, children }) {
     </div>
   );
 }
-function FormRow({ label, labelRight, children }) {
+// ★必須項目の目印（赤い丸）。FormRow の required と、フォーム上部の凡例で使う
+const RequiredDot = () => (
+  <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background:C.red, marginRight:6, verticalAlign:"middle", flexShrink:0 }} />
+);
+
+function FormRow({ label, labelRight, children, required }) {
   return (
     <div style={{ padding:"12px 14px",borderBottom:`1px solid ${C.border}` }}>
       <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
-        <label style={{ fontSize:13,fontWeight:700,color:"#5a6478" }}>{label}</label>
+        <label style={{ fontSize:13,fontWeight:700,color:"#5a6478",display:"flex",alignItems:"center" }}>{required && <RequiredDot />}{label}</label>
         {labelRight}
       </div>
       {children}
@@ -15571,6 +15580,9 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         </div>
       )}
       <div style={{ padding:14 }}>
+        <div style={{ display:"flex", alignItems:"center", fontSize:11.5, color:C.textSec, marginBottom:10 }}>
+          <RequiredDot />は必須項目です（それ以外は空欄でも試合を始められます）
+        </div>
 
         {/* 団体戦ペア登録モード：試合情報を非表示 */}
         {!isTeamMatchGame && (
@@ -15670,7 +15682,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
             )}
           </FormRow>
-          <FormRow label={isDoubles ? "選手1" : "選手名"}>
+          <FormRow label={isDoubles ? "選手1（必須）" : "選手名（必須）"} required>
             <input style={S.inp} placeholder="選手名" value={aP1} onChange={e => setAP1(e.target.value)}/>
             {ownRosterForA.length>0 && (
               <div style={{ marginTop:6 }}>
@@ -15681,7 +15693,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             )}
           </FormRow>
           {isDoubles && (
-            <FormRow label="選手2（ペア）">
+            <FormRow label="選手2（ペア・必須）" required>
               <input style={S.inp} placeholder="選手名" value={aP2} onChange={e => setAP2(e.target.value)}/>
               {ownRosterForA.length>0 && (
                 <div style={{ marginTop:6 }}>
@@ -15751,7 +15763,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
           </FormRow>
           {!isTeamMatchGame && (
-            <FormRow label="若番 / 遅番（必須）">
+            <FormRow label="若番 / 遅番（必須）" required>
               {bothEntryNosNumeric ? (
                 <div style={{ fontSize:11.5, color:C.textSec, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
                   ✓ ペア出場番号（{aEntryNo} と {bEntryNo}）から自動判定：<b style={{ color:C.navy }}>{isYounger ? "若番" : "遅番"}</b>
