@@ -21276,36 +21276,59 @@ export default function App() {
     return false;
   };
 
+  // ★見張りの仕組み（2026-09 作り直し）
+  //   以前は、戻るを受け止めるたびに pushState で見張りを積み直していた。
+  //   ところが Android の Chrome は「ユーザーが画面に触れないまま積まれた履歴」を、戻るのときに飛ばしてしまう
+  //   （広告サイトなどの“戻れなくする”対策）。そのため、戻るを2回続けて押すと見張りが飛ばされ、
+  //   「このサイトを離れますか？」が出てアプリの外（前に見ていたサイト）へ出てしまっていた。
+  //   → 見張りは積み直さず、history.forward() で「見張りの位置」に戻る方式に変更。新しい履歴を積まないので飛ばされない。
+  //   ・履歴は [元の位置, 見張り] の2つだけ。戻る＝元の位置へ → アプリ内で一個前の画面を開く → forward で見張りへ戻る。
+  //   ・forward がうまくいかなかった場合の保険として、次に画面に触れたときに見張りを積み直す（触れた後の積み直しは飛ばされない）。
   useEffect(() => {
-    if (!window.__stBackTrapArmed) {
+    try { window.history.scrollRestoration = "manual"; } catch (e) {}
+    const isTrap = (st) => !!(st && st.stBackTrap);
+    const armTrap = () => {
       window.history.pushState({ stBackTrap: true }, "");
-      window.__stBackTrapArmed = true;
-    }
-    const onPop = () => {
+      window.__stAtTrap = true;
+    };
+    // 再読み込みした直後は、すでに見張りの位置にいることがある（その場合は積み増さない）
+    if (isTrap(window.history.state)) window.__stAtTrap = true;
+    else armTrap();
+
+    let fallbackTimer = null;
+    const returnToTrap = () => {
+      window.history.forward();
+      clearTimeout(fallbackTimer);
+      fallbackTimer = setTimeout(() => { if (!window.__stAtTrap) armTrap(); }, 700);
+    };
+    const onPop = (e) => {
+      if (isTrap(e.state)) { window.__stAtTrap = true; return; } // forward で見張りの位置に戻ってきた
+      window.__stAtTrap = false;
       let handled = false;
-      try { handled = appBackRef.current ? appBackRef.current() : false; } catch (e) { console.error(e); }
-      if (handled) {
-        window.history.pushState({ stBackTrap: true }, ""); // 見張りを積み直して、アプリに留まる
-        return;
-      }
+      try { handled = appBackRef.current ? appBackRef.current() : false; } catch (err) { console.error(err); }
+      if (handled) { returnToTrap(); return; } // アプリ内で戻ったので、見張りの位置に戻ってアプリに留まる
       const leave = window.confirm("アプリを終了しますか？");
       if (leave) {
         skipUnloadConfirm = true;          // ②の確認を二重に出さない
-        window.__stBackTrapArmed = false;
         window.removeEventListener("popstate", onPop);
         window.history.back();             // 本当に前のページへ（＝アプリを出る）
       } else {
-        window.history.pushState({ stBackTrap: true }, "");
+        returnToTrap();
       }
     };
     // ★本体の戻るの直後に画面をタップした場合（確認ダイアログのボタン・下部ナビなど）は、
     //   そのタップの操作を優先する（一個前の画面への差し替えはしない）
-    const clearIntent = () => { backIntentRef.current = null; };
+    //   あわせて、見張りの位置にいなければ（forward に失敗したときなど）ここで積み直す
+    const onPointerDown = () => {
+      backIntentRef.current = null;
+      if (!window.__stAtTrap && !isTrap(window.history.state)) armTrap();
+    };
     window.addEventListener("popstate", onPop);
-    document.addEventListener("pointerdown", clearIntent, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
+      clearTimeout(fallbackTimer);
       window.removeEventListener("popstate", onPop);
-      document.removeEventListener("pointerdown", clearIntent, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, []);
 
