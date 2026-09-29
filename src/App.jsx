@@ -167,7 +167,7 @@ const clearScreenCache = () => { Object.keys(screenCache).forEach(k => { delete 
 //   ・自分が保存・削除した試合は、その場でキャッシュを捨てるので古い内容は出ない
 //   ・他の人が記録した内容は、下の有効期限が切れた時点で最新になる
 const MATCH_LIST_CACHE_MS   = 3 * 60 * 1000;  // 全試合一覧（分析画面用）：3分（自分の保存・削除ではその場で捨てる）
-const FULL_MATCH_CACHE_MS   = 5 * 60 * 1000;  // 終了済み試合のポイント明細：5分
+const FULL_MATCH_CACHE_MS   = 30 * 60 * 1000; // 終了済み試合のポイント明細：30分（終了済みの明細はほぼ変わらない。自分が保存した試合はその場で捨てる）
 const PROFILE_CACHE_MS      = 5 * 60 * 1000;  // 自分のプロフィール：5分
 let _matchListCache = null;      // { at, promise }
 const _fullMatchCache = new Map(); // matchId -> { at, data }
@@ -4341,11 +4341,49 @@ function takeFreshPrefetch() {
   _matchListPrefetchedAt = 0;
   return fresh;
 }
-// ★分析メニュー用の先読み（選手マスター・学校・シーズン設定。どれもキャッシュされるので、次に分析を開くと待たない）。
-//   全試合一覧と番手の試合IDは prefetchMatchList() で取得済みのものを使い回す。
-function prefetchAnalysisBase() {
-  Promise.all([getPlayerRoster(), getSchools(), getMySchoolSeason()])
-    .catch(e => console.error("分析データの先読みに失敗:", e));
+// ★分析（個人）の「誰の分析を出すか」の既定値。
+//   linked_player_idが古いIDを指していても別人を選ばないよう、見つからなければプロフィール名で探し、それでもなければ未選択。
+function pickDefaultAnalysisPlayer(p, rosterList) {
+  let player = null;
+  if (p?.linked_player_id) player = (rosterList || []).find(r => r.id === p.linked_player_id)?.player_name ?? null;
+  if (!player && p?.name) {
+    const nameMatch = (rosterList || []).find(r => r.is_own_team !== false && normalizePlayerName(r.player_name) === normalizePlayerName(p.name));
+    if (nameMatch) player = nameMatch.player_name;
+  }
+  return player;
+}
+function loadAnalysisScope() {
+  try { const s = JSON.parse(localStorage.getItem("analysisScope") || "null"); if (s) return { ...DEFAULT_SCOPE, ...s }; } catch {}
+  return DEFAULT_SCOPE;
+}
+// ★分析メニューの先読み。ホーム画面を開いたときに裏で実行する。
+//   ①分析画面の土台（プロフィール・選手マスター・全試合一覧・学校・番手の試合ID）を画面キャッシュに入れておく
+//   ②最初に表示される「自分の分析」の対象試合のポイント明細を取っておく（終了済みは30分キャッシュ）
+//   これで分析メニューを押したとき、通信を待たずに結果まで表示できる。
+let _analysisPrefetchAt = 0;
+async function prefetchAnalysisBase() {
+  if (Date.now() - _analysisPrefetchAt < 5 * 60 * 1000) return;
+  _analysisPrefetchAt = Date.now();
+  try {
+    // 試合一覧の先読みが走っていれば、それを待って同じデータを使う（二重に取得しない）
+    if (_matchListInflight) await _matchListInflight.promise.catch(() => {});
+    const [p, rosterList, list, schools, teamIds] = await Promise.all([
+      getMyProfile(), getPlayerRoster(), getMatchesCached(), getSchools(), getTeamMatchMatchIds(),
+    ]);
+    getMySchoolSeason().catch(() => {}); // ペア・チームタブ用
+    if (!list || list.length === 0) { _analysisPrefetchAt = 0; return; }
+    writeScreenCache("personalAnalysis", [p, rosterList, list, schools, Array.from(teamIds)]);
+    const player = pickDefaultAnalysisPlayer(p, rosterList);
+    if (!player) return;
+    const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
+    const schoolName = school?.name || "";
+    const pm = list.filter(m => m.status === "finished" && ownSideFor(m, player, schoolName));
+    const { list: target } = applyScope(pm, loadAnalysisScope(), { seasonStart: school?.season_start_date || null, teamMatchIds: teamIds });
+    if (target.length > 0) await getFullMatchesByIds(target.map(m => m.id));
+  } catch (e) {
+    _analysisPrefetchAt = 0;
+    console.error("分析データの先読みに失敗:", e);
+  }
 }
 function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; _teamBoutIdsCache = null; }
 
@@ -11138,7 +11176,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
       // ★ホーム画面の表示が終わったら、試合一覧のデータを裏で先に取得しておく
       //   （「試合」を押したときに、読み込みを待たずに大会一覧を出せるように）
       setTimeout(prefetchMatchList, 300);
-      setTimeout(prefetchAnalysisBase, 1500); // ★分析メニュー用の軽いデータも先に取っておく
+      setTimeout(prefetchAnalysisBase, 1500); // ★分析メニュー（個人）の表示に必要なデータも先に取っておく
     })();
   }, [apply]);
 
@@ -13220,6 +13258,10 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 }
 
 function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStats, onOpenMatch }) {
+  // ★前回の分析結果（同じ選手なら、開いた瞬間にこれを表示し、裏で最新に差し替える）
+  const restoredResultRef = useRef(readScreenCache("personalAnalysisResult"));
+  const resultReqRef = useRef(0);
+  // ※最初はtrueのままにする（選手が決まる前に「選手選択画面」へ飛ばないように。キャッシュがあれば直後に解除される）
   const [loading, setLoading] = useState(true);
   const [roster, setRoster] = useState([]);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
@@ -13228,10 +13270,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
   const [mode, setMode] = useState("results"); // results | wizardPlayer | scope
   // ★集計対象（期間・大会・試合数・対象試合）。端末に保存して次回も同じ条件から始める
-  const [scope, setScope] = useState(() => {
-    try { const s = JSON.parse(localStorage.getItem("analysisScope")||"null"); if (s) return { ...DEFAULT_SCOPE, ...s }; } catch {}
-    return DEFAULT_SCOPE;
-  });
+  const [scope, setScope] = useState(loadAnalysisScope);
   const [seasonStart, setSeasonStart] = useState(null);
   const [seasonLabel, setSeasonLabel] = useState("");
   const [teamMatchIds, setTeamMatchIds] = useState(new Set());
@@ -13293,11 +13332,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   //   前回開いたときの内容をすぐ表示してから、裏で最新に差し替える。
   //   （選手を選び直した後に裏の更新が届いても、選択が勝手に戻らないようにしている）
   const initializedRef = useRef(false);
-  // ★対象試合（個人戦のみ／団体戦のみ）のしぼり込みに使う
-  useEffect(() => { getTeamMatchMatchIds().then(setTeamMatchIds); }, []);
-  const apply = useCallback(([p, rosterList, list, schools]) => {
+  // ★対象試合（個人戦のみ／団体戦のみ）のしぼり込みに使う番手の試合IDも、土台のデータと一緒に取得する
+  //   （以前は別々に取得しており、番手のIDが届く前に初回の集計が走ると、しぼり込みが効かないことがあった）
+  const apply = useCallback(([p, rosterList, list, schools, teamIds]) => {
     setRoster(rosterList);
     setAllMatches(list);
+    if (teamIds) setTeamMatchIds(new Set(teamIds));
     let linked = null;
     if (p?.linked_player_id) {
       const found = (rosterList || []).find(r => r.id === p.linked_player_id);
@@ -13320,12 +13360,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       //   ログインした本人とは全く違う人の分析が表示される不具合があった。
       //   まずは自分のプロフィール名と選手マスターの名前が一致するものが無いか探し（自動復旧）、
       //   それでも見つからない場合は他の誰かを勝手に選ばず「未選択」のままにする。
-      let defaultPlayer = linked;
-      if (!defaultPlayer && p?.name) {
-        const nameMatch = (rosterList || []).find(r => r.is_own_team !== false && normalizePlayerName(r.player_name) === normalizePlayerName(p.name));
-        if (nameMatch) defaultPlayer = nameMatch.player_name;
-      }
+      const defaultPlayer = pickDefaultAnalysisPlayer(p, rosterList);
       setSelectedPlayer(defaultPlayer || null);
+      // ★前回の結果が同じ選手（自チーム）のものなら、集計を待たずにそのまま表示する
+      const r = restoredResultRef.current;
+      if (r && defaultPlayer && r.player === defaultPlayer && !r.school) {
+        setResultMatches(r.matches);
+        setResultCondLabel(r.condLabel);
+        setResultCapped(r.capped);
+      } else {
+        restoredResultRef.current = null;
+      }
     }
     setLoading(false);
   }, []);
@@ -13339,6 +13384,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       //   学校一覧は他の取得結果に依存しないので、最初から同時に取得する。
       const fresh = await Promise.all([
         getMyProfile(), getPlayerRoster(), getMatchesCached(), getSchools(),
+        getTeamMatchMatchIds().then(ids => Array.from(ids)),
       ]);
       writeScreenCache("personalAnalysis", fresh);
       apply(fresh);
@@ -13367,12 +13413,19 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     : [],
     [allMatches, selectedPlayer, effectiveSchoolName]);
 
-  async function loadResults(matchSummaries, condLabel, capped = 0) {
-    setResultLoading(true);
+  async function loadResults(matchSummaries, condLabel, capped = 0, { silent = false } = {}) {
+    // silent：前回の結果を表示したまま裏で差し替える（「集計中...」を出さない・フィルターも戻さない）
+    if (!silent) {
+      setResultLoading(true);
+      setResultFilter("all");
+    }
     setResultCondLabel(condLabel);
     setResultCapped(capped);
-    setResultFilter("all");
+    const player = selectedPlayer, school = selectedSchoolName;
+    const reqNo = ++resultReqRef.current;
     const full = await getFullMatchesByIds(matchSummaries.map(m => m.id));
+    // ★待っている間に別の条件で集計し直していたら、古い結果で上書きしない
+    if (reqNo !== resultReqRef.current) return;
     full.sort((a, b) => {
       const d = new Date(a.match_date) - new Date(b.match_date);
       if (d !== 0) return d;
@@ -13380,7 +13433,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     });
     setResultMatches(full);
     setResultLoading(false);
-    setMode("results");
+    if (!silent) setMode("results");
+    writeScreenCache("personalAnalysisResult", { player, school, condLabel, capped, matches: full });
   }
 
   // 初回表示：条件未設定なら「直近5試合」を自動で読み込む
@@ -13388,7 +13442,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     if (!loading && selectedPlayer && !hasLoadedDefault) {
       setHasLoadedDefault(true);
       const { list, capped } = applyScope(playerMatches, scope, { seasonStart, teamMatchIds });
-      loadResults(list, scopeShortLabel(scope, seasonLabel), capped);
+      // ★前回の結果を表示済みなら、「集計中...」を出さずに裏で差し替える
+      loadResults(list, scopeShortLabel(scope, seasonLabel), capped, { silent: !!restoredResultRef.current });
     }
     // ★誰の分析かを自動特定できなかった場合、空の結果画面を出さず選手選択画面を案内する
     if (!loading && !selectedPlayer && !hasLoadedDefault) {
