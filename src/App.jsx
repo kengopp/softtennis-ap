@@ -4341,6 +4341,12 @@ function takeFreshPrefetch() {
   _matchListPrefetchedAt = 0;
   return fresh;
 }
+// ★分析メニュー用の先読み（選手マスター・学校・シーズン設定。どれもキャッシュされるので、次に分析を開くと待たない）。
+//   全試合一覧と番手の試合IDは prefetchMatchList() で取得済みのものを使い回す。
+function prefetchAnalysisBase() {
+  Promise.all([getPlayerRoster(), getSchools(), getMySchoolSeason()])
+    .catch(e => console.error("分析データの先読みに失敗:", e));
+}
 function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; _teamBoutIdsCache = null; }
 
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis }) {
@@ -11132,6 +11138,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
       // ★ホーム画面の表示が終わったら、試合一覧のデータを裏で先に取得しておく
       //   （「試合」を押したときに、読み込みを待たずに大会一覧を出せるように）
       setTimeout(prefetchMatchList, 300);
+      setTimeout(prefetchAnalysisBase, 1500); // ★分析メニュー用の軽いデータも先に取っておく
     })();
   }, [apply]);
 
@@ -12614,27 +12621,38 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [seasonStart, setSeasonStart] = useState(null);
   const [seasonLabel, setSeasonLabel] = useState("");
 
+  // ★前回開いたときのデータをすぐ表示し、裏で最新に差し替える（「読み込み中...」で待たせない）
+  //   期間の初期値（シーズン）を決めるのは最初の1回だけ。裏の更新で、選び直した期間が戻らないようにする。
+  const periodInitRef = useRef(false);
+  const applyData = useCallback(([p, list, schools, simpleList, season]) => {
+    if (p?.school_id) {
+      setSchoolId(p.school_id);
+      const s = (schools||[]).find(s => s.id === p.school_id);
+      if (s) setMySchoolName(s.name);
+      if (season?.season_start_date) {
+        setSeasonStart(season.season_start_date);
+        setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
+        if (!cachedPeriodRef.current && !periodInitRef.current) setPeriod("season");
+      } else {
+        setSeasonStart(null);
+        setPeriod(v => v==="season" ? "all" : v);
+      }
+    }
+    periodInitRef.current = true;
+    setAllMatches([...list, ...(simpleList||[])]);
+    setLoading(false);
+  }, []);
   useEffect(() => {
+    const cached = readScreenCache("pairAnalysisData");
+    if (cached) applyData(cached);
     (async () => {
       // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブと同じ数え方にする）
       // ★シーズン設定も同時に取得する（以前はプロフィール等を待ってから、もう1往復していた）
-      const [p, list, schools, simpleList, season] = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches(), getMySchoolSeason()]);
-      if (p?.school_id) {
-        setSchoolId(p.school_id);
-        const s = (schools||[]).find(s => s.id === p.school_id);
-        if (s) setMySchoolName(s.name);
-        if (season?.season_start_date) {
-          setSeasonStart(season.season_start_date);
-          setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
-          if (!cachedPeriodRef.current) setPeriod("season");
-        } else {
-          setPeriod(v => v==="season" ? "all" : v);
-        }
-      }
-      setAllMatches([...list, ...(simpleList||[])]);
-      setLoading(false);
+      const fresh = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches(), getMySchoolSeason()]);
+      writeScreenCache("pairAnalysisData", fresh);
+      applyData(fresh);
     })();
-  }, []);
+  }, [applyData]);
 
   // ★試合スタッツを見て戻ってきたときに、選んでいたペアと画面の状態を復元する
   useEffect(() => {
@@ -15047,19 +15065,17 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   const [seasonStart, setSeasonStart] = useState(null);
   const [seasonLabel, setSeasonLabel] = useState("");
 
+  // ★前回開いたときのデータをすぐ表示し、裏で最新に差し替える。
+  //   期間の初期値（シーズン）を決めるのは最初の1回だけ（裏の更新で選び直した期間が戻らないように）。
+  const periodInitRef = useRef(false);
   useEffect(() => {
-    (async () => {
-      // ★以前は「プロフィール→シーズン→選手マスター→学校→試合」と5回順番に待っていた。すべて同時に取得する。
-      // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブ・ペアタブと同じ数え方にする）
-      const [profile, season, rosterList, schools, list, simpleList] = await Promise.all([
-        getMyProfile(), getMySchoolSeason(), getPlayerRoster(), getSchools(),
-        getMatchesCached(), getSimpleRecordedDrawMatches(),
-      ]);
+    const applyData = ([profile, season, rosterList, schools, list, simpleList]) => {
       if (season?.season_start_date) {
         setSeasonStart(season.season_start_date);
         setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
-        setPeriod("season");
+        if (!periodInitRef.current) setPeriod("season");
       }
+      periodInitRef.current = true;
       setRoster(rosterList);
       if (profile?.linked_player_id) {
         const found = rosterList.find(p => p.id === profile.linked_player_id);
@@ -15071,6 +15087,18 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
       }
       setMatches([...list, ...(simpleList||[])]);
       setLoading(false);
+    };
+    const cached = readScreenCache("playerStatsData");
+    if (cached) applyData(cached);
+    (async () => {
+      // ★以前は「プロフィール→シーズン→選手マスター→学校→試合」と5回順番に待っていた。すべて同時に取得する。
+      // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブ・ペアタブと同じ数え方にする）
+      const fresh = await Promise.all([
+        getMyProfile(), getMySchoolSeason(), getPlayerRoster(), getSchools(),
+        getMatchesCached(), getSimpleRecordedDrawMatches(),
+      ]);
+      writeScreenCache("playerStatsData", fresh);
+      applyData(fresh);
     })();
   }, []);
 
