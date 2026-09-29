@@ -517,6 +517,12 @@ async function getSimpleRecordedDrawMatches(tournamentId) {
 // ★キャッシュから返すときは複製を渡す（呼び出し側が中身を書き換えてもキャッシュが壊れないように）
 const cloneMatchData = (m) => (typeof structuredClone === "function" ? structuredClone(m) : JSON.parse(JSON.stringify(m)));
 
+// ★明細の取得列（rowToMatchFull が使う列だけ。select("*") より転送量が少ない）
+const FULL_PLAYER_COLS = "id, match_id, team, player_name, club_name, position, order_num, entry_no";
+const FULL_GAME_COLS = "id, match_id, game_number, server_team, is_final, score_a, score_b, winner_team";
+const FULL_POINT_COLS = "id, game_id, match_id, point_number, scoring_team, player_name, play_type, side_type, course_type, miss_type, result_type, is_winner, fault_count, score_a_after, score_b_after, scored_at";
+const FULL_FAULT_COLS = "id, game_id, match_id, fault_number, server_team, player_name, score_a_at, score_b_at";
+
 async function getFullMatchesByIds(ids) {
   const allIds = Array.from(new Set((ids ?? []).filter(Boolean)));
   if (allIds.length === 0) return [];
@@ -560,13 +566,16 @@ async function getFullMatchesByIds(ids) {
       { data: faultsData, error: fErr },
     ] = await Promise.all([
       supabase.from("matches").select("*").in("id", chunkIds),
-      supabase.from("match_players").select("*").in("match_id", chunkIds),
+      // ★明細は画面で使う列だけを取得する（rowToMatchFullで使う列と同じ）。
+      // ★40試合分のポイントは1000件を超えるため、1回の取得では途中で切れていた
+      //   （＝分析の数字が一部の試合で欠けていた）。全ページを取得する。
       // ★ポイントは必ずpoint_number順で取得する。サーブを誰が打ったかの推定は
       //   「そのゲームの何本目か」を配列の並び順で数えているため、順番が崩れると
-      //   ダブルフォルトや1st/2ndの内訳がペアの別の選手に割り当てられてしまう。
-      supabase.from("games").select("*").in("match_id", chunkIds).order("game_number"),
-      supabase.from("points").select("*").in("match_id", chunkIds).order("point_number"),
-      supabase.from("faults").select("*").in("match_id", chunkIds).order("fault_number"),
+      //   ダブルフォルトや1st/2ndの内訳がペアの別の選手に割り当てられてしまう（取得後にも並べ直す）。
+      fetchAllRows("match_players", FULL_PLAYER_COLS, q => q.in("match_id", chunkIds).order("id")),
+      fetchAllRows("games", FULL_GAME_COLS, q => q.in("match_id", chunkIds).order("match_id").order("game_number").order("id")),
+      fetchAllRows("points", FULL_POINT_COLS, q => q.in("match_id", chunkIds).order("match_id").order("point_number").order("id")),
+      fetchAllRows("faults", FULL_FAULT_COLS, q => q.in("match_id", chunkIds).order("match_id").order("fault_number").order("id")),
     ]);
     const chunkErr = mErr || pErr || gErr || ptErr || fErr;
     if (chunkErr) { console.error(chunkErr); return; } // 1チャンク失敗しても他は続行する
@@ -709,24 +718,18 @@ async function getRankingMatchDetails(ids) {
       supabase.from("matches")
         .select("id, match_date, tournament_name, status, order_a, order_b, receive_order_a, receive_order_b, match_score_a, match_score_b, walkover_winner")
         .in("id", chunkIds),
-      supabase.from("match_players")
-        .select("id, match_id, team, player_name, order_num, club_name")
-        .in("match_id", chunkIds),
-      supabase.from("games")
-        .select("id, match_id, game_number, server_team, is_final")
-        .in("match_id", chunkIds)
-        .order("game_number"),
+      // ★40試合分のポイントは1000件を超えるため、全ページを取得する（以前は途中で切れていた）
+      fetchAllRows("match_players", "id, match_id, team, player_name, order_num, club_name",
+        q => q.in("match_id", chunkIds).order("id")),
+      fetchAllRows("games", "id, match_id, game_number, server_team, is_final",
+        q => q.in("match_id", chunkIds).order("match_id").order("game_number").order("id")),
       // ★重要：サーブを誰が打ったかは「そのゲームの何本目のサーブか」を配列の並び順で数えて割り出しているため、
       //   point_number順で取得しないと、DFや1st/2ndの内訳がペアの別の選手に割り当てられてしまう。
       //   （試合詳細のスタッツタブはorder指定済みなので、以前はこの分析メニューだけ数字が食い違っていた）
-      supabase.from("points")
-        .select("game_id, match_id, point_number, player_name, scoring_team, play_type, result_type, is_winner, fault_count")
-        .in("match_id", chunkIds)
-        .order("point_number"),
-      supabase.from("faults")
-        .select("game_id, match_id, fault_number, player_name, server_team")
-        .in("match_id", chunkIds)
-        .order("fault_number"),
+      fetchAllRows("points", "id, game_id, match_id, point_number, player_name, scoring_team, play_type, result_type, is_winner, fault_count",
+        q => q.in("match_id", chunkIds).order("match_id").order("point_number").order("id")),
+      fetchAllRows("faults", "id, game_id, match_id, fault_number, player_name, server_team",
+        q => q.in("match_id", chunkIds).order("match_id").order("fault_number").order("id")),
     ]);
     const chunkErr = mErr || pErr || gErr || ptErr || fErr;
     if (chunkErr) { console.error(chunkErr); continue; } // 1チャンク失敗しても他は続行する
@@ -761,10 +764,30 @@ async function getRankingMatchDetails(ids) {
 }
 
 
+// ★分析画面は再描画のたびに「通算・勝ち・負け・推移」と同じ試合を何度も集計していたため、
+//   1試合分の calcPlayerStats の結果を試合オブジェクトごとに覚えておく。
+//   中身（ゲーム・ポイント・選手）が変わっていれば計算し直す。
+const _playerStatsMemo = new WeakMap();
+function playerStatsSignature(match) {
+  const games = Array.isArray(match.games) ? match.games : [];
+  let n = 0;
+  for (const g of games) n += (g?.points?.length ?? 0) * 1000 + (g?.faults?.length ?? 0);
+  return `${games.length}:${n}:${match.players?.length ?? 0}`;
+}
+function calcPlayerStatsMemo(match) {
+  if (!match || typeof match !== "object") return calcPlayerStats(match);
+  const sig = playerStatsSignature(match);
+  const hit = _playerStatsMemo.get(match);
+  if (hit && hit.games === match.games && hit.players === match.players && hit.sig === sig) return hit.rows;
+  const rows = calcPlayerStats(match);
+  _playerStatsMemo.set(match, { games: match.games, players: match.players, sig, rows });
+  return rows;
+}
+
 function playerStatsInMatch(match, playerName, mySchoolName) {
   const side = ownSideFor(match, playerName, mySchoolName);
   if (!side) return null;
-  const all = calcPlayerStats(match);
+  const all = calcPlayerStatsMemo(match);
   return all.find(r => r.team === side && r.player_name === playerName) || null;
 }
 
@@ -1297,6 +1320,11 @@ function rowToMatchSummary(m, players=[], games=[]) {
 }
 
 function rowToMatchFull(m, players, games, points, faults) {
+  // ★ゲームごとに全ポイントをfilterし直すと、試合数×ゲーム数×ポイント数の処理になるため、先にゲーム別に分けておく
+  const pointsByGame = {};
+  for (const pt of points) (pointsByGame[pt.game_id] ??= []).push(pt);
+  const faultsByGame = {};
+  for (const f of faults) (faultsByGame[f.game_id] ??= []).push(f);
   return {
     id: m.id, created_by: m.created_by,
     // ★記録者ロック（今この試合を記録している人）。観戦モードの「○○ 記録中」表示に使う。
@@ -1322,12 +1350,12 @@ function rowToMatchFull(m, players, games, points, faults) {
     games: games.map(g => ({
       id: g.id, match_id: m.id, game_number: g.game_number, server_team: g.server_team,
       is_final: g.is_final, score_a: g.score_a, score_b: g.score_b, winner_team: g.winner_team,
-      faults: faults.filter(f => f.game_id === g.id).map(f => ({
+      faults: (faultsByGame[g.id] ?? []).map(f => ({
         id: f.id, game_id: f.game_id, match_id: m.id, fault_number: f.fault_number,
         server_team: f.server_team, player_name: f.player_name,
         score_a_at: f.score_a_at, score_b_at: f.score_b_at,
       })),
-      points: points.filter(pt => pt.game_id === g.id).map(pt => ({
+      points: (pointsByGame[g.id] ?? []).map(pt => ({
         id: pt.id, game_id: pt.game_id, match_id: m.id, point_number: pt.point_number,
         scoring_team: pt.scoring_team, player_name: pt.player_name,
         play_type: pt.play_type ?? null, side_type: pt.side_type ?? null, course_type: pt.course_type ?? null, miss_type: pt.miss_type ?? null, result_type: pt.result_type ?? null,
