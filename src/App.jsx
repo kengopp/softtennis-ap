@@ -190,6 +190,7 @@ function clearDataCaches() {
   _lastMatchListData = null;
   _primedMatches.clear();
   _knownIndividualMatchIds = new Set();
+  _savedMatchSnapshots.clear();
 }
 function invalidateRosterCache() { _rosterCache = null; }
 function primeMatch(data) { if (data?.id) _primedMatches.set(data.id, { at: Date.now(), data }); }
@@ -1350,10 +1351,158 @@ async function resolveRecorderFields(match, user) {
   return { recorder_id: match.recorder_id ?? null, recorder_name: match.recorder_name ?? null };
 }
 
+// ============================================================
+// ★保存する行の形（全部保存・差分保存・保存済みの記録で共通に使う）
+// ============================================================
+const playerRowOf = (p, matchId) => ({
+  id: p.id, match_id: matchId, team: p.team, player_name: p.player_name,
+  club_name: p.club_name || null, position: p.position || null, order_num: p.order_num,
+  entry_no: p.entry_no || null,
+});
+const gameRowOf = (g, matchId) => ({
+  id: g.id, match_id: matchId, game_number: g.game_number, server_team: g.server_team,
+  is_final: g.is_final, score_a: g.score_a, score_b: g.score_b, winner_team: g.winner_team || null,
+});
+const pointRowOf = (pt, g, matchId) => ({
+  id: pt.id, game_id: g.id, match_id: matchId, point_number: pt.point_number,
+  scoring_team: pt.scoring_team, player_name: pt.player_name || null,
+  shot_type: toShotType(pt.play_type, pt.result_type),
+  play_type: pt.play_type || null, side_type: pt.side_type || null, course_type: pt.course_type || null, miss_type: pt.miss_type || null, result_type: pt.result_type || null,
+  is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
+  scored_at: pt.scored_at || null, // ★動画同期用：得点を記録した時刻
+});
+const faultRowOf = (f, g, matchId) => ({
+  id: f.id, game_id: g.id, match_id: matchId, fault_number: f.fault_number,
+  server_team: f.server_team, player_name: f.player_name || null,
+  score_a_at: f.score_a_at, score_b_at: f.score_b_at,
+});
+// 変わったかどうかの比較に使う文字列（得点時刻は作った後に変わらないうえ、DBから読むと書式が変わるため比較から外す）
+const rowKeyOf = (row) => JSON.stringify({ ...row, scored_at: undefined, is_winner: row.is_winner ?? null });
+
+// ★DBに保存済みの内容の控え（試合ID -> 控え）。記録中の1点ごとの保存では、この控えと比べて
+//   「変わった行だけ」を送る。控えは、全部保存が成功したとき・記録画面でDBから読み込んだときに作り直す。
+//   DBをこの仕組みの外から書き換える処理（リセット・名前の置き換え・削除など）では必ず捨てる。
+const _savedMatchSnapshots = new Map();
+function makeSavedSnapshot(match) {
+  const mid = match.id;
+  const games = new Map(), points = new Map(), faults = new Map();
+  (match.games ?? []).forEach(g => {
+    games.set(g.id, rowKeyOf(gameRowOf(g, mid)));
+    (g.points ?? []).forEach(pt => points.set(pt.id, rowKeyOf(pointRowOf(pt, g, mid))));
+    (g.faults ?? []).forEach(f => faults.set(f.id, rowKeyOf(faultRowOf(f, g, mid))));
+  });
+  return {
+    status: match.status,
+    playersKey: JSON.stringify((match.players ?? []).map(p => playerRowOf(p, mid))),
+    games, points, faults,
+  };
+}
+function seedSavedSnapshot(match) { if (match?.id) _savedMatchSnapshots.set(match.id, makeSavedSnapshot(match)); }
+function dropSavedSnapshot(matchId) { if (matchId) _savedMatchSnapshots.delete(matchId); else _savedMatchSnapshots.clear(); }
+
+// 試合の行を保存する（動画リンクの列がまだ無い環境では、その項目だけ外して保存し直す）
+async function upsertMatchRow(matchRow) {
+  let { error: mErr } = await supabase.from("matches").upsert(matchRow);
+  // ★video_links 列がまだ無い場合は、その項目だけ外して保存し直す。
+  //   動画リンクは保存されないが、スコア・メモなど本体の記録は必ず守る。
+  if (mErr && matchRow.video_links && /video_links/.test(mErr.message || "")) {
+    console.warn("saveMatch: video_links列が無いため、動画リンクを除いて保存します。");
+    const { video_links, ...rowWithoutVideo } = matchRow;
+    ({ error: mErr } = await supabase.from("matches").upsert(rowWithoutVideo));
+  }
+  if (mErr) throw mErr;
+}
+async function deleteRowsByIds(table, ids) {
+  if (!ids.length) return;
+  const CHUNK = 150;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { error } = await supabase.from(table).delete().in("id", ids.slice(i, i + CHUNK));
+    if (error) throw error;
+  }
+}
+// ★ポイント（フォルト）をまとめて保存する。番号の重複で弾かれたときは、そのゲームの分を一度消して入れ直す
+//   （入れ直す内容は手元にある今の内容そのものなので、記録は消えない）
+async function upsertNumberedRows(table, rows, numberField, allRowsOfGame) {
+  if (!rows.length) return;
+  let { error } = await supabase.from(table).upsert(rows);
+  if (error && new RegExp(numberField).test(error.message || "")) {
+    console.warn(`saveMatch: ${table} の番号の重複を検出したため、ゲーム単位で作り直します。`);
+    const gameIds = Array.from(new Set(rows.map(r => r.game_id)));
+    for (const gid of gameIds) {
+      const { error: dErr } = await supabase.from(table).delete().eq("game_id", gid);
+      if (dErr) throw dErr;
+      const all = allRowsOfGame(gid);
+      if (all.length) {
+        const { error: iErr } = await supabase.from(table).insert(all);
+        if (iErr) throw iErr;
+      }
+    }
+    return;
+  }
+  if (error) throw error;
+}
+
+// ★記録中の1点ごとの保存（差分保存）。控えと比べて変わった行だけを送る。
+//   以前は1点ごとに「選手の消して入れ直し・全ゲームの保存・消えた記録の確認」を順番に行い、12〜20往復かかっていた。
+//   ふだんの1点は「試合・そのゲーム・そのポイント」を同時に送る1往復で済む。
+async function saveMatchIncremental(match, matchRow, snap) {
+  const mid = match.id;
+  const games = match.games ?? [];
+  const gameRows = games.map(g => gameRowOf(g, mid));
+  const pointRows = [], faultRows = [];
+  games.forEach(g => {
+    (g.points ?? []).forEach(pt => pointRows.push(pointRowOf(pt, g, mid)));
+    (g.faults ?? []).forEach(f => faultRows.push(faultRowOf(f, g, mid)));
+  });
+  const has = (list) => { const set = new Set(list.map(r => r.id)); return (id) => set.has(id); };
+  const hasGame = has(gameRows), hasPoint = has(pointRows), hasFault = has(faultRows);
+  const staleGameIds  = [...snap.games.keys()].filter(id => !hasGame(id));
+  const stalePointIds = [...snap.points.keys()].filter(id => !hasPoint(id));
+  const staleFaultIds = [...snap.faults.keys()].filter(id => !hasFault(id));
+  const changedGames  = gameRows.filter(r => snap.games.get(r.id) !== rowKeyOf(r));
+  const changedPoints = pointRows.filter(r => snap.points.get(r.id) !== rowKeyOf(r));
+  const changedFaults = faultRows.filter(r => snap.faults.get(r.id) !== rowKeyOf(r));
+  const hasNewGame = changedGames.some(r => !snap.games.has(r.id));
+  const playersChanged = JSON.stringify((match.players ?? []).map(p => playerRowOf(p, mid))) !== snap.playersKey;
+  const pointsOfGame = (gid) => pointRows.filter(r => r.game_id === gid);
+  const faultsOfGame = (gid) => faultRows.filter(r => r.game_id === gid);
+
+  // ① 消えたポイント・フォルトを先に消す（番号を振り直したとき、同じ番号の行とぶつからないように）
+  if (stalePointIds.length || staleFaultIds.length) {
+    await Promise.all([deleteRowsByIds("points", stalePointIds), deleteRowsByIds("faults", staleFaultIds)]);
+  }
+  // ② 試合・ゲーム・ポイントを同時に保存する。
+  //   新しいゲームがあるときだけ、ゲームを先に保存してからポイントを保存する（ポイントの親がまだ無いと保存できないため）
+  const saveNumbered = () => Promise.all([
+    upsertNumberedRows("points", changedPoints, "point_number", pointsOfGame),
+    upsertNumberedRows("faults", changedFaults, "fault_number", faultsOfGame),
+  ]);
+  const first = [upsertMatchRow(matchRow)];
+  if (playersChanged) {
+    first.push((async () => {
+      const { error: dErr } = await supabase.from("match_players").delete().eq("match_id", mid);
+      if (dErr) throw dErr;
+      if (match.players?.length) {
+        const { error: pErr } = await supabase.from("match_players").insert(match.players.map(p => playerRowOf(p, mid)));
+        if (pErr) throw pErr;
+      }
+    })());
+  }
+  if (changedGames.length) {
+    first.push((async () => { const { error } = await supabase.from("games").upsert(changedGames); if (error) throw error; })());
+  }
+  if (!hasNewGame) first.push(saveNumbered());
+  await Promise.all(first);
+  if (hasNewGame) await saveNumbered();
+  // ③ 消えたゲームは最後に消す（ポイントが先に消えていないと消せないため）
+  if (staleGameIds.length) await deleteRowsByIds("games", staleGameIds);
+}
+
 // 試合1件を関連テーブルごと保存（新規・更新どちらも対応）
 // ★isNew: 今まさに新しく作る試合（IDを新しく発行したばかりで、DBにまだ何も無い）ときだけ true にする。
 //   その場合は「既存の行の確認・削除」を全部省き、試合と選手を入れるだけにする（通信が約10往復→2往復）。
-async function saveMatch(match, { isNew = false } = {}) {
+// ★incremental: 記録中の1点ごとの保存。保存済みの控えがあれば、変わった行だけを送る（控えが無いときは全部保存）。
+async function saveMatch(match, { isNew = false, incremental = false } = {}) {
   invalidateMatchCaches(match?.id); // ★分析画面のキャッシュに古い内容が残らないように
   // ★ログイン確認は端末内の情報で行う（以前は毎回サーバーに問い合わせていた。書き込みの権限はRLSで守られている）
   const user = await getAuthUserFast();
@@ -1386,45 +1535,50 @@ async function saveMatch(match, { isNew = false } = {}) {
   const videoLinks = normalizeVideoLinks(match.video_links);
   if (videoLinks.length > 0) matchRow.video_links = videoLinks;
 
-  let { error: mErr } = await supabase.from("matches").upsert(matchRow);
-  // ★video_links 列がまだ無い場合は、その項目だけ外して保存し直す。
-  //   動画リンクは保存されないが、スコア・メモなど本体の記録は必ず守る。
-  if (mErr && matchRow.video_links && /video_links/.test(mErr.message || "")) {
-    console.warn("saveMatch: video_links列が無いため、動画リンクを除いて保存します。");
-    const { video_links, ...rowWithoutVideo } = matchRow;
-    ({ error: mErr } = await supabase.from("matches").upsert(rowWithoutVideo));
+  // ★差分保存：控えがあり、状態（進行中→終了など）が変わっておらず、選手・ゲームが空でないときだけ使う。
+  //   状態が変わるとき（試合終了・中断など）や、いつもと違う形の保存は、念のため全部保存で確認し直す。
+  const snap = _savedMatchSnapshots.get(match.id);
+  if (incremental && !isNew && snap && snap.status === match.status
+      && (match.games?.length ?? 0) > 0 && (match.players?.length ?? 0) > 0) {
+    try {
+      await saveMatchIncremental(match, matchRow, snap);
+      seedSavedSnapshot(match);
+      return matchRow;
+    } catch (e) {
+      // 途中で失敗したときは控えを捨てる（次の保存は全部保存でDBと突き合わせ直す）
+      dropSavedSnapshot(match.id);
+      throw e;
+    }
   }
-  if (mErr) throw mErr;
+  // ここから先は全部保存。途中で失敗しても控えがずれないよう、先に捨てておく（成功したら作り直す）
+  dropSavedSnapshot(match.id);
+  // ★確認・削除のどれかが失敗していたら、DBと手元が一致しているとは言えないので控えを作らない
+  let cleanOk = true;
+  const chk = (res) => { if (res?.error) { cleanOk = false; console.error(res.error); } return res; };
+
+  await upsertMatchRow(matchRow);
 
   // ★新しく作る試合（まだゲームが無い）は、選手を入れるだけで保存完了
   if (isNew && !(match.games?.length)) {
     if (match.players?.length) {
-      const playerRows = match.players.map(p => ({
-        id: p.id, match_id: match.id, team: p.team, player_name: p.player_name,
-        club_name: p.club_name || null, position: p.position || null, order_num: p.order_num,
-        entry_no: p.entry_no || null,
-      }));
-      const { error: pErr } = await supabase.from("match_players").insert(playerRows);
+      const { error: pErr } = await supabase.from("match_players").insert(match.players.map(p => playerRowOf(p, match.id)));
       if (pErr) throw pErr;
     }
+    seedSavedSnapshot(match);
     return matchRow;
   }
 
   // 選手情報：一旦削除してから入れ直す（シンプルで確実な方式）
   // ★安全装置：本来選手が登録されているはずの試合で、保存内容の選手が0人の場合は
   // 　取得エラー等で空のまま読み込んでしまった可能性が高いため、削除をスキップして実データを保護する
-  const { data: existingPlayers } = await supabase.from("match_players").select("id").eq("match_id", match.id);
+  const { data: existingPlayers } = chk(await supabase.from("match_players").select("id").eq("match_id", match.id));
   const playersLooksLikeAccidentalWipe = !(match.players?.length) && (existingPlayers ?? []).length > 0;
   if (playersLooksLikeAccidentalWipe) {
     console.error("saveMatch: 既存のmatch_playersがあるのに保存内容が空のため、削除処理をスキップしました。match_id=", match.id);
   } else {
-    await supabase.from("match_players").delete().eq("match_id", match.id);
+    chk(await supabase.from("match_players").delete().eq("match_id", match.id));
     if (match.players?.length) {
-      const playerRows = match.players.map(p => ({
-        id: p.id, match_id: match.id, team: p.team, player_name: p.player_name,
-        club_name: p.club_name || null, position: p.position || null, order_num: p.order_num,
-        entry_no: p.entry_no || null,
-      }));
+      const playerRows = match.players.map(p => playerRowOf(p, match.id));
       const { error: pErr } = await supabase.from("match_players").insert(playerRows);
       if (pErr) throw pErr;
     }
@@ -1445,52 +1599,38 @@ async function saveMatch(match, { isNew = false } = {}) {
   {
     const keepPointIds = (match.games ?? []).flatMap(g => (g.points ?? []).map(p => p.id));
     const keepFaultIds = (match.games ?? []).flatMap(g => (g.faults ?? []).map(f => f.id));
-    const { data: existingPointsBefore } = await supabase.from("points").select("id").eq("match_id", match.id);
+    const { data: existingPointsBefore } = chk(await supabase.from("points").select("id").eq("match_id", match.id));
     const stalePointIdsBefore = (existingPointsBefore ?? []).map(r => r.id).filter(id => !keepPointIds.includes(id));
-    if (stalePointIdsBefore.length) await supabase.from("points").delete().in("id", stalePointIdsBefore);
+    if (stalePointIdsBefore.length) chk(await supabase.from("points").delete().in("id", stalePointIdsBefore));
 
-    const { data: existingFaultsBefore } = await supabase.from("faults").select("id").eq("match_id", match.id);
+    const { data: existingFaultsBefore } = chk(await supabase.from("faults").select("id").eq("match_id", match.id));
     const staleFaultIdsBefore = (existingFaultsBefore ?? []).map(r => r.id).filter(id => !keepFaultIds.includes(id));
-    if (staleFaultIdsBefore.length) await supabase.from("faults").delete().in("id", staleFaultIdsBefore);
+    if (staleFaultIdsBefore.length) chk(await supabase.from("faults").delete().in("id", staleFaultIdsBefore));
   }
 
   for (const g of (match.games ?? [])) {
-    const gameRow = {
-      id: g.id, match_id: match.id, game_number: g.game_number, server_team: g.server_team,
-      is_final: g.is_final, score_a: g.score_a, score_b: g.score_b, winner_team: g.winner_team || null,
-    };
+    const gameRow = gameRowOf(g, match.id);
     const { error: gErr } = await supabase.from("games").upsert(gameRow);
     if (gErr) throw gErr;
 
     if (g.points?.length) {
-      const pointRows = g.points.map(pt => ({
-        id: pt.id, game_id: g.id, match_id: match.id, point_number: pt.point_number,
-        scoring_team: pt.scoring_team, player_name: pt.player_name || null,
-        shot_type: toShotType(pt.play_type, pt.result_type),
-        play_type: pt.play_type || null, side_type: pt.side_type || null, course_type: pt.course_type || null, miss_type: pt.miss_type || null, result_type: pt.result_type || null,
-        is_winner: pt.is_winner, fault_count: pt.fault_count ?? 0, score_a_after: pt.score_a_after, score_b_after: pt.score_b_after,
-        scored_at: pt.scored_at || null, // ★動画同期用：得点を記録した時刻
-      }));
+      const pointRows = g.points.map(pt => pointRowOf(pt, g, match.id));
       let { error: ptErr } = await supabase.from("points").upsert(pointRows);
       // ★それでも番号の重複で弾かれた場合の最後の手段：
       //   そのゲームのポイントを一度すべて消してから入れ直す。
       //   （記録が消えないよう、入れ直す内容は手元にある今の内容そのもの）
       if (ptErr && /point_number/.test(ptErr.message || "")) {
         console.warn("saveMatch: ポイント番号の重複を検出したため、ゲーム" + g.game_number + "を作り直します。");
-        await supabase.from("points").delete().eq("game_id", g.id);
+        chk(await supabase.from("points").delete().eq("game_id", g.id));
         ({ error: ptErr } = await supabase.from("points").insert(pointRows));
       }
       if (ptErr) throw ptErr;
     }
     if (g.faults?.length) {
-      const faultRows = g.faults.map(f => ({
-        id: f.id, game_id: g.id, match_id: match.id, fault_number: f.fault_number,
-        server_team: f.server_team, player_name: f.player_name || null,
-        score_a_at: f.score_a_at, score_b_at: f.score_b_at,
-      }));
+      const faultRows = g.faults.map(f => faultRowOf(f, g, match.id));
       let { error: fErr } = await supabase.from("faults").upsert(faultRows);
       if (fErr && /fault_number/.test(fErr.message || "")) {
-        await supabase.from("faults").delete().eq("game_id", g.id);
+        chk(await supabase.from("faults").delete().eq("game_id", g.id));
         ({ error: fErr } = await supabase.from("faults").insert(faultRows));
       }
       if (fErr) throw fErr;
@@ -1502,7 +1642,7 @@ async function saveMatch(match, { isNew = false } = {}) {
   const currentPointIds = (match.games ?? []).flatMap(g => (g.points ?? []).map(p => p.id));
   const currentFaultIds = (match.games ?? []).flatMap(g => (g.faults ?? []).map(f => f.id));
 
-  const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", match.id);
+  const { data: existingGames } = chk(await supabase.from("games").select("id").eq("match_id", match.id));
 
   // ★安全装置：本来ゲームが存在するはずの試合で、今回保存しようとしている内容にゲームが
   // 　1件も無い場合、それは「取得エラーなどで空のまま読み込んでしまった」可能性が高い。
@@ -1512,19 +1652,22 @@ async function saveMatch(match, { isNew = false } = {}) {
   const looksLikeAccidentalWipe = currentGameIds.length === 0 && (existingGames ?? []).length > 0;
 
   if (!looksLikeAccidentalWipe) {
-    const { data: existingPoints } = await supabase.from("points").select("id").eq("match_id", match.id);
+    const { data: existingPoints } = chk(await supabase.from("points").select("id").eq("match_id", match.id));
     const stalePointIds = (existingPoints ?? []).map(r => r.id).filter(id => !currentPointIds.includes(id));
-    if (stalePointIds.length) await supabase.from("points").delete().in("id", stalePointIds);
+    if (stalePointIds.length) chk(await supabase.from("points").delete().in("id", stalePointIds));
 
-    const { data: existingFaults } = await supabase.from("faults").select("id").eq("match_id", match.id);
+    const { data: existingFaults } = chk(await supabase.from("faults").select("id").eq("match_id", match.id));
     const staleFaultIds = (existingFaults ?? []).map(r => r.id).filter(id => !currentFaultIds.includes(id));
-    if (staleFaultIds.length) await supabase.from("faults").delete().in("id", staleFaultIds);
+    if (staleFaultIds.length) chk(await supabase.from("faults").delete().in("id", staleFaultIds));
 
     const staleGameIds = (existingGames ?? []).map(r => r.id).filter(id => !currentGameIds.includes(id));
-    if (staleGameIds.length) await supabase.from("games").delete().in("id", staleGameIds);
+    if (staleGameIds.length) chk(await supabase.from("games").delete().in("id", staleGameIds));
   } else {
     console.error("saveMatch: 既存のgamesがあるのに保存内容が空のため、削除処理をスキップしました。match_id=", match.id);
   }
+  // ★DBの中身が手元と一致していると言えるときだけ、差分保存用の控えを作る
+  //   （安全装置で削除をスキップした場合は、DBに手元に無い行が残っているので作らない）
+  if (cleanOk && !looksLikeAccidentalWipe && !playersLooksLikeAccidentalWipe) seedSavedSnapshot(match);
   return matchRow;
 }
 
@@ -1540,6 +1683,7 @@ function notifyRestored(kind, id) {
 }
 async function deleteMatch(id) {
   invalidateMatchCaches(id);
+  dropSavedSnapshot(id);
   const { error } = await supabase.from("matches").update({ deleted_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
   notifyDeleted("match", id);
@@ -1549,6 +1693,7 @@ async function deleteMatch(id) {
 //   既存のgames/points/faultsを消し、スコアと状態を未開始に戻す（recorder_idも解放する）。
 async function resetMatchToUnrecorded(matchId) {
   invalidateMatchCaches(matchId);
+  dropSavedSnapshot(matchId);
   const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", matchId);
   const gameIds = (existingGames ?? []).map(g => g.id);
   if (gameIds.length) {
@@ -1570,6 +1715,7 @@ async function getDeletedMatches() {
   return data ?? [];
 }
 async function restoreMatch(id) {
+  dropSavedSnapshot(id);
   notifyRestored("match", id);
   invalidateMatchCaches(id);
   const { error } = await supabase.from("matches").update({ deleted_at: null }).eq("id", id);
@@ -1721,6 +1867,7 @@ function countPlaceholderRecords(match) {
 // ★チーム内の全試合をまとめて修正する（1試合ずつ開いて直すのは大変なため）
 async function repairAllPlaceholderPlayerNames() {
   invalidateMatchCaches();
+  dropSavedSnapshot();
   // 仮名が残っているポイント・フォルトから、対象の試合を洗い出す
   const [{ data: pRows, error: pErr }, { data: fRows, error: fErr }] = await Promise.all([
     supabase.from("points").select("match_id").in("player_name", PLACEHOLDER_NAMES),
@@ -1748,6 +1895,7 @@ async function repairAllPlaceholderPlayerNames() {
 
 async function repairPlaceholderPlayerNames(match) {
   invalidateMatchCaches(match?.id);
+  dropSavedSnapshot(match?.id);
   const map = findPlaceholderRenameMap(match);
   if (Object.keys(map).length === 0) return 0;
   let fixed = 0;
@@ -2149,6 +2297,7 @@ async function savePlayer(player) {
 // 　戻り値は更新した試合数（0件やエラーの場合は原因を呼び出し元で分かるようにする）。
 async function renamePlayerEverywhere(oldName, newName, team, clubName) {
   invalidateMatchCaches();
+  dropSavedSnapshot();
   invalidateRosterCache();
   if (!oldName || !newName || oldName === newName) return 0;
   let q = supabase.from("match_players").select("id, match_id, club_name").eq("player_name", oldName);
@@ -16225,7 +16374,11 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
         // ★作成した直後の試合は、保存した内容をそのまま使う（サーバーからの取り直しを省く）
         const primed = takePrimedMatch(matchId);
         const [m, user, tmgRes] = await Promise.all([
-          primed ? Promise.resolve(primed) : getMatch(matchId),
+          (primed ? Promise.resolve(primed) : getMatch(matchId)).then(mm => {
+            // ★DBから読み込んだ（または保存したばかりの）内容を、差分保存の控えにする
+            if (mm && !primed) seedSavedSnapshot(mm);
+            return mm;
+          }),
           getAuthUserFast(),
           teamMatchId
             ? supabase.from("team_match_games").select("recorder_id, status").eq("match_id", matchId).single()
@@ -16371,7 +16524,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const toSave = latestUnsavedRef.current;
     if (!toSave) return;
     savingRef.current = true;
-    saveMatch(toSave)
+    // ★記録中の保存は差分保存（変わった行だけを送る）。控えが無いとき・状態が変わるときは自動で全部保存になる
+    saveMatch(toSave, { incremental: true })
       .then(() => {
         if (latestUnsavedRef.current === toSave) {
           latestUnsavedRef.current = null;
@@ -17989,6 +18143,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   // 　ここで直接削除してから、リセット後の状態をDBに反映する
                   const updated = { ...match, games:[], match_score_a:0, match_score_b:0, status:"scheduled", first_server:null, walkover_winner:null };
                   setMatch({...updated});
+                  dropSavedSnapshot(match.id); // ★差分保存の控えも捨てる（DBを直接書き換えるため）
                   try {
                     const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", match.id);
                     const gameIds = (existingGames ?? []).map(g => g.id);
