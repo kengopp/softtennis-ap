@@ -166,7 +166,7 @@ const clearScreenCache = () => { Object.keys(screenCache).forEach(k => { delete 
 //   タップしてから表示までに時間がかかっていた。取得結果を短時間だけ覚えておき、同じ内容はすぐ返す。
 //   ・自分が保存・削除した試合は、その場でキャッシュを捨てるので古い内容は出ない
 //   ・他の人が記録した内容は、下の有効期限が切れた時点で最新になる
-const MATCH_LIST_CACHE_MS   = 60 * 1000;      // 全試合一覧（分析画面用）：1分
+const MATCH_LIST_CACHE_MS   = 3 * 60 * 1000;  // 全試合一覧（分析画面用）：3分（自分の保存・削除ではその場で捨てる）
 const FULL_MATCH_CACHE_MS   = 5 * 60 * 1000;  // 終了済み試合のポイント明細：5分
 const PROFILE_CACHE_MS      = 5 * 60 * 1000;  // 自分のプロフィール：5分
 let _matchListCache = null;      // { at, promise }
@@ -182,7 +182,14 @@ let _lastMatchListData = null;   // { at, list }
 const _primedMatches = new Map(); // matchId -> { at, data }
 // ★個人戦の試合ID（団体戦の番手ではないと分かっている試合）。試合を開く前の問い合わせを省くために使う
 let _knownIndividualMatchIds = new Set();
+// ★団体戦の番手として登録されている試合ID（分析の「個人戦のみ／団体戦のみ」に使う）。試合一覧の取得時にも作る
+let _teamBoutIdsCache = null;     // { at, promise }
+// ★チームのシーズン設定（分析画面の期間の既定値）。管理者が変更したときはその場で捨てる
+const SEASON_CACHE_MS = 5 * 60 * 1000;
+let _seasonCache = null;          // { at, schoolId, promise }
 function clearDataCaches() {
+  _teamBoutIdsCache = null;
+  _seasonCache = null;
   _matchListCache = null;
   _fullMatchCache.clear();
   _profileCache = null;
@@ -228,6 +235,7 @@ async function fetchAllRows(table, columns, apply = (q) => q) {
 function invalidateMatchCaches(matchId) {
   _matchListCache = null;
   _matchListPrefetchedAt = 0; // ★先読みした試合一覧も、そのままは使わない
+  _teamBoutIdsCache = null;
   if (matchId) _fullMatchCache.delete(matchId); else _fullMatchCache.clear();
 }
 // ★ログイン中のユーザー。supabase.auth.getUser()は毎回サーバーに問い合わせるため、
@@ -467,24 +475,32 @@ const toShotType = (play, result) => {
 // 　選手別/ペア別の勝敗数集計に使えるよう「疑似的な試合」の形に変換して取得する。
 // 　通常の試合記録（matchesテーブル）は一切作られないため、統計画面でのみこれを使う。
 async function getSimpleRecordedDrawMatches(tournamentId) {
-  let q = supabase
-    .from("draw_matches")
-    .select("id, tournament_id, side_a_entry_id, side_b_entry_id, simple_result_winner, simple_result_score_a, simple_result_score_b")
-    .not("simple_result_winner", "is", null);
-  if (tournamentId) q = q.eq("tournament_id", tournamentId);
-  const { data: dms, error } = await q;
+  // ★1000件を超えても取りこぼさないよう分けて取得する
+  const { data: dms, error } = await fetchAllRows("draw_matches",
+    "id, tournament_id, side_a_entry_id, side_b_entry_id, simple_result_winner, simple_result_score_a, simple_result_score_b",
+    q => {
+      let qq = q.not("simple_result_winner", "is", null);
+      if (tournamentId) qq = qq.eq("tournament_id", tournamentId);
+      return qq.order("id");
+    });
   if (error) { console.error(error); return []; }
   if (!dms || dms.length === 0) return [];
 
   const entryIds = Array.from(new Set(dms.flatMap(d => [d.side_a_entry_id, d.side_b_entry_id]).filter(Boolean)));
   const tournamentIds = Array.from(new Set(dms.map(d => d.tournament_id).filter(Boolean)));
 
-  const [{ data: entries }, { data: tournaments }] = await Promise.all([
-    entryIds.length ? supabase.from("draw_entries").select("id, player1_name, player2_name, school_name, is_own_team").in("id", entryIds) : Promise.resolve({ data: [] }),
-    tournamentIds.length ? supabase.from("tournaments").select("id, name, start_date, end_date").in("id", tournamentIds) : Promise.resolve({ data: [] }),
+  // ★IDが多いと1回のリクエストが長くなりすぎるため、150件ずつに分けて同時に取得する
+  const inChunks = (table, cols, ids) => {
+    const reqs = [];
+    for (let i = 0; i < ids.length; i += 150) reqs.push(supabase.from(table).select(cols).in("id", ids.slice(i, i + 150)));
+    return Promise.all(reqs).then(rs => rs.flatMap(r => { if (r.error) console.error(r.error); return r.data ?? []; }));
+  };
+  const [entries, tournaments] = await Promise.all([
+    inChunks("draw_entries", "id, player1_name, player2_name, school_name, is_own_team", entryIds),
+    inChunks("tournaments", "id, name, start_date, end_date", tournamentIds),
   ]);
-  const entryMap = {}; (entries ?? []).forEach(e => { entryMap[e.id] = e; });
-  const tMap = {}; (tournaments ?? []).forEach(t => { tMap[t.id] = t; });
+  const entryMap = {}; entries.forEach(e => { entryMap[e.id] = e; });
+  const tMap = {}; tournaments.forEach(t => { tMap[t.id] = t; });
 
   return dms.map(dm => {
     const eA = dm.side_a_entry_id ? entryMap[dm.side_a_entry_id] : null;
@@ -871,10 +887,24 @@ function scopeShortLabel(scope, seasonLabel) {
 }
 
 // ★団体戦の番手として登録されている試合のIDを集める（対象試合のしぼり込みに使う）
+// ★試合一覧を開いたときに作ったものがあれば使い回す（通信なし）。
+//   以前は分析画面を開くたびに取得し直しており、しかも1000件で打ち切られていた。
 async function getTeamMatchMatchIds() {
-  const { data, error } = await supabase.from("team_match_games").select("match_id");
-  if (error) { console.error(error); return new Set(); }
-  return new Set((data ?? []).map(r => r.match_id).filter(Boolean));
+  const now = Date.now();
+  if (_teamBoutIdsCache && now - _teamBoutIdsCache.at < MATCH_LIST_CACHE_MS) return new Set(await _teamBoutIdsCache.promise);
+  const promise = fetchAllRows("team_match_games", "id, match_id", q => q.not("match_id", "is", null).order("id"))
+    .then(({ data, error }) => {
+      if (error) throw error;
+      return new Set((data ?? []).map(r => r.match_id).filter(Boolean));
+    });
+  _teamBoutIdsCache = { at: now, promise };
+  try {
+    return new Set(await promise);
+  } catch (e) {
+    console.error(e);
+    if (_teamBoutIdsCache?.promise === promise) _teamBoutIdsCache = null; // 失敗は覚えない
+    return new Set();
+  }
 }
 
 // ============================================================
@@ -2195,6 +2225,7 @@ async function updateSchoolMaster(id, updates) {
   if (error) throw error;
   if (!data || data.length===0) throw new Error("更新対象の学校が見つからないか、更新権限がありません。");
   invalidateSchoolsCache();
+  _seasonCache = null; // ★シーズン設定が変わっている可能性があるので取り直す
   return data[0];
 }
 
@@ -2217,6 +2248,21 @@ async function getSchoolSeason(schoolId) {
     .eq("id", schoolId).single();
   if (error) { console.error(error); return null; }
   return data;
+}
+
+// ★自分のチームのシーズン設定。プロフィール（キャッシュ済み）から学校を割り出して取得する。
+//   画面側で「プロフィール取得 → シーズン取得」と順番待ちしないよう、他の取得と同時に呼べる形にしている。
+async function getMySchoolSeason() {
+  const p = await getMyProfile();
+  const schoolId = p?.school_id;
+  if (!schoolId) return null;
+  const now = Date.now();
+  if (_seasonCache && _seasonCache.schoolId === schoolId && now - _seasonCache.at < SEASON_CACHE_MS) return _seasonCache.promise;
+  const promise = getSchoolSeason(schoolId);
+  _seasonCache = { at: now, schoolId, promise };
+  const season = await promise;
+  if (!season && _seasonCache?.promise === promise) _seasonCache = null; // 失敗は覚えない
+  return season;
 }
 
 // ★起点日の西暦から既定の呼び名を作る（例：2026-08-01 → 2026チーム）
@@ -2640,11 +2686,13 @@ async function saveTeamMatchGame(g) {
     status: g.status || "waiting",
   };
   const { error } = await supabase.from("team_match_games").upsert(row);
+  _teamBoutIdsCache = null;
   if (error) throw error;
   return row;
 }
 
 async function updateTeamMatchGame(id, updates) {
+  _teamBoutIdsCache = null;
   const { error } = await supabase.from("team_match_games").update(updates).eq("id", id);
   if (error) throw error;
 }
@@ -2803,6 +2851,13 @@ async function getTournaments() {
     .order("start_date", { ascending: false });
   if (error) { console.error(error); return []; }
   return data ?? [];
+}
+
+// ★削除済み大会の名前だけ（分析の絞り込み候補から除くのに使う）
+async function getDeletedTournamentNames() {
+  const { data, error } = await supabase.from("tournaments").select("name").not("deleted_at", "is", null);
+  if (error) { console.error(error); return []; }
+  return (data ?? []).map(t => t.name);
 }
 
 // ★ゴミ箱：削除済み（deleted_atが入っている）大会一覧を取得
@@ -4257,6 +4312,7 @@ function fetchMatchListSnapshot({ onTournaments } = {}) {
     list.forEach(m => { videoLinksByMatch[m.id] = m.video_links || []; });
     const tList = attachTeamVideoLinks(teamMatches, videoLinksByMatch);
     const teamMatchIds = new Set(allGames.map(g => g.match_id).filter(Boolean));
+    _teamBoutIdsCache = { at: Date.now(), promise: Promise.resolve(teamMatchIds) }; // ★分析画面でも使い回す
     // 団体戦に紐付いたmatch_idを個人戦一覧から除外
     const individual = list.filter(m => !teamMatchIds.has(m.id));
     _knownIndividualMatchIds = new Set(individual.map(m => m.id));
@@ -4285,7 +4341,7 @@ function takeFreshPrefetch() {
   _matchListPrefetchedAt = 0;
   return fresh;
 }
-function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; }
+function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; _teamBoutIdsCache = null; }
 
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
@@ -12561,12 +12617,12 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   useEffect(() => {
     (async () => {
       // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブと同じ数え方にする）
-      const [p, list, schools, simpleList] = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches()]);
+      // ★シーズン設定も同時に取得する（以前はプロフィール等を待ってから、もう1往復していた）
+      const [p, list, schools, simpleList, season] = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches(), getMySchoolSeason()]);
       if (p?.school_id) {
         setSchoolId(p.school_id);
         const s = (schools||[]).find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
-        const season = await getSchoolSeason(p.school_id);
         if (season?.season_start_date) {
           setSeasonStart(season.season_start_date);
           setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
@@ -14420,13 +14476,16 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
     const cached = readScreenCache("teamStats");
     if (cached) apply(cached); // まず前回の内容を即表示（裏で最新化を続ける）
     (async () => {
-      const [list, simpleList, rosterList, p, schools, deletedList, teamList] = await Promise.all([
+      // ★以前は団体戦を動画リンクまで全部取得していたが、ここで使うのは「番手の試合ID」だけなので、
+      //   試合一覧で取得済みのものを使い回す。削除済み大会は名前だけ取る。シーズン設定も同時に取得する。
+      const seasonP = getMySchoolSeason();
+      const [list, simpleList, rosterList, p, schools, deletedNamesList, teamIdSet] = await Promise.all([
         getMatchesCached(), getSimpleRecordedDrawMatches(), getPlayerRoster(),
-        getMyProfile(), getSchools(), getDeletedTournaments(), getTeamMatches(),
+        getMyProfile(), getSchools(), getDeletedTournamentNames(), getTeamMatchMatchIds(),
       ]);
       const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
       if (p?.school_id) {
-        getSchoolSeason(p.school_id).then(season => {
+        seasonP.then(season => {
           if (season?.season_start_date) {
             setSeasonStart(season.season_start_date);
             setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
@@ -14437,14 +14496,13 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
         });
       }
       // ★団体戦の一戦として作成された試合（match）のIDを集めておく（個人戦との区別に使う）
-      const teamIds = [];
-      (teamList || []).forEach(tm => (tm.games||[]).forEach(g => { if (g.match_id) teamIds.push(g.match_id); }));
+      const teamIds = Array.from(teamIdSet);
       const snapshot = {
         list, simpleList, rosterList,
         schoolName: school?.name ?? "",
         // ★ゴミ箱に入っている大会名。試合データ自体は削除しないが、
         //   絞り込みプルダウンには削除済みの大会名を出さないようにするため。
-        deletedNames: (deletedList || []).map(t => t.name),
+        deletedNames: deletedNamesList,
         teamIds,
       };
       writeScreenCache("teamStats", snapshot);
@@ -14991,28 +15049,26 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
 
   useEffect(() => {
     (async () => {
-      const profile = await getMyProfile();
-      if (profile?.school_id) {
-        const season = await getSchoolSeason(profile.school_id);
-        if (season?.season_start_date) {
-          setSeasonStart(season.season_start_date);
-          setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
-          setPeriod("season");
-        }
+      // ★以前は「プロフィール→シーズン→選手マスター→学校→試合」と5回順番に待っていた。すべて同時に取得する。
+      // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブ・ペアタブと同じ数え方にする）
+      const [profile, season, rosterList, schools, list, simpleList] = await Promise.all([
+        getMyProfile(), getMySchoolSeason(), getPlayerRoster(), getSchools(),
+        getMatchesCached(), getSimpleRecordedDrawMatches(),
+      ]);
+      if (season?.season_start_date) {
+        setSeasonStart(season.season_start_date);
+        setSeasonLabel(season.season_start_label || defaultSeasonLabel(season.season_start_date));
+        setPeriod("season");
       }
-      const rosterList = await getPlayerRoster();
       setRoster(rosterList);
       if (profile?.linked_player_id) {
         const found = rosterList.find(p => p.id === profile.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
       }
       if (profile?.school_id) {
-        const schools = await getSchools();
-        const s = schools.find(s => s.id === profile.school_id);
+        const s = (schools || []).find(s => s.id === profile.school_id);
         if (s) setMySchoolName(s.name);
       }
-      // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブ・ペアタブと同じ数え方にする）
-      const [list, simpleList] = await Promise.all([getMatchesCached(), getSimpleRecordedDrawMatches()]);
       setMatches([...list, ...(simpleList||[])]);
       setLoading(false);
     })();
