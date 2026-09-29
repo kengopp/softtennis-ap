@@ -227,6 +227,7 @@ async function fetchAllRows(table, columns, apply = (q) => q) {
 // ★試合を保存・削除したときに呼ぶ（その試合の明細と、全試合一覧のキャッシュを捨てる）
 function invalidateMatchCaches(matchId) {
   _matchListCache = null;
+  _matchListPrefetchedAt = 0; // ★先読みした試合一覧も、そのままは使わない
   if (matchId) _fullMatchCache.delete(matchId); else _fullMatchCache.clear();
 }
 // ★ログイン中のユーザー。supabase.auth.getUser()は毎回サーバーに問い合わせるため、
@@ -2533,6 +2534,7 @@ async function getTeamMatchChangeSignature(teamMatchId, matchIds) {
 }
 
 async function saveTeamMatch(tm) {
+  clearMatchListPrefetch();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
   const row = {
@@ -2787,6 +2789,7 @@ async function getDeletedTournaments() {
 }
 
 async function saveTournament(t) {
+  clearMatchListPrefetch();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
   const row = {
@@ -4195,6 +4198,67 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 // ============================================================
 // 試合一覧
 // ============================================================
+// ============================================================
+// ★試合一覧（大会・団体戦・個人戦）のデータ取得
+//   画面の外に出しておき、ホーム画面を開いたときに裏で先に取得しておけるようにする（先読み）。
+//   同じ取得が同時に走らないよう、取得中のものがあればそれを共有する。
+// ============================================================
+let _matchListInflight = null;
+let _matchListSnapshotAt = 0;
+function fetchMatchListSnapshot({ onTournaments } = {}) {
+  if (_matchListInflight) {
+    if (onTournaments) _matchListInflight.tnP.then(onTournaments).catch(() => {});
+    return _matchListInflight.promise;
+  }
+  purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除（10分に1回まで）
+  // ★大会一覧は全試合の取得を待たずに先に表示できるよう、単独でも受け取れるようにする
+  const tnP = getTournaments();
+  if (onTournaments) tnP.then(onTournaments).catch(() => {});
+  // ★以前は団体戦の取得が「団体戦→番手→動画リンク」と3回の順番待ちになっており、
+  //   さらに番手の一覧をもう1回別に取得していた。団体戦と番手は同時に取得し、
+  //   動画リンクはすでに取得している全試合のデータから作る。
+  const promise = Promise.all([
+    getMatches(),
+    getTeamMatchesBase(),
+    getSchools(),
+    tnP,
+  ]).then(([list, { teamMatches, allGames }, schools, tnList]) => {
+    const smap = {};
+    (schools || []).forEach(s => { smap[s.id] = s.name; });
+    const videoLinksByMatch = {};
+    list.forEach(m => { videoLinksByMatch[m.id] = m.video_links || []; });
+    const tList = attachTeamVideoLinks(teamMatches, videoLinksByMatch);
+    const teamMatchIds = new Set(allGames.map(g => g.match_id).filter(Boolean));
+    // 団体戦に紐付いたmatch_idを個人戦一覧から除外
+    const individual = list.filter(m => !teamMatchIds.has(m.id));
+    _knownIndividualMatchIds = new Set(individual.map(m => m.id));
+    // ★分析画面・候補づくりでも同じ全試合一覧を使い回せるようにしておく
+    if (list.length > 0) _matchListCache = { at: Date.now(), promise: Promise.resolve(list) };
+    const snapshot = { list, individual, tList, smap, tnList };
+    writeScreenCache("matchList", snapshot);
+    _matchListSnapshotAt = Date.now();
+    return snapshot;
+  }).finally(() => { _matchListInflight = null; });
+  _matchListInflight = { promise, tnP };
+  return promise;
+}
+// ★ホーム画面から呼ぶ先読み。直近1分以内に取得済みなら何もしない
+//   先読みした内容は、次に試合一覧を開いたときに「取り直さずにそのまま使ってよい」印を付けておく
+//   （試合・団体戦・大会を保存したときは印を外すので、古い内容のまま出ることはない）
+let _matchListPrefetchedAt = 0;
+function prefetchMatchList() {
+  if (Date.now() - _matchListSnapshotAt < 60 * 1000) return;
+  fetchMatchListSnapshot()
+    .then(() => { _matchListPrefetchedAt = Date.now(); })
+    .catch(e => console.error("試合一覧の先読みに失敗:", e));
+}
+function takeFreshPrefetch() {
+  const fresh = Date.now() - _matchListPrefetchedAt < 30 * 1000;
+  _matchListPrefetchedAt = 0;
+  return fresh;
+}
+function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; }
+
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   // ★スマホでは一度に何百枚もカードを描画するだけで表示が重くなるため、
@@ -4274,6 +4338,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   //   ①一覧では使っていないゲームごとの得点(games)を取得しない → getMatches()
   //   ②「団体戦に紐づく試合ID」の取得を、他の取得の後ではなく同時に行う
   //     （以前は4件の取得が終わってから、さらにもう1往復待っていた）
+  const [tournamentsReady, setTournamentsReady] = useState(false); // ★大会一覧だけ先に届いたか
   const applyData = useCallback(({ list, individual, tList, smap, tnList }) => {
     setSchoolMap(smap);
     setTournaments(tnList || []);
@@ -4308,38 +4373,18 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const reload = useCallback((opts) => {
     const silent = opts === true || opts?.silent === true; // 裏での更新（画面を「読み込み中」にしない）
     if (!silent) setLoading(true);
-    purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除（10分に1回まで）
-    // ★以前は団体戦の取得が「団体戦→番手→動画リンク」と3回の順番待ちになっており、
-    //   さらに番手の一覧をもう1回別に取得していた。団体戦と番手は同時に取得し、
-    //   動画リンクはすでに取得している全試合のデータから作る。
-    Promise.all([
-      getMatches(),
-      getTeamMatchesBase(),
-      getSchools(),
-      getTournaments(),
-    ]).then(([list, { teamMatches, allGames }, schools, tnList]) => {
-      const smap = {};
-      (schools || []).forEach(s => { smap[s.id] = s.name; });
-      const videoLinksByMatch = {};
-      list.forEach(m => { videoLinksByMatch[m.id] = m.video_links || []; });
-      const tList = attachTeamVideoLinks(teamMatches, videoLinksByMatch);
-      const teamMatchIds = new Set(allGames.map(g => g.match_id).filter(Boolean));
-      // 団体戦に紐付いたmatch_idを個人戦一覧から除外
-      const individual = list.filter(m => !teamMatchIds.has(m.id));
-      _knownIndividualMatchIds = new Set(individual.map(m => m.id));
-      // ★分析画面・候補づくりでも同じ全試合一覧を使い回せるようにしておく
-      if (list.length > 0) _matchListCache = { at: Date.now(), promise: Promise.resolve(list) };
-      const snapshot = { list, individual, tList, smap, tnList };
-      writeScreenCache("matchList", snapshot);
-      applyData(snapshot);
-    }).catch(e => { console.error(e); setLoading(false); });
+    fetchMatchListSnapshot({
+      // ★大会一覧は届いた時点で先に表示する（試合数などの集計は、全試合が届いてから埋まる）
+      onTournaments: silent ? undefined : (tn) => { setTournaments(tn || []); setTournamentsReady(true); },
+    }).then(applyData).catch(e => { console.error(e); setLoading(false); });
   }, [applyData]);
 
   useEffect(() => {
     const cached = readScreenCache("matchList");
     if (cached) {
       applyData(cached);        // まず前回の内容を即表示
-      reload({ silent: true }); // 裏で最新化
+      // 裏で最新化（ホーム画面で先読みしたばかりの内容なら、同じ取得を繰り返さない）
+      if (!takeFreshPrefetch()) reload({ silent: true });
     } else {
       reload();
     }
@@ -4936,10 +4981,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             );
           })()}
           <div style={{ padding:"0 14px", paddingBottom:90 }}>
-            {loading && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
-            {!loading && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
-            {!loading && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
-            {!loading && filteredTournaments.map(t => {
+            {loading && !tournamentsReady && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
+            {(!loading || tournamentsReady) && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
+            {(!loading || tournamentsReady) && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
+            {(!loading || tournamentsReady) && filteredTournaments.map(t => {
               const stats = statsForTournament(t);
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
@@ -4974,17 +5019,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       </div>
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setBreakdownModalFor(t); }}>
                         <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>🎾</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.totalMatches}試合</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.totalMatches}試合`}</div>
                         <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>試合数</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
                         <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>✅</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.registeredMatches}試合</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.registeredMatches}試合`}</div>
                         <div style={{ fontSize:9.5, color:C.textSec }}>終了</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
                         <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.venueCount}か所</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.venueCount}か所`}</div>
                         <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
                       </div>
                     </div>
@@ -11000,6 +11045,9 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
       };
       writeScreenCache("home", snapshot);
       apply(snapshot);
+      // ★ホーム画面の表示が終わったら、試合一覧のデータを裏で先に取得しておく
+      //   （「試合」を押したときに、読み込みを待たずに大会一覧を出せるように）
+      setTimeout(prefetchMatchList, 300);
     })();
   }, [apply]);
 
