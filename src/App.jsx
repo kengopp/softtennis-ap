@@ -21847,6 +21847,17 @@ export default function App() {
         matchId={matchId}
         initialTab={recordInitialTab}
         onBack={async ()=>{
+          // ★「←」・中断・途中終了のあとは、実際に一個前に見ていた画面（画面の履歴）へ戻る。
+          //   以前は prevScreen（どこから試合を開いたかの控え）だけで戻り先を決めていたため、
+          //   控えが古いまま残っていると、関係のない画面（分析など）へ飛んでしまうことがあった。
+          //   履歴が無いとき（再読み込み直後など）だけ、これまで通り prevScreen で決める。
+          if (navHistoryRef.current.length > 0) {
+            backIntentRef.current = null;
+            if (restorePrevRef.current && restorePrevRef.current()) {
+              await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1);
+              return;
+            }
+          }
           const target = prevScreen==="home" ? "home" : prevScreen==="teamMatchDetail" ? "teamMatchDetail" : prevScreen==="tournamentDetail" ? "tournamentDetail" : prevScreen==="stats" ? "stats" : prevScreen==="personalAnalysis" ? "personalAnalysis" : prevScreen==="pairAnalysis" ? "pairAnalysis" : "list";
           // ★大会詳細に戻るはずなのに、何らかの理由でtournamentContextが失われていた場合はsessionStorageから復元を試みる
           if (target === "tournamentDetail" && !tournamentContext) restoreTournamentReturnCtx();
