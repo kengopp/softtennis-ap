@@ -10090,7 +10090,57 @@ function TermsViewScreen({ agreedAt, onBack }) {
   );
 }
 
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onTrash, onTerms, termsAgreedAt, onProfile, onLogout, textScale, onChangeTextScale }) {
+// ★操作ガイド（設定から開く）。ガイド本体は外部ページなので、別タブで開く
+const OPERATION_GUIDES = [
+  {
+    icon: "🔰",
+    label: "まずはこちら",
+    title: "かんたん操作ガイド",
+    desc: "アプリの登録からログインまでを説明しています。最初の1回だけ、5分程度で登録できます。",
+    url: "https://claude.ai/artifact/PGoKhBkNP8R73Q8eSHPxKW",
+  },
+  {
+    icon: "🎾",
+    label: "スコアをつけるときは",
+    title: "詳細ガイド",
+    desc: "試合の作成方法からスコアの入力方法まで、実際の画面写真を使って説明しています。",
+    url: "https://claude.ai/artifact/R5H4ivKHYyKXLCfPMnvAFP",
+  },
+];
+
+function GuideScreen({ onBack }) {
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display: "flex", alignItems: "center", gap: 10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
+        <span style={{ fontSize: 18, fontWeight: 800, color: C.white }}>📖 操作ガイド</span>
+      </div>
+      <div style={{ padding: 14, paddingBottom: 40 }}>
+        <div style={{ fontSize: 12, color: C.textSec, lineHeight: 1.6, marginBottom: 12 }}>
+          タップすると、ガイドが別のタブで開きます。読み終わったら、タブを閉じるとアプリに戻れます。
+        </div>
+        {OPERATION_GUIDES.map(g => (
+          <a
+            key={g.url}
+            href={g.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ ...S.card, display: "block", padding: "16px 14px", marginBottom: 12, textDecoration: "none", color: C.text }}
+          >
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.textSec, marginBottom: 4 }}>■ {g.label}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: C.navy }}>{g.icon} {g.title}</div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.white, background: C.navy, borderRadius: 20, padding: "5px 12px", whiteSpace: "nowrap", flexShrink: 0 }}>開く ↗</span>
+            </div>
+            <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.7, marginTop: 8 }}>{g.desc}</div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onTrash, onTerms, onGuide, termsAgreedAt, onProfile, onLogout, textScale, onChangeTextScale }) {
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
@@ -10186,6 +10236,16 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           <div>
             <div style={{ fontSize:14,fontWeight:700 }}>🗑 ゴミ箱</div>
             <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>削除した大会・試合を確認（24時間以内なら復元可）</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
+        <div
+          style={{ ...S.card, padding:"16px 14px", marginTop:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onGuide}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>📖 操作ガイド</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>登録・ログインの方法、試合の作成とスコアのつけ方</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
@@ -21724,12 +21784,16 @@ export default function App() {
         onProfile={()=>setScreen("profile")}
         onTrash={()=>{ setPendingOpenTrash(true); setListMatchMode("tournament"); setScreen("list"); }}
         onTerms={()=>setScreen("terms")}
+        onGuide={()=>setScreen("guide")}
         termsAgreedAt={profile?.terms_agreed_at}
         onLogout={performLogout}
         textScale={textScale}
         onChangeTextScale={setTextScale}
       />
     );
+  }
+  if (screen==="guide") {
+    return <GuideScreen onBack={()=>setScreen("master")} />;
   }
   if (screen==="terms") {
     return <TermsViewScreen agreedAt={profile?.terms_agreed_at} onBack={()=>setScreen("master")} />;
