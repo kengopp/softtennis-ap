@@ -2293,49 +2293,48 @@ async function getTeamMatch(id) {
 // 　全試合・全団体戦を取得してから大会名で絞り込んでいたため、利用期間が長くなる
 // 　ほど大会詳細を開くたびに表示が遅くなっていた。DB側で最初から対象大会だけに絞り込む。
 async function getTournamentMatchesAndTeamMatches(tournamentName) {
+  // ★処理速度改善：
+  //   ・以前は選手とゲームを60試合ずつ「順番に」取得し、そのあと番手、さらに動画リンクと順番待ちが続いていた。
+  //     選手と番手は同時に取得し、待ちを2回（番手の試合が別の大会名のときだけ3回）にした。
+  //   ・個人戦のゲームごとの得点（games）は大会詳細では使っていないため、取得しないようにした。
+  //   ・1000件を超える大会でも取りこぼさないよう、分けて取得する。
   const [
     { data: matchRows, error: mErr },
     { data: teamRows, error: tErr },
   ] = await Promise.all([
-    supabase.from("matches").select("*").eq("tournament_name", tournamentName).is("deleted_at", null).order("created_at", { ascending: false }),
-    supabase.from("team_matches").select("*").eq("tournament_name", tournamentName).is("deleted_at", null).order("match_date", { ascending: false }),
+    fetchAllRows("matches", "*", q => q.eq("tournament_name", tournamentName).is("deleted_at", null).order("created_at", { ascending: false }).order("id")),
+    fetchAllRows("team_matches", "*", q => q.eq("tournament_name", tournamentName).is("deleted_at", null).order("match_date", { ascending: false }).order("id")),
   ]);
   if (mErr) console.error(mErr);
   if (tErr) console.error(tErr);
   const matchRowsSafe = matchRows ?? [];
   const teamRowsSafe = teamRows ?? [];
 
+  const chunked = (ids, size) => { const out = []; for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size)); return out; };
   const matchIds = matchRowsSafe.map(m => m.id);
-  const CHUNK_SIZE = 60;
-  const chunks = [];
-  for (let i = 0; i < matchIds.length; i += CHUNK_SIZE) chunks.push(matchIds.slice(i, i + CHUNK_SIZE));
-  const playersByMatch = {};
-  const gamesByMatch = {};
-  for (const chunkIds of chunks) {
-    const [
-      { data: playersData, error: pErr },
-      { data: gamesData, error: gErr },
-    ] = await Promise.all([
-      supabase.from("match_players").select("*").in("match_id", chunkIds).order("team").order("order_num"),
-      supabase.from("games").select("*").in("match_id", chunkIds).order("game_number"),
-    ]);
-    if (pErr) console.error(pErr);
-    if (gErr) console.error(gErr);
-    (playersData ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
-    (gamesData ?? []).forEach(g => { (gamesByMatch[g.match_id] ??= []).push(g); });
-  }
-  const matches = matchRowsSafe.map(m => {
-    const games = (gamesByMatch[m.id] ?? []).map(g => ({ ...g, points: [] }));
-    return rowToMatchSummary(m, playersByMatch[m.id] ?? [], games);
-  });
-
   const teamMatchIds = teamRowsSafe.map(tm => tm.id);
-  let tmGames = [];
-  if (teamMatchIds.length > 0) {
-    const { data, error } = await supabase.from("team_match_games").select("*").in("team_match_id", teamMatchIds).order("order_num");
+  const [playerResults, tmgResults] = await Promise.all([
+    Promise.all(chunked(matchIds, 100).map(ids =>
+      supabase.from("match_players").select("*").in("match_id", ids)
+    )),
+    Promise.all(chunked(teamMatchIds, 100).map(ids =>
+      supabase.from("team_match_games").select("*").in("team_match_id", ids)
+    )),
+  ]);
+  const playersByMatch = {};
+  playerResults.forEach(({ data, error }) => {
     if (error) console.error(error);
-    tmGames = data ?? [];
-  }
+    (data ?? []).forEach(p => { (playersByMatch[p.match_id] ??= []).push(p); });
+  });
+  // 並び順（A→B、番号順）はここで整える
+  Object.values(playersByMatch).forEach(list => list.sort((a, b) =>
+    a.team === b.team ? (a.order_num ?? 0) - (b.order_num ?? 0) : (a.team < b.team ? -1 : 1)
+  ));
+  const matches = matchRowsSafe.map(m => rowToMatchSummary(m, playersByMatch[m.id] ?? [], []));
+
+  const tmGames = [];
+  tmgResults.forEach(({ data, error }) => { if (error) console.error(error); tmGames.push(...(data ?? [])); });
+  tmGames.sort((a, b) => (a.order_num ?? 0) - (b.order_num ?? 0));
   const gamesByTeamMatch = {};
   tmGames.forEach(g => { (gamesByTeamMatch[g.team_match_id] ??= []).push(g); });
   // ★団体戦カードに🎥（動画リンク件数）を出すため、各番手の試合の動画リンクをまとめて集める。
@@ -2344,18 +2343,15 @@ async function getTournamentMatchesAndTeamMatches(tournamentName) {
   matchRowsSafe.forEach(m => { videoLinksByMatch[m.id] = normalizeVideoLinks(m.video_links); });
   const missingBoutIds = tmGames.map(g => g.match_id).filter(id => id && !(id in videoLinksByMatch));
   if (missingBoutIds.length > 0) {
-    const { data: boutRows, error: bErr } = await supabase.from("matches").select("id, video_links").in("id", missingBoutIds).is("deleted_at", null);
-    if (bErr) console.error(bErr);
-    (boutRows ?? []).forEach(m => { videoLinksByMatch[m.id] = normalizeVideoLinks(m.video_links); });
+    const boutResults = await Promise.all(chunked(missingBoutIds, 150).map(ids =>
+      supabase.from("matches").select("id, video_links").in("id", ids).is("deleted_at", null)
+    ));
+    boutResults.forEach(({ data, error }) => {
+      if (error) console.error(error);
+      (data ?? []).forEach(m => { videoLinksByMatch[m.id] = normalizeVideoLinks(m.video_links); });
+    });
   }
-  const teamMatches = teamRowsSafe.map(tm => {
-    const games = gamesByTeamMatch[tm.id] ?? [];
-    // ★この対戦（全番手）の動画を1つの一覧にまとめる。どの番手の動画か分かるようにタイトルに番手を付ける。
-    const video_links = games.flatMap(g =>
-      (g.match_id ? (videoLinksByMatch[g.match_id] ?? []) : []).map(v => ({ ...v, title: `${g.order_num}番手 ${v.title || "動画"}` }))
-    );
-    return { ...tm, games, video_links };
-  });
+  const teamMatches = attachTeamVideoLinks(teamRowsSafe.map(tm => ({ ...tm, games: gamesByTeamMatch[tm.id] ?? [] })), videoLinksByMatch);
 
   return { matches, teamMatches };
 }
@@ -2878,28 +2874,46 @@ async function deleteEntireDraw(tournamentId, category) {
 // （大会詳細のトーナメント表表示用）
 async function getDrawMatchesWithEntries(tournamentId, category, blockLabel) {
   const matches = await getDrawMatches(tournamentId, category, blockLabel);
+  return enrichDrawMatches(matches);
+}
+
+// ★ドローの枠に、対戦者（エントリー）と試合の進行状況を付ける。
+//   以前はエントリー→試合と順番に取得していたのを同時に取得し、IDが多いときは分けて送る。
+async function enrichDrawMatches(matches) {
   if (matches.length === 0) return [];
+  const chunked = (ids, size) => { const out = []; for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size)); return out; };
   const entryIds = Array.from(new Set(matches.flatMap(m => [m.side_a_entry_id, m.side_b_entry_id]).filter(Boolean)));
-  let entryMap = {};
-  if (entryIds.length) {
-    const { data, error } = await supabase.from("draw_entries").select("*").in("id", entryIds);
-    if (error) console.error(error);
-    (data ?? []).forEach(e => { entryMap[e.id] = e; });
-  }
   // ドロー画面のカードにスコア・進行状況を表示するため、紐づく試合の最小限の情報も取得する
   const matchIds = Array.from(new Set(matches.map(m => m.match_id).filter(Boolean)));
-  let matchInfoMap = {};
-  if (matchIds.length) {
-    const { data, error } = await supabase.from("matches").select("id, status, match_score_a, match_score_b, memo").in("id", matchIds);
-    if (error) console.error(error);
-    (data ?? []).forEach(mi => { matchInfoMap[mi.id] = mi; });
-  }
+  const [entryResults, matchResults] = await Promise.all([
+    Promise.all(chunked(entryIds, 150).map(ids => supabase.from("draw_entries").select("*").in("id", ids))),
+    Promise.all(chunked(matchIds, 150).map(ids => supabase.from("matches").select("id, status, match_score_a, match_score_b, memo").in("id", ids))),
+  ]);
+  const entryMap = {};
+  entryResults.forEach(({ data, error }) => { if (error) console.error(error); (data ?? []).forEach(e => { entryMap[e.id] = e; }); });
+  const matchInfoMap = {};
+  matchResults.forEach(({ data, error }) => { if (error) console.error(error); (data ?? []).forEach(mi => { matchInfoMap[mi.id] = mi; }); });
   return matches.map(m => ({
     ...m,
     sideA: m.side_a_entry_id ? entryMap[m.side_a_entry_id] : null,
     sideB: m.side_b_entry_id ? entryMap[m.side_b_entry_id] : null,
     matchInfo: m.match_id ? (matchInfoMap[m.match_id] || null) : null,
   }));
+}
+
+// ★トーナメント表の表示に必要なものを一度に取得する。
+//   以前は「ブロック一覧 → 枠 → エントリー → 試合」と4回順番に待っていたのを、
+//   大会・種別の枠を1回で全部取り、ブロック一覧もそこから作ることで2回の待ちにした。
+async function getDrawBracketData(tournamentId, category, preferredBlock) {
+  const { data, error } = await fetchAllRows("draw_matches", "*", q => q
+    .eq("tournament_id", tournamentId).eq("category", category)
+    .order("round_no", { ascending: true }).order("slot_no", { ascending: true }).order("id"));
+  if (error) { console.error(error); return { labels: [], scope: null, rows: [] }; }
+  const all = data ?? [];
+  const labels = Array.from(new Set(all.map(r => r.block_label).filter(Boolean))).sort();
+  const scope = labels.length > 0 ? (preferredBlock && labels.includes(preferredBlock) ? preferredBlock : labels[0]) : null;
+  const scoped = all.filter(r => scope ? r.block_label === scope : r.block_label == null);
+  return { labels, scope, rows: await enrichDrawMatches(scoped) };
 }
 
 // draw_entries の作成・更新（対戦情報入力シートから呼ばれる）
@@ -5546,17 +5560,52 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     });
   }, [tournament?.name, individualResultFilter, individualSearch, individualRoundFilter, individualPairFilter]);
 
-  // ★silent=trueの時は一覧を「読み込み中...」で消さずに裏で再取得する（手動更新ボタン用）
-  const reload = useCallback((silent) => {
-    if (silent) setRefreshing(true); else setLoading(true);
-    Promise.all([getTournamentMatchesAndTeamMatches(tournament.name), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id)]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList]) => {
+  // ★前回開いたときの内容を大会ごとに覚えておき、次に開いたとき（試合を見て戻ってきたときなど）は
+  //   まずそれをすぐ表示して、裏で最新に差し替える（以前は戻るたびに「読み込み中...」で待たされていた）。
+  const cacheKey = `tournamentDetail:${tournament.id}`;
+  const applySnapshot = useCallback((snap) => {
+    setSchoolMap(snap.smap);
+    if (snap.myName) setMySchoolName(snap.myName);
+    setMatches(snap.matches);
+    setTeamMatches(snap.teamMatches);
+    setMatchStatusById(snap.statusMap);
+    if (snap.drawSummary) setDrawSummary(snap.drawSummary);
+    if (snap.aiRows) {
+      setAiAnalyzedMatchIds(new Set(snap.aiRows.map(r => r.match_id)));
+      const map = {};
+      snap.aiRows.forEach(r => { map[r.match_id] = r; });
+      setAiAnalysesRowMap(map);
+    }
+  }, []);
+  const updateSnapshotCache = (patch) => {
+    const cur = readScreenCache(cacheKey);
+    if (cur) writeScreenCache(cacheKey, { ...cur, ...patch });
+  };
+
+  // ★manual=true：右上の🔄ボタン（更新中の表示と「更新しました」を出す）
+  //   manual=false：前回の内容があれば画面はそのまま裏で更新、無ければ「読み込み中」を出す
+  const reload = useCallback((manual) => {
+    const hasCache = !!readScreenCache(cacheKey);
+    if (manual) setRefreshing(true); else if (!hasCache) setLoading(true);
+    const finish = () => {
+      if (manual) {
+        setRefreshing(false);
+        setRefreshToast(true);
+        setTimeout(() => setRefreshToast(false), 1600);
+      }
+      setLoading(false);
+    };
+    // ★ドローの有無（件数）も同時に取得する
+    const drawP = Promise.all([getDrawSummary(tournament.id, "team"), getDrawSummary(tournament.id, "individual")])
+      .then(([teamCount, indivCount]) => ({ team: teamCount, individual: indivCount }))
+      .catch(e => { console.error(e); return null; });
+    Promise.all([getTournamentMatchesAndTeamMatches(tournament.name), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id), drawP]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList, drawSummaryNow]) => {
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
-      setSchoolMap(smap);
       let myName = "";
       if (profile?.school_id) {
         const s = schools.find(s => s.id === profile.school_id);
-        if (s) { myName = s.name; setMySchoolName(s.name); }
+        if (s) myName = s.name;
       }
       // ★ドロー表で「結果だけ記録」した簡易記録はmatchesテーブルに行が作られないため、
       //   別途取得してこの大会の一覧・成績に合流させる。
@@ -5564,36 +5613,44 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       const simpleForThisTournament = simpleList.filter(m =>
         (m.players || []).some(p => p.club_name === myName)
       );
-      setMatches([...list, ...simpleForThisTournament]);
-      setTeamMatches(tList);
+      const statusMap = {};
+      list.forEach(m => { statusMap[m.id] = m.status; });
+      const prev = readScreenCache(cacheKey);
+      const snap = {
+        smap, myName, statusMap,
+        matches: [...list, ...simpleForThisTournament],
+        teamMatches: tList,
+        drawSummary: drawSummaryNow || prev?.drawSummary || null,
+        aiRows: prev?.aiRows || null,
+      };
+      writeScreenCache(cacheKey, snap);
+      applySnapshot(snap);
+      finish();
+
+      // AI分析の有無は画面を出したあとで取得する
       const teamGameMatchIds = tList.flatMap(tm => (tm.games || []).filter(g => g.match_id).map(g => g.match_id));
       const individualMatchIds = list.map(m => m.id);
       const allMatchIdsForAiCheck = Array.from(new Set([...teamGameMatchIds, ...individualMatchIds]));
       if (allMatchIdsForAiCheck.length > 0) {
         getAiAnalyses(allMatchIdsForAiCheck).then(rows => {
-          setAiAnalyzedMatchIds(new Set(rows.map(r => r.match_id)));
-          const map = {};
-          rows.forEach(r => { map[r.match_id] = r; });
-          setAiAnalysesRowMap(map);
+          applySnapshot({ ...snap, aiRows: rows });
+          updateSnapshotCache({ aiRows: rows });
         });
       }
-      const statusMap = {};
-      list.forEach(m => { statusMap[m.id] = m.status; });
-      setMatchStatusById(statusMap);
-      if (silent) {
-        setRefreshing(false);
-        setRefreshToast(true);
-        setTimeout(() => setRefreshToast(false), 1600);
-      } else {
-        setLoading(false);
-      }
+    }).catch(e => {
+      console.error(e);
+      finish();
+      if (manual) alert("更新に失敗しました。通信状態を確認してもう一度お試しください。");
     });
-    Promise.all([getDrawSummary(tournament.id, "team"), getDrawSummary(tournament.id, "individual")]).then(([teamCount, indivCount]) => {
-      setDrawSummary({ team: teamCount, individual: indivCount });
-    });
-  }, [tournament.name, tournament.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tournament.name, tournament.id, applySnapshot]);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    const cached = readScreenCache(cacheKey);
+    if (cached) { applySnapshot(cached); setLoading(false); }
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload]);
 
   // ★団体戦にドローが無い場合は「ドロー表」ボタン自体を出さないため、
   //   デフォルトの表示を自動で「試合カード」に切り替える
@@ -8539,10 +8596,16 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 // トーナメント表（ドローの実データ表示）
 // ============================================================
 function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMatch, autoOpenBulkImport, onAutoOpened }) {
-  const [blockLabels, setBlockLabels] = useState([]);
-  const [selectedBlock, setSelectedBlock] = useState(null); // null = ブロックなし("すべて"扱い)
-  const [drawMatches, setDrawMatches] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // ★前回開いたときのトーナメント表を覚えておき、次に開いたときはまずそれを表示して裏で最新にする
+  const drawCacheKey = `drawBracket:${tournament.id}:${category}`;
+  const [initialDrawCache] = useState(() => readScreenCache(drawCacheKey));
+  const [blockLabels, setBlockLabels] = useState(initialDrawCache?.labels ?? []);
+  const [selectedBlock, setSelectedBlock] = useState(initialDrawCache?.scope ?? null); // null = ブロックなし("すべて"扱い)
+  const [drawMatches, setDrawMatches] = useState(initialDrawCache?.rows ?? []);
+  const [loading, setLoading] = useState(!initialDrawCache);
+  // ★再読み込みしても、今見ているブロックのままにする（以前は保存するたびに最初のブロックに戻っていた）
+  const selectedBlockRef = useRef(selectedBlock);
+  selectedBlockRef.current = selectedBlock;
   const [editingSlot, setEditingSlotRaw] = useState(null); // タップ中のdrawMatch
   const [startingId, setStartingId] = useState(null);
   const [advancingId, setAdvancingId] = useState(null);
@@ -8707,13 +8770,13 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
   };
 
   const reload = useCallback(async () => {
-    setLoading(true);
-    const labels = await getDrawBlockLabels(tournament.id, category);
+    // ★前回の内容を表示中なら「読み込み中」にせず、裏で差し替える
+    if (!readScreenCache(drawCacheKey)) setLoading(true);
+    const { labels, scope, rows } = await getDrawBracketData(tournament.id, category, selectedBlockRef.current);
     setBlockLabels(labels);
-    const scope = labels.length > 0 ? (selectedBlock && labels.includes(selectedBlock) ? selectedBlock : labels[0]) : null;
     setSelectedBlock(scope);
-    const rows = await getDrawMatchesWithEntries(tournament.id, category, scope);
     setDrawMatches(rows);
+    writeScreenCache(drawCacheKey, { labels, scope, rows });
     setLoading(false);
 
     // 編集中だった枠が記録されていれば、対戦情報入力シートを自動で復元する
@@ -8750,6 +8813,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     setLoading(true);
     const rows = await getDrawMatchesWithEntries(tournament.id, category, label);
     setDrawMatches(rows);
+    writeScreenCache(drawCacheKey, { labels: blockLabels, scope: label, rows });
     setLoading(false);
   };
 
