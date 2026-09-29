@@ -172,10 +172,56 @@ const PROFILE_CACHE_MS      = 5 * 60 * 1000;  // 自分のプロフィール：5
 let _matchListCache = null;      // { at, promise }
 const _fullMatchCache = new Map(); // matchId -> { at, data }
 let _profileCache = null;        // { at, promise }
+// ★選手マスター：試合作成・試合を開く・一覧など多くの画面で毎回全件を取り直していたため、2分間だけ覚えておく。
+//   自分が選手を追加・編集・削除したときは、その場で捨てて取り直す。
+const ROSTER_CACHE_MS       = 2 * 60 * 1000;
+let _rosterCache = null;         // { at, promise }
+// ★最後に取得した全試合一覧（学校名・会場名の候補づくりに使い回す。候補なので少し古くても問題ない）
+let _lastMatchListData = null;   // { at, list }
+// ★作成した直後の試合。記録画面を開くときに、サーバーから取り直さずこれを使う（1回だけ）
+const _primedMatches = new Map(); // matchId -> { at, data }
+// ★個人戦の試合ID（団体戦の番手ではないと分かっている試合）。試合を開く前の問い合わせを省くために使う
+let _knownIndividualMatchIds = new Set();
 function clearDataCaches() {
   _matchListCache = null;
   _fullMatchCache.clear();
   _profileCache = null;
+  _rosterCache = null;
+  _lastMatchListData = null;
+  _primedMatches.clear();
+  _knownIndividualMatchIds = new Set();
+}
+function invalidateRosterCache() { _rosterCache = null; }
+function primeMatch(data) { if (data?.id) _primedMatches.set(data.id, { at: Date.now(), data }); }
+function takePrimedMatch(id) {
+  const hit = _primedMatches.get(id);
+  _primedMatches.delete(id);
+  return (hit && Date.now() - hit.at < 60 * 1000) ? hit.data : null;
+}
+
+// ★Supabase（PostgREST）は標準設定だと1回の取得で最大1000行までしか返さない。
+//   件数が多いテーブルを「全部」取りたいときは、この関数で何回かに分けて取得する。
+//   1回目で総件数を聞き、残りのページは同時に取りに行く（待ち時間はほぼ2回分で済む）。
+//   apply には絞り込み・並び順を書く（並び順は必ず一意になるよう id などを最後に足すこと）。
+const FETCH_PAGE_SIZE = 1000;
+async function fetchAllRows(table, columns, apply = (q) => q) {
+  const first = await apply(supabase.from(table).select(columns, { count: "exact" })).range(0, FETCH_PAGE_SIZE - 1);
+  if (first.error) return { data: null, error: first.error };
+  const rows = [...(first.data ?? [])];
+  const total = first.count ?? rows.length;
+  if (rows.length === 0 || total <= rows.length) return { data: rows, error: null };
+  // サーバー側の上限が1000より小さい設定でも取りこぼさないよう、実際に返ってきた件数を1ページの大きさにする
+  const step = rows.length;
+  const pages = [];
+  for (let from = step; from < total; from += step) {
+    pages.push(apply(supabase.from(table).select(columns)).range(from, from + step - 1));
+  }
+  const results = await Promise.all(pages);
+  for (const r of results) {
+    if (r.error) return { data: null, error: r.error };
+    rows.push(...(r.data ?? []));
+  }
+  return { data: rows, error: null };
 }
 // ★試合を保存・削除したときに呼ぶ（その試合の明細と、全試合一覧のキャッシュを捨てる）
 function invalidateMatchCaches(matchId) {
@@ -1056,13 +1102,13 @@ async function getMatchesCached() {
 }
 
 async function getMatches() {
-  const { data, error } = await supabase
-    .from("matches")
-    .select("*")
+  // ★1000件を超えても全試合を取れるよう、分けて取得する（以前は1000件で打ち切られていた）
+  const { data, error } = await fetchAllRows("matches", "*", q => q
     .is("deleted_at", null)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id"));
   if (error) { console.error(error); return []; }
-  if (!data || data.length === 0) return [];
+  if (!data || data.length === 0) { _lastMatchListData = { at: Date.now(), list: [] }; return []; }
 
   const matchIds = data.map(m => m.id);
   const CHUNK_SIZE = 100;
@@ -1085,7 +1131,9 @@ async function getMatches() {
     a.team === b.team ? (a.order_num ?? 0) - (b.order_num ?? 0) : (a.team < b.team ? -1 : 1)
   ));
 
-  return data.map(m => rowToMatchSummary(m, playersByMatch[m.id] ?? [], []));
+  const list = data.map(m => rowToMatchSummary(m, playersByMatch[m.id] ?? [], []));
+  _lastMatchListData = { at: Date.now(), list };
+  return list;
 }
 
 // ★ホーム画面専用の軽量データ取得。
@@ -1303,9 +1351,12 @@ async function resolveRecorderFields(match, user) {
 }
 
 // 試合1件を関連テーブルごと保存（新規・更新どちらも対応）
-async function saveMatch(match) {
+// ★isNew: 今まさに新しく作る試合（IDを新しく発行したばかりで、DBにまだ何も無い）ときだけ true にする。
+//   その場合は「既存の行の確認・削除」を全部省き、試合と選手を入れるだけにする（通信が約10往復→2往復）。
+async function saveMatch(match, { isNew = false } = {}) {
   invalidateMatchCaches(match?.id); // ★分析画面のキャッシュに古い内容が残らないように
-  const { data: { user } } = await supabase.auth.getUser();
+  // ★ログイン確認は端末内の情報で行う（以前は毎回サーバーに問い合わせていた。書き込みの権限はRLSで守られている）
+  const user = await getAuthUserFast();
   if (!user) throw new Error("ログインしていません");
 
   const matchRow = {
@@ -1344,6 +1395,20 @@ async function saveMatch(match) {
     ({ error: mErr } = await supabase.from("matches").upsert(rowWithoutVideo));
   }
   if (mErr) throw mErr;
+
+  // ★新しく作る試合（まだゲームが無い）は、選手を入れるだけで保存完了
+  if (isNew && !(match.games?.length)) {
+    if (match.players?.length) {
+      const playerRows = match.players.map(p => ({
+        id: p.id, match_id: match.id, team: p.team, player_name: p.player_name,
+        club_name: p.club_name || null, position: p.position || null, order_num: p.order_num,
+        entry_no: p.entry_no || null,
+      }));
+      const { error: pErr } = await supabase.from("match_players").insert(playerRows);
+      if (pErr) throw pErr;
+    }
+    return matchRow;
+  }
 
   // 選手情報：一旦削除してから入れ直す（シンプルで確実な方式）
   // ★安全装置：本来選手が登録されているはずの試合で、保存内容の選手が0人の場合は
@@ -1460,6 +1525,7 @@ async function saveMatch(match) {
   } else {
     console.error("saveMatch: 既存のgamesがあるのに保存内容が空のため、削除処理をスキップしました。match_id=", match.id);
   }
+  return matchRow;
 }
 
 // ★誤削除対策のため、即時完全削除ではなくゴミ箱行き（論理削除）にする
@@ -1520,10 +1586,18 @@ async function permanentlyDeleteMatch(id) {
 // ============================================================
 // 複数試合分のAI分析をまとめて取得（一覧のバッジ表示・AI分析タブ用）
 async function getAiAnalyses(matchIds) {
-  if (!matchIds || matchIds.length === 0) return [];
-  const { data, error } = await supabase.from("ai_analyses").select("*").in("match_id", matchIds).is("deleted_at", null);
-  if (error) { console.error(error); return []; }
-  return data ?? [];
+  const ids = Array.from(new Set((matchIds ?? []).filter(Boolean)));
+  if (ids.length === 0) return [];
+  // ★試合IDが多いとリクエストのURLが長くなりすぎて失敗するため、分けて同時に取得する
+  const CHUNK = 150;
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+  const results = await Promise.all(chunks.map(c =>
+    supabase.from("ai_analyses").select("*").in("match_id", c).is("deleted_at", null)
+  ));
+  const rows = [];
+  results.forEach(({ data, error }) => { if (error) console.error(error); rows.push(...(data ?? [])); });
+  return rows;
 }
 async function saveAiAnalysis({ id, match_id, youtube_url, comment_text }) {
   const payload = {
@@ -1595,7 +1669,7 @@ async function startScheduledMatch(id, firstServer, orderA, orderB, recvA, recvB
   if (recvA) updates.receive_order_a = recvA; // ★レシーブの1人目（サーブとは別）
   if (recvB) updates.receive_order_b = recvB;
   // ★試合を開始した人がそのまま記録者になる（作成者とは別に管理する）
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserFast(); // ★端末内の情報で確認（サーバーへの問い合わせを省く）
   if (user) {
     const profile = await getMyProfile();
     updates.recorder_id = user.id;
@@ -1755,6 +1829,7 @@ async function uploadTournamentGuideline(file) {
 
 async function saveMyProfile(profile) {
   _profileCache = null;
+  invalidateRosterCache(); // ★承認状態が変わると見える選手が変わるため
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("ログインしていません");
   if (!profile.school_id) throw new Error("学校を選択してください。");
@@ -1984,8 +2059,8 @@ async function deleteSchoolMaster(id) {
 // ============================================================
 // 選手マスター（同じ学校のメンバーで共有）
 // ============================================================
-async function getPlayerRoster() {
-  const { data, error } = await supabase.from("players").select("*").order("player_name");
+async function getPlayerRosterFresh() {
+  const { data, error } = await fetchAllRows("players", "*", q => q.order("player_name").order("id"));
   if (error) {
     console.error(error);
     // ★以前はエラー時に空配列を返しており、呼び出し側が「選手0人」と誤判定して
@@ -1994,34 +2069,48 @@ async function getPlayerRoster() {
   }
   return data;
 }
-
-// 試合保存時に選手を選手マスターへ自動登録する
-// 同じ名前がすでにある場合は「田中 蓮2」「田中 蓮3」のように連番をつける
-async function autoRegisterPlayerToRoster(playerName, teamName, isOwnTeam) {
-  if (!playerName?.trim()) return;
+// ★2分間は前回の結果を使い回す（fresh:true なら必ず取り直す）。
+//   0件のとき・失敗したときは覚えない（登録直後など、まだ見られない状態の結果を使い回さないため）。
+async function getPlayerRoster({ fresh = false } = {}) {
+  const now = Date.now();
+  if (!fresh && _rosterCache && now - _rosterCache.at < ROSTER_CACHE_MS) {
+    return (await _rosterCache.promise).slice();
+  }
+  const promise = getPlayerRosterFresh();
+  _rosterCache = { at: now, promise };
   try {
-    const roster = await getPlayerRoster();
-    const baseName = playerName.trim();
-    // ★品質改善：空白の有無だけが違う同一人物を別選手として重複登録しないよう、
-    // 既存名との比較は空白を除去して行う
-    const existingNames = new Set(roster.map(p => normalizePlayerName(p.player_name)));
-    // すでに（空白の違いを除いて）完全一致する名前がある場合はスキップ
-    if (existingNames.has(normalizePlayerName(baseName))) return;
-    // 連番チェック（「田中 蓮2」「田中 蓮3」などがある場合に次の番号を使う）
-    let finalName = baseName;
-    let n = 2;
-    while (existingNames.has(normalizePlayerName(finalName))) {
-      finalName = `${baseName}${n}`;
-      n++;
-    }
-    await savePlayer({ player_name: finalName, is_own_team: isOwnTeam, team_name: teamName || null });
+    const list = await promise;
+    if (list.length === 0 && _rosterCache?.promise === promise) _rosterCache = null;
+    return list.slice();
   } catch (e) {
-    console.error("選手マスター自動登録エラー:", e);
+    if (_rosterCache?.promise === promise) _rosterCache = null;
+    throw e;
+  }
+}
+
+// ★試合を作ったときに、まだ選手マスターにいない選手をまとめて登録する。
+//   以前は選手ごとに選手マスター全件を取り直し（4人なら4回）、しかも終わるまで記録画面に進めなかった。
+//   選手マスターの取得は1回にし、呼び出し側は完了を待たずに先へ進む。
+async function autoRegisterPlayersToRoster(entries) {
+  let roster;
+  try { roster = await getPlayerRoster(); } catch (e) { console.error("選手マスター自動登録エラー:", e); return; }
+  // ★空白の有無だけが違う同一人物を別選手として重複登録しないよう、比較は空白を除去して行う
+  const existingNames = new Set(roster.map(p => normalizePlayerName(p.player_name)));
+  for (const { name, teamName, isOwnTeam } of entries) {
+    const baseName = (name || "").trim();
+    if (!baseName || existingNames.has(normalizePlayerName(baseName))) continue;
+    try {
+      await savePlayer({ player_name: baseName, is_own_team: isOwnTeam, team_name: teamName || null });
+      existingNames.add(normalizePlayerName(baseName));
+    } catch (e) {
+      console.error("選手マスター自動登録エラー:", e);
+    }
   }
 }
 
 async function savePlayer(player) {
-  const { data: { user } } = await supabase.auth.getUser();
+  invalidateRosterCache();
+  const user = await getAuthUserFast();
   if (!user) throw new Error("ログインしていません");
   // school_id / gender_category は呼び出し元から明示的に渡された値を優先する
   // （新規登録フローでは、この時点でまだ自分のプロフィールがDBに保存されていないことがあるため）
@@ -2045,6 +2134,7 @@ async function savePlayer(player) {
     created_by: user.id,
   };
   const { error } = await supabase.from("players").upsert(row);
+  invalidateRosterCache();
   if (error) throw error;
   return row;
 }
@@ -2059,6 +2149,7 @@ async function savePlayer(player) {
 // 　戻り値は更新した試合数（0件やエラーの場合は原因を呼び出し元で分かるようにする）。
 async function renamePlayerEverywhere(oldName, newName, team, clubName) {
   invalidateMatchCaches();
+  invalidateRosterCache();
   if (!oldName || !newName || oldName === newName) return 0;
   let q = supabase.from("match_players").select("id, match_id, club_name").eq("player_name", oldName);
   if (team) q = q.eq("team", team);
@@ -2079,6 +2170,7 @@ async function renamePlayerEverywhere(oldName, newName, team, clubName) {
 }
 
 async function deletePlayerFromRoster(id) {
+  invalidateRosterCache();
   const { error } = await supabase.rpc("delete_player_and_unlink", { p_player_id: id });
   if (error) throw error;
 }
@@ -2090,23 +2182,38 @@ async function deletePlayerFromRoster(id) {
 // 都道府県で絞り込めるよう、学校マスター由来のものは prefecture を保持する
 // ============================================================
 // 過去の試合に入力された会場名の候補一覧を取得
+// ★候補づくりには、直近10分以内に取得した全試合一覧があればそれを使い回す（試合一覧画面から来た場合はほぼこれ）。
+//   以前は候補のためだけに全試合・全出場選手を毎回取得しており、しかも1000行で打ち切られていた。
+const KNOWN_LIST_REUSE_MS = 10 * 60 * 1000;
+function recentMatchList() {
+  return (_lastMatchListData && Date.now() - _lastMatchListData.at < KNOWN_LIST_REUSE_MS) ? _lastMatchListData.list : null;
+}
 async function getKnownVenues() {
   try {
-    const { data, error } = await supabase.from("matches").select("venue");
-    if (error) { console.error("venue fetch error:", error); return []; }
-    return [...new Set((data ?? []).map(r => r.venue).filter(Boolean))].sort();
+    const recent = recentMatchList();
+    let venues;
+    if (recent) {
+      venues = recent.map(m => m.venue);
+    } else {
+      const { data, error } = await fetchAllRows("matches", "venue", q => q.not("venue", "is", null).order("id"));
+      if (error) { console.error("venue fetch error:", error); return []; }
+      venues = (data ?? []).map(r => r.venue);
+    }
+    return [...new Set(venues.filter(Boolean))].sort();
   } catch(e) { console.error("getKnownVenues exception:", e); return []; }
 }
 
 async function getKnownSchools() {
-  const [{ data: schoolsData, error: schoolsErr }, { data: cpData, error: cpErr }] = await Promise.all([
-    supabase.from("schools").select("name, prefecture"),
-    supabase.from("match_players").select("club_name"),
+  const recent = recentMatchList();
+  const [schoolsData, clubNames] = await Promise.all([
+    getSchools(),
+    recent
+      ? Promise.resolve(recent.flatMap(m => (m.players || []).map(p => p.club_name)))
+      : fetchAllRows("match_players", "club_name", q => q.not("club_name", "is", null).order("id"))
+          .then(({ data, error }) => { if (error) console.error(error); return (data ?? []).map(r => r.club_name); }),
   ]);
-  if (schoolsErr) console.error(schoolsErr);
-  if (cpErr) console.error(cpErr);
   const map = new Map(); // name -> prefecture（学校マスター由来を優先）
-  (cpData ?? []).forEach(r => { if (r.club_name && !map.has(r.club_name)) map.set(r.club_name, null); });
+  (clubNames ?? []).forEach(name => { if (name && !map.has(name)) map.set(name, null); });
   (schoolsData ?? []).forEach(r => { if (r.name) map.set(r.name, r.prefecture || null); });
   return Array.from(map.entries())
     .map(([name, prefecture]) => ({ name, prefecture }))
@@ -2116,40 +2223,29 @@ async function getKnownSchools() {
 // ============================================================
 // 団体戦データ層
 // ============================================================
-async function getTeamMatches() {
-  const { data, error } = await supabase
-    .from("team_matches")
-    .select("*")
-    .is("deleted_at", null)
-    .order("match_date", { ascending: false });
-  if (error) { console.error(error); return []; }
-  if (!data || data.length === 0) return [];
-
-  const ids = data.map(m => m.id);
-  const { data: games, error: gErr } = await supabase
-    .from("team_match_games")
-    .select("*")
-    .in("team_match_id", ids)
-    .order("order_num");
-  if (gErr) console.error(gErr);
-
+// ★団体戦と番手を「同時に」取得する（以前は団体戦→番手→動画リンクと3回順番に待っていた）。
+//   番手は団体戦のIDで絞らず、見えるものを全部取る（見える範囲はRLSでチーム内に限られている）。
+//   allGames には削除済みの団体戦の番手も含まれる（個人戦一覧から団体戦の番手を除くのに使う）。
+async function getTeamMatchesBase() {
+  const [tm, tmg] = await Promise.all([
+    fetchAllRows("team_matches", "*", q => q.is("deleted_at", null).order("match_date", { ascending: false }).order("id")),
+    fetchAllRows("team_match_games", "*", q => q.order("order_num").order("id")),
+  ]);
+  if (tm.error) { console.error(tm.error); return { teamMatches: [], allGames: [] }; }
+  if (tmg.error) console.error(tmg.error);
+  const allGames = tmg.data ?? [];
   const gamesByTeamMatch = {};
-  (games ?? []).forEach(g => { (gamesByTeamMatch[g.team_match_id] ??= []).push(g); });
+  allGames.forEach(g => { (gamesByTeamMatch[g.team_match_id] ??= []).push(g); });
+  const teamMatches = (tm.data ?? []).map(m => ({ ...m, games: gamesByTeamMatch[m.id] ?? [] }));
+  return { teamMatches, allGames };
+}
 
-  // ★動画リンクは団体戦そのものではなく、各1戦（bout＝matchesテーブルの行）に付いている。
-  //   団体戦一覧のカードに🎥バッジを出すため、まとめて取得して束ねておく。
-  const boutMatchIds = (games ?? []).map(g => g.match_id).filter(Boolean);
-  const videoLinksByMatch = {};
-  if (boutMatchIds.length > 0) {
-    const { data: boutMatches, error: vErr } = await supabase
-      .from("matches").select("id, video_links").in("id", boutMatchIds);
-    if (vErr) console.error(vErr);
-    (boutMatches ?? []).forEach(m => { videoLinksByMatch[m.id] = normalizeVideoLinks(m.video_links); });
-  }
-
-  return data.map(m => {
-    const gamesForThis = gamesByTeamMatch[m.id] ?? [];
-    // ★モーダルでそのまま一覧表示できるよう、どの番手の動画かをタイトルに含めて1本の配列にまとめる
+// ★動画リンクは団体戦そのものではなく、各1戦（bout＝matchesテーブルの行）に付いている。
+//   団体戦一覧のカードに🎥バッジを出すため、番手ごとの動画を束ねる。
+//   videoLinksByMatch: 試合ID -> 動画リンク配列
+function attachTeamVideoLinks(teamMatches, videoLinksByMatch) {
+  return teamMatches.map(m => {
+    const gamesForThis = m.games ?? [];
     const videoLinks = gamesForThis.flatMap(g =>
       (g.match_id ? (videoLinksByMatch[g.match_id] ?? []) : []).map(v => ({
         ...v, title: `${g.order_num}番手 ${v.title || "動画"}`,
@@ -2157,6 +2253,30 @@ async function getTeamMatches() {
     );
     return { ...m, games: gamesForThis, video_links: videoLinks };
   });
+}
+
+async function getTeamMatches() {
+  const { teamMatches } = await getTeamMatchesBase();
+  if (teamMatches.length === 0) return [];
+  const boutMatchIds = teamMatches.flatMap(m => m.games.map(g => g.match_id)).filter(Boolean);
+  const videoLinksByMatch = {};
+  const CHUNK = 150;
+  const chunks = [];
+  for (let i = 0; i < boutMatchIds.length; i += CHUNK) chunks.push(boutMatchIds.slice(i, i + CHUNK));
+  const results = await Promise.all(chunks.map(ids => supabase.from("matches").select("id, video_links").in("id", ids)));
+  results.forEach(({ data: rows, error: vErr }) => {
+    if (vErr) console.error(vErr);
+    (rows ?? []).forEach(m => { videoLinksByMatch[m.id] = normalizeVideoLinks(m.video_links); });
+  });
+  return attachTeamVideoLinks(teamMatches, videoLinksByMatch);
+}
+
+// ★団体戦の作成画面の候補（大会名・回戦・コート・区分）だけを取る。以前は候補のために全団体戦を番手・動画まで取得していた。
+async function getTeamMatchSuggestions() {
+  const { data, error } = await fetchAllRows("team_matches", "tournament_name, round, court_number, my_team_division",
+    q => q.is("deleted_at", null).order("id"));
+  if (error) { console.error(error); return []; }
+  return data ?? [];
 }
 
 async function getTeamMatch(id) {
@@ -2579,7 +2699,11 @@ async function permanentlyDeleteTournament(id) {
 
 // ★ゴミ箱は24時間で自動的に空にする。バックグラウンド処理は無いため、
 // トップ画面の読み込みやゴミ箱を開いたタイミングで、期限切れのものを完全削除する。
+// ★一覧を開くたびに3回の削除を送っていたため、10分に1回までにする
+let _lastTrashPurgeAt = 0;
 async function purgeExpiredTrash() {
+  if (Date.now() - _lastTrashPurgeAt < 10 * 60 * 1000) return;
+  _lastTrashPurgeAt = Date.now();
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   try {
     await Promise.all([
@@ -3036,7 +3160,7 @@ async function createMatchFromDrawSlot(drawMatch, tournamentName, roundLabel) {
     is_younger: true,
     players,
   };
-  await saveMatch(match);
+  await saveMatch(match, { isNew: true });
 
   // 2) match_id が null のときだけ更新する（他の端末が先に作成していたら0件になる）
   //    ★あわせて「結果だけ記録」の内容が残っていたら消す（実際の試合＝正としてスコアを付け直すため）
@@ -3123,7 +3247,7 @@ async function createWalkoverMatch(drawMatch, tournamentName, roundLabel, winner
     is_younger: true,
     players,
   };
-  await saveMatch(match);
+  await saveMatch(match, { isNew: true });
 
   const { data: updatedRows, error: updateErr } = await supabase
     .from("draw_matches")
@@ -3999,10 +4123,14 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // ★一覧に出ている個人戦の試合と、団体戦の各番手（bout）について、AI分析が登録されている
   //   ものだけmatch_id -> 行 のマップを作る。団体戦カードの🤖バッジにも同じマップを使う。
   //   一覧のカードにAIマークを出すためだけの軽い取得なので、内容（コメント本文など）は使わず存在確認用。
-  useEffect(() => {
+  // ★裏での更新のたびに毎回問い合わせていたため、対象の試合が変わったときだけ取り直す
+  const aiTargetIdsKey = useMemo(() => {
     const individualIds = allMatches.map(m => m.id);
     const teamBoutIds = allTeamMatches.flatMap(tm => (tm.games||[]).filter(g=>g.match_id).map(g=>g.match_id));
-    const ids = Array.from(new Set([...individualIds, ...teamBoutIds]));
+    return Array.from(new Set([...individualIds, ...teamBoutIds])).sort().join(",");
+  }, [allMatches, allTeamMatches]);
+  useEffect(() => {
+    const ids = aiTargetIdsKey ? aiTargetIdsKey.split(",") : [];
     if (ids.length === 0) { setAiAnalysesMap({}); return; }
     let alive = true;
     getAiAnalyses(ids).then(rows => {
@@ -4012,24 +4140,32 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       setAiAnalysesMap(map);
     });
     return () => { alive = false; };
-  }, [allMatches, allTeamMatches]);
+  }, [aiTargetIdsKey]);
 
   const reload = useCallback((opts) => {
     const silent = opts === true || opts?.silent === true; // 裏での更新（画面を「読み込み中」にしない）
     if (!silent) setLoading(true);
-    purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除
+    purgeExpiredTrash(); // ★期限切れ（24時間経過）のゴミ箱を裏で自動削除（10分に1回まで）
+    // ★以前は団体戦の取得が「団体戦→番手→動画リンク」と3回の順番待ちになっており、
+    //   さらに番手の一覧をもう1回別に取得していた。団体戦と番手は同時に取得し、
+    //   動画リンクはすでに取得している全試合のデータから作る。
     Promise.all([
       getMatches(),
-      getTeamMatches(),
+      getTeamMatchesBase(),
       getSchools(),
       getTournaments(),
-      supabase.from("team_match_games").select("match_id").not("match_id", "is", null),
-    ]).then(([list, tList, schools, tnList, tmGamesRes]) => {
+    ]).then(([list, { teamMatches, allGames }, schools, tnList]) => {
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
-      const teamMatchIds = new Set(((tmGamesRes && tmGamesRes.data) || []).map(g => g.match_id).filter(Boolean));
+      const videoLinksByMatch = {};
+      list.forEach(m => { videoLinksByMatch[m.id] = m.video_links || []; });
+      const tList = attachTeamVideoLinks(teamMatches, videoLinksByMatch);
+      const teamMatchIds = new Set(allGames.map(g => g.match_id).filter(Boolean));
       // 団体戦に紐付いたmatch_idを個人戦一覧から除外
       const individual = list.filter(m => !teamMatchIds.has(m.id));
+      _knownIndividualMatchIds = new Set(individual.map(m => m.id));
+      // ★分析画面・候補づくりでも同じ全試合一覧を使い回せるようにしておく
+      if (list.length > 0) _matchListCache = { at: Date.now(), promise: Promise.resolve(list) };
       const snapshot = { list, individual, tList, smap, tnList };
       writeScreenCache("matchList", snapshot);
       applyData(snapshot);
@@ -4048,17 +4184,18 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   useEffect(() => { getPlayerRoster().then(setPlayerRoster); }, []); // ★参加選手一覧ポップアップ用
   useEffect(() => {
     (async () => {
-      const p = await getMyProfile();
+      // ★プロフィール・選手マスター・学校一覧を同時に取得する（以前は3回順番に待っていた）
+      const [p, roster, schools] = await Promise.all([
+        getMyProfile(), getPlayerRoster().catch(() => []), getSchools(),
+      ]);
       setIsAdmin(!!p?.is_admin);
       setMyId(p?.id ?? null);
       if (p?.linked_player_id) {
-        const roster = await getPlayerRoster();
         const found = roster.find(r => r.id === p.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
       }
       if (p?.school_id) {
         setMySchoolId(p.school_id);
-        const schools = await getSchools();
         const s = schools.find(s => s.id === p.school_id);
         if (s) setMySchoolName(s.name);
       }
@@ -10966,7 +11103,8 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
   const [oppPrefFilter, setOppPrefFilter] = useState("");
 
   useEffect(() => {
-    Promise.all([getSchools(), getKnownSchools(), getKnownVenues(), getMyProfile(), getTeamMatches()]).then(([sWithId, sForUI, v, p, tms]) => {
+    // ★候補（大会名・回戦など）のためだけに全団体戦を番手・動画まで取得していたのを、必要な項目だけにした
+    Promise.all([getSchools(), getKnownSchools(), getKnownVenues(), getMyProfile(), getTeamMatchSuggestions()]).then(([sWithId, sForUI, v, p, tms]) => {
       setSchools(sForUI); // SchoolField用（名前リスト）
       setSchoolsWithId(sWithId); // id解決用
       setVenues(v);
@@ -15486,7 +15624,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
         ...ordersFor(swap),
       };
-      await saveMatch(match);
+      await saveMatch(match, { isNew: !scheduledId });
       setScheduledId(mid);
       onScheduled && onScheduled();
     } catch(e) {
@@ -15595,15 +15733,17 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
         status:"active", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
         ...ordersFor(swap),
       };
-      await saveMatch(match);
+      const savedRow = await saveMatch(match, { isNew: true });
+      // ★記録画面を開くときにサーバーから取り直さなくて済むよう、今保存した内容を渡しておく
+      primeMatch(rowToMatchFull({ ...match, ...savedRow }, match.players, [], [], []));
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
-      const autoRegisterTasks = [
-        autoRegisterPlayerToRoster(fAP1.trim(), fAClub.trim(), true),
-        ...(isDoubles && fAP2.trim() ? [autoRegisterPlayerToRoster(fAP2.trim(), fAClub.trim(), true)] : []),
-        ...(fBP1.trim() ? [autoRegisterPlayerToRoster(fBP1.trim(), fBClub.trim(), false)] : []),
-        ...(isDoubles && fBP2.trim() ? [autoRegisterPlayerToRoster(fBP2.trim(), fBClub.trim(), false)] : []),
-      ];
-      await Promise.all(autoRegisterTasks);
+      // ★完了を待たずに記録画面へ進む（以前は4人分の登録が終わるまで画面が切り替わらなかった）
+      autoRegisterPlayersToRoster([
+        { name: fAP1, teamName: fAClub.trim(), isOwnTeam: true },
+        ...(isDoubles && fAP2.trim() ? [{ name: fAP2, teamName: fAClub.trim(), isOwnTeam: true }] : []),
+        ...(fBP1.trim() ? [{ name: fBP1, teamName: fBClub.trim(), isOwnTeam: false }] : []),
+        ...(isDoubles && fBP2.trim() ? [{ name: fBP2, teamName: fBClub.trim(), isOwnTeam: false }] : []),
+      ]);
       onSave(mid);
     } catch (e) {
       alert("保存エラー: " + JSON.stringify({msg: e?.message, code: e?.code, details: e?.details, hint: e?.hint}));
@@ -15894,7 +16034,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
                   status:"scheduled", match_score_a:0, match_score_b:0, memo:"", court_number:courtNumber||null, is_younger:isYounger, players, games:[],
                   ...ordersFor(false),
                 };
-                await saveMatch(match);
+                await saveMatch(match, { isNew: true });
                 onSavePairOnly(mid, { aP1: aP1.trim(), aP2: aP2.trim(), bP1: bP1.trim(), bP2: bP2.trim() });
               } catch(e) {
                 alert("保存エラー: " + (e.message || e));
@@ -16018,8 +16158,10 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
       try {
         // ★試合データ・ログイン中のユーザー・（団体戦なら）番手の記録者を同時に取得する。
         //   以前は「試合＋ユーザー」→「番手の記録者」と順番に待っていたため、開くまでに時間がかかっていた。
+        // ★作成した直後の試合は、保存した内容をそのまま使う（サーバーからの取り直しを省く）
+        const primed = takePrimedMatch(matchId);
         const [m, user, tmgRes] = await Promise.all([
-          getMatch(matchId),
+          primed ? Promise.resolve(primed) : getMatch(matchId),
           getAuthUserFast(),
           teamMatchId
             ? supabase.from("team_match_games").select("recorder_id, status").eq("match_id", matchId).single()
@@ -19380,7 +19522,8 @@ function PlayerRosterScreen({ onBack }) {
 
   const reload = useCallback(() => {
     setLoading(true);
-    getPlayerRoster().then(list => { setPlayers(list); setLoading(false); });
+    // ★選手マスターの管理画面では、ほかの人の変更も含めて必ず最新を表示する
+    getPlayerRoster({ fresh: true }).then(list => { setPlayers(list); setLoading(false); });
   }, []);
 
   useEffect(() => {
@@ -21166,7 +21309,9 @@ export default function App() {
   //   これを通さずに一律 screen="record" にすると、団体戦の記録者ロック（recorder_id）判定がずれて
   //   本来の記録者なのに観戦モード（閲覧のみ）になってしまう不具合が起きる。
   async function openMatchSmart(id, { prevScreen: ps, listMatchMode: lmm } = {}) {
-    const { data: tmg } = await supabase.from("team_match_games").select("team_match_id, order_num").eq("match_id", id).maybeSingle();
+    // ★試合一覧で「個人戦」と分かっている試合は、団体戦かどうかの問い合わせを省いてすぐ開く
+    const tmg = _knownIndividualMatchIds.has(id) ? null
+      : (await supabase.from("team_match_games").select("team_match_id, order_num").eq("match_id", id).maybeSingle()).data;
     if (tmg) {
       setTeamMatchId(tmg.team_match_id);
       setTeamMatchOrderNum(tmg.order_num);
