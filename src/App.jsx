@@ -212,6 +212,51 @@ function takePrimedMatch(id) {
 //   1回目で総件数を聞き、残りのページは同時に取りに行く（待ち時間はほぼ2回分で済む）。
 //   apply には絞り込み・並び順を書く（並び順は必ず一意になるよう id などを最後に足すこと）。
 const FETCH_PAGE_SIZE = 1000;
+// ============================================================
+// ★処理時間の計測表示（調査用）。URLに ?perf=1 を付けて開くとON、?perf=0 でOFF。
+//   ONのときだけ画面下に「どの処理に何ミリ秒かかったか」を表示する。OFFのときは何もしない。
+// ============================================================
+const PERF_ON = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search).get("perf");
+    if (q === "1") localStorage.setItem("perfDebug", "1");
+    if (q === "0") localStorage.removeItem("perfDebug");
+    return localStorage.getItem("perfDebug") === "1";
+  } catch { return false; }
+})();
+let _perfT0 = 0;
+const _perfLines = [];
+function perfStart(label) {
+  if (!PERF_ON) return;
+  _perfT0 = performance.now();
+  _perfLines.length = 0;
+  perfLog(`▶ ${label}`);
+}
+function perfLog(msg) {
+  if (!PERF_ON) return;
+  const t = _perfT0 ? Math.round(performance.now() - _perfT0) : 0;
+  _perfLines.push(`${String(t).padStart(5, " ")}ms  ${msg}`);
+  if (_perfLines.length > 30) _perfLines.shift();
+  try {
+    let box = document.getElementById("perf-box");
+    if (!box) {
+      box = document.createElement("pre");
+      box.id = "perf-box";
+      box.style.cssText = "position:fixed;left:4px;right:4px;bottom:4px;max-height:45vh;overflow:auto;z-index:99999;margin:0;padding:6px 8px;background:rgba(0,0,0,0.82);color:#7CFC9A;font:11px/1.35 monospace;border-radius:6px;white-space:pre-wrap;pointer-events:auto;";
+      box.onclick = () => { box.style.display = box.style.display === "none" ? "block" : "none"; };
+      document.body.appendChild(box);
+    }
+    box.textContent = _perfLines.join("\n");
+  } catch {}
+}
+// 非同期処理の所要時間を測って記録する
+async function perfTime(label, fn) {
+  if (!PERF_ON) return fn();
+  const t = performance.now();
+  try { return await fn(); }
+  finally { perfLog(`${label}: ${Math.round(performance.now() - t)}ms`); }
+}
+
 async function fetchAllRows(table, columns, apply = (q) => q) {
   const first = await apply(supabase.from(table).select(columns, { count: "exact" })).range(0, FETCH_PAGE_SIZE - 1);
   if (first.error) return { data: null, error: first.error };
@@ -561,6 +606,7 @@ async function getFullMatchesByIds(ids) {
     else if (_fullMatchInflight.has(id)) waiting.push(_fullMatchInflight.get(id));
     else toFetch.push(id);
   });
+  perfLog(`明細: ${allIds.length}試合（キャッシュ${cachedResults.length} / 取得中を待つ${waiting.length} / 新規取得${toFetch.length}）`);
   if (toFetch.length === 0 && waiting.length === 0) return cachedResults;
 
   let fetchP = Promise.resolve([]);
@@ -572,7 +618,9 @@ async function getFullMatchesByIds(ids) {
     });
     fetchP.finally(() => { toFetch.forEach(id => _fullMatchInflight.delete(id)); }).catch(() => {});
   }
+  const tFull = performance.now();
   const [fetched, waited] = await Promise.all([fetchP, Promise.all(waiting)]);
+  perfLog(`明細の取得完了: ${Math.round(performance.now() - tFull)}ms（ポイント${fetched.reduce((a, m) => a + (m.games ?? []).reduce((b, g) => b + (g.points?.length ?? 0), 0), 0)}件）`);
   return [
     ...cachedResults,
     ...fetched,
@@ -1185,6 +1233,9 @@ async function getMatchesCached() {
 }
 
 async function getMatches() {
+  return perfTime("全試合一覧の取得(getMatches)", getMatchesInner);
+}
+async function getMatchesInner() {
   // ★1000件を超えても全試合を取れるよう、分けて取得する（以前は1000件で打ち切られていた）
   const { data, error } = await fetchAllRows("matches", "*", q => q
     .is("deleted_at", null)
@@ -13290,6 +13341,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   // ★前回の分析結果（同じ選手なら、開いた瞬間にこれを表示し、裏で最新に差し替える）
   const restoredResultRef = useRef(readScreenCache("personalAnalysisResult"));
   const resultReqRef = useRef(0);
+  useEffect(() => { perfLog("個人分析画面を表示開始"); }, []);
   // ※最初はtrueのままにする（選手が決まる前に「選手選択画面」へ飛ばないように。キャッシュがあれば直後に解除される）
   const [loading, setLoading] = useState(true);
   const [roster, setRoster] = useState([]);
@@ -13393,6 +13445,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       //   まずは自分のプロフィール名と選手マスターの名前が一致するものが無いか探し（自動復旧）、
       //   それでも見つからない場合は他の誰かを勝手に選ばず「未選択」のままにする。
       const defaultPlayer = pickDefaultAnalysisPlayer(p, rosterList);
+      perfLog(`既定の選手: ${defaultPlayer || "なし"}（プロフィール${p ? "あり" : "なし"} / 紐づけID${p?.linked_player_id ? "あり" : "なし"} / 紐づけ先${p?.linked_player_id ? ((rosterList || []).some(r => r.id === p.linked_player_id) ? "選手マスターにあり" : "選手マスターに無し") : "-"} / 選手${rosterList?.length ?? 0}人）`);
       setSelectedPlayer(defaultPlayer || null);
       // ★前回の結果が同じ選手（自チーム）のものなら、集計を待たずにそのまま表示する
       const r = restoredResultRef.current;
@@ -13409,15 +13462,29 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
   useEffect(() => {
     const cached = readScreenCache("personalAnalysis");
+    perfLog(cached ? "土台データ: 覚えていた内容あり" : "土台データ: 覚えていた内容なし（取得を待つ）");
     if (cached) apply(cached, { fromCache: true }); // まず前回の内容を即表示（裏で最新化を続ける）
     (async () => {
       // ★以前は「プロフィール・選手マスター・全試合」を取得し終わってから、
       //   さらに学校一覧をもう1往復かけて取りに行っていた（その分まるまる待たされていた）。
       //   学校一覧は他の取得結果に依存しないので、最初から同時に取得する。
-      const fresh = await Promise.all([
+      const fresh = await perfTime("土台データの最新取得", () => Promise.all([
         getMyProfile(), getPlayerRoster(), getMatchesCached(), getSchools(),
         getTeamMatchMatchIds().then(ids => Array.from(ids)),
-      ]);
+      ]));
+      perfLog(`土台データ: 全試合${fresh[2]?.length ?? 0}件 / 選手${fresh[1]?.length ?? 0}人`);
+      // ★プロフィールの取得が一時的に失敗する（通信・ログイン情報の更新中など）と「誰の分析か」が決まらず、
+      //   選手選択画面が開いてしまっていた。決まらないときは、プロフィールと選手マスターを1回だけ取り直す。
+      if (!pickDefaultAnalysisPlayer(fresh[0], fresh[1])) {
+        perfLog("既定の選手が決まらないため、プロフィールと選手マスターを取り直し");
+        _profileCache = null;
+        const [p2, r2] = await Promise.all([
+          getMyProfile().catch(() => null),
+          getPlayerRoster({ fresh: true }).catch(() => fresh[1]),
+        ]);
+        if (p2) fresh[0] = p2;
+        if (r2) fresh[1] = r2;
+      }
       writeScreenCache("personalAnalysis", fresh);
       apply(fresh);
     })();
@@ -13455,6 +13522,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     setResultCapped(capped);
     const player = selectedPlayer, school = selectedSchoolName;
     const reqNo = ++resultReqRef.current;
+    perfLog(`集計開始（${matchSummaries.length}試合${silent ? "・前回の結果を表示中" : ""}）`);
     const full = await getFullMatchesByIds(matchSummaries.map(m => m.id));
     // ★待っている間に別の条件で集計し直していたら、古い結果で上書きしない
     if (reqNo !== resultReqRef.current) return;
@@ -13485,6 +13553,12 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     // eslint-disable-next-line
   }, [loading, selectedPlayer]);
 
+  // ★計測用：画面が描かれた時点を記録する（集計・描画の時間を含む）
+  useEffect(() => {
+    if (!PERF_ON) return;
+    const label = loading ? "「読み込み中...」を表示" : resultLoading ? "「集計中...」を表示" : resultMatches.length > 0 ? `結果を表示（${resultMatches.length}試合）` : `画面を表示（${mode}）`;
+    requestAnimationFrame(() => perfLog(label));
+  }, [loading, resultLoading, resultMatches, mode]);
   if (loading) {
     return (
       <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
@@ -22303,7 +22377,7 @@ export default function App() {
     setTournamentContext(null); // ボトムナビでの移動時は大会の文脈から抜ける
     if (key==="home") setScreen("home");
     else if (key==="list") setScreen("list");
-    else if (key==="stats") setScreen("personalAnalysis");
+    else if (key==="stats") { perfStart("分析メニューをタップ"); setScreen("personalAnalysis"); }
     else if (key==="master") setScreen("master");
     else if (key==="aiAnalysisList") { setAiAnalysisPlayer(null); setScreen("aiAnalysisList"); }
     else if (key==="pairAnalysis") setScreen("pairAnalysis");
