@@ -539,27 +539,55 @@ const FULL_GAME_COLS = "id, match_id, game_number, server_team, is_final, score_
 const FULL_POINT_COLS = "id, game_id, match_id, point_number, scoring_team, player_name, play_type, side_type, course_type, miss_type, result_type, is_winner, fault_count, score_a_after, score_b_after, scored_at";
 const FULL_FAULT_COLS = "id, game_id, match_id, fault_number, server_team, player_name, score_a_at, score_b_at";
 
+// ★取得中の試合明細（試合ID -> Promise<試合データ|null>）。
+//   ホーム画面の先読みが終わる前に分析を開いたとき、同じ試合をもう一度取得して回線を奪い合っていたため、
+//   取得中のものがあればその完了を待って使う。
+const _fullMatchInflight = new Map();
+
 async function getFullMatchesByIds(ids) {
   const allIds = Array.from(new Set((ids ?? []).filter(Boolean)));
   if (allIds.length === 0) return [];
 
-  // ★終了済みの試合の明細は5分間キャッシュする。分析画面で条件や選手を切り替えるたびに
+  // ★終了済みの試合の明細はしばらくキャッシュする。分析画面で条件や選手を切り替えるたびに
   //   同じ試合のポイントを取り直していたのが、表示が遅い一番の原因だったため。
   //   進行中の試合は刻々と変わるので、キャッシュせず毎回取得する。
   const now = Date.now();
   const cachedResults = [];
-  const uniqueIds = [];
+  const waiting = [];
+  const toFetch = [];
   allIds.forEach(id => {
     const hit = _fullMatchCache.get(id);
     if (hit && now - hit.at < FULL_MATCH_CACHE_MS) cachedResults.push(cloneMatchData(hit.data));
-    else uniqueIds.push(id);
+    else if (_fullMatchInflight.has(id)) waiting.push(_fullMatchInflight.get(id));
+    else toFetch.push(id);
   });
-  if (uniqueIds.length === 0) return cachedResults;
+  if (toFetch.length === 0 && waiting.length === 0) return cachedResults;
 
+  let fetchP = Promise.resolve([]);
+  if (toFetch.length > 0) {
+    fetchP = fetchFullMatchesUncached(toFetch);
+    toFetch.forEach(id => {
+      const one = fetchP.then(list => list.find(m => m.id === id) ?? null, () => null);
+      _fullMatchInflight.set(id, one);
+    });
+    fetchP.finally(() => { toFetch.forEach(id => _fullMatchInflight.delete(id)); }).catch(() => {});
+  }
+  const [fetched, waited] = await Promise.all([fetchP, Promise.all(waiting)]);
+  return [
+    ...cachedResults,
+    ...fetched,
+    ...waited.filter(Boolean).map(cloneMatchData), // 他の取得の結果を共有するので、書き換えられないよう複製を渡す
+  ];
+}
+
+async function fetchFullMatchesUncached(uniqueIds) {
   // ★試合数が多い大会だと、.in()に渡すID一覧が長くなりすぎて
   //   リクエストが失敗したり、スマホの通信・メモリ負荷が大きくなり画面が固まる
   //   （真っ白になる）ことがあったため、一定件数ごとに分割して取得する。
-  const CHUNK_SIZE = 40;
+  // ★以前は40試合ずつだったため、ポイントが1回の上限（1000件）を必ず超え、
+  //   「件数を数える→残りのページを取る」の2往復になっていた。15試合ずつにして
+  //   ほとんどの分割が1往復で終わるようにし、分割はすべて同時に取得する。
+  const CHUNK_SIZE = 15;
   const chunks = [];
   for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
     chunks.push(uniqueIds.slice(i, i + CHUNK_SIZE));
@@ -601,7 +629,7 @@ async function getFullMatchesByIds(ids) {
     (pointsData ?? []).forEach(pt => { (pointsByMatch[pt.match_id] ??= []).push(pt); });
     (faultsData ?? []).forEach(f => { (faultsByMatch[f.match_id] ??= []).push(f); });
   };
-  const PARALLEL = 3;
+  const PARALLEL = 7; // 100試合（分析の上限）なら一度に全部
   for (let i = 0; i < chunks.length; i += PARALLEL) {
     await Promise.all(chunks.slice(i, i + PARALLEL).map(fetchChunk));
   }
@@ -624,7 +652,7 @@ async function getFullMatchesByIds(ids) {
   ms.forEach((row, i) => {
     if (row.status === "finished" && !row.deleted_at) _fullMatchCache.set(row.id, { at: savedAt, data: cloneMatchData(fetched[i]) });
   });
-  return [...cachedResults, ...fetched];
+  return fetched;
 }
 
 // ============================================================
