@@ -4431,6 +4431,14 @@ function pickDefaultAnalysisPlayer(p, rosterList) {
   }
   return player;
 }
+// ★前回分析した選手（端末に保存）。紐づけから選手が決まらないときの既定値に使う
+function loadLastAnalysisPlayer() {
+  try { const v = JSON.parse(localStorage.getItem("analysisLastPlayer") || "null"); return v?.player ? v : null; } catch { return null; }
+}
+function saveLastAnalysisPlayer(player, school) {
+  if (!player) return;
+  try { localStorage.setItem("analysisLastPlayer", JSON.stringify({ player, school: school || "" })); } catch {}
+}
 function loadAnalysisScope() {
   try { const s = JSON.parse(localStorage.getItem("analysisScope") || "null"); if (s) return { ...DEFAULT_SCOPE, ...s }; } catch {}
   return DEFAULT_SCOPE;
@@ -13418,7 +13426,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const apply = useCallback(([p, rosterList, list, schools, teamIds], { fromCache = false } = {}) => {
     // ★覚えておいた内容からは「誰の分析か」が決まらないとき（プロフィールや選手マスターが取れていなかった等）は、
     //   それを使わずに最新の取得を待つ。以前はここで「未選択」のまま確定してしまい、選手選択画面が開いていた。
-    if (fromCache && !initializedRef.current && !pickDefaultAnalysisPlayer(p, rosterList)) return;
+    if (fromCache && !initializedRef.current && !pickDefaultAnalysisPlayer(p, rosterList) && !loadLastAnalysisPlayer()) return;
     setRoster(rosterList);
     setAllMatches(list);
     if (teamIds) setTeamMatchIds(new Set(teamIds));
@@ -13444,12 +13452,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       //   ログインした本人とは全く違う人の分析が表示される不具合があった。
       //   まずは自分のプロフィール名と選手マスターの名前が一致するものが無いか探し（自動復旧）、
       //   それでも見つからない場合は他の誰かを勝手に選ばず「未選択」のままにする。
-      const defaultPlayer = pickDefaultAnalysisPlayer(p, rosterList);
+      // ★紐づけから選手が決まらないときは、前回この画面で分析した選手を出す（毎回選手選択画面に戻らないように）
+      const lastPick = loadLastAnalysisPlayer();
+      const linkedPlayer = pickDefaultAnalysisPlayer(p, rosterList);
+      const defaultPlayer = linkedPlayer || lastPick?.player || null;
+      if (!linkedPlayer && lastPick?.player && lastPick.school) setSelectedSchoolName(lastPick.school);
+      perfLog(`前回の選手: ${lastPick?.player || "なし"}`);
       perfLog(`既定の選手: ${defaultPlayer || "なし"}（プロフィール${p ? "あり" : "なし"} / 紐づけID${p?.linked_player_id ? "あり" : "なし"} / 紐づけ先${p?.linked_player_id ? ((rosterList || []).some(r => r.id === p.linked_player_id) ? "選手マスターにあり" : "選手マスターに無し") : "-"} / 選手${rosterList?.length ?? 0}人）`);
       setSelectedPlayer(defaultPlayer || null);
       // ★前回の結果が同じ選手（自チーム）のものなら、集計を待たずにそのまま表示する
       const r = restoredResultRef.current;
-      if (r && defaultPlayer && r.player === defaultPlayer && !r.school) {
+      if (r && defaultPlayer && r.player === defaultPlayer && (r.school || "") === (linkedPlayer ? "" : (lastPick?.school || ""))) {
         setResultMatches(r.matches);
         setResultCondLabel(r.condLabel);
         setResultCapped(r.capped);
@@ -13475,7 +13488,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       perfLog(`土台データ: 全試合${fresh[2]?.length ?? 0}件 / 選手${fresh[1]?.length ?? 0}人`);
       // ★プロフィールの取得が一時的に失敗する（通信・ログイン情報の更新中など）と「誰の分析か」が決まらず、
       //   選手選択画面が開いてしまっていた。決まらないときは、プロフィールと選手マスターを1回だけ取り直す。
-      if (!pickDefaultAnalysisPlayer(fresh[0], fresh[1])) {
+      if (!pickDefaultAnalysisPlayer(fresh[0], fresh[1]) && !loadLastAnalysisPlayer()) {
         perfLog("既定の選手が決まらないため、プロフィールと選手マスターを取り直し");
         _profileCache = null;
         const [p2, r2] = await Promise.all([
@@ -13535,6 +13548,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     setResultLoading(false);
     if (!silent) setMode("results");
     writeScreenCache("personalAnalysisResult", { player, school, condLabel, capped, matches: full });
+    saveLastAnalysisPlayer(player, school);
   }
 
   // 初回表示：条件未設定なら「直近5試合」を自動で読み込む
