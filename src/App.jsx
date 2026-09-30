@@ -375,6 +375,12 @@ const mySideOf = (m, mySchoolName) => {
 //   勝敗が決まらない（棄権した側の方が数字上多いこともある）ため、その場合はmatch.walkover_winnerを
 //   最優先で使う。勝敗が関わるすべての箇所は、直接スコアを比較せず必ずこの関数を使うこと。
 const sortByRecord = (sort) => (a,b) => {
+  // ★勝率順：丸めた%ではなく勝数÷試合数で比べる。同じ勝率なら試合数が多い方（＝より確かな数字）を上にする
+  if (sort === "rate") {
+    const ra = a.total > 0 ? a.wins / a.total : -1;
+    const rb = b.total > 0 ? b.wins / b.total : -1;
+    return (rb - ra) || (b.total - a.total) || (b.wins - a.wins);
+  }
   if (sort === "lose")  return (b.losses - a.losses) || (b.total - a.total);
   if (sort === "count") return (b.total - a.total) || (b.wins - a.wins);
   return (b.wins - a.wins) || (b.total - a.total);
@@ -460,6 +466,7 @@ function PeriodSortBar({ period, setPeriod, sort, setSort }) {
     <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
       <button style={{ ...S.togBtn(period==="all",C.navy),fontSize:11,padding:"6px 10px" }} onClick={()=>setPeriod("all")}>全期間</button>
       <button style={{ ...S.togBtn(period==="month1",C.navy),fontSize:11,padding:"6px 10px" }} onClick={()=>setPeriod("month1")}>直近1ヶ月</button>
+      <button style={{ ...S.togBtn(sort==="rate",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("rate")}>勝率順</button>
       <button style={{ ...S.togBtn(sort==="win",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("win")}>勝数順</button>
       <button style={{ ...S.togBtn(sort==="lose",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("lose")}>負数順</button>
       <button style={{ ...S.togBtn(sort==="count",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("count")}>試合数順</button>
@@ -14640,7 +14647,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   });
   const [pairMode, setPairMode] = useState(initialPrefs.pairMode ?? "own"); // own | opp
   const [oppMode, setOppMode] = useState(initialPrefs.oppMode ?? "team"); // team | pair
-  const [sort, setSort] = useState("win"); // win(勝数順) | lose(負数順) | count(試合数順)
+  const [sort, setSort] = useState("win"); // rate(勝率順) | win(勝数順) | lose(負数順) | count(試合数順)
   // ★以前は勝率順だったが、1試合100%が7試合100%より上に来てしまい実力が分からなかったため、
   //   勝数・負数の多い順に変更（同数なら試合数が多い方を上にする）
   const sortRows = sortByRecord(sort);
@@ -15033,12 +15040,12 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
               ))}
             </div>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, margin:"0 2px 8px" }}>
-              <span style={{ fontSize:13, color:"#5a6478", minWidth:0 }}>
+              <span style={{ fontSize:12, color:"#5a6478", minWidth:0 }}>
                 {tab==="players" ? "タップで選手の戦績へ" : tab==="pairs" ? "タップでペアの詳細へ" : "タップで学校の詳細へ"}
               </span>
               <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                {[["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
-                  <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12.5,padding:"6px 8px" }} onClick={()=>setSort(k)}>{l}</button>
+                {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+                  <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12,padding:"6px 6px",whiteSpace:"nowrap" }} onClick={()=>setSort(k)}>{l}</button>
                 ))}
               </div>
             </div>
@@ -15372,8 +15379,8 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
                     {/* ★並び替えはペアが2組以上のときだけ出す（1組では並び替える意味がないため） */}
                     {partnerRows.length>=2 && (
                       <div style={{ display:"flex",gap:4 }}>
-                        {[["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
-                          <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:13,padding:"6px 9px" }} onClick={()=>setSort(k)}>{l}</button>
+                        {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+                          <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12,padding:"6px 6px",whiteSpace:"nowrap" }} onClick={()=>setSort(k)}>{l}</button>
                         ))}
                       </div>
                     )}
