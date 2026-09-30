@@ -13398,6 +13398,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const [resultLoading, setResultLoading] = useState(false);
   const [resultCondLabel, setResultCondLabel] = useState("");
   const [hasLoadedDefault, setHasLoadedDefault] = useState(false);
+  const [autoPickNote, setAutoPickNote] = useState("");
   const [resultFilter, setResultFilter] = useState("all"); // ★勝敗フィルター：all | win | lose
   // ★得点・ミスの内訳の切り替え：play=プレイ別（ストローク/ボレー…） course=コース別（引っ張り/流し…）
   const [breakdownDim, setBreakdownDim] = useState("play");
@@ -13463,6 +13464,13 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       const lastPick = loadLastAnalysisPlayer();
       const linkedPlayer = pickDefaultAnalysisPlayer(p, rosterList);
       const defaultPlayer = linkedPlayer || lastPick?.player || null;
+      // ★誰の分析か決まらないときだけ、選手選択画面を案内する（選手の設定と同じタイミングで切り替える）
+      if (!defaultPlayer) {
+        setHasLoadedDefault(true);
+        setMode("wizardPlayer");
+        // ★調査用：自動で選手を決められなかった理由を、選択画面の下に小さく表示する
+        setAutoPickNote(`自動選択できませんでした（${fromCache ? "保存データ" : "最新データ"}／プロフィール${p ? "あり" : "なし"}／紐づけ${p?.linked_player_id ? ((rosterList || []).some(r => r.id === p.linked_player_id) ? "あり・一覧にあり" : "あり・一覧に無し") : "なし"}／選手${rosterList?.length ?? 0}人／前回の選手${lastPick?.player ? "あり" : "なし"}）`);
+      }
       if (!linkedPlayer && lastPick?.player && lastPick.school) setSelectedSchoolName(lastPick.school);
       perfLog(`前回の選手: ${lastPick?.player || "なし"}`);
       perfLog(`既定の選手: ${defaultPlayer || "なし"}（プロフィール${p ? "あり" : "なし"} / 紐づけID${p?.linked_player_id ? "あり" : "なし"} / 紐づけ先${p?.linked_player_id ? ((rosterList || []).some(r => r.id === p.linked_player_id) ? "選手マスターにあり" : "選手マスターに無し") : "-"} / 選手${rosterList?.length ?? 0}人）`);
@@ -13566,11 +13574,10 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       // ★前回の結果を表示済みなら、「集計中...」を出さずに裏で差し替える
       loadResults(list, scopeShortLabel(scope, seasonLabel), capped, { silent: !!restoredResultRef.current });
     }
-    // ★誰の分析かを自動特定できなかった場合、空の結果画面を出さず選手選択画面を案内する
-    if (!loading && !selectedPlayer && !hasLoadedDefault) {
-      setHasLoadedDefault(true);
-      setMode("wizardPlayer");
-    }
+    // ※「誰の分析か決まらないときに選手選択画面へ進む」判断は、ここではなく apply() の中で行う。
+    //   以前はここで「読み込み完了なのに選手が未設定」を見て選択画面へ進めていたが、
+    //   端末によっては「読み込み完了」と「選手の設定」が別々のタイミングで画面に反映され、
+    //   その一瞬のすき間で、選手が決まっているのに選択画面へ進んでしまっていた（戻る矢印で結果が出るのはこのため）。
     // eslint-disable-next-line
   }, [loading, selectedPlayer]);
 
@@ -13670,7 +13677,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           <div style={S.card}>
             {filteredRoster.length===0 && <div style={{ padding:16, textAlign:"center", color:C.textSec, fontSize:12 }}>選手が見つかりません</div>}
             {filteredRoster.map(p => (
-              <div key={p.id} onClick={()=>setSelectedPlayer(p.player_name)}
+              <div key={p.id} onClick={()=>{ setSelectedPlayer(p.player_name); saveLastAnalysisPlayer(p.player_name, selectedSchoolName); }}
                 style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", borderBottom:`1px solid ${C.border}`, cursor:"pointer", background:p.player_name===selectedPlayer?C.accentL:"transparent" }}>
                 <div style={{ width:34,height:34,borderRadius:"50%",background:C.accentL,color:C.accent,fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{p.player_name[0]}</div>
                 <div style={{ flex:1 }}>
@@ -13689,6 +13696,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
             style={{ width:"100%", padding:13, borderRadius:11, border:"none", fontSize:14, fontWeight:800, cursor:selectedPlayer?"pointer":"default",
               background: selectedPlayer ? C.navy : "#d5dae2", color:"#fff" }}
           >{selectedPlayer ? "次へ →" : "選手を選んでください"}</button>
+          {autoPickNote && <div style={{ fontSize:10, color:"#9aa3b5", marginTop:6, textAlign:"center" }}>{autoPickNote}</div>}
         </div>
       </div>
     );
