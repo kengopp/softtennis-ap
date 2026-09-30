@@ -4371,10 +4371,11 @@ async function prefetchAnalysisBase() {
       getMyProfile(), getPlayerRoster(), getMatchesCached(), getSchools(), getTeamMatchMatchIds(),
     ]);
     getMySchoolSeason().catch(() => {}); // ペア・チームタブ用
-    if (!list || list.length === 0) { _analysisPrefetchAt = 0; return; }
-    writeScreenCache("personalAnalysis", [p, rosterList, list, schools, Array.from(teamIds)]);
+    if (!p || !list || list.length === 0) { _analysisPrefetchAt = 0; return; }
     const player = pickDefaultAnalysisPlayer(p, rosterList);
+    // ★誰の分析か決まるときだけ画面の土台として覚えておく（決まらない内容で画面を開かせない）
     if (!player) return;
+    writeScreenCache("personalAnalysis", [p, rosterList, list, schools, Array.from(teamIds)]);
     const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
     const schoolName = school?.name || "";
     const pm = list.filter(m => m.status === "finished" && ownSideFor(m, player, schoolName));
@@ -13334,7 +13335,10 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const initializedRef = useRef(false);
   // ★対象試合（個人戦のみ／団体戦のみ）のしぼり込みに使う番手の試合IDも、土台のデータと一緒に取得する
   //   （以前は別々に取得しており、番手のIDが届く前に初回の集計が走ると、しぼり込みが効かないことがあった）
-  const apply = useCallback(([p, rosterList, list, schools, teamIds]) => {
+  const apply = useCallback(([p, rosterList, list, schools, teamIds], { fromCache = false } = {}) => {
+    // ★覚えておいた内容からは「誰の分析か」が決まらないとき（プロフィールや選手マスターが取れていなかった等）は、
+    //   それを使わずに最新の取得を待つ。以前はここで「未選択」のまま確定してしまい、選手選択画面が開いていた。
+    if (fromCache && !initializedRef.current && !pickDefaultAnalysisPlayer(p, rosterList)) return;
     setRoster(rosterList);
     setAllMatches(list);
     if (teamIds) setTeamMatchIds(new Set(teamIds));
@@ -13377,7 +13381,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
   useEffect(() => {
     const cached = readScreenCache("personalAnalysis");
-    if (cached) apply(cached); // まず前回の内容を即表示（裏で最新化を続ける）
+    if (cached) apply(cached, { fromCache: true }); // まず前回の内容を即表示（裏で最新化を続ける）
     (async () => {
       // ★以前は「プロフィール・選手マスター・全試合」を取得し終わってから、
       //   さらに学校一覧をもう1往復かけて取りに行っていた（その分まるまる待たされていた）。
