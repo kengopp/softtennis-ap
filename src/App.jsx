@@ -20065,6 +20065,209 @@ function HandButtons({ value, onChange }) {
     </div>
   );
 }
+// ============================================================
+// 選手マスター：テキストを貼り付けて選手を一括登録
+// ★対戦表・名簿の文字をコピーして貼り付け、選手マスターに直接登録する（ペアマスターを経由しない）。
+//   形式はペアマスターの一括登録と同じ（1行1ペア、タブ・カンマ・全角スペース・連続半角スペース区切り）。
+//   ・「出場番号　学校名　選手1　選手2」…先頭が数字なら出場番号として読み飛ばす
+//   ・「学校名　選手名」…選手1人だけの行もOK
+//   ・「選手名」だけの行は自チームの選手として扱う
+//   確認画面は「ペアマスターから選手マスターへ登録」と同じ作り（未登録の選手だけ、自チーム判定、✏️で修正）。
+// ============================================================
+function parseRosterImportText(text, mySchoolName) {
+  const out = [];
+  text.split("\n").map(l => l.trim()).filter(Boolean).forEach(line => {
+    let cols = (line.includes("\t") ? line.split("\t") : line.split(/,|　| {2,}/)).map(c => (c || "").trim());
+    if (cols.length > 1 && /^[0-9０-９]+$/.test(cols[0])) cols = cols.slice(1); // 出場番号
+    cols = cols.filter(Boolean);
+    if (cols.length === 0) return;
+    if (cols.length === 1) { out.push({ name: cols[0], clubName: mySchoolName || "" }); return; }
+    const [club, ...names] = cols;
+    names.forEach(n => out.push({ name: n, clubName: club }));
+  });
+  return out;
+}
+
+function RosterTextImportScreen({ mySchoolName, onBack }) {
+  const [step, setStep] = useState("paste"); // paste | confirm
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [candidates, setCandidates] = useState([]); // [{ name, clubName, isOwn, checked }]
+  const [skipped, setSkipped] = useState([]);       // 既に選手マスターにいる選手名
+  const [registering, setRegistering] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [editIdx, setEditIdx] = useState(-1);
+  const [editName, setEditName] = useState("");
+  const [editClub, setEditClub] = useState("");
+
+  const parsed = parseRosterImportText(text, mySchoolName);
+  const pairLines = text.split("\n").map(l => l.trim()).filter(Boolean).length;
+
+  async function goConfirm() {
+    if (parsed.length === 0) { alert("読み取れる選手がいません。"); return; }
+    setLoading(true);
+    try {
+      const roster = await getPlayerRoster({ fresh: true });
+      const existing = new Set(roster.map(p => normalizePlayerName(p.player_name)));
+      const seen = new Set();
+      const list = [], skip = [];
+      parsed.forEach(({ name, clubName }) => {
+        const key = normalizePlayerName(name);
+        if (!key || seen.has(key)) return; // ★同じ選手が何度出てきても1名として扱う
+        seen.add(key);
+        if (existing.has(key)) { skip.push(name); return; }
+        list.push({ name, clubName, isOwn: !!mySchoolName && clubName === mySchoolName, checked: true });
+      });
+      setCandidates(list);
+      setSkipped(skip);
+      setStep("confirm");
+    } catch (e) {
+      alert("選手マスターの読み込みに失敗しました: " + (e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle(i) { setCandidates(l => l.map((c, j) => j === i ? { ...c, checked: !c.checked } : c)); }
+  function toggleOwn(i) { setCandidates(l => l.map((c, j) => j === i ? { ...c, isOwn: !c.isOwn } : c)); }
+  function toggleAll(checked) { setCandidates(l => l.map(c => ({ ...c, checked }))); }
+  function openEdit(i) { setEditIdx(i); setEditName(candidates[i].name); setEditClub(candidates[i].clubName); }
+  function saveEdit() {
+    const n = editName.trim(), club = editClub.trim();
+    if (!n) { alert("選手名を入力してください。"); return; }
+    // ★この画面の中だけで直す（ペアマスターなど他のデータは書き換えない）
+    setCandidates(l => l.map((c, j) => j === editIdx ? { ...c, name: n, clubName: club, isOwn: !!mySchoolName && club === mySchoolName } : c));
+    setEditIdx(-1);
+  }
+
+  async function handleRegister() {
+    const targets = candidates.filter(c => c.checked);
+    if (targets.length === 0) { alert("登録する選手を選んでください。"); return; }
+    setRegistering(true);
+    setProgress(0);
+    let ok = 0, fail = 0, done = 0;
+    // ★1人ずつ順番に保存すると人数が多いときに時間がかかるため、5人ずつ同時に保存する
+    for (let i = 0; i < targets.length; i += 5) {
+      await Promise.all(targets.slice(i, i + 5).map(async c => {
+        try {
+          await savePlayer({ player_name: c.name, is_own_team: c.isOwn, team_name: (c.isOwn ? (c.clubName || mySchoolName) : c.clubName) || null });
+          ok++;
+        } catch (e) { fail++; }
+        done++;
+        setProgress(done);
+      }));
+    }
+    setRegistering(false);
+    if (fail === 0) { alert(`${ok}名を選手マスターに登録しました。`); onBack(); }
+    else alert(`${ok}名を登録しました。${fail}名は登録に失敗しました。通信状況を確認して、もう一度お試しください。`);
+  }
+
+  const allChecked = candidates.length > 0 && candidates.every(c => c.checked);
+  const checkedCount = candidates.filter(c => c.checked).length;
+
+  return (
+    <div style={S.page}>
+      <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} disabled={registering}
+          onClick={() => step === "confirm" ? setStep("paste") : onBack()}>←</button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:C.white }}>{step === "paste" ? "📋 テキストから一括登録" : "登録する選手の確認"}</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>{step === "paste" ? "選手マスター" : "貼り付けた内容から"}</div>
+        </div>
+      </div>
+
+      {step === "paste" ? (
+        <div style={{ padding:14 }}>
+          <div style={{ fontSize:11.5, color:C.navy, background:"#eef0ff", border:"1px solid #dcdffc", borderRadius:10, padding:"10px 12px", lineHeight:1.6, marginBottom:10 }}>
+            💡 対戦表や名簿をコピーして貼り付けてください。ペアマスターの取り込みと同じ形式が使えます（1行1ペア、タブ・カンマ・全角スペース区切り）。
+            <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", marginTop:6, fontFamily:"monospace", fontSize:11, color:C.textSec, lineHeight:1.6 }}>
+              1　東福岡　清見 祐吾　田中 蓮<br/>2　真颯館　福永 清春　保科 空伽
+            </div>
+            <div style={{ marginTop:6 }}>出場番号は無くても構いません。1行に選手1人だけ（「学校名　選手名」）でも読み取れます。</div>
+          </div>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="ここに貼り付け"
+            style={{ width:"100%", height:200, border:`2px solid ${C.navy}`, borderRadius:12, padding:10, fontSize:13, fontFamily:"inherit", boxSizing:"border-box", resize:"vertical", background:C.white, color:C.text }}
+          />
+          <button
+            style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white), marginTop:10 }}
+            disabled={loading || parsed.length === 0}
+            onClick={goConfirm}
+          >{loading ? "読み込み中..." : parsed.length === 0 ? "貼り付けると確認できます" : `内容を確認する（${pairLines}行・${parsed.length}名）→`}</button>
+        </div>
+      ) : (
+        <div style={{ padding:14 }}>
+          <div style={{ fontSize:11.5, color:C.textSec, background:"#f7f8fa", border:`1px solid ${C.border}`, borderRadius:10, padding:"9px 11px", lineHeight:1.6, marginBottom:10 }}>
+            選手マスターにまだいない選手だけを一覧にしています。学校名から自チーム／他チームを自動判定しています。違っていればタップで切り替え、✏️で名前・学校名を直せます。
+          </div>
+          {candidates.length === 0 ? (
+            <div style={{ textAlign:"center", color:C.textSec, marginTop:30, fontSize:12.5, lineHeight:1.8 }}>
+              <div style={{ fontSize:36, marginBottom:10 }}>✅</div>
+              貼り付けた選手は全員、既に選手マスターに登録されています
+            </div>
+          ) : (
+            <>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"2px 2px 8px" }}>
+                <div style={{ fontSize:11.5, fontWeight:700, color:C.navy }}>未登録の選手（{candidates.length}名）</div>
+                <button style={{ background:"none", border:"none", color:C.navy, fontSize:11.5, fontWeight:700, cursor:"pointer" }} onClick={() => toggleAll(!allChecked)} disabled={registering}>
+                  {allChecked ? "全て解除" : "全て選択"}
+                </button>
+              </div>
+              <div style={S.card}>
+                {candidates.map((c, i) => (
+                  <div key={c.name + "_" + i} style={{ padding:"11px 14px", borderBottom:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10 }}>
+                    <input type="checkbox" checked={c.checked} onChange={() => toggle(i)} disabled={registering} style={{ width:18, height:18, flexShrink:0 }} />
+                    <div style={{ flex:1, minWidth:0, cursor:"pointer" }} onClick={() => !registering && toggle(i)}>
+                      <div style={{ fontSize:13.5, fontWeight:700, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                        {c.name}
+                        <span style={{ fontWeight:400, color:C.textSec }}> ／ {c.clubName || "（学校名未入力）"}</span>
+                      </div>
+                    </div>
+                    <span style={S.chip(c.isOwn)} onClick={() => !registering && toggleOwn(i)}>{c.isOwn ? "自チーム" : "他チーム"}</span>
+                    <button style={{ background:"none", border:"none", fontSize:15, cursor:"pointer", padding:"2px 0", flexShrink:0 }}
+                      onClick={() => openEdit(i)} disabled={registering} title="選手名・学校名を修正">✏️</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {skipped.length > 0 && (
+            <div style={{ ...S.card, marginTop:8, padding:"10px 14px", fontSize:12, color:C.textSec, lineHeight:1.6 }}>
+              登録済みのため省略：{skipped.length}名（{skipped.slice(0, 3).join("、")}{skipped.length > 3 ? " ほか" : ""}）
+            </div>
+          )}
+          {candidates.length > 0 && (
+            <button
+              style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`, C.white), marginTop:12 }}
+              disabled={registering || checkedCount === 0}
+              onClick={handleRegister}
+            >{registering ? `登録中...（${progress}/${checkedCount}）` : `選択した選手を登録する（${checkedCount}名）`}</button>
+          )}
+        </div>
+      )}
+
+      {editIdx >= 0 && candidates[editIdx] && (
+        <Modal onClose={() => setEditIdx(-1)}>
+          <h3 style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>選手名・学校名を修正</h3>
+          <div style={{ fontSize:10.5, color:C.textSec, marginBottom:12, lineHeight:1.6 }}>この画面の中だけで修正します（ペアマスターなどは変わりません）。</div>
+          <div style={{ fontSize:11, fontWeight:700, color:C.textSec, marginBottom:4 }}>選手名</div>
+          <input style={{ width:"100%", padding:"9px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13.5, color:C.text, boxSizing:"border-box", marginBottom:12 }}
+            value={editName} onChange={e => setEditName(e.target.value)} />
+          <div style={{ fontSize:11, fontWeight:700, color:C.textSec, marginBottom:4 }}>学校名・チーム名</div>
+          <input style={{ width:"100%", padding:"9px 12px", borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13.5, color:C.text, boxSizing:"border-box", marginBottom:16 }}
+            value={editClub} onChange={e => setEditClub(e.target.value)} />
+          <div style={{ display:"flex", gap:8 }}>
+            <button style={{ flex:1, padding:11, borderRadius:10, border:`1px solid ${C.border}`, background:C.white, fontSize:13, fontWeight:700, color:C.textSec, cursor:"pointer" }} onClick={() => setEditIdx(-1)}>キャンセル</button>
+            <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:C.navy, fontSize:13, fontWeight:800, color:C.white, cursor:"pointer" }} onClick={saveEdit}>保存</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function PlayerRosterScreen({ onBack }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20088,6 +20291,8 @@ function PlayerRosterScreen({ onBack }) {
   const [editMemo, setEditMemo] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [nameSearch, setNameSearch] = useState(""); // ★学校を問わず選手名で直接検索するための入力
+  const [menuOpen, setMenuOpen] = useState(false);     // ★右上「⋯」メニュー
+  const [textImportOpen, setTextImportOpen] = useState(false); // ★テキストから一括登録の画面
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -20184,13 +20389,37 @@ function PlayerRosterScreen({ onBack }) {
     catch (e) { setErrorMsg("削除に失敗しました: " + (e.message || e)); }
   }
 
+  if (textImportOpen) {
+    return <RosterTextImportScreen mySchoolName={mySchoolName} onBack={() => { setTextImportOpen(false); reload(); }} />;
+  }
+
   return (
     <div style={S.page}>
       <div style={S.hdr}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
-          <span style={{ fontSize:18, fontWeight:800, color:C.white }}>選手マスター</span>
+          <span style={{ fontSize:18, fontWeight:800, color:C.white, flex:1 }}>選手マスター</span>
+          {/* ★右上の「⋯」メニュー（テキストから一括登録） */}
+          <button
+            style={{ width:40, height:34, borderRadius:9, border:"none", background:"rgba(255,255,255,0.14)", color:C.white, fontSize:18, fontWeight:800, cursor:"pointer", letterSpacing:1, flexShrink:0 }}
+            onClick={() => setMenuOpen(v => !v)}
+            aria-label="メニュー"
+          >⋯</button>
         </div>
+        {menuOpen && (
+          <>
+            <div style={{ position:"fixed", inset:0, zIndex:50 }} onClick={() => setMenuOpen(false)} />
+            <div style={{ position:"absolute", top:"100%", right:10, marginTop:4, background:C.white, borderRadius:12, boxShadow:"0 6px 20px rgba(0,0,0,0.18)", border:`1px solid ${C.border}`, zIndex:51, minWidth:230 }}>
+              <button
+                style={{ display:"block", width:"100%", textAlign:"left", padding:"12px 14px", background:"none", border:"none", cursor:"pointer" }}
+                onClick={() => { setMenuOpen(false); setTextImportOpen(true); }}
+              >
+                <div style={{ fontSize:13.5, fontWeight:700, color:C.text }}>📋 テキストから一括登録</div>
+                <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>対戦表・名簿を貼り付けて登録</div>
+              </button>
+            </div>
+          </>
+        )}
       </div>
       <div style={{ display:"flex", gap:6, padding:"12px 14px 0" }}>
         {[["own","自チーム"],["other","他チーム"]].map(([v,l])=>(
