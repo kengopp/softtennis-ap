@@ -14655,7 +14655,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   });
   const [pairMode, setPairMode] = useState(initialPrefs.pairMode ?? "own"); // own | opp
   const [oppMode, setOppMode] = useState(initialPrefs.oppMode ?? "team"); // team | pair
-  const [sort, setSort] = useState("win"); // rate(勝率順) | win(勝数順) | lose(負数順) | count(試合数順)
+  const [sort, setSort] = useState("rate"); // rate(勝率順) | win(勝数順) | lose(負数順) | count(試合数順)
   // ★以前は勝率順だったが、1試合100%が7試合100%より上に来てしまい実力が分からなかったため、
   //   勝数・負数の多い順に変更（同数なら試合数が多い方を上にする）
   const sortRows = sortByRecord(sort);
@@ -15249,7 +15249,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   const [playerName, setPlayerName] = useState(initialPlayerName || null); // 現在表示中の選手（未選択ならnull＝選択画面）
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
-  const [sort, setSort] = useState("win");
+  const [sort, setSort] = useState("rate");
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
   // ★シーズン設定（起点日・呼び名）。設定されていれば「📌◯◯以降」を初期表示の期間にする
   const [seasonStart, setSeasonStart] = useState(null);
@@ -15444,7 +15444,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const [loading, setLoading] = useState(true);
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
-  const [sort, setSort] = useState("win");
+  const [sort, setSort] = useState("rate");
   const [mySchoolName, setMySchoolName] = useState("");
   const [detail, setDetail] = useState([]);       // points込みの詳細
   const [detailLoading, setDetailLoading] = useState(false);
