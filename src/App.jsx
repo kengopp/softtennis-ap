@@ -6487,14 +6487,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           });
           if (rows.length === 0) return <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>記録済みのペア試合がありません</div>;
           return rows.map(r => (
-            <div key={r.key} style={{ background:C.white, borderRadius:12, padding:"11px 12px", marginBottom:8, border:"1px solid "+C.border, borderLeft:`4px solid ${r.win?C.accent:C.orange}` }}>
-              <div style={{ fontSize:9.5, color:C.textSec, marginBottom:5 }}>{r.roundLabel}{r.orderNum ? `・${r.orderNum}番手` : ""}</div>
+            <div key={r.key} style={{ background:C.white, borderRadius:12, padding:"13px 14px", marginBottom:10, border:"1px solid "+C.border, borderLeft:`4px solid ${r.win?C.accent:C.orange}` }}>
+              <div style={{ fontSize:12.5, fontWeight:700, color:C.textSec, marginBottom:6 }}>{r.roundLabel}{r.orderNum ? `・${r.orderNum}番手` : ""}</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div style={{ fontSize:11.5, lineHeight:1.5 }}>
+                <div style={{ fontSize:14.5, lineHeight:1.6, flex:1, minWidth:0 }}>
                   <div style={{ fontWeight:r.win?800:600, color:C.teamA }}><b>{r.myClub}</b> {r.myNames}</div>
                   <div style={{ fontWeight:r.win?600:800, color:r.win?C.text:C.teamB }}><b>{r.oppClub}</b> {r.oppNames}</div>
                 </div>
-                <div style={{ fontSize:15, fontWeight:800, color:r.win?C.accent:C.orange }}>{r.scoreA}-{r.scoreB}</div>
+                <div style={{ fontSize:22, fontWeight:900, marginLeft:10, flexShrink:0, color:r.win?C.accent:C.orange }}>{r.scoreA}-{r.scoreB}</div>
               </div>
             </div>
           ));
