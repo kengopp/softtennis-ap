@@ -2163,6 +2163,15 @@ async function saveMyProfile(profile) {
     console.error(error);
     throw error;
   }
+  // ★チームへの参加（承認）は、招待コードをデータベース側で確認して行う。
+  //   承認済み・閲覧専用・管理者の項目は、本人が直接書き換えられないようにしてあるため。
+  if (profile.invite_code) {
+    const { data: kind, error: jErr } = await supabase.rpc("join_team", { p_school_id: profile.school_id, p_code: profile.invite_code });
+    if (jErr) { console.error(jErr); throw jErr; }
+    if (!kind) throw new Error("招待コードが正しくありません。管理者に確認してください。");
+    _profileCache = null;
+    _isViewerCache = null;
+  }
 }
 
 // ★閲覧専用アカウント（先生・保護者）かどうかを判定するための共通の仕組み。
@@ -2190,23 +2199,25 @@ function viewerAlert() { alert("閲覧専用アカウントのため、この操
 
 // 招待コード・管理者情報を取得
 // ★viewer_invite_code は「閲覧専用」で参加するためのコード（先生・保護者向け）
+// ★招待コードは管理者以外には読めないようにしてあるため、コードは専用の関数（管理者のみ）で取得する
 async function getSchoolInviteInfo(schoolId) {
   if (!schoolId) return null;
-  const { data, error } = await supabase.from("schools").select("invite_code, viewer_invite_code, admin_user_id").eq("id", schoolId).single();
+  const { data, error } = await supabase.from("schools").select("admin_user_id").eq("id", schoolId).single();
   if (error) { console.error(error); return null; }
-  return data;
+  let codes = null;
+  const { data: c, error: cErr } = await supabase.rpc("get_my_school_codes");
+  if (!cErr && Array.isArray(c) && c.length) codes = c[0];
+  return { admin_user_id: data.admin_user_id, invite_code: codes?.invite_code || "", viewer_invite_code: codes?.viewer_invite_code || "" };
 }
 
 // 招待コードを照合する。
 // 戻り値: "member"（記録もできる通常メンバー） / "viewer"（閲覧専用） / null（不一致）
 async function verifyInviteCodeKind(schoolId, code) {
-  const info = await getSchoolInviteInfo(schoolId);
-  if (!info) return null;
   const input = (code || "").trim().toUpperCase();
-  if (!input) return null;
-  if (info.invite_code && info.invite_code === input) return "member";
-  if (info.viewer_invite_code && info.viewer_invite_code === input) return "viewer";
-  return null;
+  if (!schoolId || !input) return null;
+  const { data, error } = await supabase.rpc("check_invite_code", { p_school_id: schoolId, p_code: input });
+  if (error) { console.error(error); return null; }
+  return data === "member" || data === "viewer" ? data : null;
 }
 
 // 招待コードを照合（真偽値だけ欲しい既存の呼び出し用）
@@ -2214,22 +2225,18 @@ async function verifyInviteCode(schoolId, code) {
   return (await verifyInviteCodeKind(schoolId, code)) !== null;
 }
 
-const makeInviteCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
-
-// 招待コードを再発行
+// 招待コードを再発行（学校の管理者のみ・データベース側で発行）
 async function reissueInviteCode(schoolId) {
-  const newCode = makeInviteCode();
-  const { error } = await supabase.from("schools").update({ invite_code: newCode }).eq("id", schoolId);
+  const { data, error } = await supabase.rpc("reissue_invite_code", { p_kind: "member" });
   if (error) throw error;
-  return newCode;
+  return data;
 }
 
 // 閲覧専用コードを発行・再発行
 async function reissueViewerInviteCode(schoolId) {
-  const newCode = makeInviteCode();
-  const { error } = await supabase.from("schools").update({ viewer_invite_code: newCode }).eq("id", schoolId);
+  const { data, error } = await supabase.rpc("reissue_invite_code", { p_kind: "viewer" });
   if (error) throw error;
-  return newCode;
+  return data;
 }
 
 // 承認済みメンバー一覧を取得（移譲先選択用）
@@ -2251,7 +2258,7 @@ async function getGroupMembers() {
 // 管理者を移譲
 async function transferAdmin(schoolId, toUserId) {
   _profileCache = null;
-  const { error } = await supabase.from("schools").update({ admin_user_id: toUserId }).eq("id", schoolId);
+  const { error } = await supabase.rpc("transfer_admin", { p_to: toUserId });
   if (error) throw error;
 }
 
@@ -2275,11 +2282,13 @@ async function dissolveTeam() {
 // 毎回の一覧再読み込み（reload）のたびにネットワーク取得していたのをやめ、
 // 一度取得したらメモリ上にキャッシュして使い回す。追加・編集・削除時だけキャッシュを破棄する。
 let __schoolsCache = null;
+// ★招待コードの列は管理者以外に見せないため、学校の取得では列を明示する（select("*") は使わない）
+const SCHOOL_COLS = "id, name, prefecture, category, gender_restriction, admin_user_id, goal_first_serve_pct, goal_receive_miss_pct, goal_winner_count, goal_error_count, goal_point_diff, season_start_date, season_start_label";
 let __schoolsRequestVersion = 0; // ★通信競合対策：古いリクエストの結果でキャッシュを上書きしないようにする
 async function getSchools(force=false) {
   if (__schoolsCache && !force) return __schoolsCache;
   const requestVersion = ++__schoolsRequestVersion;
-  const { data, error } = await supabase.from("schools").select("*").order("name");
+  const { data, error } = await supabase.from("schools").select(SCHOOL_COLS).order("name");
   if (error) {
     console.error("学校一覧の取得に失敗しました:", error);
     // ★管理画面（force=true）は「今のDBの正しい状態」を見る場所なので、
@@ -2300,14 +2309,14 @@ async function addSchool(name, prefecture, category, genderRestriction) {
   const trimmedName = name?.trim();
   if (!trimmedName) throw new Error("学校名を入力してください。");
   const row = { id: uid(), name: trimmedName, prefecture: prefecture || null, category: category || null, gender_restriction: genderRestriction || "mixed" };
-  const { data, error } = await supabase.from("schools").insert(row).select("*").single();
+  const { data, error } = await supabase.from("schools").insert(row).select(SCHOOL_COLS).single();
   if (error) throw error;
   invalidateSchoolsCache();
   return data; // ★DBが実際に保存した内容（created_at等のデフォルト値も含む）を返す
 }
 
 async function updateSchoolMaster(id, updates) {
-  const { data, error } = await supabase.from("schools").update(updates).eq("id", id).select("*");
+  const { data, error } = await supabase.from("schools").update(updates).eq("id", id).select(SCHOOL_COLS);
   if (error) throw error;
   if (!data || data.length===0) throw new Error("更新対象の学校が見つからないか、更新権限がありません。");
   invalidateSchoolsCache();
@@ -19435,7 +19444,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
       // players（選手マスター）へのINSERTはRLSで「同じチームの承認済みユーザーのみ」という
       // 判定になっており、usersの行がまだ無い/未承認のままだと選手登録が権限エラーで弾かれていた。
       // そのため、選手マスターへの登録より先にプロフィールを保存して承認状態にする。
-      await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId, is_approved: true, ...(joinKind ? { is_viewer: joinKind === "viewer" } : {}) });
+      await saveMyProfile({ name: fullName, school_id: schoolId, prefecture, gender_category: genderCategory, category, linked_player_id: linkedPlayerId, ...(!isApproved ? { invite_code: inviteInput } : {}) });
       setIsApproved(true);
 
       let newLinkedPlayerId = linkedPlayerId;
@@ -19656,7 +19665,7 @@ function ProfileScreen({ onBack, forced, onSaved }) {
           <FormRow label="男子・女子・共通">
             <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
               {GENDER_OPTIONS.map(g => (
-                <button key={g.key} style={S.togBtn(genderCategory===g.key)} onClick={()=>setGenderCategory(g.key)}>{g.label}</button>
+                <button key={g.key} style={S.togBtn(genderCategory===g.key)} onClick={()=>{ if (g.key!==genderCategory) { setGenderCategory(g.key); setIsApproved(false); setInviteInput(""); setInviteError(""); } }}>{g.label}</button>
               ))}
             </div>
           </FormRow>
@@ -20859,7 +20868,7 @@ async function saveProfileOnly(payload) {
       prefecture: payload.prefecture,
       gender_category: payload.genderCategory,
       category: payload.category,
-      is_approved: true,
+      invite_code: payload.inviteCode,
       // ★この時点ではまだ選手情報登録（ステップ4）が終わっていないため、明示的に未完了にする。
       // これにより、途中でブラウザバック・再読み込みされても「登録完了済み」と誤判定されず、
       // 次回アクセス時にステップ4から再開できる。
@@ -21144,7 +21153,7 @@ function AuthScreen({ onAuthed }) {
       const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
       if (error) throw error;
       if (data.user) {
-        const basePayload = { fullName, schoolId, prefecture, genderCategory, category, registerMode };
+        const basePayload = { fullName, schoolId, prefecture, genderCategory, category, registerMode, inviteCode: inviteInput.trim().toUpperCase() };
         if (data.session) {
           await saveProfileOnly(basePayload);
           // ★ブラウザバック・再読み込みでReactのstateが消えても、この後ステップ4を復元できるようにする
