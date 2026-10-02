@@ -4493,7 +4493,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           <div style={{ display:"grid", gridTemplateColumns:"80px 1fr 1fr", gap:6, alignItems:"center" }}>
             {["正クロス","逆クロス"].map(pos => (
               <Fragment key={pos}>
-                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>{pos}</div>
+                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap", paddingLeft:8 }}>{pos}</div>
                 {COURSE_TYPES.filter(c=>c.pos===pos).map(c => <button key={c.key} onClick={()=>setCourse(course===c.key?null:c.key)} style={{ ...btn, ...sel(course===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
               </Fragment>
             ))}
@@ -17447,7 +17447,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ display:"grid", gridTemplateColumns:"80px 1fr 1fr", gap:6, alignItems:"center" }}>
             {["正クロス","逆クロス"].map(pos => (
               <Fragment key={pos}>
-                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>{pos}</div>
+                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap", paddingLeft:8 }}>{pos}</div>
                 {COURSE_TYPES.filter(c=>c.pos===pos).map(c => <button key={c.key} onClick={()=>toggle("course_type", c.key)} style={{ ...btn, ...sel(lp.course_type===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
               </Fragment>
             ))}
@@ -18622,7 +18622,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     <div ref={osRefs.course} style={{ display:"grid", gridTemplateColumns:"84px 1fr 1fr", gap:6, alignItems:"center" }}>
                       {["正クロス","逆クロス"].map(pos => (
                         <Fragment key={pos}>
-                          <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>{pos}</div>
+                          <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap", paddingLeft:8 }}>{pos}</div>
                           {COURSE_TYPES.filter(c=>c.pos===pos).map(c => (
                             <button key={c.key} onClick={()=>osPickCourse(c.key)} style={{ ...btnBase, ...selStyle(osCourse===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>
                           ))}
