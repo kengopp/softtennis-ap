@@ -11355,26 +11355,25 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                   return (
                   <div key={t.id ?? idx} style={{ ...S.card, padding:16, marginBottom: idx===upcomingTournaments.length-1?0:10, borderLeft:`4px solid ${C.textSec}` }}>
                     <div style={{ cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                      {/* ★大会一覧と同じく、日付（曜日付き）を大会名の上に大きく表示する */}
                       <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:8 }}>
-                        <div style={{ fontSize:15,fontWeight:800,color:C.text,marginBottom:2 }}>{t.name}</div>
+                        <div style={{ fontSize:16,fontWeight:700,color:"#5a6478",marginBottom:2 }}>{fmtDateRangeDow(t.start_date, t.end_date)}</div>
                         {countdownLabel && (
                           <div style={{ fontSize:16,fontWeight:800,color:C.red,whiteSpace:"nowrap" }}>{countdownLabel}</div>
                         )}
                       </div>
-                      <div style={{ fontSize:12,color:C.textSec }}>{fmtDate(t.start_date)}</div>
+                      <div style={{ fontSize:16,fontWeight:800,color:C.text }}>{t.name}</div>
                     </div>
-                    {participantCount > 0 && (
-                      <div
-                        style={{ display:"inline-flex", alignItems:"center", gap:5, marginTop:8, cursor:"pointer" }}
-                        onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}
-                      >
-                        <span style={{ fontSize:13 }}>👥</span>
-                        <span style={{ fontSize:12.5, fontWeight:700, color:C.text }}>{participantCount}人</span>
-                        <span style={{ fontSize:11, color:C.textSec, textDecoration:"underline" }}>参加選手</span>
-                      </div>
-                    )}
-                    {(t.venue_link || t.guideline_url) && (
+                    {/* ★参加選手・地図・要項を1行にまとめてスペースを節約 */}
+                    {(participantCount > 0 || t.venue_link || t.guideline_url) && (
                       <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                        {participantCount > 0 && (
+                          <button
+                            style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:4, borderRadius:10, padding:"9px 4px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer", whiteSpace:"nowrap" }}
+                            onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}
+                          ><span>👥</span> {participantCount}人</button>
+                        )}
+                        {(t.venue_link || t.guideline_url) && (<>
                         <button
                           disabled={!t.venue_link}
                           style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
@@ -11385,6 +11384,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                           style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
                           onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
                         ><span style={{ color: t.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
+                        </>)}
                       </div>
                     )}
                   </div>
