@@ -18308,13 +18308,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           )}
           {correctMode&&(
             <div>
-              <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7a5800" }}>
+              <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:14,lineHeight:1.6,color:"#7a5800" }}>
                 ✏️ 修正したいポイントをタップすると内容の変更・削除ができます。「＋」では好きな位置にポイントを追加できます。
               </div>
               {match.games.filter(g=>!correctGameId||g.id===correctGameId).map(g=>(
                 <div key={g.id} style={S.card}>
-                  <div style={{ padding:"8px 12px",background:C.navyMid,color:C.white,display:"flex",justifyContent:"space-between" }}>
-                    <span style={{ fontWeight:700,fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
+                  <div style={{ padding:"10px 14px",background:C.navyMid,color:C.white,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <span style={{ fontWeight:800,fontSize:16 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
                     <span style={{ display:"flex",alignItems:"center",gap:10 }}>
                       {/* ★点が1つも入っていない空のゲームは、間違って作られたものなので削除できるようにする。
                             削除すると後ろのゲーム番号が繰り上がる（第2→第1のように詰められる）。 */}
@@ -18330,28 +18330,39 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                           }}
                         >🗑 削除</button>
                       )}
-                      <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
+                      <span style={{ fontWeight:900, fontSize:20 }}>{leftScore(g)} - {rightScore(g)}</span>
                     </span>
                   </div>
                   <div style={{ padding:"8px 10px" }}>
                     <div style={{ textAlign:"center" }}>
-                      <button style={{ background:"none",border:`1px dashed ${C.border}`,borderRadius:8,color:C.accent,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 10px",width:"100%" }} onClick={()=>setAddingPoint({gameId:g.id,atIndex:0})}>＋ 先頭に追加</button>
+                      <button style={{ background:"none",border:`1px dashed ${C.border}`,borderRadius:8,color:C.accent,fontSize:14,fontWeight:800,cursor:"pointer",padding:"8px 10px",width:"100%" }} onClick={()=>setAddingPoint({gameId:g.id,atIndex:0})}>＋ 先頭に追加</button>
                     </div>
                     {g.points.length===0&&<div style={{ fontSize:12,color:C.textSec,padding:"10px 4px",textAlign:"center" }}>記録なし</div>}
                     {g.points.map((pt,idx)=>(
                       <div key={pt.id}>
-                        <div style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:C.gray,borderRadius:8,marginTop:4,borderLeft:`4px solid ${pt.scoring_team==="A"?C.accent:C.orange}`,cursor:"pointer" }} onClick={()=>setEditingPoint({gameId:g.id,point:pt})}>
-                          <span style={{ fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:20,background:pt.scoring_team==="A"?C.accentL:C.redL,color:pt.scoring_team==="A"?C.accent:C.red,whiteSpace:"nowrap" }}>
-                            {pt.scoring_team==="A"?"A 得点":"B 得点"}
-                          </span>
-                          <span style={{ fontSize:11,flex:1,color:C.text }}>
-                            {[pt.player_name,pt.play_type?getPlayLabel(pt.play_type):null,pt.side_type?getSideLabel(pt.side_type):null,pt.course_type?getCourseLabel(pt.course_type):null,pt.miss_type?getMissLabel(pt.miss_type):null,pt.result_type?getResultLabel(pt.result_type):null].filter(Boolean).join(" · ")||"—"}
-                          </span>
-                          <span style={{ fontSize:11,color:C.textSec,whiteSpace:"nowrap" }}>{pt.score_a_after}-{pt.score_b_after}</span>
-                          <span style={{ fontSize:14,color:C.textSec,flexShrink:0 }}>›</span>
-                        </div>
+                        {/* ★文字が小さく見えにくいという声への対応：記録画面の「このゲームの記録」と同じ見せ方で大きく表示 */}
+                        {(()=>{
+                          const l = leftScore({score_a:pt.score_a_after, score_b:pt.score_b_after}), r = rightScore({score_a:pt.score_a_after, score_b:pt.score_b_after});
+                          const sv = pt.fault_count===2 ? "DF" : pt.fault_count===1 ? "2nd" : "1st";
+                          const tag = { fontSize:12, fontWeight:800, borderRadius:9, padding:"1px 7px", marginLeft:5, whiteSpace:"nowrap", display:"inline-block" };
+                          const det = [pt.side_type&&getSideLabel(pt.side_type), pt.miss_type&&getMissLabel(pt.miss_type), pt.course_type&&getCourseLabel(pt.course_type)].filter(Boolean).join("・");
+                          const col = pt.scoring_team==="A" ? C.teamA : C.teamB;
+                          return (
+                            <div style={{ display:"flex",alignItems:"center",gap:10,padding:"10px 10px",background:C.gray,borderRadius:10,marginTop:6,borderLeft:`5px solid ${col}`,cursor:"pointer" }} onClick={()=>setEditingPoint({gameId:g.id,point:pt})}>
+                              <span style={{ fontSize:13,fontWeight:800,padding:"3px 8px",borderRadius:20,background:col,color:C.white,whiteSpace:"nowrap",maxWidth:96,overflow:"hidden",textOverflow:"ellipsis",flexShrink:0 }}>{osTeamName(pt.scoring_team)}</span>
+                              <span style={{ flex:1,minWidth:0,fontSize:15,fontWeight:700,color:C.text,lineHeight:1.5 }}>
+                                {pt.player_name || (pt.fault_count===2 ? "ダブルフォルト" : "—")}{pt.play_type ? `（${getPlayLabel(pt.play_type)}）` : ""}
+                                <span style={{ ...tag, color: sv==="DF" ? C.white : "#3d4457", background: sv==="DF" ? "#e74c3c" : "#e6e9ef" }}>{sv}</span>
+                                {pt.result_type && <span style={{ ...tag, color: isWinnerResult(pt.result_type) ? "#1565c0" : C.red, background: isWinnerResult(pt.result_type) ? "#e3eefb" : "#fbe6ea" }}>{isWinnerResult(pt.result_type) ? "決め" : "ミス"}</span>}
+                                {det && <div style={{ fontSize:13,fontWeight:600,color:C.textSec,marginTop:1 }}>{det}</div>}
+                              </span>
+                              <span style={{ fontSize:17,fontWeight:900,color:C.text,whiteSpace:"nowrap",fontVariantNumeric:"tabular-nums" }}>{l}-{r}</span>
+                              <span style={{ fontSize:18,color:C.textSec,flexShrink:0 }}>›</span>
+                            </div>
+                          );
+                        })()}
                         <div style={{ textAlign:"center",marginTop:4 }}>
-                          <button style={{ background:"none",border:"none",color:C.accent,fontSize:10,fontWeight:700,cursor:"pointer",padding:"3px 8px" }} onClick={()=>setAddingPoint({gameId:g.id,atIndex:idx+1})}>＋ ここに追加</button>
+                          <button style={{ background:"none",border:"none",color:C.accent,fontSize:13.5,fontWeight:800,cursor:"pointer",padding:"6px 12px" }} onClick={()=>setAddingPoint({gameId:g.id,atIndex:idx+1})}>＋ ここに追加</button>
                         </div>
                       </div>
                     ))}
@@ -18395,20 +18406,20 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
           {showGamePicker && (
             <Modal onClose={()=>setShowGamePicker(false)}>
-              <h3 style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:4,textAlign:"center" }}>🔧 修正するゲームを選んでください</h3>
-              <p style={{ fontSize:11,color:C.textSec,marginBottom:14,textAlign:"center" }}>選んだゲームのポイントを1つずつ修正・削除・追加できます</p>
+              <h3 style={{ fontSize:17,fontWeight:800,color:C.navy,marginBottom:4,textAlign:"center" }}>🔧 修正するゲームを選んでください</h3>
+              <p style={{ fontSize:13,color:C.textSec,marginBottom:14,textAlign:"center" }}>選んだゲームのポイントを1つずつ修正・削除・追加できます</p>
               {match.games.map(g=>(
                 <div
                   key={g.id}
-                  style={{ display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 12px",marginBottom:7,cursor:"pointer" }}
+                  style={{ display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderRadius:10,padding:"13px 14px",marginBottom:8,cursor:"pointer" }}
                   onClick={()=>{ setCorrectGameId(g.id); setCorrectMode(true); setShowGamePicker(false); }}
                 >
-                  <span style={{ fontSize:12,fontWeight:800,color:C.navy,width:54 }}>{g.is_final?"🔥":""}第{g.game_number}G</span>
-                  <span style={{ fontSize:14,fontWeight:800,color:C.text }}>{g.score_a} - {g.score_b}</span>
-                  <span style={{ marginLeft:"auto",fontSize:10.5,fontWeight:700,color:C.textSec }}>
-                    {g.winner_team ? `${g.winner_team==="A"?teamALabel:teamBLabel} の勝ち` : "記録中"}
+                  <span style={{ fontSize:16,fontWeight:800,color:C.navy,width:70 }}>{g.is_final?"🔥":""}第{g.game_number}G</span>
+                  <span style={{ fontSize:19,fontWeight:900,color:C.text }}>{leftScore(g)} - {rightScore(g)}</span>
+                  <span style={{ marginLeft:"auto",fontSize:13.5,fontWeight:700,color:C.textSec }}>
+                    {g.winner_team ? `${osTeamName(g.winner_team)}の勝ち` : "記録中"}
                   </span>
-                  <span style={{ fontSize:14,color:C.textSec }}>›</span>
+                  <span style={{ fontSize:18,color:C.textSec }}>›</span>
                 </div>
               ))}
               <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setShowGamePicker(false)}>キャンセル</button>
