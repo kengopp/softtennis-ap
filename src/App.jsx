@@ -4347,7 +4347,7 @@ function NavBar({ active, onNavigate }) {
 }
 
 // ★試合終了後のスコア修正：ポイントをタップした際に開く編集モーダル
-function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, onClose, onSave, onDelete }) {
+function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, onClose, onSave, onDelete, ui }) {
   const [team,   setTeam]   = useState(point.scoring_team || "A");
   const [play,   setPlay]   = useState(point.play_type);
   const [side,   setSide]   = useState(point.side_type);
@@ -4366,90 +4366,138 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
     onSave({ scoring_team:team, play_type:play, side_type:side, course_type:course, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
   }
 
+  // ★記録画面（一画面記録）と同じ見た目・並び：①サーブ ②得点チーム ③決めた/ミスした ④誰が ⑤プレー ⑥よりくわしく
+  const U = ui || {
+    leftTeam:"A", rightTeam:"B",
+    teamName:(t)=> (t==="A" ? teamALabel : teamBLabel) || (t==="A" ? "自チーム" : "相手"),
+    teamColor:(t)=> t==="A" ? C.teamA : C.teamB,
+    playersOf:(t)=> players.filter(p=>p.team===t).map((p,i)=>({ id:p.id, idx:i, name:p.name, club:"" })),
+    positionOf:()=> "",
+    surname:(n)=> String(n||"").trim().split(/[\s　]+/)[0],
+    allNames: players.map(p=>p.name),
+  };
+  const SEL = "#0b6e75";
+  const kind = result ? (isWinnerResult(result) ? "winner" : "error") : null;
+  const target = kind==="winner" ? team : kind==="error" ? (team==="A"?"B":"A") : null;
+  const btn = { borderRadius:12, borderWidth:2, borderStyle:"solid", borderColor:C.border, background:C.white, color:C.text, fontWeight:800, cursor:"pointer", textAlign:"center", outline:"none", minWidth:0, WebkitTapHighlightColor:"transparent" };
+  const sel = (on, color=SEL) => on ? { background:color, borderColor:color, color:C.white } : { borderColor:C.border };
+  const head = (n, text, hint) => (
+    <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:15, fontWeight:800, color:C.text, margin:"0 0 8px" }}>
+      <span style={{ width:24, height:24, borderRadius:"50%", background:C.navy, color:C.white, fontSize:13, display:"inline-flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{n}</span>
+      <span>{text}</span>{hint && <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>{hint}</span>}
+    </div>
+  );
+  const sub = (t) => <div style={{ fontSize:12.5, fontWeight:800, color:C.textSec, margin:"10px 0 5px 2px" }}>{t}</div>;
+  const pickKind = (k) => {
+    if (k === kind) return;
+    setResult(k); setPlayerName(null);
+    if (k !== "error") setMiss(null);
+    if (k === "error" && play === "serve") setPlay(null);
+  };
+  const group = (t) => {
+    const off = !!target && target!==t, wide = !!target && target===t, color = U.teamColor(t);
+    return (
+      <div key={t} style={{ flex: wide ? "1.8 1 0" : "1 1 0", minWidth:0, borderRadius:12, padding:6, background: t==="A" ? "#e9f8ef" : "#fff1e6", transition:"flex .25s, opacity .2s", ...(off ? { opacity:0.3, pointerEvents:"none", filter:"grayscale(.6)" } : {}) }}>
+        <div style={{ fontSize:13, fontWeight:800, color, borderLeft:`3px solid ${color}`, paddingLeft:6, margin:"0 0 6px 2px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{U.teamName(t)}</div>
+        <div style={{ display:"flex", gap:6 }}>
+          {U.playersOf(t).map(p => {
+            const on = playerName===p.name;
+            const pos = U.positionOf(p);
+            const parts = String(p.name||"").split(/[\s　]+/);
+            const same = U.allNames.filter(n => U.surname(n) === parts[0]).length > 1;
+            const lines = (parts.length>1 && same) ? [parts[0], parts.slice(1).join(" ")] : [parts[0] || p.name || "—"];
+            return (
+              <button key={p.id} onClick={()=>setPlayerName(on ? null : p.name)} style={{ ...btn, ...sel(on), flex:"1 1 0", minHeight:58, padding:"6px 4px", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+                <FitLines lines={lines} maxPx={lines.length>1 ? 16 : 21} minPx={10} lineHeight={1.2} />
+                {pos && <span style={{ fontSize:11.5, fontWeight:700, opacity:0.8, marginTop:2 }}>{pos}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
   return (
     <Modal onClose={onClose}>
-      <div style={{ maxHeight:"72vh", overflowY:"auto" }}>
-        <h3 style={{ fontSize:16,fontWeight:800,marginBottom:14,textAlign:"center" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
+      <div style={{ maxHeight:"74vh", overflowY:"auto", textAlign:"left" }}>
+        <h3 style={{ fontSize:17,fontWeight:800,marginBottom:14,textAlign:"center" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>得点チーム</div>
-          <div style={{ display:"flex",gap:8 }}>
-            <button style={{ ...S.togBtn(team==="A"),flex:1 }} onClick={()=>setTeam("A")}>{teamALabel||"自チーム"}</button>
-            <button style={{ ...S.togBtn(team==="B"),flex:1 }} onClick={()=>setTeam("B")}>{teamBLabel||"相手"}</button>
-          </div>
-        </div>
-
-        <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>① プレイ内容</div>
-          <div>
-            {playTypesFor(result).map(p=>(
-              <span key={p.key} style={S.chip(play===p.key)} onClick={()=>setPlay(play===p.key?null:p.key)}>{p.label}</span>
+          {head(1, "サーブは？")}
+          <div style={{ display:"flex", gap:8 }}>
+            {[[0,"1st",SEL],[1,"2nd","#f5a623"],[2,"df","#e74c3c"]].map(([v,l,col])=>(
+              <button key={v} onClick={()=>setFault(v)} style={{ ...btn, ...sel(fault===v,col), flex:1, minHeight:52, fontSize:16, lineHeight:1.15, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {l==="df" ? <span>ダブル<br/>フォルト</span> : l}
+              </button>
             ))}
           </div>
+          {fault===2 && <div style={{ fontSize:12, color:"#c0392b", marginTop:6, fontWeight:700 }}>※ダブルフォルトは相手側の得点です。②の得点チームを相手側にしてください。</div>}
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>サーブ本数</div>
-          <div style={{ display:"flex",gap:8 }}>
-            <button style={{ ...S.togBtn(fault===0),flex:1,fontSize:12 }} onClick={()=>setFault(0)}>1stイン</button>
-            <button style={{ ...S.togBtn(fault===1),flex:1,fontSize:12 }} onClick={()=>setFault(1)}>2ndイン</button>
-            <button style={{ ...S.togBtn(fault===2),flex:1,fontSize:12,color:fault===2?undefined:C.red }} onClick={()=>setFault(2)}>ダブルフォルト</button>
-          </div>
-          <div style={{ fontSize:10,color:C.textSec,marginTop:6 }}>※このラリーの1本目のサーブが入ったかどうかです。プレイ内容が「サーブ」以外でも設定できます。</div>
-          {fault===2 && <div style={{ fontSize:10,color:C.red,marginTop:4 }}>※ダブルフォルトは相手側の得点になります。「得点チーム」を相手側に設定してください。</div>}
-        </div>
-
-        <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>② フォア / バック</div>
-          <div>
-            {SIDE_TYPES.map(s=>(
-              <span key={s.key} style={S.chip(side===s.key)} onClick={()=>setSide(side===s.key?null:s.key)}>{s.label}</span>
-            ))}
+          {head(2, "どちらが得点しましたか？")}
+          <div style={{ display:"flex", gap:8 }}>
+            {[U.leftTeam, U.rightTeam].map(t => {
+              const on = team===t, color = U.teamColor(t);
+              return (
+                <button key={t} onClick={()=>{ if(!on){ setTeam(t); setPlayerName(null); } }} style={{ ...btn, flex:1, padding:"10px 6px", background:color, borderColor:color, color:C.white, opacity: on ? 1 : 0.35, boxShadow: on ? "0 0 0 3px #fff inset, 0 3px 10px rgba(0,0,0,.18)" : "none" }}>
+                  <FitLines lines={[U.teamName(t)]} maxPx={18} minPx={11} lineHeight={1.2} />
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* ★③ミスの種類は「相手ミス」を選んだときだけ表示する。コースは入力の負担が大きいので最後に置く */}
-        {isMiss && (
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>③ ミスの種類</div>
-            <div>
-              {MISS_TYPES.map(m=>(
-                <span key={m.key} style={S.chip(miss===m.key)} onClick={()=>setMiss(miss===m.key?null:m.key)}>{m.label}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>{isMiss ? "④" : "③"} コース</div>
-          <CoursePicker value={course} onChange={setCourse}/>
+          {head(3, "この得点は？")}
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={()=>pickKind("winner")} style={{ ...btn, ...sel(kind==="winner"), flex:1, padding:"10px 4px", fontSize:16 }}>
+              決めた<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{U.teamName(team)}の得点）</div>
+            </button>
+            <button onClick={()=>pickKind("error")} style={{ ...btn, ...sel(kind==="error","#d8645c"), flex:1, padding:"10px 4px", fontSize:16 }}>
+              ミスした<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{U.teamName(team==="A"?"B":"A")}のミス）</div>
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom:12, ...(kind ? {} : { opacity:0.35, pointerEvents:"none" }) }}>
+          {head(4, kind==="error" ? "誰がミスした？" : kind==="winner" ? "誰が決めた？" : "誰が？")}
+          <div style={{ display:"flex", gap:8 }}>{group(U.leftTeam)}{group(U.rightTeam)}</div>
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>結果</div>
-          <div>
-            {RESULT_TYPES.map(r=>(
-              <span key={r.key} style={S.chip(result===r.key)} onClick={()=>{
-                const next = result===r.key ? null : r.key;
-                setResult(next);
-                // ★表示されなくなる選択肢は解除しておく（決めた→③、ミス→サーブ）
-                if (next !== "error") setMiss(null);
-                if (next === "error" && play === "serve") setPlay(null);
-              }}>{r.label}</span>
+          {head(5, "どんなプレー？", "（任意）")}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
+            {playTypesFor(result).map(p => (
+              <button key={p.key} onClick={()=>setPlay(play===p.key?null:p.key)} style={{ ...btn, ...sel(play===p.key), padding:"10px 2px", fontSize:14 }}>{p.label}</button>
             ))}
           </div>
         </div>
 
         <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>選手</div>
-          <div>
-            {players.map(p=>(
-              <span key={p.id} style={S.chip(playerName===p.name)} onClick={()=>setPlayerName(playerName===p.name?null:p.name)}>{p.name}</span>
+          {head(6, "よりくわしく", "（任意）")}
+          {sub("フォア／バック")}
+          <div style={{ display:"flex", gap:8 }}>
+            {SIDE_TYPES.map(sd => <button key={sd.key} onClick={()=>setSide(side===sd.key?null:sd.key)} style={{ ...btn, ...sel(side===sd.key), flex:1, padding:"10px 2px", fontSize:15 }}>{sd.label}</button>)}
+          </div>
+          {isMiss && (<>
+            {sub("ミスの種類")}
+            <div style={{ display:"flex", gap:8 }}>
+              {MISS_TYPES.map(m => <button key={m.key} onClick={()=>setMiss(miss===m.key?null:m.key)} style={{ ...btn, ...sel(miss===m.key), flex:1, padding:"10px 2px", fontSize:15 }}>{m.label}</button>)}
+            </div>
+          </>)}
+          {sub("コース")}
+          <div style={{ display:"grid", gridTemplateColumns:"80px 1fr 1fr", gap:6, alignItems:"center" }}>
+            {["正クロス","逆クロス"].map(pos => (
+              <Fragment key={pos}>
+                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>{pos}</div>
+                {COURSE_TYPES.filter(c=>c.pos===pos).map(c => <button key={c.key} onClick={()=>setCourse(course===c.key?null:c.key)} style={{ ...btn, ...sel(course===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
+              </Fragment>
             ))}
           </div>
         </div>
 
-        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8 }} onClick={handleSave}>{mode==="add"?"追加する":"保存する"}</button>
+        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8, fontSize:16 }} onClick={handleSave}>{mode==="add"?"追加する":"保存する"}</button>
         {mode==="edit" && (
           <button style={{ ...S.btn("#fff"),color:C.red,border:"1px solid "+C.red, marginBottom:8 }} onClick={onDelete}>🗑 このポイントを削除</button>
         )}
@@ -18367,6 +18415,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               players={allPlayers}
               teamALabel={teamALabel}
               teamBLabel={teamBLabel}
+              ui={{ leftTeam, rightTeam, teamName:osTeamName, teamColor:osTeamColor, playersOf:osPlayersOf, positionOf:osPositionOf, surname:osSurname, allNames: match.players.map(x=>x.player_name) }}
               onClose={()=>setEditingPoint(null)}
               onSave={(updates)=>{ updatePointInGame(editingPoint.gameId, editingPoint.point.id, updates); setEditingPoint(null); }}
               onDelete={()=>{ if(window.confirm("このポイントを削除しますか？削除後はスコアが自動的に再計算されます。")){ deletePointFromGame(editingPoint.gameId, editingPoint.point.id); setEditingPoint(null); } }}
@@ -18380,6 +18429,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               players={allPlayers}
               teamALabel={teamALabel}
               teamBLabel={teamBLabel}
+              ui={{ leftTeam, rightTeam, teamName:osTeamName, teamColor:osTeamColor, playersOf:osPlayersOf, positionOf:osPositionOf, surname:osSurname, allNames: match.players.map(x=>x.player_name) }}
               onClose={()=>setAddingPoint(null)}
               onSave={(values)=>{ insertPointInGame(addingPoint.gameId, addingPoint.atIndex, values); setAddingPoint(null); }}
             />
