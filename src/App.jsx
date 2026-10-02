@@ -16977,6 +16977,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [osCourse, setOsCourse] = useState(null);  // ⑥コース
   const [osToast,  setOsToast]  = useState("");    // 記録直後の「〇〇に1点」表示
   const [osMenu,   setOsMenu]   = useState(false); // 「⋯ その他」（中断・途中終了など）
+  // ★自動スクロールのON/OFF（端末ごとに覚えておく。初期値はON）
+  const [osAutoScroll, setOsAutoScroll] = useState(() => { try { return localStorage.getItem("os_auto_scroll") !== "off"; } catch(e) { return true; } });
+  const toggleOsAutoScroll = () => setOsAutoScroll(v => { const nv = !v; try { localStorage.setItem("os_auto_scroll", nv ? "on" : "off"); } catch(e) {} return nv; });
   const osToastTimer = useRef(null);
   const osRefs = { sv:useRef(null), team:useRef(null), kind:useRef(null), player:useRef(null), play:useRef(null), side:useRef(null), miss:useRef(null), course:useRef(null) };
   const osAnchorY = useRef(null);   // ①サーブのボタンが最初に表示される画面上の高さ（自動スクロールの基準）
@@ -17599,6 +17602,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   // ★自動スクロール：次に押すボタンの列が、①サーブのボタンが最初に表示されていた高さに来るようにする
   function osGoTo(key, ratio=1){
     clearTimeout(osScrollTimer.current);
+    if (!osAutoScroll) return; // ★自動スクロールOFFのときは動かさない
     osScrollTimer.current = setTimeout(() => {
       const el = osRefs[key]?.current, sv = osRefs.sv.current;
       if (!el || !sv) return;
@@ -18518,6 +18522,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     <button style={{ width:"100%",padding:13,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>{ setOsMenu(false); setSuspendConfirm(true); }}>⏸ 中断</button>
                     <button style={{ width:"100%",padding:13,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setAbandonConfirm(true); }}>⏹ 途中終了</button>
                     <button style={{ width:"100%",padding:12,background:"none",border:`1px dashed ${C.border}`,borderRadius:10,color:C.textSec,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setShowGamePicker(true); }}>🔧 記録済みのゲームを修正する</button>
+                    {/* ★自動スクロールのON/OFF（この端末で覚えておく） */}
+                    <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8, padding:"10px 12px", border:`1px solid ${C.border}`, borderRadius:10 }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:14, fontWeight:800, color:C.text }}>自動スクロール</div>
+                        <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>選ぶたびに次の項目まで画面を動かします</div>
+                      </div>
+                      <button onClick={toggleOsAutoScroll} style={{ flexShrink:0, minWidth:76, padding:"9px 12px", borderRadius:20, border:"none", fontSize:14, fontWeight:800, cursor:"pointer", background: osAutoScroll ? "#0b6e75" : "#e6e8ee", color: osAutoScroll ? C.white : C.textSec }}>{osAutoScroll ? "ON" : "OFF"}</button>
+                    </div>
                     <button style={{ width:"100%",padding:12,background:C.gray,color:C.textSec,border:"1px solid "+C.border,borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setResetConfirm(true); }}>🗑️ スコア全削除</button>
                     <button style={{ width:"100%",padding:12,background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:14 }} onClick={()=>setOsMenu(false)}>閉じる</button>
                   </Modal>
