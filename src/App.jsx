@@ -17979,7 +17979,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 );
               })()}
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                <button disabled={startingGame} style={{ width:"100%", padding:"15px 16px", background:startingGame?"#9bd9bb":`linear-gradient(135deg,${C.accent},#00a066)`, color:"white", border:"none", borderRadius:14, fontSize:16, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame(match.first_server ? match : { ...match, first_server:"A" })}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
+                <button disabled={startingGame} style={{ width:"100%", padding:"15px 16px", background:startingGame?"#8a96ad":`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:"white", border:"none", borderRadius:14, fontSize:16, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame(match.first_server ? match : { ...match, first_server:"A" })}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
                 <div style={{ display:"flex", gap:8 }}>
                   <button
                     style={{ flex:1, padding:"13px 16px", background:"#fff", border:"1px solid "+C.border, color:C.navy, borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" }}
