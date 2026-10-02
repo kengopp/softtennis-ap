@@ -16909,6 +16909,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [osMiss,   setOsMiss]   = useState(null);  // ⑥ミスの種類（ミスした時だけ）
   const [osCourse, setOsCourse] = useState(null);  // ⑥コース
   const [osToast,  setOsToast]  = useState("");    // 記録直後の「〇〇に1点」表示
+  const [osMenu,   setOsMenu]   = useState(false); // 「⋯ その他」（中断・途中終了など）
   const osToastTimer = useRef(null);
   const osRefs = { sv:useRef(null), team:useRef(null), kind:useRef(null), player:useRef(null), play:useRef(null), side:useRef(null), miss:useRef(null), course:useRef(null) };
   const osAnchorY = useRef(null);   // ①サーブのボタンが最初に表示される画面上の高さ（自動スクロールの基準）
@@ -18306,7 +18307,18 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <button style={{ flex:1, padding:"10px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:"#b4433c", cursor:"pointer" }}
                     onClick={()=>{ if (currentGame.points.length===0) { alert("このゲームにはまだ記録がありません"); return; } setUndoConfirm(true); }}>↩ 1点前に戻す</button>
                   <button style={{ padding:"10px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:C.textSec, cursor:"pointer" }} onClick={osClear}>選択をクリア</button>
+                  <button style={{ padding:"10px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:C.textSec, cursor:"pointer" }} onClick={()=>setOsMenu(true)} aria-label="その他の操作">⋯</button>
                 </div>
+                {osMenu && (
+                  <Modal onClose={()=>setOsMenu(false)}>
+                    <div style={{ fontSize:16, fontWeight:800, textAlign:"center", marginBottom:14 }}>その他の操作</div>
+                    <button style={{ width:"100%",padding:13,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>{ setOsMenu(false); setSuspendConfirm(true); }}>⏸ 中断</button>
+                    <button style={{ width:"100%",padding:13,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setAbandonConfirm(true); }}>⏹ 途中終了</button>
+                    <button style={{ width:"100%",padding:12,background:"none",border:`1px dashed ${C.border}`,borderRadius:10,color:C.textSec,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setShowGamePicker(true); }}>🔧 記録済みのゲームを修正する</button>
+                    <button style={{ width:"100%",padding:12,background:C.gray,color:C.textSec,border:"1px solid "+C.border,borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setResetConfirm(true); }}>🗑️ スコア全削除</button>
+                    <button style={{ width:"100%",padding:12,background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:14 }} onClick={()=>setOsMenu(false)}>閉じる</button>
+                  </Modal>
+                )}
 
                 <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:12 }}>
                   {/* ① サーブ */}
@@ -18421,11 +18433,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   </div>
                 )}
 
-                <button style={{ width:"100%",padding:11,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:12 }} onClick={()=>setSuspendConfirm(true)}>⏸ 中断</button>
-                <button style={{ width:"100%",padding:11,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setAbandonConfirm(true)}>⏹ 途中終了</button>
-                {/* ★一画面記録中は、前のゲームの修正・スコア全削除は下にまとめる（上は記録のボタンだけにする） */}
-                <button style={{ width:"100%",padding:10,background:"none",border:`1px dashed ${C.border}`,borderRadius:10,color:C.textSec,fontSize:12,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setShowGamePicker(true)}>🔧 記録済みのゲームを修正する</button>
-                <button style={{ width:"100%",padding:10,background:C.gray,color:C.textSec,border:"1px solid "+C.border,borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setResetConfirm(true)}>🗑️ スコア全削除</button>
+                {/* ★中断・途中終了などは「記録する」ボタンの近くに置くと押し間違えるため、上の「⋯ その他」にまとめた */}
 
                 {/* 記録するボタン（画面の一番下に固定） */}
                 <div style={{ position:"fixed", left:0, right:0, bottom:0, display:"flex", justifyContent:"center", padding:"0 10px calc(10px + env(safe-area-inset-bottom))", pointerEvents:"none", zIndex:50 }}>
