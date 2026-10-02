@@ -18858,7 +18858,14 @@ function MatchSummaryPanel({ match, part="all" }) {
                 return (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, padding:"4px 0" }}>
                     <span style={{ width:24, height:24, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", fontSize:15, fontWeight:900, color:isWin?C.accent:C.red, background:isWin?"#e3f5ea":"#fbe6ea", flexShrink:0 }}>{isWin?"○":"×"}</span>
-                    <span style={{ flex:1, minWidth:0 }}>{p.player ? `${p.player}${p.play?`（${getPlayLabel(p.play)}）`:""}` : (isWin?"相手ミス":"相手の攻撃/自分ミス")}</span>
+                    <span style={{ flex:1, minWidth:0 }}>
+                      {p.player ? `${p.player}${p.play?`（${getPlayLabel(p.play)}）`:""}` : (isWin?"相手ミス":"相手の攻撃/自分ミス")}
+                      {/* ★そのプレーが「決め（ウィナー）」か「ミス」かを小さなバッジで表示 */}
+                      {p.player && (p.isWinner===true || p.isWinner===false) && (
+                        <span style={{ display:"inline-block", marginLeft:6, padding:"1px 7px", borderRadius:10, fontSize:11, fontWeight:800, verticalAlign:"1px",
+                          color: p.isWinner ? "#1565c0" : C.red, background: p.isWinner ? "#e3eefb" : "#fbe6ea" }}>{p.isWinner ? "決め" : "ミス"}</span>
+                      )}
+                    </span>
                     <span style={{ flexShrink:0, fontSize:14, fontWeight:800, fontVariantNumeric:"tabular-nums" }}>
                       <span style={{ color:isWin?C.teamA:C.textSec }}>{a}</span>
                       <span style={{ color:C.textSec, margin:"0 3px" }}>-</span>
