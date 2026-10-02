@@ -18545,7 +18545,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     </button>
                     <button style={{ width:"100%",padding:13,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>{ setOsMenu(false); setSuspendConfirm(true); }}>⏸ 中断</button>
                     <button style={{ width:"100%",padding:13,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setAbandonConfirm(true); }}>⏹ 途中終了</button>
-                    <button style={{ width:"100%",padding:12,background:"none",border:`1px dashed ${C.border}`,borderRadius:10,color:C.textSec,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setShowGamePicker(true); }}>🔧 記録済みのゲームを修正する</button>
+                    <button style={{ width:"100%",padding:13,background:"#eaeef7",border:"1px solid #b9c4dc",borderRadius:10,color:C.navy,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setShowGamePicker(true); }}>🔧 記録済みのゲームを修正する</button>
                     {/* ★自動スクロールのON/OFF（この端末で覚えておく） */}
                     <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8, padding:"10px 12px", border:`1px solid ${C.border}`, borderRadius:10 }}>
                       <div style={{ flex:1, minWidth:0 }}>
