@@ -17278,11 +17278,116 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <button style={{ flexShrink:0, padding:"8px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:13, fontWeight:800, color:C.navy, cursor:"pointer" }}
             onClick={()=>setLastPtEditOpen(v=>!v)}>{lastPtEditOpen ? "▲ 閉じる" : "✏️ 直す"}</button>
         </div>
-        {lastPtEditOpen && renderPointDetailEditor(gameId)}
+        {lastPtEditOpen && renderLastPointEditor(gameId)}
       </div>
     );
   }
-  // ★ゲーム終了直後の「最後の1点」に詳細を追記するための共通UIブロック
+  // ★最後の1点の複数の項目をまとめて書き換える（1項目ずつ保存すると前の変更が上書きされるため）
+  function setLastPointFields(gameId, fields){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g || g.points.length===0) return;
+    const idx = g.points.length-1;
+    const updatedPt = { ...g.points[idx], ...fields };
+    if ("result_type" in fields) updatedPt.is_winner = fields.result_type ? isWinnerResult(fields.result_type) : null;
+    persist({ ...match, games: match.games.map(gm=>gm.id===gameId ? { ...g, points: g.points.map((p,i)=>i===idx?updatedPt:p) } : gm) });
+  }
+  // ★ゲーム終了画面の「✏️ 直す」：記録画面（一画面記録）と同じ見た目・並びで最後の1点を直す
+  function renderLastPointEditor(gameId){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g || g.points.length===0) return null;
+    const lp = g.points[g.points.length-1];
+    if (lp.fault_count===2 && !lp.result_type) {
+      return <div style={{ marginTop:12, fontSize:13, color:C.textSec, background:"#f7f8fb", borderRadius:12, padding:12 }}>ダブルフォルトの1点なので、直す項目はありません。間違いのときは「1点前に戻す」で記録し直してください。</div>;
+    }
+    const SEL = "#0b6e75";
+    const kind = lp.result_type ? (isWinnerResult(lp.result_type) ? "winner" : "error") : null;
+    const scoreTeam = lp.scoring_team;
+    const target = kind==="winner" ? scoreTeam : kind==="error" ? osOther(scoreTeam) : null;
+    const btn = { borderRadius:12, borderWidth:2, borderStyle:"solid", borderColor:C.border, background:C.white, color:C.text, fontWeight:800, cursor:"pointer", textAlign:"center", outline:"none", minWidth:0, WebkitTapHighlightColor:"transparent" };
+    const sel = (on, color=SEL) => on ? { background:color, borderColor:color, color:C.white } : { borderColor:C.border };
+    const head = (n, text, hint) => (
+      <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:15, fontWeight:800, color:C.text, margin:"0 0 8px" }}>
+        <span style={{ width:24, height:24, borderRadius:"50%", background:C.navy, color:C.white, fontSize:13, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{n}</span>
+        <span>{text}</span>{hint && <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>{hint}</span>}
+      </div>
+    );
+    const sub = (t) => <div style={{ fontSize:12.5, fontWeight:800, color:C.textSec, margin:"10px 0 5px 2px" }}>{t}</div>;
+    const toggle = (field, v) => setLastPointFields(gameId, { [field]: lp[field]===v ? null : v });
+    const group = (t) => {
+      const off = !!target && target!==t, wide = !!target && target===t, color = osTeamColor(t);
+      return (
+        <div key={t} style={{ flex: wide ? "1.8 1 0" : "1 1 0", minWidth:0, borderRadius:12, padding:6, background: t==="A" ? "#e9f8ef" : "#fff1e6", transition:"flex .25s, opacity .2s", ...(off ? { opacity:0.3, pointerEvents:"none", filter:"grayscale(.6)" } : {}) }}>
+          <div style={{ fontSize:13, fontWeight:800, color, borderLeft:`3px solid ${color}`, paddingLeft:6, margin:"0 0 6px 2px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{osTeamName(t)}</div>
+          <div style={{ display:"flex", gap:6 }}>
+            {osPlayersOf(t).map(p => {
+              const on = lp.player_name===p.name;
+              const pos = osPositionOf(p);
+              const parts = p.name.split(/[\s　]+/);
+              const sameSurname = match.players.filter(x => osSurname(x.player_name) === parts[0]).length > 1;
+              const lines = (parts.length>1 && sameSurname) ? [parts[0], parts.slice(1).join(" ")] : [parts[0] || p.name];
+              return (
+                <button key={p.id} onClick={()=>setLastPointFields(gameId, { player_name: p.name })} style={{ ...btn, ...sel(on), flex:"1 1 0", minHeight:58, padding:"6px 4px", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+                  <FitLines lines={lines} maxPx={lines.length>1 ? 16 : 21} minPx={10} lineHeight={1.2} />
+                  {pos && <span style={{ fontSize:11.5, fontWeight:700, opacity:0.8, marginTop:2 }}>{pos}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+    return (
+      <div style={{ marginTop:12, background:"#f7f8fb", border:`1px solid ${C.border}`, borderRadius:14, padding:12, textAlign:"left" }}>
+        <div style={{ marginBottom:12 }}>
+          {head(1, "この得点は？")}
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={()=>{ if(kind!=="winner") setLastPointFields(gameId, { result_type:"winner", player_name:null, miss_type:null }); }} style={{ ...btn, ...sel(kind==="winner"), flex:1, padding:"10px 4px", fontSize:16 }}>
+              決めた<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{osTeamName(scoreTeam)}の得点）</div>
+            </button>
+            <button onClick={()=>{ if(kind!=="error") setLastPointFields(gameId, { result_type:"error", player_name:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="error","#d8645c"), flex:1, padding:"10px 4px", fontSize:16 }}>
+              ミスした<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{osTeamName(osOther(scoreTeam))}のミス）</div>
+            </button>
+          </div>
+        </div>
+        <div style={{ marginBottom:12, ...(kind ? {} : { opacity:0.35, pointerEvents:"none" }) }}>
+          {head(2, kind==="error" ? "誰がミスした？" : kind==="winner" ? "誰が決めた？" : "誰が？")}
+          <div style={{ display:"flex", gap:8 }}>{group(leftTeam)}{group(rightTeam)}</div>
+        </div>
+        <div style={{ marginBottom:12 }}>
+          {head(3, "どんなプレー？", "（任意）")}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
+            {playTypesFor(lp.result_type).map(p => (
+              <button key={p.key} onClick={()=>toggle("play_type", p.key)} style={{ ...btn, ...sel(lp.play_type===p.key), padding:"10px 2px", fontSize:14 }}>{p.label}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          {head(4, "よりくわしく", "（任意）")}
+          {sub("フォア／バック")}
+          <div style={{ display:"flex", gap:8 }}>
+            {SIDE_TYPES.map(sd => <button key={sd.key} onClick={()=>toggle("side_type", sd.key)} style={{ ...btn, ...sel(lp.side_type===sd.key), flex:1, padding:"10px 2px", fontSize:15 }}>{sd.label}</button>)}
+          </div>
+          {kind==="error" && (<>
+            {sub("ミスの種類")}
+            <div style={{ display:"flex", gap:8 }}>
+              {MISS_TYPES.map(m => <button key={m.key} onClick={()=>toggle("miss_type", m.key)} style={{ ...btn, ...sel(lp.miss_type===m.key), flex:1, padding:"10px 2px", fontSize:15 }}>{m.label}</button>)}
+            </div>
+          </>)}
+          {sub("コース")}
+          <div style={{ display:"grid", gridTemplateColumns:"80px 1fr 1fr", gap:6, alignItems:"center" }}>
+            {["正クロス","逆クロス"].map(pos => (
+              <Fragment key={pos}>
+                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>{pos}</div>
+                {COURSE_TYPES.filter(c=>c.pos===pos).map(c => <button key={c.key} onClick={()=>toggle("course_type", c.key)} style={{ ...btn, ...sel(lp.course_type===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
+              </Fragment>
+            ))}
+          </div>
+        </div>
+        <button onClick={()=>setLastPtEditOpen(false)} style={{ width:"100%", marginTop:14, padding:12, background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:C.navy, cursor:"pointer" }}>▲ 閉じる（変更はすぐ保存されます）</button>
+      </div>
+    );
+  }
+  // ★ゲーム終了直後の「最後の1点」に詳細を追記するための共通UIブロック（旧版・現在は未使用）
   function renderPointDetailEditor(gameId){
     const g = match.games.find(gm=>gm.id===gameId);
     if(!g || g.points.length===0) return null;
@@ -18554,7 +18659,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:44 }}>🎾</div>
             <h3 style={{ fontSize:18,fontWeight:800,margin:"8px 0" }}>第{modal.num}ゲーム終了！</h3>
-            <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
+            <p style={{ color:C.textSec }}>{osTeamName(modal.winner)}（{modal.winner==="A"?teamALabel:teamBLabel}） 勝利</p>
             <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
             {renderLastPointSummary(modal.gameId)}
             <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:14 }} onClick={()=>{setModal(null);startNewGame();}}>次のゲームへ</button>
@@ -18568,7 +18673,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ textAlign:"center" }}>
             <div style={{ fontSize:44 }}>🏆</div>
             <h3 style={{ fontSize:18,fontWeight:800,margin:"8px 0" }}>試合終了！</h3>
-            <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
+            <p style={{ color:C.textSec }}>{osTeamName(modal.winner)}（{modal.winner==="A"?teamALabel:teamBLabel}） 勝利</p>
             <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
             {renderLastPointSummary(modal.gameId)}
             <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:14 }} onClick={()=>{ persist({...match,status:"finished"}); setModal(null); }}>結果を見る</button>
@@ -18817,7 +18922,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       )}
 
       {/* ★記録中はメニューバーを出さない（「記録する」ボタンとの押し間違い防止・画面を広く使うため）。戻るのは左上の「←」 */}
-      {!osRecording && <NavBar active="record" onNavigate={onNavigate}/>}
+      {!osRecording && !(modal?.type==="gameOver" || modal?.type==="matchOver") && <NavBar active="record" onNavigate={onNavigate}/>}
     </div>
   );
 }
