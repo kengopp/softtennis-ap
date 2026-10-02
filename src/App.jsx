@@ -5934,7 +5934,8 @@ function saveTournamentFilterPrefs(tournamentName, prefs) {
 // ============================================================
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
-function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, onOpenPairMaster, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport, onOpenAiAnalysis }) {
+const _teamListModeMemo = {}; // ★大会詳細・団体戦タブの表示モードを大会ごとに記憶
+function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, onOpenPairMaster, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport, onOpenAiAnalysis, onOpenPairMatch }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [showMoreMenu, setShowMoreMenu] = useState(false); // ★ヘッダー右上「⋯」メニューの開閉
@@ -5961,7 +5962,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [individualSearch, setIndividualSearch] = useState(savedFilterPrefs.search || ""); // ★選手名・チーム名でのペア絞り込み
   const [individualRoundFilter, setIndividualRoundFilter] = useState(savedFilterPrefs.round || "all"); // ★回戦ごとの絞り込み
   const [individualPairFilter, setIndividualPairFilter] = useState(savedFilterPrefs.pair || "all"); // ★自チームのペアごとの絞り込み
-  const [teamListMode, setTeamListMode] = useState("draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
+  const [teamListMode, _setTeamListMode] = useState(() => _teamListModeMemo[tournament?.id] || "draw"); // draw | card | pair（団体戦タブ内の表示切り替え）
+  // ★試合詳細から戻ったときに同じ表示（ペア別対戦結果など）へ戻れるよう、大会ごとに覚えておく
+  const setTeamListMode = (v) => { if (tournament?.id) _teamListModeMemo[tournament.id] = v; _setTeamListMode(v); };
   const [matchStatusById, setMatchStatusById] = useState({}); // ★団体戦の番手ステータス表示用：試合ID→ステータス
   const [playerRoster, setPlayerRoster] = useState([]); // ★参加選手一覧モーダルで名前を表示するための選手マスター全件
   const [showParticipants, setShowParticipants] = useState(false); // ★参加選手一覧モーダルの開閉
@@ -6447,9 +6450,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               onClick={()=>setTeamListMode("card")}
             >🏆 試合カード</button>
             <button
-              style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="pair" ? C.accentL : "none", color: teamListMode==="pair" ? C.navy : C.textSec, fontSize:13, fontWeight:700, cursor:"pointer" }}
+              style={{ flex:1, padding:"10px 0", border:"none", background: teamListMode==="pair" ? C.accentL : "none", color: teamListMode==="pair" ? C.navy : C.textSec, fontSize: drawSummary.team > 0 ? 12 : 13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", letterSpacing: drawSummary.team > 0 ? -0.3 : 0 }}
               onClick={()=>setTeamListMode("pair")}
-            >📋 ペア別対戦</button>
+            >📋 ペア別対戦結果</button>
           </div>
         )}
 
@@ -6482,12 +6485,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               if (!m || m.status !== "finished") return; // 記録済みの試合のみ対象
               const aNames = (m.players || []).filter(p => p.team === "A").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
               const bNames = (m.players || []).filter(p => p.team === "B").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
-              rows.push({ key: g.id, roundLabel: tm.round || "団体戦", orderNum: g.order_num, myClub: myFullLabel, oppClub: oppLabel, myNames: aNames, oppNames: bNames, scoreA: m.match_score_a, scoreB: m.match_score_b, win: winnerSideOf(m)==="A" });
+              rows.push({ key: g.id, matchId: m.id, teamMatchId: tm.id, roundLabel: tm.round || "団体戦", orderNum: g.order_num, myClub: myFullLabel, oppClub: oppLabel, myNames: aNames, oppNames: bNames, scoreA: m.match_score_a, scoreB: m.match_score_b, win: winnerSideOf(m)==="A" });
             });
           });
           if (rows.length === 0) return <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>記録済みのペア試合がありません</div>;
           return rows.map(r => (
-            <div key={r.key} style={{ background:C.white, borderRadius:12, padding:"13px 14px", marginBottom:10, border:"1px solid "+C.border, borderLeft:`4px solid ${r.win?C.accent:C.orange}` }}>
+            <div key={r.key} onClick={()=>onOpenPairMatch && onOpenPairMatch(r.matchId, r.teamMatchId)} style={{ cursor:"pointer", background:C.white, borderRadius:12, padding:"13px 14px", marginBottom:10, border:"1px solid "+C.border, borderLeft:`4px solid ${r.win?C.accent:C.orange}` }}>
               <div style={{ fontSize:12.5, fontWeight:700, color:C.textSec, marginBottom:6 }}>{r.roundLabel}{r.orderNum ? `・${r.orderNum}番手` : ""}</div>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <div style={{ fontSize:14.5, lineHeight:1.6, flex:1, minWidth:0 }}>
@@ -22187,6 +22190,7 @@ export default function App() {
     }
   };
   const navHistoryRef = useRef([]);   // 一個前、二個前…の画面
+  const pairTeamMatchRef = useRef(null); // ★「ペア別対戦結果」から開いた試合の団体戦ID（戻るときに団体戦スコアを再計算する）
   const deletedNavRef = useRef(new Set()); // 削除された "match:ID" / "teamMatch:ID" / "tournament:ID"
   // ★削除済みの試合・団体戦・大会を開いていた画面か
   const isDeletedSnap = (sn) => {
@@ -22863,6 +22867,8 @@ export default function App() {
         matchId={matchId}
         initialTab={recordInitialTab}
         onBack={async ()=>{
+          // ★ペア別対戦結果から開いた団体戦の試合なら、修正内容を団体戦スコアへ反映
+          if (pairTeamMatchRef.current) { const tmId = pairTeamMatchRef.current; pairTeamMatchRef.current = null; try { await recalcTeamMatchScore(tmId); } catch(e) {} }
           // ★「←」・中断・途中終了のあとは、実際に一個前に見ていた画面（画面の履歴）へ戻る。
           //   以前は prevScreen（どこから試合を開いたかの控え）だけで戻り先を決めていたため、
           //   控えが古いまま残っていると、関係のない画面（分析など）へ飛んでしまうことがあった。
@@ -22881,7 +22887,7 @@ export default function App() {
           setScreen(target); setMatchId(null); await new Promise(r=>setTimeout(r,800)); setTick(t=>t+1);
         }}
         onEdit={id=>{ setEditTargetId(id); setScreen("setup"); }}
-        onNavigate={key=>{ setTick(t=>t+1); setMatchId(null); setRecordInitialTab(null); goNav(key); }}
+        onNavigate={key=>{ if (pairTeamMatchRef.current) { recalcTeamMatchScore(pairTeamMatchRef.current); pairTeamMatchRef.current = null; } setTick(t=>t+1); setMatchId(null); setRecordInitialTab(null); goNav(key); }}
         onOpenAiAnalysis={(match, existing)=>{
           setAiAnalysisTargetMatch(match);
           setAiAnalysisEditRow(existing);
@@ -22901,6 +22907,7 @@ export default function App() {
         onSaved={updated=>{ setTournamentContext(updated); setTick(t=>t+1); }}
         onOpenMatch={id=>{ setTournamentSeg("individual"); setMatchId(id); setPrevScreen("tournamentDetail"); setRecordInitialTab(null); setScreen("record"); }}
         onOpenTeamMatch={id=>{ setTournamentSeg("team"); setTeamMatchId(id); setScreen("teamMatchDetail"); }}
+        onOpenPairMatch={(id, tmId)=>{ pairTeamMatchRef.current = tmId || null; setTournamentSeg("team"); setMatchId(id); setPrevScreen("tournamentDetail"); setRecordInitialTab(null); setScreen("record"); }}
         onNewIndividual={()=>{ setTournamentSeg("individual"); setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
         onNewTeam={()=>{ setTournamentSeg("team"); setTeamMatchEditId(null); setTeamMatchCopyId(null); setCreatingFromTournament(true); setScreen("teamMatchSetup"); }}
         onCopyMatch={id=>{ setTournamentSeg("individual"); setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setCreatingFromTournament(true); setPrevScreen("tournamentDetail"); setScreen("setup"); }}
