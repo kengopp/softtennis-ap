@@ -18309,11 +18309,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     {osPlayersOf(t).map(p => {
                       const on = osPlayer===p.name && osTargetTeam===t;
                       const pos = osPositionOf(p);
+                      // ★選手名は名字だけを大きく表示。ただし試合内に同じ名字の選手がいるときは区別できるよう名前まで出す
                       const parts = p.name.split(/[\s　]+/);
-                      const lines = parts.length>1 ? [parts[0], parts.slice(1).join(" ")] : [p.name];
+                      const sameSurname = match.players.filter(x => osSurname(x.player_name) === parts[0]).length > 1;
+                      const lines = (parts.length>1 && sameSurname) ? [parts[0], parts.slice(1).join(" ")] : [parts[0] || p.name];
                       return (
                         <button key={p.id} onClick={()=>osPickPlayer(p.name)} style={{ ...btnBase, ...selStyle(on), flex:"1 1 0", minHeight:58, padding:"6px 4px", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
-                          <FitLines lines={lines} maxPx={16} minPx={9} lineHeight={1.2} />
+                          <FitLines lines={lines} maxPx={lines.length>1 ? 16 : 21} minPx={10} lineHeight={1.2} />
                           {pos && <span style={{ fontSize:11.5, fontWeight:700, opacity:0.8, marginTop:2 }}>{pos}</span>}
                         </button>
                       );
