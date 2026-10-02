@@ -4628,7 +4628,7 @@ async function prefetchAnalysisBase() {
 }
 function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; _teamBoutIdsCache = null; }
 
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis }) {
+function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis, onModeChange }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   // ★スマホでは一度に何百枚もカードを描画するだけで表示が重くなるため、
   //   まず30件だけ描画し、「もっと見る」で追加していく（絞り込み結果の件数自体は変わらない）
@@ -5130,7 +5130,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 14px 0" }}>
         <div style={{ flex:1, display:"flex", background:"#f0f2f6", padding:3, borderRadius:10 }}>
           {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); if (v!=="individual") { setFilterHasVideo(false); setFilterHasAi(false); } }}>{l}</button>
+            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); onModeChange && onModeChange(v); /* ★アプリ全体にも今のタブを伝える（試合から戻ったとき同じタブで開くため） */ if (v!=="individual") { setFilterHasVideo(false); setFilterHasAi(false); } }}>{l}</button>
           ))}
         </div>
       </div>
@@ -23428,6 +23428,7 @@ export default function App() {
       onCopyTeamMatch={id=>{ setTournamentContext(null); setTeamMatchCopyId(id); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
       onOpenTournament={t=>{ setTournamentContext(t); setListMatchMode("tournament"); setScreen("tournamentDetail"); }}
       initialMatchMode={listMatchMode}
+      onModeChange={setListMatchMode}
       initialShowTrash={pendingOpenTrash}
       onTrashConsumed={()=>setPendingOpenTrash(false)}
       onOpenAiAnalysis={(match, existing)=>{
