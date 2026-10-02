@@ -4375,6 +4375,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
     positionOf:()=> "",
     surname:(n)=> String(n||"").trim().split(/[\s　]+/)[0],
     allNames: players.map(p=>p.name),
+    famOf:(t)=> players.filter(p=>p.team===t).map(p=>String(p.name||"").trim().split(/[\s　]+/)[0]).filter(Boolean).join("・"),
   };
   const SEL = "#0b6e75";
   const kind = result ? (isWinnerResult(result) ? "winner" : "error") : null;
@@ -4442,6 +4443,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
               return (
                 <button key={t} onClick={()=>{ if(!on){ setTeam(t); setPlayerName(null); } }} style={{ ...btn, flex:1, padding:"10px 6px", background:color, borderColor:color, color:C.white, opacity: on ? 1 : 0.35, boxShadow: on ? "0 0 0 3px #fff inset, 0 3px 10px rgba(0,0,0,.18)" : "none" }}>
                   <FitLines lines={[U.teamName(t)]} maxPx={18} minPx={11} lineHeight={1.2} />
+                  {/* ★学校名だけだと同校対決などでどちらか分からないため、記録画面と同じく名字も出す */}
+                  {U.famOf && U.famOf(t) && U.famOf(t)!==String(U.teamName(t)).split("/").join("・") && <FitLines lines={[U.famOf(t)]} maxPx={15} minPx={10} lineHeight={1.3} style={{ marginTop:2, opacity:0.95 }} />}
                 </button>
               );
             })}
@@ -18415,7 +18418,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               players={allPlayers}
               teamALabel={teamALabel}
               teamBLabel={teamBLabel}
-              ui={{ leftTeam, rightTeam, teamName:osTeamName, teamColor:osTeamColor, playersOf:osPlayersOf, positionOf:osPositionOf, surname:osSurname, allNames: match.players.map(x=>x.player_name) }}
+              ui={{ leftTeam, rightTeam, teamName:osTeamName, teamColor:osTeamColor, playersOf:osPlayersOf, positionOf:osPositionOf, surname:osSurname, allNames: match.players.map(x=>x.player_name), famOf:(t)=>familyNamesOf(t).split("/").join("・") }}
               onClose={()=>setEditingPoint(null)}
               onSave={(updates)=>{ updatePointInGame(editingPoint.gameId, editingPoint.point.id, updates); setEditingPoint(null); }}
               onDelete={()=>{ if(window.confirm("このポイントを削除しますか？削除後はスコアが自動的に再計算されます。")){ deletePointFromGame(editingPoint.gameId, editingPoint.point.id); setEditingPoint(null); } }}
@@ -18429,7 +18432,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               players={allPlayers}
               teamALabel={teamALabel}
               teamBLabel={teamBLabel}
-              ui={{ leftTeam, rightTeam, teamName:osTeamName, teamColor:osTeamColor, playersOf:osPlayersOf, positionOf:osPositionOf, surname:osSurname, allNames: match.players.map(x=>x.player_name) }}
+              ui={{ leftTeam, rightTeam, teamName:osTeamName, teamColor:osTeamColor, playersOf:osPlayersOf, positionOf:osPositionOf, surname:osSurname, allNames: match.players.map(x=>x.player_name), famOf:(t)=>familyNamesOf(t).split("/").join("・") }}
               onClose={()=>setAddingPoint(null)}
               onSave={(values)=>{ insertPointInGame(addingPoint.gameId, addingPoint.atIndex, values); setAddingPoint(null); }}
             />
@@ -18467,7 +18470,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 <button key={t} onClick={()=>osPickTeam(t)} style={{ ...btnBase, flex:1, padding:"10px 6px", background:color, borderColor:color, color:C.white,
                   opacity: (osScoreTeam && !on) ? 0.35 : 1, boxShadow: on ? "0 0 0 3px #fff inset, 0 3px 10px rgba(0,0,0,.18)" : "none" }}>
                   <FitLines lines={[osTeamName(t)]} maxPx={19} minPx={12} lineHeight={1.2} />
-                  {fam && !isSameSchoolMatch && <FitLines lines={[fam]} maxPx={16} minPx={11} lineHeight={1.3} style={{ marginTop:3, opacity:0.95 }} />}
+                  {fam && fam!==String(osTeamName(t)).split("/").join("・") && <FitLines lines={[fam]} maxPx={16} minPx={11} lineHeight={1.3} style={{ marginTop:3, opacity:0.95 }} />}
                 </button>
               );
             };
