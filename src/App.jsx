@@ -4421,7 +4421,10 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   return (
     <Modal onClose={onClose}>
       <div style={{ maxHeight:"74vh", overflowY:"auto", textAlign:"left" }}>
-        <h3 style={{ fontSize:17,fontWeight:800,marginBottom:14,textAlign:"center" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
+        <div style={{ position:"sticky",top:0,zIndex:2,background:"#fff",marginBottom:14,paddingBottom:2 }}>
+          <h3 style={{ fontSize:17,fontWeight:800,textAlign:"center",margin:0,padding:"4px 40px" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
+          <button aria-label="閉じる" onClick={onClose} style={{ position:"absolute",top:-4,right:-4,width:36,height:36,border:"none",background:"#f0f2f5",borderRadius:"50%",fontSize:18,fontWeight:700,color:C.textSec,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>✕</button>
+        </div>
 
         <div style={{ marginBottom:12 }}>
           {head(1, "サーブは？")}
@@ -4501,10 +4504,10 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         </div>
 
         <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8, fontSize:16 }} onClick={handleSave}>{mode==="add"?"追加する":"保存する"}</button>
+        <button style={{ ...S.btn("#f0f0f0"),color:C.text, marginBottom: mode==="edit"?20:0 }} onClick={onClose}>キャンセル</button>
         {mode==="edit" && (
-          <button style={{ ...S.btn("#fff"),color:C.red,border:"1px solid "+C.red, marginBottom:8 }} onClick={onDelete}>🗑 このポイントを削除</button>
+          <button style={{ ...S.btn("#fff"),color:C.red,border:"1px solid "+C.red }} onClick={onDelete}>🗑 このポイントを削除</button>
         )}
-        <button style={{ ...S.btn("#f0f0f0"),color:C.text }} onClick={onClose}>キャンセル</button>
       </div>
     </Modal>
   );
