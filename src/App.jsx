@@ -4060,12 +4060,20 @@ function FitLines({ lines, fallbackLines, maxPx, minPx, lineHeight = 1.25, style
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, maxPx, minPx]);
   useLayoutEffect(() => { measure(); }, [measure]);
+  // ★幅が変わったときだけ測り直す（高さの変化で毎回測り直すと、測る→大きさが変わる→測る…と止まらなくなり画面が固まるため）
   useEffect(() => {
     const box = boxRef.current;
     if (!box || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => measure());
+    let lastW = box.clientWidth, raf = 0;
+    const ro = new ResizeObserver(() => {
+      const w = box.clientWidth;
+      if (Math.abs(w - lastW) < 1) return;
+      lastW = w;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => measure());
+    });
     ro.observe(box);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); cancelAnimationFrame(raf); };
   }, [measure]);
   const shown = state.useFallback ? fallbackLines : lines;
   return (
@@ -4091,12 +4099,20 @@ function FitBadge({ text, maxPx = 17, minPx = 10, maxLines = 2, style }) {
     setPx(f);
   }, [shown, maxPx, minPx, maxLines]);
   useLayoutEffect(() => { measure(); }, [measure]);
+  // ★親の「幅」が変わったときだけ測り直す（文字の大きさを変えると親の高さが変わるため、高さで反応すると無限に測り直して固まる）
   useEffect(() => {
     const el = ref.current?.parentElement;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => measure());
+    let lastW = el.clientWidth, raf = 0;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (Math.abs(w - lastW) < 1) return;
+      lastW = w;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => measure());
+    });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); cancelAnimationFrame(raf); };
   }, [measure]);
   return <div ref={ref} title={full} style={{ display:"block", width:"fit-content", maxWidth:"100%", margin:"0 auto", overflowWrap:"anywhere", lineHeight:1.25, fontSize:px, ...style }}>{shown}</div>;
 }
@@ -17537,8 +17553,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       if (!el || !sv) return;
       const docTop = (e) => e.getBoundingClientRect().top + window.scrollY;
       if (osAnchorY.current == null) osAnchorY.current = Math.max(80, docTop(sv) - (window.scrollY > 0 ? 0 : 0));
-      window.scrollTo({ top: Math.max(0, (docTop(el) - osAnchorY.current) * ratio), behavior:"smooth" });
-    }, 60);
+      // ★なめらかスクロール中にタップすると、スマホではタップが「スクロールを止める」動作に使われて
+      //   ボタンが反応しない（画面が固まったように見える）ため、一瞬で移動させる
+      window.scrollTo({ top: Math.max(0, (docTop(el) - osAnchorY.current) * ratio), behavior:"auto" });
+    }, 30);
   }
   function osPickServe(v){ // "1st" | "2nd" | "df"
     handleServeRadio(v);
@@ -17555,7 +17573,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   function osClear(){
     if (fault!==0) handleServeRadio("1st");
     resetSel();
-    window.scrollTo({ top:0, behavior:"smooth" });
+    window.scrollTo({ top:0, behavior:"auto" });
   }
   function osRecord(){
     if (!osReady) return;
@@ -17570,7 +17588,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       clearTimeout(osToastTimer.current);
       osToastTimer.current = setTimeout(()=>setOsToast(""), 1600);
     }
-    window.scrollTo({ top:0, behavior:"smooth" });
+    window.scrollTo({ top:0, behavior:"auto" });
   }
   const osRecording = tab==="record" && !correctMode && !!currentGame && match.status!=="finished" && !viewOnly;
 
