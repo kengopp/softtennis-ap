@@ -4404,7 +4404,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           {U.playersOf(t).map(p => {
             const on = playerName===p.name;
             const pos = U.positionOf(p);
-            const parts = String(p.name||"").split(/[\s　]+/);
+            const parts = String(p.label||p.name||"").split(/[\s　]+/);
             const same = U.allNames.filter(n => U.surname(n) === parts[0]).length > 1;
             const lines = (parts.length>1 && same) ? [parts[0], parts.slice(1).join(" ")] : [parts[0] || p.name || "—"];
             return (
@@ -17335,7 +17335,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const g = match.games.find(gm=>gm.id===gameId);
     if(!g || g.points.length===0) return null;
     const lp = g.points[g.points.length-1];
-    const who = lp.player_name || (lp.fault_count===2 ? "ダブルフォルト" : "");
+    const who = osDisp(lp.player_name) || (lp.fault_count===2 ? "ダブルフォルト" : "");
     const parts = [lp.result_type && (isWinnerResult(lp.result_type) ? "決め" : "ミス"), lp.side_type&&getSideLabel(lp.side_type), lp.result_type==="error"&&lp.miss_type&&getMissLabel(lp.miss_type), lp.course_type&&getCourseLabel(lp.course_type)].filter(Boolean);
     return (
       <div style={{ textAlign:"left", marginTop:14, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
@@ -17392,7 +17392,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             {osPlayersOf(t).map(p => {
               const on = lp.player_name===p.name;
               const pos = osPositionOf(p);
-              const parts = p.name.split(/[\s　]+/);
+              const parts = p.label.split(/[\s　]+/);
               const sameSurname = match.players.filter(x => osSurname(x.player_name) === parts[0]).length > 1;
               const lines = (parts.length>1 && sameSurname) ? [parts[0], parts.slice(1).join(" ")] : [parts[0] || p.name];
               return (
@@ -17578,8 +17578,16 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     return [...n].length > 10 ? [...n].slice(0,10).join("") + "…" : n; // ★10文字を超える学校名は「…」で省略
   };
   // 選手（登録順）。名前が空欄なら仮名（自チーム=選手1/選手2、相手=選手A/選手B）
-  const osPlayersOf = (t) => match.players.filter(p=>p.team===t).sort((x,y)=>(x.order_num??0)-(y.order_num??0))
-    .map((p,i)=>({ id:p.id, idx:i, name:(p.player_name && p.player_name.trim()) || (t==="B" ? PLACEHOLDER_NAMES[i] : `選手${i+1}`), club:(p.club_name||"").trim() }));
+  // ★相手ペアを選ばずに始めた試合は相手の選手データが無いため、仮名の選手を補って必ずボタンを出す。
+  //   相手の仮名は記録上は「選手A／選手B」（あとで本名に置き換える仕組みと合わせるため）、画面では「選手1／選手2」と表示する。
+  const osDisp = (n) => n==="選手A" ? "選手1" : n==="選手B" ? "選手2" : n;
+  const osPlayersOf = (t) => {
+    const rows = match.players.filter(p=>p.team===t).sort((x,y)=>(x.order_num??0)-(y.order_num??0));
+    const need = Math.max(rows.length, match.players.filter(p=>p.team==="A").length, match.players.filter(p=>p.team==="B").length, 1);
+    const list = rows.map((p,i)=>({ id:p.id, idx:i, name:(p.player_name && p.player_name.trim()) || (t==="B" ? PLACEHOLDER_NAMES[i] : `選手${i+1}`), club:(p.club_name||"").trim() }));
+    for (let i=list.length; i<need; i++) list.push({ id:`ph-${t}-${i}`, idx:i, name: t==="B" ? (PLACEHOLDER_NAMES[i] ?? `選手${i+1}`) : `選手${i+1}`, club:"" });
+    return list.map(p => ({ ...p, label: osDisp(p.name) }));
+  };
   const osSurname = (n) => String(n||"").trim().split(/[\s　]+/)[0];
   // ★前衛・後衛：選手マスターに登録があれば表示（学校名で絞ってから名前で探す）。無ければ表示しない。
   //   選手未登録の仮名（選手1/選手2・選手A/選手B）のときは、1人目＝後衛、2人目＝前衛と表示する。
@@ -17756,7 +17764,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ display:"grid",gridTemplateColumns:"minmax(0,1fr) 100px minmax(0,1fr)",gap:6,marginBottom:6 }}>
             {[leftLabel, null, rightLabel].map((lab,i)=> lab==null ? <div key={i}/> : (
               <div key={i} style={{ minWidth:0, textAlign:"center", color:C.white, fontWeight:800 }}>
-                {(()=>{ const names=(lab||"").split("/").filter(Boolean); return names.length>0 && (
+                {(()=>{ const t = i===0 ? leftTeam : rightTeam; const names = osPlayersOf(t).map(p=>p.label); return names.length>0 && (
                   <FitLines lines={names} fallbackLines={names.map(n=>String(n).trim().split(/[\s　]+/)[0])} maxPx={18} minPx={12} lineHeight={1.3} />
                 ); })()}
               </div>
@@ -18351,7 +18359,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                             <div style={{ display:"flex",alignItems:"center",gap:10,padding:"10px 10px",background:C.gray,borderRadius:10,marginTop:6,borderLeft:`5px solid ${col}`,cursor:"pointer" }} onClick={()=>setEditingPoint({gameId:g.id,point:pt})}>
                               <span style={{ fontSize:13,fontWeight:800,padding:"3px 8px",borderRadius:20,background:col,color:C.white,whiteSpace:"nowrap",maxWidth:96,overflow:"hidden",textOverflow:"ellipsis",flexShrink:0 }}>{osTeamName(pt.scoring_team)}</span>
                               <span style={{ flex:1,minWidth:0,fontSize:15,fontWeight:700,color:C.text,lineHeight:1.5 }}>
-                                {pt.player_name || (pt.fault_count===2 ? "ダブルフォルト" : "—")}{pt.play_type ? `（${getPlayLabel(pt.play_type)}）` : ""}
+                                {osDisp(pt.player_name) || (pt.fault_count===2 ? "ダブルフォルト" : "—")}{pt.play_type ? `（${getPlayLabel(pt.play_type)}）` : ""}
                                 <span style={{ ...tag, color: sv==="DF" ? C.white : "#3d4457", background: sv==="DF" ? "#e74c3c" : "#e6e9ef" }}>{sv}</span>
                                 {pt.result_type && <span style={{ ...tag, color: isWinnerResult(pt.result_type) ? "#1565c0" : C.red, background: isWinnerResult(pt.result_type) ? "#e3eefb" : "#fbe6ea" }}>{isWinnerResult(pt.result_type) ? "決め" : "ミス"}</span>}
                                 {det && <div style={{ fontSize:13,fontWeight:600,color:C.textSec,marginTop:1 }}>{det}</div>}
@@ -18476,7 +18484,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             const summary = osIsDF
               ? `ダブルフォルト（${serverName}）：${osTeamName(osScoreTeam)}に1点`
               : osReady
-                ? `${osTeamName(osTeam)}に1点：${osPlayer}${osPlay?`（${getPlayLabel(osPlay)}）`:""} ${osKind==="winner"?"決め":"ミス"}${[osSide&&getSideLabel(osSide), osKind==="error"&&osMiss&&getMissLabel(osMiss), osCourse&&getCourseLabel(osCourse)].filter(Boolean).map(t=>"・"+t).join("")}`
+                ? `${osTeamName(osTeam)}に1点：${osDisp(osPlayer)}${osPlay?`（${getPlayLabel(osPlay)}）`:""} ${osKind==="winner"?"決め":"ミス"}${[osSide&&getSideLabel(osSide), osKind==="error"&&osMiss&&getMissLabel(osMiss), osCourse&&getCourseLabel(osCourse)].filter(Boolean).map(t=>"・"+t).join("")}`
                 : "②〜④を選んでください";
             const teamBtn = (t) => {
               const on = osScoreTeam===t, color = osTeamColor(t);
@@ -18501,7 +18509,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       const on = osPlayer===p.name && osTargetTeam===t;
                       const pos = osPositionOf(p);
                       // ★選手名は名字だけを大きく表示。ただし試合内に同じ名字の選手がいるときは区別できるよう名前まで出す
-                      const parts = p.name.split(/[\s　]+/);
+                      const parts = p.label.split(/[\s　]+/);
                       const sameSurname = match.players.filter(x => osSurname(x.player_name) === parts[0]).length > 1;
                       const lines = (parts.length>1 && sameSurname) ? [parts[0], parts.slice(1).join(" ")] : [parts[0] || p.name];
                       return (
@@ -18646,7 +18654,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                         <div key={pt.id} onClick={()=>setEditingPoint({gameId:currentGame.id,point:pt})} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:"1px solid #f0f2f6", cursor:"pointer" }}>
                           <span style={{ width:22, height:22, borderRadius:6, display:"inline-flex", alignItems:"center", justifyContent:"center", fontWeight:900, color:osTeamColor(pt.scoring_team), background: pt.scoring_team==="A" ? "#e3f5ea" : "#fff1e6", flexShrink:0 }}>{pt.scoring_team==="A"?"○":"●"}</span>
                           <span style={{ flex:1, minWidth:0, fontSize:13 }}>
-                            {pt.player_name || (pt.fault_count===2 ? "ダブルフォルト" : "—")}{pt.play_type ? `（${getPlayLabel(pt.play_type)}）` : ""}
+                            {osDisp(pt.player_name) || (pt.fault_count===2 ? "ダブルフォルト" : "—")}{pt.play_type ? `（${getPlayLabel(pt.play_type)}）` : ""}
                             <span style={{ ...tagStyle, color: sv==="DF" ? C.white : "#3d4457", background: sv==="DF" ? "#e74c3c" : "#eef0f4" }}>{sv}</span>
                             {pt.result_type && <span style={{ ...tagStyle, color: isWinnerResult(pt.result_type) ? "#1565c0" : C.red, background: isWinnerResult(pt.result_type) ? "#e3eefb" : "#fbe6ea" }}>{isWinnerResult(pt.result_type) ? "決め" : "ミス"}</span>}
                             {det && <div style={{ fontSize:11, color:C.textSec, marginTop:1 }}>{det}</div>}
@@ -18814,7 +18822,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <p style={{ fontSize:13, color:C.textSec, marginBottom:20, lineHeight:1.6 }}>{(()=>{
               const lp = currentGame?.points?.[currentGame.points.length-1];
               if (!lp) return "直前に記録した1点が取り消されます。";
-              const who = lp.player_name || (lp.fault_count===2 ? "ダブルフォルト" : "");
+              const who = osDisp(lp.player_name) || (lp.fault_count===2 ? "ダブルフォルト" : "");
               const b = lp.scoring_team==="A" ? [lp.score_a_after-1, lp.score_b_after] : [lp.score_a_after, lp.score_b_after-1];
               const l = isYounger ? b[0] : b[1], r = isYounger ? b[1] : b[0];
               return `直前の記録${who?`「${who}${lp.play_type?`（${getPlayLabel(lp.play_type)}）`:""}」`:""}を取り消して、${l} - ${r} に戻します。`;
