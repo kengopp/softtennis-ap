@@ -17257,6 +17257,31 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     if(!currentGame) return;
     updatePointDetail(currentGame.id, field, value);
   }
+  // ★ゲーム終了画面：詳細は記録する前に入れているので、まず「最後の1点」の内容だけを表示する。
+  //   直したいときだけ「直す」を押すと、これまでの詳細入力欄が開く。
+  const [lastPtEditOpen, setLastPtEditOpen] = useState(false);
+  useEffect(() => { setLastPtEditOpen(false); }, [modal?.gameId]);
+  function renderLastPointSummary(gameId){
+    const g = match.games.find(gm=>gm.id===gameId);
+    if(!g || g.points.length===0) return null;
+    const lp = g.points[g.points.length-1];
+    const who = lp.player_name || (lp.fault_count===2 ? "ダブルフォルト" : "");
+    const parts = [lp.result_type && (isWinnerResult(lp.result_type) ? "決め" : "ミス"), lp.side_type&&getSideLabel(lp.side_type), lp.result_type==="error"&&lp.miss_type&&getMissLabel(lp.miss_type), lp.course_type&&getCourseLabel(lp.course_type)].filter(Boolean);
+    return (
+      <div style={{ textAlign:"left", marginTop:14, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+        <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:4 }}>最後の1点</div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ flex:1, minWidth:0, fontSize:15, fontWeight:800, color:C.text, lineHeight:1.5 }}>
+            {who || "（選手未入力）"}{lp.play_type ? `（${getPlayLabel(lp.play_type)}）` : ""}
+            {parts.length>0 && <div style={{ fontSize:12.5, fontWeight:700, color:C.textSec }}>{parts.join("・")}</div>}
+          </div>
+          <button style={{ flexShrink:0, padding:"8px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:13, fontWeight:800, color:C.navy, cursor:"pointer" }}
+            onClick={()=>setLastPtEditOpen(v=>!v)}>{lastPtEditOpen ? "▲ 閉じる" : "✏️ 直す"}</button>
+        </div>
+        {lastPtEditOpen && renderPointDetailEditor(gameId)}
+      </div>
+    );
+  }
   // ★ゲーム終了直後の「最後の1点」に詳細を追記するための共通UIブロック
   function renderPointDetailEditor(gameId){
     const g = match.games.find(gm=>gm.id===gameId);
@@ -18529,7 +18554,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <h3 style={{ fontSize:18,fontWeight:800,margin:"8px 0" }}>第{modal.num}ゲーム終了！</h3>
             <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
             <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
-            {renderPointDetailEditor(modal.gameId)}
+            {renderLastPointSummary(modal.gameId)}
             <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:14 }} onClick={()=>{setModal(null);startNewGame();}}>次のゲームへ</button>
             <button style={{ width:"100%",padding:11,background:"#f0f0f0",color:C.textSec,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>setGameOverUndoConfirm(true)}>↩ 1点前に戻す</button>
           </div>
@@ -18543,7 +18568,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <h3 style={{ fontSize:18,fontWeight:800,margin:"8px 0" }}>試合終了！</h3>
             <p style={{ color:C.textSec }}>{modal.winner==="A"?teamALabel:teamBLabel} 勝利</p>
             <div style={{ fontSize:28,fontWeight:900,margin:"10px 0" }}><span style={{ color:isYounger?"#2ecc71":"#f97316" }}>{isYounger?modal.sA:modal.sB}</span><span style={{ color:C.textSec,margin:"0 8px" }}>-</span><span style={{ color:isYounger?"#f97316":"#2ecc71" }}>{isYounger?modal.sB:modal.sA}</span></div>
-            {renderPointDetailEditor(modal.gameId)}
+            {renderLastPointSummary(modal.gameId)}
             <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`),marginTop:14 }} onClick={()=>{ persist({...match,status:"finished"}); setModal(null); }}>結果を見る</button>
           </div>
         </Modal>
