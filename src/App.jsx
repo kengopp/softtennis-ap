@@ -17712,7 +17712,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 title="最新データに更新"
               >{refreshing ? "..." : "🔄"}</button>
             )}
-            {(match.status==="active" || match.status==="finished") && (
+            {/* ★記録中はLINE共有を「⋯」（その他の操作）に入れたので、ヘッダーには出さない（観戦中・試合前後は従来通り） */}
+            {(match.status==="active" || match.status==="finished") && (viewOnly || !currentGame || match.status==="finished") && (
               <button
                 style={{ background:"#06C755",border:"none",borderRadius:8,padding:"5px 8px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}
                 onClick={()=>shareToLine(match.status==="waiting" ? "待機中" : match.status==="finished" ? "試合終了" : "試合中")}
@@ -18538,6 +18539,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 {osMenu && (
                   <Modal onClose={()=>setOsMenu(false)}>
                     <div style={{ fontSize:16, fontWeight:800, textAlign:"center", marginBottom:14 }}>その他の操作</div>
+                    <button style={{ width:"100%",padding:13,background:"#06C755",color:C.white,border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8 }} onClick={()=>{ setOsMenu(false); shareToLine("試合中"); }}>
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg>
+                      LINEで共有する
+                    </button>
                     <button style={{ width:"100%",padding:13,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>{ setOsMenu(false); setSuspendConfirm(true); }}>⏸ 中断</button>
                     <button style={{ width:"100%",padding:13,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setAbandonConfirm(true); }}>⏹ 途中終了</button>
                     <button style={{ width:"100%",padding:12,background:"none",border:`1px dashed ${C.border}`,borderRadius:10,color:C.textSec,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setShowGamePicker(true); }}>🔧 記録済みのゲームを修正する</button>
