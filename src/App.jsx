@@ -17784,14 +17784,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             {/* ★「▮ サーブ」の説明は枠の上にはみ出す形（absolute）で置き、行の高さに含めない。
                  こうすると左右のポイント数字と黄色いバーが、ゲームカウントの枠の上下中央にそろう。 */}
             <div style={{ textAlign:"center",position:"relative" }}>
-              {curServer && (
-                <div style={{ position:"absolute",left:0,right:0,bottom:"100%",paddingBottom:4,display:"flex",alignItems:"center",justifyContent:"center",gap:5 }}>
-                  {/* ★小さいバーはサーブ側に置く（左がサーブ「▮ サーブ」／右がサーブ「サーブ ▮」） */}
-                  {curServer===leftTeam && <span style={{ width:4,height:12,borderRadius:2,background:C.serve }}/>}
-                  <span style={{ fontSize:11,fontWeight:700,color:C.serve }}>サーブ</span>
-                  {curServer===rightTeam && <span style={{ width:4,height:12,borderRadius:2,background:C.serve }}/>}
-                </div>
-              )}
+              {/* ★サーブ側は、得点の横の大きい黄色の棒だけで示す（ゲームカウントの上の小さい表示は廃止） */}
               <div style={{ background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"6px 4px" }}>
                 <div style={{ fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.75)",marginBottom:2 }}>
                   {currentGame ? ("G" + currentGame.game_number + (currentGame.is_final ? " F" : "")) : ""}
