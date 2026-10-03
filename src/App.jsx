@@ -15594,7 +15594,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
 // ============================================================
 // ★「187勝46敗」の表示。数字は大きく、「勝」「敗」は小さくして、狭い画面でも2段に折り返さないようにする
 function WinLossText({ wins, losses }) {
-  const u = { fontSize:"0.62em", fontWeight:800, margin:"0 1px" };
+  const u = { fontSize:"0.72em", fontWeight:800, margin:"0 1px" };
   return <span style={{ whiteSpace:"nowrap" }}>{wins}<span style={u}>勝</span>{losses}<span style={u}>敗</span></span>;
 }
 
@@ -15716,15 +15716,15 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                   <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>総合成績（自チーム視点）</div>
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1.35fr",textAlign:"center" }}>
                     <div>
-                      <div style={{ fontSize:20,fontWeight:800 }}>{rec.total}</div>
+                      <div style={{ fontSize:24,fontWeight:800 }}>{rec.total}</div>
                       <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>試合数</div>
                     </div>
                     <div>
-                      <div style={{ fontSize:20,fontWeight:800,color:C.accent }}>{rec.rate}%</div>
+                      <div style={{ fontSize:24,fontWeight:800,color:C.accent }}>{rec.rate}%</div>
                       <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>勝率</div>
                     </div>
                     <div>
-                      <div style={{ fontSize:20,fontWeight:800 }}><WinLossText wins={rec.wins} losses={rec.losses} /></div>
+                      <div style={{ fontSize:24,fontWeight:800 }}><WinLossText wins={rec.wins} losses={rec.losses} /></div>
                       <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>戦績</div>
                     </div>
                   </div>
@@ -15734,8 +15734,8 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                   <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>相手選手別の成績（自チームの勝率）</div>
                   {oppPlayerRows.map(r=>(
                     <div key={r.name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}` }}>
-                      <span style={{ fontSize:13 }}>{r.name}</span>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
+                      <span style={{ fontSize:14 }}>{r.name}</span>
+                      <span style={{ fontSize:13,color:C.textSec,whiteSpace:"nowrap",marginLeft:8 }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
                     </div>
                   ))}
                 </div>
@@ -15744,8 +15744,8 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                   <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>相手ペア別の成績（自チームの勝率）</div>
                   {oppPairRows.map(r=>(
                     <div key={r.name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}` }}>
-                      <span style={{ fontSize:13 }}>{r.name}</span>
-                      <span style={{ fontSize:12,color:C.textSec }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
+                      <span style={{ fontSize:14 }}>{r.name}</span>
+                      <span style={{ fontSize:13,color:C.textSec,whiteSpace:"nowrap",marginLeft:8 }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
                     </div>
                   ))}
                 </div>
