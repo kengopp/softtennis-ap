@@ -12899,6 +12899,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
   const [noteEditing, setNoteEditing] = useState(null); // {id?, text, match_id}
+  const [noteOrder, setNoteOrder] = useState("desc"); // ★対戦メモの並び（desc=新しい順／asc=古い順）
   // ★期間（チームタブ・選手の戦績画面とそろえる）。シーズン設定があれば「📌◯◯以降」が初期値
   // ★開いた時点で前回の期間が保存されていたか（保存処理が先に走って上書きされる前に覚えておく）
   const cachedPeriodRef = useRef(readScreenCache("pairAnalysis")?.period);
@@ -13038,6 +13039,33 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const targetMatches = side === "own"
     ? (selectedOwnPair?.matches ?? [])
     : (selectedOppPair?.matches ?? []);
+
+  // ★対戦メモの時系列：自チームのペアの絞り込みに関係なく、この相手ペアと戦った全試合を並べる
+  //   （メモは相手ペアごとに学校で共有しているので、どの自チームペアの試合のメモも一緒に読めるようにする）
+  const allVsOppMatches = (side === "opp" && selectedOppPair)
+    ? ownMatches.filter(m => {
+        const bClub = m.players.find(p=>p.team==="B")?.club_name;
+        if (mySchoolName && bClub && bClub.trim() === mySchoolName.trim()) return false;
+        return oppPairOf(m)?.key === selectedOppPair.key;
+      })
+    : [];
+  const noteTimeline = (() => {
+    if (side !== "opp" || !selectedOppPair) return [];
+    const byMatch = new Map(allVsOppMatches.map(m => [m.id, { type:"match", m, date:(m.match_date||"").slice(0,10), rank:roundProgressRank(m.round), notes:[] }]));
+    const events = [...byMatch.values()];
+    notes.forEach(n => {
+      const ev = n.match_id && byMatch.get(n.match_id);
+      if (ev) ev.notes.push(n);
+      else events.push({ type:"free", date:(n.created_at||"").slice(0,10), rank:1000, notes:[n] });
+    });
+    events.forEach(ev => ev.notes.sort((a,b) => String(a.created_at||"").localeCompare(String(b.created_at||""))));
+    const cmp = (a,b) => a.date.localeCompare(b.date) || (a.rank - b.rank) || String(a.notes[0]?.created_at||"").localeCompare(String(b.notes[0]?.created_at||""));
+    events.sort(cmp);
+    if (noteOrder === "desc") events.reverse();
+    return events;
+  })();
+  // ★その試合で登録した順（後衛→前衛）で、自チームのペア名を出す
+  const ownPairNamesOf = (m) => (m.players||[]).filter(p=>p.team==="A").sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p=>String(p.player_name||"").trim()).filter(Boolean);
 
   // ★points込みの詳細は、見る対象が決まったタイミングでその分だけ読み込む
   useEffect(() => {
@@ -13267,7 +13295,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                   <div style={S.card}>
                     <div style={{ padding:14 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-                        <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>📝 メモ（{notes.length}件）</div>
+                        <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>📝 対戦メモ（{notes.length}件）</div>
                         {!noteEditing && (
                           <button onClick={()=>setNoteEditing({ text:"", match_id:null })}
                             style={{ background:C.gray, border:"none", borderRadius:8, fontSize:13.5, fontWeight:700, color:C.navy, padding:"7px 12px", cursor:"pointer" }}>＋ 追加</button>
@@ -13280,18 +13308,21 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                             value={noteEditing.text}
                             onChange={e=>setNoteEditing(v=>({ ...v, text:e.target.value }))}
                             placeholder={"気づいたことを書いてください\n例：田中のポーチが速い。ロブで一度下げてから展開する。"}
-                            style={{ width:"100%", minHeight:110, padding:12, borderRadius:9, border:`1.5px solid ${C.border}`,
+                            style={{ width:"100%", boxSizing:"border-box", minHeight:110, padding:12, borderRadius:9, border:`1.5px solid ${C.border}`,
                               fontSize:14.5, lineHeight:1.75, color:C.text, fontFamily:"inherit", resize:"vertical" }}
                           />
-                          <div style={{ fontSize:13, fontWeight:700, color:C.text, margin:"10px 0 6px" }}>試合に紐づける（任意）</div>
-                          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
-                            {[...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
+                          <div style={{ fontSize:13, fontWeight:700, color:C.text, margin:"10px 0 6px" }}>どの試合のメモですか？（任意）</div>
+                          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:10 }}>
+                            {[...allVsOppMatches].sort((a,b)=> String(b.match_date||"").localeCompare(String(a.match_date||"")) || (roundProgressRank(b.round)-roundProgressRank(a.round))).map(m => {
                               const on = noteEditing.match_id === m.id;
+                              const win = winnerSideOf(m)==="A";
+                              const md = (m.match_date||"").slice(5).split("-").map(x=>String(Number(x))).join("/");
                               return (
                                 <div key={m.id} onClick={()=>setNoteEditing(v=>({ ...v, match_id: on ? null : m.id }))}
-                                  style={{ padding:"9px 12px", borderRadius:9, fontSize:13, fontWeight:700, cursor:"pointer",
+                                  style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 12px", borderRadius:9, fontSize:13, fontWeight:700, cursor:"pointer",
                                     border:`1.5px solid ${on?C.navy:C.border}`, background:on?C.navy:C.white, color:on?C.white:C.textSec }}>
-                                  {(m.match_date||"").slice(5).replace("-","/")} {m.round||""} {m.match_score_a}-{m.match_score_b}
+                                  <span style={{ minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{md} {m.round||""}　{ownPairNamesOf(m).map(n=>n.split(/[\s　]+/)[0]).join("・")}</span>
+                                  <span style={{ marginLeft:"auto", fontWeight:900, whiteSpace:"nowrap" }}>{m.match_score_a}-{m.match_score_b} {win?"勝":"敗"}</span>
                                 </div>
                               );
                             })}
@@ -13304,28 +13335,71 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         </div>
                       )}
 
+                      {noteTimeline.length > 1 && !noteEditing && (
+                        <div style={{ display:"flex", background:C.gray, borderRadius:9, padding:3, gap:3, marginBottom:12 }}>
+                          {[["desc","新しい順"],["asc","古い順"]].map(([v,l]) => (
+                            <button key={v} onClick={()=>setNoteOrder(v)}
+                              style={{ flex:1, padding:"7px 4px", borderRadius:7, border:"none", fontSize:12.5, fontWeight:800, cursor:"pointer",
+                                background: noteOrder===v ? C.white : "transparent", color: noteOrder===v ? C.navy : C.textSec,
+                                boxShadow: noteOrder===v ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>{l}</button>
+                          ))}
+                        </div>
+                      )}
+
                       {notes.length === 0 && !noteEditing && (
-                        <div style={{ textAlign:"center", color:C.textSec, fontSize:13.5, padding:"16px 0" }}>
+                        <div style={{ textAlign:"center", color:C.textSec, fontSize:13.5, padding:"6px 0 14px" }}>
                           まだメモがありません。次に当たるときのために書いておけます。
                         </div>
                       )}
 
-                      {notes.map(n => {
-                        const linked = n.match_id ? targetMatches.find(m=>m.id===n.match_id) : null;
-                        return (
-                          <div key={n.id} style={{ background:"#fffdf5", border:"1px solid #f0dfa8", borderRadius:10, padding:12, marginBottom:8 }}>
-                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:12.5, color:C.textSec, fontWeight:700, marginBottom:6 }}>
-                              <span>{(n.created_at||"").slice(0,10).replace(/-/g,"/")}</span>
-                              <span style={{ display:"flex", alignItems:"center", gap:8 }}>
-                                {linked && <span style={{ fontSize:12, fontWeight:800, color:"#8a5a00", background:"#fff4e5", border:"1px solid #f5c979", borderRadius:6, padding:"2px 7px" }}>{linked.round||"試合"}</span>}
-                                <span onClick={()=>setNoteEditing({ id:n.id, text:n.note_text, match_id:n.match_id })} style={{ color:C.navy, cursor:"pointer" }}>編集</span>
-                                <span onClick={()=>handleDeleteNote(n.id)} style={{ color:C.red, cursor:"pointer" }}>削除</span>
-                              </span>
-                            </div>
-                            <div style={{ fontSize:14, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap" }}>{n.note_text}</div>
-                          </div>
-                        );
-                      })}
+                      {/* ★試合の流れに沿ってメモを並べる（メモのない試合も並べて、対戦の流れが途切れないようにする） */}
+                      {noteTimeline.length > 0 && (
+                        <div style={{ position:"relative", paddingLeft:20 }}>
+                          <div style={{ position:"absolute", left:6, top:6, bottom:6, width:2, background:C.border }} />
+                          {noteTimeline.map((ev, idx) => {
+                            const isMatch = ev.type === "match";
+                            const m = ev.m;
+                            const win = isMatch && winnerSideOf(m)==="A";
+                            const dotColor = !isMatch ? "#c4cbd8" : win ? C.accent : C.red;
+                            const ours = isMatch ? ownPairNamesOf(m).join("・") : "";
+                            const title = isMatch ? [m.tournament_name, m.round].filter(Boolean).join("・") : "";
+                            return (
+                              <div key={isMatch ? m.id : "free-"+ev.notes[0].id} style={{ position:"relative", marginBottom: idx===noteTimeline.length-1 ? 0 : 14 }}>
+                                <span style={{ position:"absolute", left:-19, top:5, width:12, height:12, borderRadius:"50%", background:dotColor, border:"2px solid #fff", boxShadow:`0 0 0 1.5px ${dotColor}` }} />
+                                <div style={{ display:"flex", alignItems:"baseline", gap:6, flexWrap:"wrap" }}>
+                                  <span style={{ fontSize:13, fontWeight:800, color: isMatch ? C.navy : "#8a5a00" }}>{(ev.date||"").replace(/-/g,"/")}</span>
+                                  {isMatch
+                                    ? (title && <span style={{ fontSize:12.5, color:"#5a6478", fontWeight:700 }}>{title}</span>)
+                                    : <span style={{ fontSize:11, fontWeight:800, color:"#8a5a00", background:"#fff4e5", border:"1px solid #f5c979", borderRadius:6, padding:"1px 7px" }}>試合に紐づけなし</span>}
+                                </div>
+                                {isMatch && (
+                                  <div onClick={()=>{ if (!m.is_simple_draw_result) onOpenMatch && onOpenMatch(m.id); }}
+                                    style={{ display:"flex", alignItems:"center", gap:8, marginTop:3, fontSize:13.5, cursor: m.is_simple_draw_result ? "default" : "pointer" }}>
+                                    <span style={{ flex:1, minWidth:0, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{ours}</span>
+                                    <span style={{ fontWeight:800 }}>{m.match_score_a}-{m.match_score_b}</span>
+                                    <span style={{ fontWeight:900, width:20, textAlign:"right", color: win ? C.accent : C.red }}>{win?"勝":"敗"}</span>
+                                  </div>
+                                )}
+                                {isMatch && ev.notes.length === 0 && (
+                                  <div style={{ fontSize:12, color:"#a0a8b8", marginTop:5 }}>この試合のメモはありません</div>
+                                )}
+                                {ev.notes.map(n => (
+                                  <div key={n.id} style={{ background:"#fffdf5", border:"1px solid #f0dfa8", borderRadius:10, padding:"10px 12px", marginTop:8 }}>
+                                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", fontSize:12, color:C.textSec, fontWeight:700, marginBottom:5 }}>
+                                      <span>{(n.created_at||"").slice(5,10).split("-").map(x=>String(Number(x))).join("/")} に記入</span>
+                                      <span style={{ display:"flex", alignItems:"center", gap:12 }}>
+                                        <span onClick={()=>handleDeleteNote(n.id)} style={{ color:C.red, cursor:"pointer", padding:"2px 0" }}>削除</span>
+                                        <span onClick={()=>setNoteEditing({ id:n.id, text:n.note_text, match_id:n.match_id })} style={{ color:C.navy, cursor:"pointer", padding:"2px 0" }}>編集</span>
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize:14, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap" }}>{n.note_text}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
