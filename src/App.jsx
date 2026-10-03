@@ -23113,7 +23113,16 @@ export default function App() {
     const returnToTrap = () => {
       window.history.forward();
       clearTimeout(fallbackTimer);
-      fallbackTimer = setTimeout(() => { if (!window.__stAtTrap) armTrap(); }, 700);
+      // ★確かめが遅れても、ここでは見張りを積み直さない（画面に触れずに積んだ履歴は、Android の Chrome が
+      //   次の戻るで飛ばしてしまい、「このサイトを離れますか？」が出てページごと読み込み直されるため）。
+      //   見張りの位置に戻れていなければ forward をやり直し、それでもだめなら次に画面に触れたときに積み直す。
+      let tries = 0;
+      const check = () => {
+        if (window.__stAtTrap) return;
+        if (isTrap(window.history.state)) { window.__stAtTrap = true; return; }
+        if (++tries <= 3) { window.history.forward(); fallbackTimer = setTimeout(check, 700); }
+      };
+      fallbackTimer = setTimeout(check, 700);
     };
     const onPop = (e) => {
       if (isTrap(e.state)) { window.__stAtTrap = true; return; } // forward で見張りの位置に戻ってきた
