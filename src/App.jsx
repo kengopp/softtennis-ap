@@ -14548,22 +14548,25 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
                   loadResults(list, scopeShortLabel(next, seasonLabel), capped);
                 }}
-                style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
+                style={{ flex:1, padding:"6px 2px", lineHeight:1.25, borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
                   border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}
-              >直近{n}試合</button>
+              ><span style={{ whiteSpace:"nowrap" }}>直近</span><br/><span style={{ whiteSpace:"nowrap" }}>{n}試合</span></button>
             );
           })}
           <button
             disabled={resultLoading}
             onClick={()=>{
-              const next = { ...scope, limit:0, pickedIds:[] };
+              // ★チームの期間（例：26-27チーム）が決まっていれば、「その期間の全試合」にする
+              const next = { ...scope, limit:0, pickedIds:[], ...(seasonStart ? { period:"season" } : {}) };
               setScope(next);
               const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
               loadResults(list, scopeShortLabel(next, seasonLabel), capped);
             }}
             style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
-              border:`1px solid ${!scope.limit?C.navy:C.border}`, background:!scope.limit?C.navy:"#fff", color:!scope.limit?"#fff":C.textSec }}
-          >全部</button>
+              ...(()=>{ const on = !scope.limit && (scope.pickedIds??[]).length===0 && (!seasonStart || scope.period==="season");
+                return { border:`1px solid ${on?C.navy:C.border}`, background:on?C.navy:"#fff", color:on?"#fff":C.textSec }; })(),
+              ...(seasonStart ? { flex:1.5, lineHeight:1.25, padding:"6px 2px" } : {}) }}
+          >{seasonStart ? <><span style={{ whiteSpace:"nowrap" }}>{seasonLabel}</span><br/><span style={{ whiteSpace:"nowrap" }}>全試合</span></> : "全部"}</button>
         </div>
 
 
