@@ -20734,6 +20734,259 @@ function RosterTextImportScreen({ mySchoolName, onBack }) {
   );
 }
 
+// ★名字だけの記録をまとめる
+//   当初「西」のように名字だけで選手マスターに登録して試合を記録し、あとからフルネームの選手を別に登録した場合、
+//   過去の試合には「西」の文字のまま残り、対戦成績・スタッツが「西」と「西 優」に分かれてしまう。
+//   過去の試合（match_players）から名字だけの名前を探し、同じ学校の選手マスターにいる同じ名字のフルネームの選手を候補に出して、
+//   ユーザーが確認したものだけ、出場選手・ポイント・フォルトの名前をフルネームに書き換える。
+const isSurnameOnlyName = (n) => { const t = String(n || "").trim(); return !!t && !/[\s　]/.test(t); };
+const surnameOfName = (n) => String(n || "").trim().split(/[\s　]+/)[0];
+
+async function mergeSurnameRecords(item, newName) {
+  // item: { name, rowIds, matchIds }
+  const { error: mpErr } = await supabase.from("match_players").update({ player_name: newName }).in("id", item.rowIds);
+  if (mpErr) throw mpErr;
+  const { error: ptErr } = await supabase.from("points").update({ player_name: newName }).eq("player_name", item.name).in("match_id", item.matchIds);
+  if (ptErr) throw ptErr;
+  const { error: flErr } = await supabase.from("faults").update({ player_name: newName }).eq("player_name", item.name).in("match_id", item.matchIds);
+  if (flErr) throw flErr;
+}
+
+function MergeSurnameScreen({ mySchoolName, onBack }) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [items, setItems] = useState([]);        // 候補あり
+  const [noMatch, setNoMatch] = useState([]);    // 候補なし
+  const [choice, setChoice] = useState({});      // key -> まとめ先のフルネーム（null=まとめない）
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(null);        // { results:[{from,to,count}], failed:[{from,msg}], matchCount }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [roster, mpRes] = await Promise.all([
+          getPlayerRoster({ fresh: true }),
+          fetchAllRows("match_players", "id, match_id, team, player_name, club_name", q => q.order("id")),
+        ]);
+        if (mpRes.error) throw mpRes.error;
+        const own = (mySchoolName || "").trim();
+        // 学校ごとの選手マスター（自チームの選手は自分の学校として扱う）
+        const rosterBySchool = {};
+        (roster || []).forEach(p => {
+          const school = p.is_own_team !== false ? own : (p.team_name || "").trim();
+          if (!school) return;
+          (rosterBySchool[school] ??= []).push(String(p.player_name || "").trim());
+        });
+        // 名字だけの名前を「チーム側・学校・名前」ごとに集める
+        const groups = {};
+        (mpRes.data || []).forEach(r => {
+          const name = String(r.player_name || "").trim();
+          if (!isSurnameOnlyName(name)) return;
+          const school = (r.club_name || "").trim() || (r.team === "A" ? own : "");
+          const key = `${r.team}|${school}|${name}`;
+          const g = (groups[key] ??= { key, team: r.team, school, name, rowIds: [], matchIds: [] });
+          g.rowIds.push(r.id);
+          if (!g.matchIds.includes(r.match_id)) g.matchIds.push(r.match_id);
+        });
+        const found = [], missing = [];
+        Object.values(groups).forEach(g => {
+          const cands = [...new Set((rosterBySchool[g.school] || []).filter(n => !isSurnameOnlyName(n) && surnameOfName(n) === g.name))].sort();
+          if (cands.length) found.push({ ...g, cands, isOwn: !!own && g.school === own });
+          else missing.push(g);
+        });
+        // 自チームを先に、そのあと学校名順・名前順
+        found.sort((a, b) => (b.isOwn - a.isOwn) || a.school.localeCompare(b.school, "ja") || a.name.localeCompare(b.name, "ja"));
+        missing.sort((a, b) => a.school.localeCompare(b.school, "ja") || a.name.localeCompare(b.name, "ja"));
+        // ポイント数（確認用の目安）
+        const counts = await Promise.all(found.map(g =>
+          supabase.from("points").select("id", { count: "exact", head: true }).eq("player_name", g.name).in("match_id", g.matchIds)
+            .then(r => r.count ?? null).catch(() => null)
+        ));
+        found.forEach((g, i) => { g.pointCount = counts[i]; });
+        if (cancelled) return;
+        const init = {};
+        // 候補が1人なら最初からチェック。2人以上なら、間違いを防ぐため選んでもらう
+        found.forEach(g => { init[g.key] = g.cands.length === 1 ? g.cands[0] : null; });
+        setItems(found); setNoMatch(missing); setChoice(init); setLoading(false);
+      } catch (e) {
+        if (!cancelled) { setLoadError(e?.message || String(e)); setLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mySchoolName]);
+
+  const chosen = items.filter(g => choice[g.key]);
+  const multiChosen = chosen.filter(g => g.cands.length > 1);
+
+  async function runMerge() {
+    setRunning(true);
+    const results = [], failed = [];
+    const touched = new Set();
+    for (const g of chosen) {
+      try {
+        await mergeSurnameRecords(g, choice[g.key]);
+        results.push({ from: g.name, to: choice[g.key], count: g.matchIds.length });
+        g.matchIds.forEach(id => touched.add(id));
+      } catch (e) {
+        failed.push({ from: g.name, msg: e?.message || String(e) });
+      }
+    }
+    invalidateMatchCaches();
+    dropSavedSnapshot();
+    invalidateRosterCache();
+    setRunning(false); setConfirmOpen(false);
+    setDone({ results, failed, matchCount: touched.size });
+  }
+
+  const SEL = "#0b6e75";
+  const hdr = (
+    <div style={S.hdr}>
+      <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack} disabled={running}>←</button>
+        <span style={{ fontSize:17, fontWeight:800, color:C.white, flex:1 }}>名字だけの記録をまとめる</span>
+      </div>
+    </div>
+  );
+
+  if (done) {
+    return (
+      <div style={S.page}>
+        {hdr}
+        <div style={{ padding:"30px 16px", textAlign:"center" }}>
+          <div style={{ fontSize:44 }}>{done.failed.length ? "⚠️" : "✅"}</div>
+          <h3 style={{ margin:"8px 0 6px", fontSize:18, fontWeight:800 }}>{done.results.length ? "まとめました" : "まとめられませんでした"}</h3>
+          {done.results.length > 0 && <p style={{ fontSize:13, color:C.textSec, lineHeight:1.7, margin:"0 0 16px" }}>{done.matchCount}試合の記録をフルネームに書き換えました。</p>}
+          {done.results.length > 0 && (
+            <div style={{ ...S.card, textAlign:"left", marginBottom:16 }}>
+              {done.results.map((r, i) => (
+                <div key={i} style={{ padding:"9px 12px", borderBottom:`1px solid ${C.border}`, fontSize:13 }}>{r.from} → {r.to}（{r.count}試合）</div>
+              ))}
+            </div>
+          )}
+          {done.failed.length > 0 && (
+            <div style={{ background:"#fdecea", border:"1px solid #f5b5b0", borderRadius:10, padding:"10px 12px", fontSize:12.5, color:C.red, textAlign:"left", marginBottom:16, lineHeight:1.7 }}>
+              次の名前は書き換えに失敗しました。もう一度お試しください。<br/>
+              {done.failed.map((f, i) => <div key={i}>・{f.from}：{f.msg}</div>)}
+            </div>
+          )}
+          <button style={{ ...S.btn(`linear-gradient(135deg,${C.navy},${C.navyMid})`), padding:15, fontSize:16, borderRadius:12 }} onClick={onBack}>選手マスターに戻る</button>
+        </div>
+      </div>
+    );
+  }
+
+  // 学校ごとにまとめて表示
+  const bySchool = [];
+  items.forEach(g => {
+    const label = g.school || "学校名なし";
+    let sec = bySchool.find(s => s.label === label && s.isOwn === g.isOwn);
+    if (!sec) { sec = { label, isOwn: g.isOwn, list: [] }; bySchool.push(sec); }
+    sec.list.push(g);
+  });
+
+  return (
+    <div style={{ ...S.page, paddingBottom:0, display:"flex", flexDirection:"column" }}>
+      {hdr}
+      <div style={{ padding:14, flex:1 }}>
+        {loading ? (
+          <div style={{ textAlign:"center", color:C.textSec, marginTop:60, fontSize:14 }}>過去の試合を調べています...</div>
+        ) : loadError ? (
+          <div style={{ background:"#fdecea", border:"1px solid #f5b5b0", borderRadius:10, padding:12, fontSize:13, color:C.red }}>読み込みに失敗しました：{loadError}</div>
+        ) : (
+          <>
+            <div style={{ background:"#eaeef7", border:"1px solid #b9c4dc", borderRadius:10, padding:"10px 12px", fontSize:12.5, lineHeight:1.7, color:C.navy, marginBottom:4 }}>
+              過去の試合で名字だけで記録された選手のうち、<b>同じ学校</b>の選手マスターに<b>同じ名字のフルネームの選手</b>がいるものを探しました。まとめたいものにチェックを入れてください。
+            </div>
+
+            {items.length === 0 && (
+              <div style={{ textAlign:"center", color:C.textSec, fontSize:13, margin:"30px 0 10px" }}>まとめられる名前は見つかりませんでした。</div>
+            )}
+
+            {bySchool.map(sec => (
+              <div key={sec.label + sec.isOwn}>
+                <div style={{ fontSize:12, fontWeight:800, color:C.textSec, margin:"14px 2px 6px" }}>{sec.label}（{sec.isOwn ? "自チーム" : "相手チーム"}）</div>
+                <div style={{ ...S.card, marginBottom:0 }}>
+                  {sec.list.map(g => {
+                    const sub = `${g.matchIds.length}試合${g.pointCount != null ? `・${g.pointCount}ポイント` : ""}`;
+                    if (g.cands.length > 1) {
+                      return (
+                        <div key={g.key} style={{ padding:"11px 12px", borderBottom:`1px solid ${C.border}`, background:"#fffaf0" }}>
+                          <div style={{ fontSize:13, fontWeight:800, marginBottom:8 }}>「{g.name}」（{sub}）は、どの選手ですか？</div>
+                          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                            {g.cands.map(n => {
+                              const on = choice[g.key] === n;
+                              return <button key={n} onClick={() => setChoice(c => ({ ...c, [g.key]: n }))} style={{ padding:"8px 12px", borderRadius:10, border:`2px solid ${on ? SEL : C.border}`, background:on ? SEL : C.white, color:on ? C.white : C.text, fontSize:13.5, fontWeight:800, cursor:"pointer" }}>{n}</button>;
+                            })}
+                            {(() => { const on = !choice[g.key]; return (
+                              <button onClick={() => setChoice(c => ({ ...c, [g.key]: null }))} style={{ padding:"8px 12px", borderRadius:10, border:`2px solid ${on ? "#7a8499" : C.border}`, background:on ? "#eef0f4" : C.white, color:C.textSec, fontSize:13.5, fontWeight:700, cursor:"pointer" }}>まとめない</button>
+                            ); })()}
+                          </div>
+                        </div>
+                      );
+                    }
+                    const on = !!choice[g.key];
+                    return (
+                      <div key={g.key} onClick={() => setChoice(c => ({ ...c, [g.key]: on ? null : g.cands[0] }))}
+                        style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 12px", borderBottom:`1px solid ${C.border}`, cursor:"pointer" }}>
+                        <div style={{ width:24, height:24, borderRadius:7, border:`2px solid ${on ? SEL : "#c4cbd8"}`, background:on ? SEL : C.white, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", color:C.white, fontWeight:900, fontSize:15 }}>{on ? "✓" : ""}</div>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:15, fontWeight:800, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                            <span style={{ color:C.textSec, textDecoration:"line-through", textDecorationColor:"#c4cbd8" }}>{g.name}</span>
+                            <span style={{ color:SEL, fontWeight:900 }}>→</span>
+                            <span>{g.cands[0]}</span>
+                          </div>
+                          <div style={{ fontSize:11.5, color:C.textSec, marginTop:3 }}>{sub}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            {noMatch.length > 0 && (
+              <>
+                <div style={{ fontSize:12, fontWeight:800, color:C.textSec, margin:"14px 2px 6px" }}>候補が見つからなかった名前</div>
+                <div style={{ ...S.card, padding:"10px 12px", fontSize:12, color:C.textSec, lineHeight:1.7 }}>
+                  {noMatch.map(g => `${g.name}（${g.school || "学校名なし"}）`).join("・")}
+                  <br/>選手マスターに同じ名字のフルネームの選手がいないため、そのままにします。
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {!loading && !loadError && items.length > 0 && (
+        <div style={{ position:"sticky", bottom:0, background:C.white, borderTop:`1px solid ${C.border}`, padding:"12px 14px calc(12px + env(safe-area-inset-bottom))" }}>
+          <button
+            disabled={chosen.length === 0}
+            onClick={() => setConfirmOpen(true)}
+            style={{ ...S.btn(chosen.length ? `linear-gradient(135deg,${C.navy},${C.navyMid})` : "#b8bfcc"), padding:15, fontSize:16, borderRadius:12, cursor:chosen.length ? "pointer" : "default" }}
+          >{chosen.length ? `チェックした${chosen.length}件をまとめる` : "まとめる名前を選んでください"}</button>
+          {multiChosen.length > 0 && (
+            <div style={{ textAlign:"center", fontSize:11, color:C.textSec, marginTop:6 }}>
+              {multiChosen.map(g => `${g.name}は「${choice[g.key]}」`).join("、")}でまとめます
+            </div>
+          )}
+        </div>
+      )}
+
+      {confirmOpen && (
+        <Modal onClose={() => { if (!running) setConfirmOpen(false); }}>
+          <h3 style={{ margin:"0 0 10px", fontSize:17, fontWeight:800, textAlign:"center" }}>{chosen.length}件の名前をまとめますか？</h3>
+          <p style={{ fontSize:13, lineHeight:1.75, margin:"0 0 12px", textAlign:"left" }}>過去の試合の出場選手・ポイント・フォルトの名前をフルネームに書き換えます。対戦成績・スタッツ・選手別の成績がまとめて集計されるようになります。</p>
+          <div style={{ background:"#fdecea", border:"1px solid #f5b5b0", color:C.red, borderRadius:10, padding:"9px 12px", fontSize:12.5, fontWeight:700, marginBottom:14, textAlign:"left" }}>⚠ 書き換えた名前は元に戻せません</div>
+          <button disabled={running} onClick={runMerge} style={{ ...S.btn(running ? "#8a96ad" : `linear-gradient(135deg,${C.navy},${C.navyMid})`), padding:15, fontSize:16, borderRadius:12, marginBottom:8 }}>{running ? "書き換え中..." : "まとめる"}</button>
+          <button disabled={running} onClick={() => setConfirmOpen(false)} style={{ ...S.btn("#f0f0f0", C.text), borderRadius:12 }}>キャンセル</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function PlayerRosterScreen({ onBack }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20759,6 +21012,7 @@ function PlayerRosterScreen({ onBack }) {
   const [nameSearch, setNameSearch] = useState(""); // ★学校を問わず選手名で直接検索するための入力
   const [menuOpen, setMenuOpen] = useState(false);     // ★右上「⋯」メニュー
   const [textImportOpen, setTextImportOpen] = useState(false); // ★テキストから一括登録の画面
+  const [mergeOpen, setMergeOpen] = useState(false); // ★名字だけの記録をまとめる画面
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -20855,6 +21109,9 @@ function PlayerRosterScreen({ onBack }) {
     catch (e) { setErrorMsg("削除に失敗しました: " + (e.message || e)); }
   }
 
+  if (mergeOpen) {
+    return <MergeSurnameScreen mySchoolName={mySchoolName} onBack={() => { setMergeOpen(false); reload(); }} />;
+  }
   if (textImportOpen) {
     return <RosterTextImportScreen mySchoolName={mySchoolName} onBack={() => { setTextImportOpen(false); reload(); }} />;
   }
@@ -20882,6 +21139,13 @@ function PlayerRosterScreen({ onBack }) {
               >
                 <div style={{ fontSize:13.5, fontWeight:700, color:C.text }}>📋 テキストから一括登録</div>
                 <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>対戦表・名簿を貼り付けて登録</div>
+              </button>
+              <button
+                style={{ display:"block", width:"100%", textAlign:"left", padding:"12px 14px", background:"none", border:"none", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}
+                onClick={() => { setMenuOpen(false); setMergeOpen(true); }}
+              >
+                <div style={{ fontSize:13.5, fontWeight:700, color:C.text }}>🔗 名字だけの記録をまとめる</div>
+                <div style={{ fontSize:11, color:C.textSec, marginTop:2 }}>過去の試合の「西」などをフルネームに直す</div>
               </button>
             </div>
           </>
