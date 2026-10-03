@@ -16010,7 +16010,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                     {compatRows.map(r => (
                       <div key={r.label} style={{ ...S.card, padding:"12px 13px", marginBottom:8 }}>
                         <div style={{ fontSize:14.5, fontWeight:800, color:C.text, marginBottom:8 }}>
-                          {r.label}　<span style={{ fontSize:13, fontWeight:700, color:C.textSec }}>{r.w}勝{r.l}敗</span>
+                          <span style={{ fontSize:13, fontWeight:900, color:C.teamB, marginRight:4 }}>vs</span>{r.label}　<span style={{ fontSize:13, fontWeight:700, color:C.textSec }}>{r.w}勝{r.l}敗</span>
                         </div>
                         {r.own.map(o => (
                           <div key={o.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
