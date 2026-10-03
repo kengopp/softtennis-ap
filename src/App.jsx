@@ -4423,7 +4423,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
       <div style={{ maxHeight:"74vh", overflowY:"auto", textAlign:"left" }}>
         <div style={{ position:"sticky",top:0,zIndex:2,background:"#fff",marginBottom:14,paddingBottom:2 }}>
           <h3 style={{ fontSize:17,fontWeight:800,textAlign:"center",margin:0,padding:"4px 40px" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
-          <button aria-label="閉じる" onClick={onClose} style={{ position:"absolute",top:-2,right:0,width:36,height:36,border:"none",background:"#f0f2f5",borderRadius:"50%",fontSize:18,fontWeight:700,color:C.textSec,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>✕</button>
+          <button aria-label="閉じる" onClick={onClose} style={{ padding:0, position:"absolute",top:-2,right:0,width:36,height:36,border:"none",background:"#f0f2f5",borderRadius:"50%",fontSize:18,fontWeight:700,color:C.textSec,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>✕</button>
         </div>
 
         <div style={{ marginBottom:12 }}>
@@ -5173,12 +5173,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               <button
                 onClick={()=>setFilterHasVideo(v=>!v)}
                 title="動画リンクがある試合だけ"
-                style={{ width:34, height:34, borderRadius:10, border:"1.5px solid "+(filterHasVideo?"#c4302b":C.border), background:filterHasVideo?"#fdeceb":C.white, color:filterHasVideo?"#c4302b":C.textSec, fontSize:15, cursor:"pointer", flexShrink:0 }}
+                style={{ padding:0, width:34, height:34, borderRadius:10, border:"1.5px solid "+(filterHasVideo?"#c4302b":C.border), background:filterHasVideo?"#fdeceb":C.white, display:"inline-flex", alignItems:"center", justifyContent:"center", lineHeight:1, color:filterHasVideo?"#c4302b":C.textSec, fontSize:15, cursor:"pointer", flexShrink:0 }}
               >🎥</button>
               <button
                 onClick={()=>setFilterHasAi(v=>!v)}
                 title="AI分析がある試合だけ"
-                style={{ width:34, height:34, borderRadius:10, border:"1.5px solid "+(filterHasAi?"#3a4152":C.border), background:filterHasAi?"#eef0f6":C.white, color:filterHasAi?"#3a4152":C.textSec, fontSize:15, cursor:"pointer", flexShrink:0 }}
+                style={{ padding:0, width:34, height:34, borderRadius:10, border:"1.5px solid "+(filterHasAi?"#3a4152":C.border), background:filterHasAi?"#eef0f6":C.white, display:"inline-flex", alignItems:"center", justifyContent:"center", lineHeight:1, color:filterHasAi?"#3a4152":C.textSec, fontSize:15, cursor:"pointer", flexShrink:0 }}
               >🤖</button>
             </>
           )}
@@ -5463,7 +5463,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             })}
           </div>
           {/* 大会FAB（★閲覧専用アカウントには出さない） */}
-          {!isViewer && <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>}
+          {!isViewer && <button style={{ padding:0, position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>}
         </>
       )}
 
@@ -5552,7 +5552,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             )}
           </div>
           {/* 個人戦FAB（★閲覧専用アカウントには出さない） */}
-          {!isViewer && <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>}
+          {!isViewer && <button style={{ padding:0, position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNew()}>＋</button>}
         </>
       )}
 
@@ -5617,7 +5617,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             )}
           </div>
           {/* 団体戦FAB（★閲覧専用アカウントには出さない） */}
-          {!isViewer && <button style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch&&onNewTeamMatch()}>＋</button>}
+          {!isViewer && <button style={{ padding:0, position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>onNewTeamMatch&&onNewTeamMatch()}>＋</button>}
         </>
       )}
 
@@ -6416,7 +6416,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>📅 {fmtDateRange(tournament.start_date, tournament.end_date)}</div>
         </div>
         <button
-          style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:15, width:32, height:32, cursor: refreshing ? "default" : "pointer", lineHeight:1, flexShrink:0 }}
+          style={{ padding:0, background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:15, width:32, height:32, cursor: refreshing ? "default" : "pointer", lineHeight:1, flexShrink:0 }}
           onClick={()=>{ if (!refreshing) reload(true); }}
           disabled={refreshing}
           title="最新データに更新"
@@ -6424,7 +6424,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         <style>{"@keyframes td-refresh-spin{to{transform:rotate(360deg);}}"}</style>
         <div style={{ position:"relative" }}>
           <button
-            style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, width:32, height:32, cursor:"pointer", lineHeight:1 }}
+            style={{ padding:0, background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, width:32, height:32, cursor:"pointer", lineHeight:1 }}
             onClick={()=>setShowMoreMenu(v=>!v)}
           >⋯</button>
           {showMoreMenu && (
@@ -6905,7 +6905,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       {/* ★団体戦の「ペア別対戦」タブは一覧を見るための画面なので、試合作成ボタンを出さない */}
       {!isViewer && !(seg==="team" && teamListMode==="pair") && (
       <button
-        style={{ position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:seg==="team"?`linear-gradient(135deg,${C.navy},${C.navyMid})`:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center" }}
+        style={{ padding:0, position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:seg==="team"?`linear-gradient(135deg,${C.navy},${C.navyMid})`:`linear-gradient(135deg,${C.accent},#00a066)`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center" }}
         onClick={()=>seg==="team" ? onNewTeam() : onNewIndividual()}
       >＋</button>
       )}
@@ -7701,7 +7701,7 @@ function TournamentPairMasterScreen({ tournament, onBack }) {
       </div>
 
       <button
-        style={{ position:"fixed", right:16, bottom:24, width:52, height:52, borderRadius:26, background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:26, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 6px 16px rgba(0,194,122,0.4)", border:"none", cursor:"pointer" }}
+        style={{ padding:0, position:"fixed", right:16, bottom:24, width:52, height:52, borderRadius:26, background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:26, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 6px 16px rgba(0,194,122,0.4)", border:"none", cursor:"pointer" }}
         onClick={() => setShowAddChoice(true)}
       >＋</button>
 
@@ -9615,7 +9615,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
               <div key={rn} style={{ width: 180, flex: "none" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 10 }}>
                   <button
-                    style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
+                    style={{ padding:0, width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
                     disabled={adjustingRound === rn}
                     onClick={() => adjustRoundCount(rn, -1)}
                 >－</button>
@@ -9623,7 +9623,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                   {rn}回戦（{rounds[rn].length}試合）
                 </div>
                 <button
-                  style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
+                  style={{ padding:0, width: 22, height: 22, borderRadius: "50%", border: "1px solid " + C.border, background: C.white, fontSize: 13, fontWeight: 700, color: C.navy, cursor: "pointer", flex: "none" }}
                   disabled={adjustingRound === rn}
                   onClick={() => adjustRoundCount(rn, 1)}
                 >＋</button>
@@ -10656,7 +10656,7 @@ function PracticeScreen({ onNavigate }) {
       </div>
 
       {tab==="list" && !loading && (
-        <button onClick={openCreate} style={{ position:"fixed", right:20, bottom:80, width:52, height:52, borderRadius:"50%", background:C.navy, color:"#fff", border:"none", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, boxShadow:"0 4px 14px rgba(0,0,0,0.25)", cursor:"pointer", zIndex:10 }}>＋</button>
+        <button onClick={openCreate} style={{ padding:0, position:"fixed", right:20, bottom:80, width:52, height:52, borderRadius:"50%", background:C.navy, color:"#fff", border:"none", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, boxShadow:"0 4px 14px rgba(0,0,0,0.25)", cursor:"pointer", zIndex:10 }}>＋</button>
       )}
 
       <NavBar active="practice" onNavigate={onNavigate} />
@@ -18011,7 +18011,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       >解除</button>
                     </div>
                     <button
-                      style={{ flex:"0 0 48px", width:48, height:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
+                      style={{ padding:0, flex:"0 0 48px", width:48, height:48, borderRadius:12, border:"none", background:"#06C755", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
                       onClick={()=>shareToLine("待機中")}
                       aria-label="LINEで共有"
                     ><svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg></button>
@@ -20867,7 +20867,7 @@ function PlayerRosterScreen({ onBack }) {
           <span style={{ fontSize:18, fontWeight:800, color:C.white, flex:1 }}>選手マスター</span>
           {/* ★右上の「⋯」メニュー（テキストから一括登録） */}
           <button
-            style={{ width:40, height:34, borderRadius:9, border:"none", background:"rgba(255,255,255,0.14)", color:C.white, fontSize:18, fontWeight:800, cursor:"pointer", letterSpacing:1, flexShrink:0 }}
+            style={{ padding:0, width:40, height:34, borderRadius:9, border:"none", background:"rgba(255,255,255,0.14)", color:C.white, fontSize:18, fontWeight:800, cursor:"pointer", letterSpacing:1, flexShrink:0 }}
             onClick={() => setMenuOpen(v => !v)}
             aria-label="メニュー"
           >⋯</button>
