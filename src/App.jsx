@@ -13156,7 +13156,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+      <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14 }}>
@@ -13816,7 +13816,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   if (loading) {
     return (
       <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-        <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
         </div>
         <div style={{ padding:14 }}>
@@ -13838,7 +13838,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
       const filteredSchools = knownSchoolNames.filter(n => !schoolSearch.trim() || n.toLowerCase().includes(schoolSearch.trim().toLowerCase()));
       return (
         <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-          <div style={{ background:C.navy, color:C.white, padding:16 }}>
+          <div style={{ ...S.hdr, color:C.white }}>
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setSchoolPickerOpen(false)}>←</span>
               <div>
@@ -13873,7 +13873,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     const filteredRoster = rosterForSchool.filter(p => !teamSearch.trim() || p.player_name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
     return (
       <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-        <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={cancelWizard}>←</span>
             <div>
@@ -13977,7 +13977,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
     return (
       <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-        <div style={{ background:C.navy, color:C.white, padding:16 }}>
+        <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("wizardPlayer")}>←</span>
             <div>
@@ -14287,7 +14287,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+      <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14 }}>
@@ -15156,7 +15156,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
   return (
     <div style={S.page}>
-      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+      <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14, paddingBottom:90 }}>
@@ -22454,7 +22454,7 @@ function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:16, display:"flex", alignItems:"center", gap:10 }}>
+      <div style={{ ...S.hdr, color:C.white, display:"flex", alignItems:"center", gap:10 }}>
         <span style={{ cursor:"pointer", fontSize:18 }} onClick={onCancel}>←</span>
         <div style={{ fontSize:18, fontWeight:800 }}>{existing ? "AI動画分析を編集" : "AI動画分析を追加"}</div>
       </div>
@@ -22517,7 +22517,7 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
   const label = aiMatchLabel(match).text;
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+      <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
           <div>
@@ -22601,9 +22601,9 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+      <div style={{ ...S.hdr, color:C.white }}>
+        {/* ★ホーム・試合一覧とヘッダーの高さをそろえるため、説明の小さい文字は出さない */}
         <div style={{ fontSize:20, fontWeight:800 }}>🤖 AI動画分析</div>
-        <div style={{ fontSize:11, color:"#b9c2d6", marginTop:2 }}>AI分析を追加した試合の一覧</div>
       </div>
       <div style={{ padding:14 }}>
         <div onClick={onSwitchPlayer} style={{ ...S.card, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", marginBottom:12 }}>
@@ -22717,7 +22717,7 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
-      <div style={{ background:C.navy, color:C.white, padding:16 }}>
+      <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
           <div>
