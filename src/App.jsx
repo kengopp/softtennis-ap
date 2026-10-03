@@ -13298,7 +13298,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>📝 対戦メモ（{notes.length}件）</div>
                         {!noteEditing && (
                           <button onClick={()=>setNoteEditing({ text:"", match_id:null })}
-                            style={{ background:C.gray, border:"none", borderRadius:8, fontSize:13.5, fontWeight:700, color:C.navy, padding:"7px 12px", cursor:"pointer" }}>＋ 追加</button>
+                            style={{ background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, border:"none", borderRadius:20, fontSize:14, fontWeight:800, color:C.white, padding:"9px 16px", cursor:"pointer", flexShrink:0, whiteSpace:"nowrap", boxShadow:"0 2px 6px rgba(15,32,68,0.25)" }}>＋ メモを書く</button>
                         )}
                       </div>
 
