@@ -13465,7 +13465,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                           {targetMatches.length}試合{targetMatches.length>0 && `・勝率${Math.round(wins/targetMatches.length*100)}%`}
                         </span>
                       </div>
-                      {side === "opp" && (oppOwnFilter.size === 0
+                      {side === "opp" && ((oppOwnFilter.size === 0 || oppOwnFilter.size === oppOwnRows.length)
                         ? <div style={{ fontSize:11.5, color:C.textSec, fontWeight:700, marginTop:3 }}>自チーム全体での通算</div>
                         : <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:6, fontSize:11.5, color:"#0b6e75", fontWeight:800, marginTop:4 }}>
                             <span>{oppOwnFilter.size === 1 ? `${oppOwnRows.find(r=>oppOwnFilter.has(r.key))?.label ?? ""} との対戦だけ表示中` : `${oppOwnFilter.size}ペアとの対戦だけ表示中`}</span>
@@ -13501,6 +13501,13 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                 {/* ★この相手と当たった自チームのペア（押すと、そのペアとの試合だけに絞る。複数選べる） */}
                 {side === "opp" && selectedOppPair && oppOwnRows.length > 0 && (
                   <div style={{ ...S.card, padding:"12px 12px 6px", marginBottom:12 }}>
+                    {/* ★まとめて選ぶ／外す */}
+                    <div style={{ display:"flex", justifyContent:"flex-end", gap:6, marginBottom:8 }}>
+                      <button onClick={()=>setOppOwnFilter(new Set(oppOwnRows.map(r=>r.key)))}
+                        style={{ fontSize:12.5, fontWeight:800, color:C.navy, background:"#eceff4", border:"none", borderRadius:16, padding:"6px 12px", cursor:"pointer" }}>すべて選択</button>
+                      <button onClick={()=>setOppOwnFilter(new Set())} disabled={oppOwnFilter.size===0}
+                        style={{ fontSize:12.5, fontWeight:800, color: oppOwnFilter.size ? C.textSec : "#c4cbd8", background:C.white, border:`1.5px solid ${C.border}`, borderRadius:16, padding:"5px 12px", cursor: oppOwnFilter.size ? "pointer" : "default" }}>クリア</button>
+                    </div>
                     {oppOwnRows.map(r => {
                       const on = oppOwnFilter.has(r.key);
                       const col = r.w > r.l ? C.accent : r.w < r.l ? C.teamB : C.textSec;
