@@ -12919,6 +12919,93 @@ function PeriodPicker({ period, setPeriod, seasonLabel }) {
   );
 }
 
+// ★自チームのペアを選ぶシート（画面の下からせり上がる）
+//   ・名前の一部で絞り込める
+//   ・最近1ヶ月に試合したペアを上に出し、それ以外は「その他のペア」にまとめて閉じておく
+function PairPickerSheet({ pairs, selectedKey, onSelect, onClose }) {
+  const [q, setQ] = useState("");
+  const [showOthers, setShowOthers] = useState(false);
+  const norm = (t) => String(t||"").replace(/[\s　・]/g, "");
+  const rows = pairs.map(p => {
+    let w = 0, l = 0, last = "";
+    p.matches.forEach(m => {
+      const ws = winnerSideOf(m);
+      if (ws === "A") w++; else if (ws === "B") l++;
+      if ((m.match_date||"") > last) last = m.match_date || "";
+    });
+    return { ...p, w, l, last };
+  });
+  const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10); })();
+  const byRecent = (a,b) => (b.last||"").localeCompare(a.last||"") || (b.matches.length - a.matches.length);
+  const query = norm(q);
+  const hits = query ? rows.filter(r => norm(r.label).includes(query)).sort((a,b)=>b.matches.length-a.matches.length) : null;
+  let recent = rows.filter(r => r.last && r.last >= cutoff).sort(byRecent);
+  let others = rows.filter(r => !(r.last && r.last >= cutoff)).sort((a,b)=>b.matches.length-a.matches.length);
+  if (recent.length === 0) { recent = others; others = []; } // 最近の試合が無い期間は、全部をそのまま並べる
+  const md = (d) => d ? d.slice(5).split("-").map(x=>String(Number(x))).join("/") : "";
+  const Row = ({ r }) => {
+    const on = r.key === selectedKey;
+    return (
+      <div onClick={()=>onSelect(r.key)}
+        style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px", border:`1.5px solid ${on ? "#0b6e75" : "#e3e7ee"}`, background: on ? "#eef8f8" : C.white, borderRadius:12, marginBottom:6, cursor:"pointer" }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:15, fontWeight:800, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{r.label}</div>
+          <div style={{ fontSize:11.5, color:C.textSec, fontWeight:700 }}>{r.last ? `最後の試合 ${md(r.last)}` : ""}</div>
+        </div>
+        <div style={{ textAlign:"right", flexShrink:0 }}>
+          <div style={{ fontSize:14, fontWeight:900, color:C.text, whiteSpace:"nowrap" }}>{r.w}勝{r.l}敗</div>
+          <div style={{ fontSize:11, color:C.textSec, fontWeight:700 }}>{r.matches.length}試合</div>
+        </div>
+        {on && <span style={{ width:22, height:22, borderRadius:"50%", background:"#0b6e75", color:C.white, fontSize:13, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✓</span>}
+      </div>
+    );
+  };
+  const sec = (t) => <div style={{ fontSize:12, fontWeight:800, color:C.textSec, margin:"12px 2px 6px" }}>{t}</div>;
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{ width:"100%", maxWidth:520, maxHeight:"85vh", background:C.white, borderRadius:"18px 18px 0 0", display:"flex", flexDirection:"column", paddingBottom:"env(safe-area-inset-bottom)" }}>
+        <div style={{ padding:"8px 14px 0" }}>
+          <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
+          <div style={{ display:"flex", alignItems:"center", marginBottom:10 }}>
+            <div style={{ flex:1, fontSize:16.5, fontWeight:900, color:C.navy }}>自チームのペアを選ぶ</div>
+            <button aria-label="閉じる" onClick={onClose} style={{ padding:0, width:32, height:32, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:6, background:"#f4f6f9", border:`1px solid ${C.border}`, borderRadius:10, padding:"0 11px", marginBottom:4 }}>
+            <span style={{ fontSize:14 }}>🔍</span>
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="名前で探す（例：川崎）"
+              style={{ flex:1, border:"none", outline:"none", background:"transparent", fontSize:16, padding:"9px 0", color:C.text, minWidth:0 }} />
+            {/* ★スマホ本体の戻るは「✕」を押してシートを閉じるため、文字を消すボタンは別の記号にする */}
+            {q && <button aria-label="文字を消す" onClick={()=>setQ("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:13, cursor:"pointer", padding:"0 2px" }}>✖</button>}
+          </div>
+        </div>
+        <div style={{ overflowY:"auto", padding:"0 14px 16px", WebkitOverflowScrolling:"touch" }}>
+          {hits ? (
+            <>
+              {sec(`「${q}」のペア（${hits.length}組）`)}
+              {hits.length === 0 && <div style={{ textAlign:"center", color:C.textSec, fontSize:13, padding:"18px 0" }}>見つかりませんでした</div>}
+              {hits.map(r => <Row key={r.key} r={r} />)}
+            </>
+          ) : (
+            <>
+              {sec(others.length ? "最近試合したペア（直近1ヶ月）" : `ペア（${recent.length}組）`)}
+              {recent.map(r => <Row key={r.key} r={r} />)}
+              {others.length > 0 && (
+                <>
+                  {sec(`その他のペア（${others.length}組）`)}
+                  {showOthers
+                    ? others.map(r => <Row key={r.key} r={r} />)
+                    : <div onClick={()=>setShowOthers(true)} style={{ textAlign:"center", fontSize:13, fontWeight:800, color:C.navy, padding:10, border:"1.5px dashed #c4cbd8", borderRadius:12, cursor:"pointer" }}>▾ その他のペアを表示</div>}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpenMatch }) {
   const [mySchoolName, setMySchoolName] = useState("");
   const [allMatches, setAllMatches] = useState([]);
@@ -12931,6 +13018,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [detailMatches, setDetailMatches] = useState([]); // 詳細（points込み）
   const [detailLoading, setDetailLoading] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);    // 通算成績の内訳の開閉
+  const [pairPickerOpen, setPairPickerOpen] = useState(false); // ★自チームのペアを選ぶシート
   const [breakdownDim, setBreakdownDim] = useState("play");
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
@@ -13197,6 +13285,11 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
       </div>
       <div style={{ padding:14 }}>
 
+        {pairPickerOpen && (
+          <PairPickerSheet pairs={ownPairs} selectedKey={ownPairKey}
+            onSelect={k=>{ setOwnPairKey(k); setOppPairKey(""); setRecordOpen(false); setPairPickerOpen(false); window.scrollTo(0,0); }}
+            onClose={()=>setPairPickerOpen(false)} />
+        )}
         <AnalysisTabs current="pair" onPersonal={()=>onOpenPersonal && onOpenPersonal()} onTeam={()=>onOpenTeamStats && onOpenTeamStats()} />
 
         {/* ★「自分たち／相手分析」の切り替えと期間を1行にまとめる */}
@@ -13289,14 +13382,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         <div style={{ fontSize:12, fontWeight:800, color:C.textSec, marginBottom:3 }}>自チームのペア</div>
                         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                           <div style={{ flex:1, minWidth:0, fontSize:19, fontWeight:900, color:C.text }}>{selectedOwnPair?.label}</div>
-                          {/* ★見た目は「変更 ▾」のボタン。上に透明のselectを重ね、押すとスマホのいつもの選択画面が開く */}
-                          <div style={{ position:"relative", flexShrink:0 }}>
-                            <div style={{ fontSize:13, fontWeight:800, color:C.navy, background:"#eceff4", borderRadius:16, padding:"7px 12px", whiteSpace:"nowrap" }}>変更 ▾</div>
-                            <select aria-label="自チームのペアを変更" value={ownPairKey} onChange={e=>{ setOwnPairKey(e.target.value); setOppPairKey(""); setRecordOpen(false); }}
-                              style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:16 }}>
-                              {ownPairs.map(p => <option key={p.key} value={p.key}>{p.label}（{p.matches.length}試合）</option>)}
-                            </select>
-                          </div>
+                          <button onClick={()=>setPairPickerOpen(true)}
+                            style={{ flexShrink:0, fontSize:13, fontWeight:800, color:C.navy, background:"#eceff4", border:"none", borderRadius:16, padding:"7px 12px", whiteSpace:"nowrap", cursor:"pointer" }}>変更 ▾</button>
                         </div>
                         <div style={{ display:"flex", alignItems:"baseline", gap:8, marginTop:6 }}>
                           <span style={{ fontSize:28, fontWeight:900, color:C.text }}><WinLossText wins={wins} losses={losses} /></span>
