@@ -351,6 +351,10 @@ const looksNaturallyFinished = (m) => {
   const need = Math.ceil(fmt / 2);
   return Math.max(m?.match_score_a ?? 0, m?.match_score_b ?? 0) >= need;
 };
+// ★成績・分析で「終わった試合」として数えるか。
+//   「途中終了」で保存されていても、スコアが先取ゲーム数に達していれば（押し間違いなど）、
+//   団体戦の画面と同じく「終了」とみなして数える。本当に途中で打ち切った試合（1-1など）は数えない。
+const countsAsFinished = (m) => !!m && (m.status === "finished" || (m.status === "abandoned" && looksNaturallyFinished(m)));
 // ★以前は「終了・途中終了・中断」以外をすべて「進行中」と表示していたため、
 //   まだ始まっていない予定（scheduled）や待機中（waiting）の試合まで「進行中」と出てしまっていた。
 //   試合一覧では「予定」と出るのに戦績画面では「進行中」と出る、という食い違いの原因。
@@ -1084,7 +1088,7 @@ function ownPerspectiveMatches(list, mySchoolName) {
   const clubOf = (m, t) => (m.players.find(p=>p.team===t && p.club_name)?.club_name || "").trim();
   const out = [];
   list.forEach(m => {
-    if (m.status !== "finished") return;
+    if (!countsAsFinished(m)) return;
     const aClub = clubOf(m, "A"), bClub = clubOf(m, "B");
     if (m.is_simple_draw_result) {
       if (my && aClub === my) out.push(m);
@@ -1292,7 +1296,7 @@ async function getHomeScreenData(linkedPlayerName) {
   ] = await Promise.all([
     supabase
       .from("matches")
-      .select("id, match_date, tournament_name, status, match_score_a, match_score_b, walkover_winner, created_at")
+      .select("id, match_date, tournament_name, status, match_score_a, match_score_b, walkover_winner, game_format, created_at")
       .is("deleted_at", null)
       .order("created_at", { ascending: false }),
     linkedPlayerName
@@ -4621,7 +4625,7 @@ async function prefetchAnalysisBase() {
     writeScreenCache("personalAnalysis", [p, rosterList, list, schools, Array.from(teamIds)]);
     const school = p?.school_id ? (schools || []).find(s => s.id === p.school_id) : null;
     const schoolName = school?.name || "";
-    const pm = list.filter(m => m.status === "finished" && ownSideFor(m, player, schoolName));
+    const pm = list.filter(m => countsAsFinished(m) && ownSideFor(m, player, schoolName));
     const { list: target } = applyScope(pm, loadAnalysisScope(), { seasonStart: school?.season_start_date || null, teamMatchIds: teamIds });
     if (target.length > 0) await getFullMatchesByIds(target.map(m => m.id));
   } catch (e) {
@@ -6258,7 +6262,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const pairLossMap = useMemo(() => {
     const map = {};
     individualMatches.forEach(m => {
-      if (m.status !== "finished") return;
+      if (!countsAsFinished(m)) return;
       const winSide = winnerSideOf(m);
       if (winSide === null) return;
       ["A","B"].forEach(side => {
@@ -6497,7 +6501,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           // ★同校対決（東福岡 vs 東福岡など）は、A側・B側どちらも自チームのペアのため、
           // 　片方だけでなく両方の勝敗を数える（＝1試合で「1勝1敗」を加算する）
           filteredIndividualMatches.forEach(m => {
-            if (m.status !== "finished") return;
+            if (!countsAsFinished(m)) return;
             const w = winnerSideOf(m);
             if (w === null) return; // 同点かつ勝者情報も無い試合は集計に含めない
             const aIsMine = (m.players || []).some(p => p.team === "A" && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim());
@@ -6534,7 +6538,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         teamMatches.forEach(tm => {
           (tm.games || []).forEach(g => {
             const m = g.match_id ? matchById[g.match_id] : null;
-            if (!m || m.status !== "finished") return;
+            if (!countsAsFinished(m)) return;
             const sides = ["A"];
             if (mySchoolName && (m.players || []).some(p => p.team === "B" && p.club_name && p.club_name.trim() === mySchoolName.trim())) {
               sides.push("B");
@@ -6622,7 +6626,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("") || "相手";
             [...(tm.games || [])].sort((x, y) => (x.order_num ?? 0) - (y.order_num ?? 0)).forEach(g => {
               const m = g.match_id ? matchById[g.match_id] : null;
-              if (!m || m.status !== "finished") return; // 記録済みの試合のみ対象
+              if (!countsAsFinished(m)) return; // 記録済みの試合のみ対象
               const aNames = (m.players || []).filter(p => p.team === "A").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
               const bNames = (m.players || []).filter(p => p.team === "B").sort((x,y) => x.order_num - y.order_num).map(p => p.player_name).filter(Boolean).join("/");
               rows.push({ key: g.id, matchId: m.id, teamMatchId: tm.id, roundLabel: tm.round || "団体戦", orderNum: g.order_num, myClub: myFullLabel, oppClub: oppLabel, myNames: aNames, oppNames: bNames, scoreA: m.match_score_a, scoreB: m.match_score_b, win: winnerSideOf(m)==="A" });
@@ -11427,7 +11431,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
     })();
   }, [apply]);
 
-  const finished = useMemo(() => allMatchesLite.filter(m=>m.status==="finished"), [allMatchesLite]);
+  const finished = useMemo(() => allMatchesLite.filter(countsAsFinished), [allMatchesLite]);
   const wins = useMemo(() => finished.filter(m=>winnerSideOf(m)==="A").length, [finished]);
 
   // ★進行中がない場合に表示する、直近の大会予定（大会単位）
@@ -11451,7 +11455,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const last5 = finished.slice(0, 5).map(m => winnerSideOf(m)==="A");
 
   // ★紐づけ選手（お子さん/自分）の戦績（getHomeScreenDataで既にその選手の試合だけに絞込済み）
-  const linkedFinished = linkedMatches.filter(m=>m.status==="finished");
+  const linkedFinished = linkedMatches.filter(countsAsFinished);
   function linkedIsWin(m) {
     return winForPlayer(m, linkedPlayerName, mySchoolName);
   }
@@ -13940,7 +13944,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     [mySchoolName, ...allMatches.flatMap(m => m.players.map(p => p.club_name))].filter(Boolean)
   )), [mySchoolName, allMatches]);
   const playerMatches = useMemo(() => selectedPlayer
-    ? allMatches.filter(m => m.status === "finished" && ownSideFor(m, selectedPlayer, effectiveSchoolName))
+    ? allMatches.filter(m => countsAsFinished(m) && ownSideFor(m, selectedPlayer, effectiveSchoolName))
     : [],
     [allMatches, selectedPlayer, effectiveSchoolName]);
 
@@ -15158,7 +15162,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
       : period==="month3" ? withinLastDays(categoryMatches, 90)
       : (period==="season" && seasonStart) ? categoryMatches.filter(m => (m.match_date||"") >= seasonStart)
       : categoryMatches;
-    return periodMatches.filter(m=>m.status==="finished");
+    return periodMatches.filter(countsAsFinished);
   }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period, seasonStart]);
 
   const teamRecord = useMemo(() => recordOf(finished, m=>winnerSideOf(m)==="A"), [finished]);
@@ -15333,7 +15337,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
         <AnalysisTabs current="team" onPersonal={()=>onNavigate&&onNavigate("stats")} onPair={()=>onNavigate && onNavigate("pairAnalysis")} />
         {loading ? (
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
-        ) : allMatches.filter(m=>m.status==="finished").length===0 ? (
+        ) : allMatches.filter(countsAsFinished).length===0 ? (
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>集計できる試合がまだありません</div>
         ) : (
           <>
@@ -15693,7 +15697,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
     : matches;
   const ownRoster = roster.filter(p=>p.is_own_team!==false);
   const myMatches = playerName ? periodMatches.filter(m => ownSideFor(m, playerName, mySchoolName)) : [];
-  const finished = myMatches.filter(m => m.status === "finished");
+  const finished = myMatches.filter(countsAsFinished);
   const rec = recordOf(finished, m=>winForPlayer(m, playerName, mySchoolName));
 
   // ペア（相方）別成績
@@ -15708,7 +15712,7 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
   partnerRows.sort(sortByRecord(sort));
 
   // 全試合（未確定含む）は日付の新しい順表示用に元のmyMatchesを使う（期間でフィルタ済み）
-  const allFinishedForTrend = playerName ? matches.filter(m=>m.status==="finished" && ownSideFor(m, playerName, mySchoolName)) : [];
+  const allFinishedForTrend = playerName ? matches.filter(m=>countsAsFinished(m) && ownSideFor(m, playerName, mySchoolName)) : [];
 
   return (
     <div style={S.page}>
@@ -15861,7 +15865,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const oppOf = m => m.players.find(p=>p.team==="B")?.club_name || "";
   const periodMatches = period==="month1" ? withinLastDays(matches, 30) : matches;
   const vsMatches = periodMatches.filter(m => oppOf(m)===schoolName);
-  const finished = vsMatches.filter(m => m.status==="finished");
+  const finished = vsMatches.filter(countsAsFinished);
   const rec = recordOf(finished, m=>winnerSideOf(m)==="A");
 
   // 相手選手別・相手ペア別（こちらの勝率で集計）
@@ -15878,7 +15882,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
   oppPairRows.sort(sortByRecord(sort));
 
-  const allFinishedForTrend = matches.filter(m => m.status==="finished" && oppOf(m)===schoolName);
+  const allFinishedForTrend = matches.filter(m => countsAsFinished(m) && oppOf(m)===schoolName);
 
   // ★この学校との試合だけポイントを読み込む（学校を開いた時点で読むので待ち時間が短い）
   const finishedIdsKey = finished.map(m=>m.id).sort().join(",");
