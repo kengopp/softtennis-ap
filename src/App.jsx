@@ -13038,6 +13038,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [recordOpen, setRecordOpen] = useState(false);    // 通算成績の内訳の開閉
   const [pairPickerOpen, setPairPickerOpen] = useState(false); // ★自チームのペアを選ぶシート
   const [oppQuery, setOppQuery] = useState("");                // ★相手分析：学校名・選手名で絞り込み
+  const [oppSort, setOppSort] = useState("count");             // ★相手分析：学校・ペアの並び順（rate|win|lose|count）
   const [openSchools, setOpenSchools] = useState(() => new Set()); // ★相手分析：開いている学校
   const [breakdownDim, setBreakdownDim] = useState("play");
   const [schoolId, setSchoolId] = useState(null);
@@ -13357,7 +13358,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                 const sc = (schools[club] ??= { club, pairs:[], n:0, w:0, l:0 });
                 sc.pairs.push(p); sc.n += p.matches.length; sc.w += p.w; sc.l += p.l;
               });
-              let list = Object.values(schools).sort((a,b)=> b.n - a.n || a.club.localeCompare(b.club, "ja"));
+              const rec = (x) => ({ wins:x.w, losses:x.l, total:x.n ?? x.matches.length });
+              const cmp = (a,b) => sortByRecord(oppSort)(rec(a), rec(b));
+              let list = Object.values(schools).sort((a,b)=> cmp(a,b) || a.club.localeCompare(b.club, "ja"));
               if (qq) {
                 list = list.map(sc => norm(sc.club).includes(qq) ? sc : { ...sc, pairs: sc.pairs.filter(p => norm(p.label).includes(qq)) })
                            .filter(sc => sc.pairs.length > 0);
@@ -13372,7 +13375,13 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                     {oppQuery && <button aria-label="文字を消す" onClick={()=>setOppQuery("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:13, cursor:"pointer", padding:"0 2px" }}>✖</button>}
                   </div>
                   <div style={{ fontSize:12, fontWeight:800, color:C.textSec, margin:"12px 2px 6px" }}>
-                    {qq ? `「${oppQuery}」で見つかった学校（${list.length}校）` : `対戦した学校（${list.length}校・対戦が多い順）`}
+                    {qq ? `「${oppQuery}」で見つかった学校（${list.length}校）` : `対戦した学校（${list.length}校）`}
+                  </div>
+                  {/* ★並び順（チーム分析と同じ） */}
+                  <div style={{ display:"flex", gap:5, marginBottom:8 }}>
+                    {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+                      <button key={k} style={{ ...S.togBtn(oppSort===k,C.navy), flex:1, fontSize:12.5, padding:"7px 4px", whiteSpace:"nowrap" }} onClick={()=>setOppSort(k)}>{l}</button>
+                    ))}
                   </div>
                   {list.length === 0 && <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0", fontSize:13.5 }}>{qq ? "見つかりませんでした" : "対戦した記録がありません"}</div>}
                   {list.map(sc => {
@@ -13389,7 +13398,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         </div>
                         {open && (
                           <div style={{ borderTop:`1px solid ${C.border}`, background:"#fafbfc", padding:"4px 10px 6px" }}>
-                            {[...sc.pairs].sort((a,b)=> b.matches.length - a.matches.length).map((p, idx, arr) => (
+                            {[...sc.pairs].sort((a,b)=> sortByRecord(oppSort)({ wins:a.w, losses:a.l, total:a.matches.length }, { wins:b.w, losses:b.l, total:b.matches.length })).map((p, idx, arr) => (
                               <div key={p.key} onClick={()=>{ setOppPairKey(p.key); window.scrollTo(0,0); }}
                                 style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 4px", borderBottom: idx===arr.length-1 ? "none" : `1px solid ${C.border}`, cursor:"pointer" }}>
                                 <span style={{ flex:1, minWidth:0, fontSize:14, fontWeight:800, color:C.text }}>
