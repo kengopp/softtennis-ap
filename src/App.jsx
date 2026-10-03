@@ -13237,7 +13237,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart]);
+    // ★相手分析で自チームのペアを選んで絞り込んだときも、内訳・サーブ・コースなどを読み直す
+  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart, [...oppOwnFilter].sort().join("|")]);
 
   const wins = targetMatches.filter(m => winnerSideOf(m)==="A").length;
   const losses = targetMatches.filter(m => winnerSideOf(m)==="B").length;
