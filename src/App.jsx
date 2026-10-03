@@ -887,8 +887,12 @@ function calcPlayerStatsMemo(match) {
   return rows;
 }
 
-function playerStatsInMatch(match, playerName, mySchoolName) {
-  const side = ownSideFor(match, playerName, mySchoolName);
+function playerStatsInMatch(match, playerName, mySchoolName, pairNames) {
+  // ★相手ペアの集計（pairNamesあり）では、2人がそろって出ている側を探す。
+  //   自チーム側だけを探す ownSideFor では相手選手が見つからず、相手分析の内訳がいつも空になっていた。
+  const side = pairNames
+    ? (["A","B"].find(t => pairNames.every(n => (match.players||[]).some(p => p.team===t && p.player_name===n))) || null)
+    : ownSideFor(match, playerName, mySchoolName);
   if (!side) return null;
   const all = calcPlayerStatsMemo(match);
   return all.find(r => r.team === side && r.player_name === playerName) || null;
@@ -1102,7 +1106,7 @@ function ownPerspectiveMatches(list, mySchoolName) {
   return out;
 }
 
-function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
+function aggregatePlayerStats(fullMatches, playerName, mySchoolName, pairNames) {
   const agg = {
     total: 0, winners: 0, errors: 0, plays: {}, playsWin: {}, playsErr: {},
     serveTotal: 0, serveFault: 0, receiveTotal: 0, receiveMiss: 0, matchesCounted: 0,
@@ -1112,7 +1116,7 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
     sideCourseWin: {}, sideCourseErr: {},
   };
   for (const m of fullMatches) {
-    const s = playerStatsInMatch(m, playerName, mySchoolName);
+    const s = playerStatsInMatch(m, playerName, mySchoolName, pairNames);
     if (!s) continue;
     agg.matchesCounted++;
     agg.total += s.total; agg.winners += s.winners; agg.errors += s.errors;
@@ -1136,9 +1140,10 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName) {
   return agg;
 }
 // ★2人分の集計を足し合わせて「ペアの集計」にする
-function aggregatePairStats(fullMatches, nameA, nameB, mySchoolName) {
-  const a = aggregatePlayerStats(fullMatches, nameA, mySchoolName);
-  const b = aggregatePlayerStats(fullMatches, nameB, mySchoolName);
+function aggregatePairStats(fullMatches, nameA, nameB, mySchoolName, isOpponent) {
+  const pairNames = isOpponent ? [nameA, nameB] : undefined;
+  const a = aggregatePlayerStats(fullMatches, nameA, mySchoolName, pairNames);
+  const b = aggregatePlayerStats(fullMatches, nameB, mySchoolName, pairNames);
   const sum = { ...a };
   const numKeys = ["total","winners","errors","serveTotal","serveFault","receiveTotal","receiveMiss",
                    "serve1st","serve2nd","serveDf","serve1stWin","serve2ndWin","missTyped"];
@@ -13249,8 +13254,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     : (selectedOppPair?.names ?? []);
   const { pair: pairAgg, byPlayer } = useMemo(() => {
     if (statNames.length < 2 || detailMatches.length === 0) return { pair:null, byPlayer:{} };
-    return aggregatePairStats(detailMatches, statNames[0], statNames[1], mySchoolName);
-  }, [detailMatches, statNames.join("|"), mySchoolName]);
+    return aggregatePairStats(detailMatches, statNames[0], statNames[1], mySchoolName, side === "opp");
+  }, [detailMatches, statNames.join("|"), mySchoolName, side]);
 
   const topWin = pairAgg ? Object.entries(pairAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
   const topErr = pairAgg ? Object.entries(pairAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
