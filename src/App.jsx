@@ -3914,7 +3914,21 @@ function calcMatchSummary(match) {
     .map(([k,v])=>({ key:k, label:getPlayLabel(k), count:v.err }))
     .filter(p=>p.count>0).sort((a,b)=>b.count-a.count).slice(0,3);
 
-  // サーブ分析（自チームのサーブのみ。fault_count: 0=1stイン/1=2ndイン/2=ダブルフォルト）
+  // ★サーブ分析（チーム別：A=自チーム／B=相手。fault_count: 0=1stイン/1=2ndイン/2=ダブルフォルト）
+  const serveBy = {};
+  ["A","B"].forEach(t => { serveBy[t] = { s1:0, s2:0, df:0, total:0, s1Win:0, s2Win:0 }; });
+  for (const g of match.games) {
+    for (let idx=0; idx<g.points.length; idx++) {
+      const pt = g.points[idx];
+      const st = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
+      const r = serveBy[st]; if (!r) continue;
+      r.total++;
+      if (pt.fault_count===0){ r.s1++; if(pt.scoring_team===st) r.s1Win++; }
+      else if (pt.fault_count===1){ r.s2++; if(pt.scoring_team===st) r.s2Win++; }
+      else if (pt.fault_count===2){ r.df++; }
+    }
+  }
+  // 以下は自チーム（A）だけの従来の集計（他の画面・AI総評で使用）
   let serve1st=0, serve2nd=0, serveDf=0, serveTotal=0;
   let firstServeWin=0, firstServeTotal=0, secondServeWin=0, secondServeTotal=0;
   for (const g of match.games) {
@@ -3946,7 +3960,7 @@ function calcMatchSummary(match) {
   return {
     totalA, totalB, attackA, oppMissA, selfMissA, oppAttackA, decisionRate,
     topScorer, scoreRanking, missRanking, posStats, bestPlays, worstPlays, pointSources, missSources,
-    serve1st, serve2nd, serveDf, serveTotal, firstServeWin, firstServeTotal, secondServeWin, secondServeTotal,
+    serve1st, serve2nd, serveDf, serveTotal, firstServeWin, firstServeTotal, secondServeWin, secondServeTotal, serveBy,
     maxWinStreak, maxLoseStreak, timeline,
   };
 }
@@ -17056,24 +17070,6 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           <FormRow label="コート番号（任意）">
             <input style={S.inp} placeholder="例：3番コート" value={courtNumber} onChange={e => setCourtNumber(e.target.value)}/>
           </FormRow>
-          {!isTeamMatchGame && (
-            <FormRow label="若番 / 遅番（必須）" required>
-              {bothEntryNosNumeric ? (
-                <div style={{ fontSize:11.5, color:C.textSec, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
-                  ✓ ペア出場番号（{aEntryNo} と {bEntryNo}）から自動判定：<b style={{ color:C.navy }}>{isYounger ? "若番" : "遅番"}</b>
-                  <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>変更したい場合は番号欄を空欄にしてください</div>
-                </div>
-              ) : (
-                <>
-                  <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
-                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                    <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
-                    <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
-                  </div>
-                </>
-              )}
-            </FormRow>
-          )}
         </FormSec>
 
         {/* ★サーブ・レシーブ順：各ペアの「サーブの1人目」「レシーブの1人目」。
@@ -17093,6 +17089,28 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
               value={orders} onChange={setOrders} mode="info" inset
             />
             </div>
+          </FormSec>
+        )}
+
+        {/* ★若番／遅番：試合開始ボタンのすぐ上に置く（必須項目なので、押す直前に選び忘れに気づけるように） */}
+        {!isTeamMatchGame && (
+          <FormSec title="若番 / 遅番">
+            <FormRow label="若番 / 遅番（必須）" required>
+              {bothEntryNosNumeric ? (
+                <div style={{ fontSize:11.5, color:C.textSec, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
+                  ✓ ペア出場番号（{aEntryNo} と {bEntryNo}）から自動判定：<b style={{ color:C.navy }}>{isYounger ? "若番" : "遅番"}</b>
+                  <div style={{ fontSize:10.5, color:C.textSec, marginTop:2 }}>変更したい場合は番号欄を空欄にしてください</div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>自チームはトーナメント表のどちら側ですか？</div>
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    <button style={S.togBtn(isYounger===true, C.navy)} onClick={()=>setIsYounger(true)}>若番</button>
+                    <button style={S.togBtn(isYounger===false, C.navy)} onClick={()=>setIsYounger(false)}>遅番</button>
+                  </div>
+                </>
+              )}
+            </FormRow>
           </FormSec>
         )}
 
@@ -19692,22 +19710,40 @@ function MatchSummaryPanel({ match, part="all" }) {
         </details>
       )}
 
-      {sum.serveTotal>0 && (
-        <details style={detailBox}>
-          <summary style={summaryBtn}>🎾 サーブ分析</summary>
-          <div style={{ padding:"0 14px 14px" }}>
-            <CompareRow label="1stイン" a={`${sum.serve1st}本`} b={`${Math.round(sum.serve1st/sum.serveTotal*100)}%`} />
-            <CompareRow label="2ndイン" a={`${sum.serve2nd}本`} b={`${Math.round(sum.serve2nd/sum.serveTotal*100)}%`} />
-            <CompareRow label="ダブルフォルト" a={`${sum.serveDf}本`} b={`${Math.round(sum.serveDf/sum.serveTotal*100)}%`} />
-            {sum.firstServeTotal>0 && (
-              <div style={{ marginTop:10, fontSize:12 }}>1stサーブ時：得点{sum.firstServeWin} 失点{sum.firstServeTotal-sum.firstServeWin}（得点率{Math.round(sum.firstServeWin/sum.firstServeTotal*100)}%）</div>
-            )}
-            {sum.secondServeTotal>0 && (
-              <div style={{ marginTop:4, fontSize:12 }}>2ndサーブ時：得点{sum.secondServeWin} 失点{sum.secondServeTotal-sum.secondServeWin}（得点率{Math.round(sum.secondServeWin/sum.secondServeTotal*100)}%）</div>
-            )}
+      {(sum.serveBy.A.total>0 || sum.serveBy.B.total>0) && (() => {
+        // ★サーブ分析：左＝自チーム（緑）／右＝相手（オレンジ）。色＝チームの意味に統一する
+        //   （以前は自チームの数字だけを「本数＝緑・割合＝オレンジ」で並べていて、色の意味が分かりにくかった）
+        const A = sum.serveBy.A, B = sum.serveBy.B;
+        const pct = (n, d) => d>0 ? `${Math.round(n/d*100)}%` : "—";
+        const cnt = (r, n) => r.total>0 ? `${n}本（${pct(n, r.total)}）` : "—";
+        const winRate = (w, n) => n>0 ? `${w}/${n}（${pct(w, n)}）` : "—";
+        const sameName = teamALabel === teamBLabel;
+        const nameA = sameName ? "自チーム" : teamALabel, nameB = sameName ? "相手" : teamBLabel;
+        const row = (label, a, b, note) => (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", alignItems:"center", gap:8, padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
+            <span style={{ fontSize:13, fontWeight:800, color:C.teamA }}>{a}</span>
+            <span style={{ fontSize:11, color:C.textSec, textAlign:"center", lineHeight:1.3 }}>{label}{note && <><br/><span style={{ fontSize:9.5 }}>{note}</span></>}</span>
+            <span style={{ fontSize:13, fontWeight:800, color:C.teamB, textAlign:"right" }}>{b}</span>
           </div>
-        </details>
-      )}
+        );
+        return (
+          <details style={detailBox}>
+            <summary style={summaryBtn}>🎾 サーブ分析</summary>
+            <div style={{ padding:"0 14px 14px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", alignItems:"center", gap:8, paddingBottom:6, borderBottom:`2px solid ${C.border}` }}>
+                <span style={{ fontSize:12, fontWeight:800, color:C.white, background:C.teamA, borderRadius:6, padding:"3px 8px", justifySelf:"start", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nameA}</span>
+                <span style={{ fontSize:10, color:C.textSec }}>サーブ{A.total}本 / {B.total}本</span>
+                <span style={{ fontSize:12, fontWeight:800, color:C.white, background:C.teamB, borderRadius:6, padding:"3px 8px", justifySelf:"end", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nameB}</span>
+              </div>
+              {row("1stイン", cnt(A, A.s1), cnt(B, B.s1))}
+              {row("2ndイン", cnt(A, A.s2), cnt(B, B.s2))}
+              {row("ダブルフォルト", cnt(A, A.df), cnt(B, B.df))}
+              {row("1stサーブ時の得点", winRate(A.s1Win, A.s1), winRate(B.s1Win, B.s1), "得点/本数")}
+              {row("2ndサーブ時の得点", winRate(A.s2Win, A.s2), winRate(B.s2Win, B.s2), "得点/本数")}
+            </div>
+          </details>
+        );
+      })()}
 
       <details style={detailBox}>
         <summary style={summaryBtn}>🔥 試合の流れ</summary>
