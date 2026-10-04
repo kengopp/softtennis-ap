@@ -28,8 +28,11 @@ const PLAY_TYPES = [
   { key: "serve",    label: "サーブ"    },
   { key: "receive",  label: "レシーブ"  },
   { key: "volley",   label: "ボレー"    },
+  { key: "high_volley", label: "ハイボレー" },
+  { key: "low_volley",  label: "ローボレー" },
   { key: "smash",    label: "スマッシュ" },
   { key: "stroke",   label: "ストローク" },
+  { key: "top",      label: "トップ打ち" },
   { key: "attack",   label: "アタック"  },
   { key: "shoot",    label: "シュート"  },
   { key: "lob",      label: "ロブ"      },
@@ -52,17 +55,20 @@ const SIDE_TYPES = [
   { key: "backhand",  label: "バック" },
 ];
 
-// ★打球コース：立ち位置（正クロス／逆クロス）× 打ち方（引っ張り／流し）の4通り。
-//   「引っ張り」は打者から見て常に左方向、「流し」は右方向。
-//   そのため正クロスでは引っ張り＝クロス／流し＝ストレート、
-//   逆クロスでは引っ張り＝ストレート／流し＝クロスになる。
-//   from/to はボタンに描くコート図の座標（下＝自分側、上＝相手側、x: 0＝左, 100＝右）。
+// ★打球コース：引っ張り／流しの2択（2026-10 正クロス・逆クロスの区別をやめて集約）。
+//   「引っ張り」は打者から見て左方向、「流し」は右方向。
+//   以前の記録（sei_pull / gyaku_pull / sei_nagashi / gyaku_nagashi）は normCourse() で
+//   引っ張り／流しに読み替えて、表示・集計・修正のすべてで新しい2択と同じように扱う。
 const COURSE_TYPES = [
-  { key:"sei_pull",    pos:"正クロス", dir:"引っ張り", from:[74,86], to:[24,16] },
-  { key:"sei_nagashi", pos:"正クロス", dir:"流し",     from:[74,86], to:[80,16] },
-  { key:"gyaku_pull",  pos:"逆クロス", dir:"引っ張り", from:[26,86], to:[20,16] },
-  { key:"gyaku_nagashi",pos:"逆クロス",dir:"流し",     from:[26,86], to:[76,16] },
+  { key:"pull",    dir:"引っ張り" },
+  { key:"nagashi", dir:"流し"     },
 ];
+const normCourse = (key) => {
+  if (!key) return null;
+  if (key === "pull" || String(key).endsWith("_pull")) return "pull";
+  if (key === "nagashi" || String(key).endsWith("_nagashi")) return "nagashi";
+  return key;
+};
 
 // ★コース分析のグラフで使う色（青＝引っ張り／黄＝流し）
 const COURSE_PULL_COLOR    = "#5b8bc9";
@@ -98,8 +104,8 @@ const getResultLabel = (key) => RESULT_LABELS[key] ?? key ?? "";
 const getSideLabel   = (key) => SIDE_TYPES.find(s => s.key === key)?.label ?? key ?? "";
 const getMissLabel   = (key) => MISS_TYPES.find(m => m.key === key)?.label ?? RETIRED_MISS_LABELS[key] ?? key ?? "";
 const getCourseLabel = (key) => {
-  const c = COURSE_TYPES.find(c => c.key === key);
-  return c ? `${c.pos}・${c.dir}` : (key ?? "");
+  const c = COURSE_TYPES.find(c => c.key === normCourse(key));
+  return c ? c.dir : (key ?? "");
 };
 // ★"プレー内容|フォアバック|ミスの種類" の組み合わせキーを表示用の文字列にする
 const missComboLabel = (key) => {
@@ -1171,42 +1177,25 @@ function buildCourseStats(agg) {
     COURSE_TYPES.forEach(ct => { byKey[ct.key] = cell(ct.key); });
     const all = COURSE_TYPES.reduce((a, ct) => a + byKey[ct.key].total, 0);
 
-    // ① 立ち位置に関係なく、引っ張り／流しのどちらを多く打っているか
-    const pull = byKey.sei_pull.total + byKey.gyaku_pull.total;
-    const nagashi = byKey.sei_nagashi.total + byKey.gyaku_nagashi.total;
+    // ① 引っ張り／流しのどちらを多く打っているか
+    const pull = byKey.pull.total;
+    const nagashi = byKey.nagashi.total;
 
-    // ② 正クロス時・逆クロス時それぞれの中での引っ張り／流し
-    const positions = [
-      { pos:"正クロス", pullCell: byKey.sei_pull,   nagaCell: byKey.sei_nagashi   },
-      { pos:"逆クロス", pullCell: byKey.gyaku_pull, nagaCell: byKey.gyaku_nagashi },
-    ].map(p => ({ ...p, total: p.pullCell.total + p.nagaCell.total }));
-
-    // ③ フォア／バックそれぞれの中での引っ張り／流し
+    // ② フォア／バックそれぞれの中での引っ張り／流し
     const scCell = (side, courseKey) => {
       const k = side + "__" + courseKey;
-      const win = agg.sideCourseWin?.[k] ?? 0;
-      const err = agg.sideCourseErr?.[k] ?? 0;
-      return win + err;
+      return (agg.sideCourseWin?.[k] ?? 0) + (agg.sideCourseErr?.[k] ?? 0);
     };
     const sides = SIDE_TYPES.map(st => {
-      const pullN   = scCell(st.key, "sei_pull")   + scCell(st.key, "gyaku_pull");
-      const nagashiN = scCell(st.key, "sei_nagashi") + scCell(st.key, "gyaku_nagashi");
-      const seiTotal   = scCell(st.key, "sei_pull")   + scCell(st.key, "sei_nagashi");
-      const gyakuTotal = scCell(st.key, "gyaku_pull") + scCell(st.key, "gyaku_nagashi");
-      return {
-        side: st.key, label: st.label, total: pullN + nagashiN, pull: pullN, nagashi: nagashiN,
-        positions: [
-          { pos:"正クロス", total: seiTotal,   pull: scCell(st.key,"sei_pull"),   nagashi: scCell(st.key,"sei_nagashi") },
-          { pos:"逆クロス", total: gyakuTotal, pull: scCell(st.key,"gyaku_pull"), nagashi: scCell(st.key,"gyaku_nagashi") },
-        ],
-      };
+      const pullN = scCell(st.key, "pull"), nagashiN = scCell(st.key, "nagashi");
+      return { side: st.key, label: st.label, total: pullN + nagashiN, pull: pullN, nagashi: nagashiN };
     });
 
-    // ④ 4コースそれぞれの決めた／ミス
+    // ③ コース（引っ張り／流し）それぞれの決めた／ミス
     const rows = COURSE_TYPES.map(ct => byKey[ct.key]);
 
     // 気づきの一文（本数が少ないと割合が極端に出るため3本以上のコースだけを対象にする）
-    let best = null, worst = null;
+  let best = null, worst = null;
     rows.forEach(r => {
       if (r.total < 3) return;
       const rate = r.win / r.total;
@@ -1214,7 +1203,7 @@ function buildCourseStats(agg) {
       if (!worst || rate < worst.rate) worst = { ...r, rate };
     });
 
-  return { all, pull, nagashi, positions, sides, rows, best, worst };
+  return { all, pull, nagashi, sides, rows, best, worst };
 }
 
 // 合算スタッツから、画面表示用の主要指標（%）を計算する
@@ -3743,7 +3732,7 @@ function calcPlayerStats(match) {
         //   ミスの種類は入力が任意なので、母数として missTyped（種類まで入力されたミスの件数）も持つ。
         missTypes: {}, missTyped: 0,
         sideWin: {}, sideErr: {},
-        // ★打球コース（正クロス／逆クロス × 引っ張り／流し）別の得点・ミス
+        // ★打球コース（引っ張り／流し）別の得点・ミス
         courseWin: {}, courseErr: {},
         // ★フォア/バック × コース（引っ張り/流し）の掛け合わせ（分析メニューのコース分析③用）
         sideCourseWin: {}, sideCourseErr: {},
@@ -3790,13 +3779,14 @@ function calcPlayerStats(match) {
         const sideBucket = pt.is_winner ? r.sideWin : r.sideErr;
         sideBucket[pt.side_type] = (sideBucket[pt.side_type] ?? 0) + 1;
       }
-      if (pt.course_type) {
+      const ptCourse = normCourse(pt.course_type); // ★以前の正クロス／逆クロス付きの記録も引っ張り／流しにまとめる
+      if (ptCourse) {
         const courseBucket = pt.is_winner ? r.courseWin : r.courseErr;
-        courseBucket[pt.course_type] = (courseBucket[pt.course_type] ?? 0) + 1;
+        courseBucket[ptCourse] = (courseBucket[ptCourse] ?? 0) + 1;
       }
-      if (pt.side_type && pt.course_type) {
+      if (pt.side_type && ptCourse) {
         const sideCourseBucket = pt.is_winner ? r.sideCourseWin : r.sideCourseErr;
-        const scKey = pt.side_type + "__" + pt.course_type;
+        const scKey = pt.side_type + "__" + ptCourse;
         sideCourseBucket[scKey] = (sideCourseBucket[scKey] ?? 0) + 1;
       }
       if (!pt.is_winner && pt.miss_type) {
@@ -4130,27 +4120,24 @@ function FitBadge({ text, maxPx = 17, minPx = 10, maxLines = 2, style }) {
 //   「どこからどこへ打ったか」が一目で分かるようにしている。
 //   記録タブ・ゲーム終了時の詳細入力・ポイント修正モーダルの3か所で共用する。
 function CoursePicker({ value, onChange }) {
-  const row = (pos) => (
-    <>
-      <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"8px 0 5px" }}>{pos} から</div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-        {COURSE_TYPES.filter(c => c.pos === pos).map(c => {
-          const sel = value === c.key;
-          return (
-            <div key={c.key}
-              onClick={()=>onChange(sel ? null : c.key)}
-              style={{
-                border:`2px solid ${sel?C.accent:C.border}`, background:sel?C.accentL:C.white,
-                borderRadius:12, padding:"14px 6px", cursor:"pointer", textAlign:"center", userSelect:"none",
-              }}>
-              <div style={{ fontSize:14, fontWeight:800, color:sel?C.accent:C.navy }}>{c.dir}</div>
-            </div>
-          );
-        })}
-      </div>
-    </>
+  const cur = normCourse(value);
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:4 }}>
+      {COURSE_TYPES.map(c => {
+        const sel = cur === c.key;
+        return (
+          <div key={c.key}
+            onClick={()=>onChange(sel ? null : c.key)}
+            style={{
+              border:`2px solid ${sel?C.accent:C.border}`, background:sel?C.accentL:C.white,
+              borderRadius:12, padding:"14px 6px", cursor:"pointer", textAlign:"center", userSelect:"none",
+            }}>
+            <div style={{ fontSize:14, fontWeight:800, color:sel?C.accent:C.navy }}>{c.dir}</div>
+          </div>
+        );
+      })}
+    </div>
   );
-  return <div>{row("正クロス")}{row("逆クロス")}</div>;
 }
 
 // ★モーダル表示中に背景（body）がスクロールしてしまうのを防ぐ（主にiOSで発生する不具合対策）
@@ -4389,7 +4376,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   const [play,   setPlay]   = useState(point.play_type);
   const [side,   setSide]   = useState(point.side_type);
   const [miss,   setMiss]   = useState(point.miss_type ?? null); // ★ミスの種類（相手ミスのときだけ）
-  const [course, setCourse] = useState(point.course_type ?? null); // ★打球コース
+  const [course, setCourse] = useState(normCourse(point.course_type)); // ★打球コース（以前の正クロス／逆クロス付きの記録は引っ張り／流しに読み替える）
   const [result, setResult] = useState(point.result_type);
   const isMiss = result === "error";
   const [playerName, setPlayerName] = useState(point.player_name);
@@ -4530,13 +4517,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
             </div>
           </>)}
           {sub("コース")}
-          <div style={{ display:"grid", gridTemplateColumns:"80px 1fr 1fr", gap:6, alignItems:"center" }}>
-            {["正クロス","逆クロス"].map(pos => (
-              <Fragment key={pos}>
-                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap", paddingLeft:8 }}>{pos}</div>
-                {COURSE_TYPES.filter(c=>c.pos===pos).map(c => <button key={c.key} onClick={()=>setCourse(course===c.key?null:c.key)} style={{ ...btn, ...sel(course===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
-              </Fragment>
-            ))}
+          <div style={{ display:"flex", gap:8 }}>
+            {COURSE_TYPES.map(c => <button key={c.key} onClick={()=>setCourse(course===c.key?null:c.key)} style={{ ...btn, ...sel(course===c.key), flex:1, padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
           </div>
         </div>
 
@@ -13751,19 +13733,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                           <SplitBar pull={courseStats.pull} nagashi={courseStats.nagashi} total={courseStats.all} />
 
                           <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>② 立ち位置ごと</div>
-                            {courseStats.positions.filter(p=>p.total>0).map(p => (
-                              <div key={p.pos} style={{ marginBottom:12 }}>
-                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
-                                  <span>{p.pos}</span><span style={{ fontSize:13, fontWeight:400, color:C.textSec }}><b style={{ fontSize:15, fontWeight:800, color:C.text }}>{p.total}</b>本</span>
-                                </div>
-                                <SplitBar pull={p.pullCell.total} nagashi={p.nagaCell.total} total={p.total} />
-                              </div>
-                            ))}
-                          </div>
-
-                          <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>③ フォア / バック別</div>
+                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>② フォア / バック別</div>
                             {courseStats.sides.filter(sd=>sd.total>0).map(sd => (
                               <div key={sd.side} style={{ marginBottom:12 }}>
                                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
@@ -13775,7 +13745,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                           </div>
 
                           <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:10 }}>④ コース別の 決めた / ミス</div>
+                            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:10 }}>③ コース別の 決めた / ミス</div>
                             {courseStats.rows.map(r => {
                               const rate = r.total>0 ? Math.round(r.win/r.total*100) : 0;
                               return (
@@ -14449,7 +14419,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const missSideTotal = missSideRows.reduce((a,[,n]) => a + n, 0);
   const topMissCombos = Object.entries(agg.missCombos ?? {}).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
-  // ★コース分析（① 引っ張り/流し → ② 立ち位置ごとの引っ張り/流し → ③ コース別の決めた/ミス）
+  // ★コース分析（① 引っ張り/流し → ② フォア/バック別 → ③ コース別の決めた/ミス）
   const courseStats = buildCourseStats(agg);
   const hasMissDetail = (agg.missTyped ?? 0) > 0 || missSideTotal > 0;
 
@@ -14863,7 +14833,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
               </div>
             </div>
 
-            {/* ★コース分析：①引っ張り/流し → ②立ち位置ごと → ③フォア/バック別 → コース別の決めた/ミス(参考) と、
+            {/* ★コース分析：①引っ張り/流し → ②フォア/バック別 → ③コース別の決めた/ミス と、
                 だんだん細かく見ていく構成。本数は割合より大きな文字にして読み取りやすくしている。 */}
             {breakdownDim==="course" && courseStats.all > 0 && (
               <div style={{ ...S.card, marginTop:-4 }}>
@@ -14888,44 +14858,9 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                     <span>流し <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{courseStats.nagashi}</b>本</span>
                   </div>
 
-                  {/* ② 立ち位置ごとの 引っ張り / 流し */}
+                  {/* ② フォア／バック別の 引っ張り / 流し */}
                   <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>② 立ち位置ごと</div>
-                    {courseStats.positions.map(p => (
-                      <div key={p.pos} style={{ marginTop:12 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:5 }}>
-                          <span>{p.pos}時</span>
-                          {p.total>0
-                            ? <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}><b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{p.total}</b>本</span>
-                            : <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}>記録なし</span>}
-                        </div>
-                        {p.total>0 && (
-                          <>
-                            <div style={{ display:"flex", height:22, borderRadius:6, overflow:"hidden", background:"#eef0f3" }}>
-                              {p.pullCell.total>0 && (
-                                <div style={{ width:`${p.pullCell.total/p.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
-                                  {Math.round(p.pullCell.total/p.total*100)}%
-                                </div>
-                              )}
-                              {p.nagaCell.total>0 && (
-                                <div style={{ width:`${p.nagaCell.total/p.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
-                                  {Math.round(p.nagaCell.total/p.total*100)}%
-                                </div>
-                              )}
-                            </div>
-                            <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.textSec, marginTop:5 }}>
-                              <span>引っ張り <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{p.pullCell.total}</b>本</span>
-                              <span>流し <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{p.nagaCell.total}</b>本</span>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* ③ フォア／バック別の 引っ張り / 流し */}
-                  <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>③ フォア / バック別</div>
+                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>② フォア / バック別</div>
                     {courseStats.sides.map((sd, sdIdx) => (
                       <div key={sd.side} style={{ marginTop: sdIdx===0 ? 0 : 14 }}>
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:5 }}>
@@ -14952,16 +14887,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                               <span>引っ張り <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.pull}</b>本</span>
                               <span>流し <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.nagashi}</b>本</span>
                             </div>
-                            {sd.positions.filter(p=>p.total>0).map(p => (
-                              <div key={p.pos} style={{ display:"flex", alignItems:"center", fontSize:13.5, color:C.textSec, padding:"3px 0" }}>
-                                <span style={{ width:60, flexShrink:0 }}>{p.pos}時</span>
-                                <span style={{ flex:1, height:18, background:"#eef0f3", borderRadius:5, overflow:"hidden", display:"flex", marginRight:8 }}>
-                                  <div style={{ width:`${p.pull/p.total*100}%`, background:COURSE_PULL_COLOR }}/>
-                                  <div style={{ width:`${p.nagashi/p.total*100}%`, background:COURSE_NAGASHI_COLOR }}/>
-                                </span>
-                                <span style={{ fontWeight:700, color:C.text, flexShrink:0 }}>{p.total}本</span>
-                              </div>
-                            ))}
+                            
                           </>
                         )}
                       </div>
@@ -14972,15 +14898,15 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   <div style={{ background:"#f7f9fc", borderLeft:`3px solid ${C.navy}`, borderRadius:6, padding:"8px 10px", fontSize:13, lineHeight:1.65, marginTop:16 }}>
                     {courseStats.best ? (
                       <>
-                        よく決まっているのは<b>{courseStats.best.label}</b>（決定率{Math.round(courseStats.best.rate*100)}%・{courseStats.best.total}本）。<br/>
-                        苦しいのは<b>{courseStats.worst.label}</b>（決定率{Math.round(courseStats.worst.rate*100)}%・{courseStats.worst.total}本）。
+                        よく決まっているのは<b>{courseStats.best.label}</b>（決定率{Math.round(courseStats.best.rate*100)}%・{courseStats.best.total}本）。
+                        {courseStats.worst && courseStats.worst.key !== courseStats.best.key && (<><br/>苦しいのは<b>{courseStats.worst.label}</b>（決定率{Math.round(courseStats.worst.rate*100)}%・{courseStats.worst.total}本）。</>)}
                       </>
                     ) : "まだ本数が少なく、傾向は出ていません。"}
                   </div>
 
-                  {/* ④ コース別の 決めた / ミス */}
+                  {/* ③ コース別の 決めた / ミス */}
                   <div style={{ marginTop:16, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
-                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:10 }}>④ コース別の 決めた / ミス</div>
+                    <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:10 }}>③ コース別の 決めた / ミス</div>
                     {courseStats.rows.map(r => {
                       const rate = r.total>0 ? Math.round(r.win/r.total*100) : 0;
                       return (
@@ -17782,13 +17708,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             </div>
           </>)}
           {sub("コース")}
-          <div style={{ display:"grid", gridTemplateColumns:"80px 1fr 1fr", gap:6, alignItems:"center" }}>
-            {["正クロス","逆クロス"].map(pos => (
-              <Fragment key={pos}>
-                <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap", paddingLeft:8 }}>{pos}</div>
-                {COURSE_TYPES.filter(c=>c.pos===pos).map(c => <button key={c.key} onClick={()=>toggle("course_type", c.key)} style={{ ...btn, ...sel(lp.course_type===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
-              </Fragment>
-            ))}
+          <div style={{ display:"flex", gap:8 }}>
+            {COURSE_TYPES.map(c => <button key={c.key} onClick={()=>toggle("course_type", normCourse(lp.course_type)===c.key ? lp.course_type : c.key)} style={{ ...btn, ...sel(normCourse(lp.course_type)===c.key), flex:1, padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
           </div>
         </div>
         <button onClick={()=>setLastPtEditOpen(false)} style={{ width:"100%", marginTop:14, padding:12, background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:C.navy, cursor:"pointer" }}>▲ 閉じる（変更はすぐ保存されます）</button>
@@ -18963,14 +18884,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       </>
                     )}
                     <div style={{ fontSize:12.5, fontWeight:800, color:C.textSec, margin:"10px 0 5px 2px" }}>コース</div>
-                    <div ref={osRefs.course} style={{ display:"grid", gridTemplateColumns:"84px 1fr 1fr", gap:6, alignItems:"center" }}>
-                      {["正クロス","逆クロス"].map(pos => (
-                        <Fragment key={pos}>
-                          <div style={{ fontSize:16, fontWeight:800, color:C.navy, whiteSpace:"nowrap", paddingLeft:8 }}>{pos}</div>
-                          {COURSE_TYPES.filter(c=>c.pos===pos).map(c => (
-                            <button key={c.key} onClick={()=>osPickCourse(c.key)} style={{ ...btnBase, ...selStyle(osCourse===c.key), padding:"10px 2px", fontSize:15 }}>{c.dir}</button>
-                          ))}
-                        </Fragment>
+                    <div ref={osRefs.course} style={{ display:"flex", gap:8 }}>
+                      {COURSE_TYPES.map(c => (
+                        <button key={c.key} onClick={()=>osPickCourse(c.key)} style={{ ...btnBase, ...selStyle(osCourse===c.key), flex:1, padding:"10px 2px", fontSize:15 }}>{c.dir}</button>
                       ))}
                     </div>
                   </div>
