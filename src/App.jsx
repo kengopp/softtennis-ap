@@ -17371,6 +17371,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   // ★特定のゲームだけを修正するときに、そのゲームIDを入れる（nullなら全ゲームを表示）
   const [correctGameId, setCorrectGameId] = useState(null);
   const [showGamePicker, setShowGamePicker] = useState(false); // 「どのゲームを直すか」の選択モーダル
+  // ★記録し忘れた最初のゲームを、第1ゲームの前に「スコアだけ」で追加する（途中のゲームから記録を始めた場合用）
+  const [insertFirst, setInsertFirst] = useState(null); // null | { left:"", right:"" }
   // ★個人戦の試合にもAI動画分析を追加できるようにする（団体戦の各番手と同様の機能）
   // 　undefined=未確認、null=未登録、オブジェクト=登録済み
   const [aiAnalysis, setAiAnalysis] = useState(undefined);
@@ -18688,6 +18690,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <div style={{ background:"#fff3e0",border:"1px solid #ffd699",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:14,lineHeight:1.6,color:"#7a5800" }}>
                 ✏️ 修正したいポイントをタップすると内容の変更・削除ができます。「＋」では好きな位置にポイントを追加できます。
               </div>
+              {!correctGameId && (
+                <button
+                  style={{ width:"100%",background:"none",border:`1px dashed ${C.accent}`,borderRadius:8,color:C.accent,fontSize:12.5,fontWeight:800,cursor:"pointer",padding:"9px 10px",marginBottom:10 }}
+                  onClick={()=>setInsertFirst({ left:"", right:"" })}
+                >＋ 第1ゲームの前に、記録していないゲームを追加</button>
+              )}
               {match.games.filter(g=>!correctGameId||g.id===correctGameId).map(g=>(
                 <div key={g.id} style={S.card}>
                   <div style={{ padding:"10px 14px",background:C.navyMid,color:C.white,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
@@ -18781,10 +18789,67 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             </div>
           )}
 
+          {insertFirst && (() => {
+            const l = parseInt(insertFirst.left, 10), r = parseInt(insertFirst.right, 10);
+            const valid = Number.isFinite(l) && Number.isFinite(r) && l >= 0 && r >= 0 && l !== r;
+            const winnerSide = valid ? (l > r ? leftTeam : rightTeam) : null;
+            const scoreA = leftTeam === "A" ? l : r, scoreB = leftTeam === "A" ? r : l;
+            const inp = { width:"100%", boxSizing:"border-box", padding:"12px 8px", fontSize:22, fontWeight:900, textAlign:"center", border:`2px solid ${C.border}`, borderRadius:10 };
+            return (
+              <Modal onClose={()=>setInsertFirst(null)}>
+                <h3 style={{ fontSize:16,fontWeight:800,color:C.navy,marginBottom:6,textAlign:"center" }}>第1ゲームの前にゲームを追加</h3>
+                <p style={{ fontSize:12,color:C.textSec,marginBottom:14,lineHeight:1.6 }}>
+                  途中のゲームから記録を始めたときに、記録していない最初のゲームを「スコアだけ」で追加します。今の第1ゲームは第2ゲームになり、以降も1つずつ繰り下がります。
+                </p>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:8, alignItems:"end" }}>
+                  <div>
+                    <div style={{ fontSize:12,fontWeight:800,color:osTeamColor(leftTeam),textAlign:"center",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{osTeamName(leftTeam)}</div>
+                    <input type="number" inputMode="numeric" min="0" style={inp} value={insertFirst.left} onChange={e=>setInsertFirst(v=>({ ...v, left:e.target.value }))} placeholder="0"/>
+                  </div>
+                  <div style={{ fontSize:22,fontWeight:900,color:C.textSec,paddingBottom:12 }}>-</div>
+                  <div>
+                    <div style={{ fontSize:12,fontWeight:800,color:osTeamColor(rightTeam),textAlign:"center",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{osTeamName(rightTeam)}</div>
+                    <input type="number" inputMode="numeric" min="0" style={inp} value={insertFirst.right} onChange={e=>setInsertFirst(v=>({ ...v, right:e.target.value }))} placeholder="0"/>
+                  </div>
+                </div>
+                <div style={{ fontSize:12.5,fontWeight:700,color:C.text,textAlign:"center",margin:"10px 0 4px",minHeight:18 }}>
+                  {valid ? `${osTeamName(winnerSide)}がこのゲームを取った` : "ゲームのポイント数を入れてください（例：4-2）"}
+                </div>
+                <button
+                  disabled={!valid}
+                  style={{ ...S.btn(valid ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, valid ? C.white : C.textSec), marginTop:10 }}
+                  onClick={()=>{
+                    if (!valid) return;
+                    const first = match.games[0];
+                    // 追加するゲームのサーブは、今の第1ゲームの逆（ゲームごとにサーブ側が交代するため）
+                    const srv = first?.server_team ? (first.server_team === "A" ? "B" : "A") : (match.first_server || "A");
+                    const newG = { id:uid(), match_id:match.id, game_number:1, server_team:srv, is_final:false, score_a:scoreA, score_b:scoreB, winner_team:winnerSide, points:[], faults:[] };
+                    let games = [newG, ...match.games];
+                    let sA = games.filter(x=>x.winner_team==="A").length, sB = games.filter(x=>x.winner_team==="B").length;
+                    const decided = sA >= winGames || sB >= winGames;
+                    // 追加で勝敗が決まった場合、最後に作られていた「点が1つも入っていない記録中のゲーム」は不要なので消す
+                    const last = games[games.length-1];
+                    if (decided && last && !last.winner_team && (last.points?.length ?? 0) === 0) games = games.slice(0, -1);
+                    games = games.map((x,i)=>({ ...x, game_number:i+1 }));
+                    sA = games.filter(x=>x.winner_team==="A").length; sB = games.filter(x=>x.winner_team==="B").length;
+                    persist({ ...match, games, first_server: srv, match_score_a:sA, match_score_b:sB, ...(decided ? { status:"finished" } : {}) });
+                    setInsertFirst(null);
+                    if (decided) { setCorrectMode(false); setCorrectGameId(null); }
+                  }}
+                >追加する</button>
+                <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setInsertFirst(null)}>キャンセル</button>
+              </Modal>
+            );
+          })()}
+
           {showGamePicker && (
             <Modal onClose={()=>setShowGamePicker(false)}>
               <h3 style={{ fontSize:17,fontWeight:800,color:C.navy,marginBottom:4,textAlign:"center" }}>🔧 修正するゲームを選んでください</h3>
               <p style={{ fontSize:13,color:C.textSec,marginBottom:14,textAlign:"center" }}>選んだゲームのポイントを1つずつ修正・削除・追加できます</p>
+              <button
+                style={{ width:"100%",background:"none",border:`1px dashed ${C.accent}`,borderRadius:10,color:C.accent,fontSize:13.5,fontWeight:800,cursor:"pointer",padding:"11px 10px",marginBottom:10 }}
+                onClick={()=>{ setShowGamePicker(false); setInsertFirst({ left:"", right:"" }); }}
+              >＋ 第1ゲームの前に、記録していないゲームを追加</button>
               {match.games.map(g=>(
                 <div
                   key={g.id}
