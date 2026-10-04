@@ -81,6 +81,7 @@ const MISS_TYPES = [
   { key: "net",  label: "ネット"   },
   { key: "over", label: "オーバー" },
   { key: "chip", label: "チップ"   },
+  { key: "side", label: "サイドアウト" }, // ★2026-10 追加
 ];
 // ★選択肢に「チップ」を復活。RETIRED_MISS_LABELSは今後また選択肢から外す種類が出た場合の
 //   フォールバック表示用に汎用の仕組みとして残しておく（現在は該当なし）
@@ -4519,7 +4520,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           </div>
           {isMiss && (<>
             {sub("ミスの種類")}
-            <div style={{ display:"flex", gap:8 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               {MISS_TYPES.map(m => <button key={m.key} onClick={()=>setMiss(miss===m.key?null:m.key)} style={{ ...btn, ...sel(miss===m.key), flex:1, padding:"10px 2px", fontSize:15 }}>{m.label}</button>)}
             </div>
           </>)}
@@ -14524,7 +14525,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const topPlaysErr = Object.entries(agg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,4);
   const maxPlayCount = Math.max(1, ...topPlaysWin.map(x=>x[1]), ...topPlaysErr.map(x=>x[1]));
 
-  // ★ミスの傾向（ネット／オーバー／チップ、フォア／バック、多い組み合わせ）
+  // ★ミスの傾向（ネット／オーバー／チップ／サイドアウト、フォア／バック、多い組み合わせ）
   //   ミスの種類は入力が任意なので、母数は「種類まで入力されたミスの件数」を使う。
   const missTypeRows = MISS_TYPES
     .map(mt => [mt.label, agg.missTypes?.[mt.key] ?? 0])
@@ -17821,7 +17822,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           </div>
           {kind==="error" && (<>
             {sub("ミスの種類")}
-            <div style={{ display:"flex", gap:8 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
               {MISS_TYPES.map(m => <button key={m.key} onClick={()=>toggle("miss_type", m.key)} style={{ ...btn, ...sel(lp.miss_type===m.key), flex:1, padding:"10px 2px", fontSize:15 }}>{m.label}</button>)}
             </div>
           </>)}
@@ -19059,7 +19060,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     {osKind==="error" && (
                       <>
                         <div style={{ fontSize:12.5, fontWeight:800, color:C.textSec, margin:"10px 0 5px 2px" }}>ミスの種類</div>
-                        <div ref={osRefs.miss} style={{ display:"flex", gap:8 }}>
+                        <div ref={osRefs.miss} style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                           {MISS_TYPES.map(m => chip(osMiss===m.key, ()=>osPickMiss(m.key), m.label, { fontSize:15 }))}
                         </div>
                       </>
