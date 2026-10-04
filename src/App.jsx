@@ -24,17 +24,19 @@ class ErrorBoundary extends Component {
 // ============================================================
 const GAME_FORMATS = [5, 7, 9];
 // プレイ内容（ショット種別）
+// ★並び順＝記録画面の3列ボタンの並び（2026-10 指定）
+//   サーブ・レシーブ・アタック／トップ打ち・ストローク・シュート／ハイボレー・ボレー・ローボレー／スマッシュ・ロブ・ツイスト
 const PLAY_TYPES = [
   { key: "serve",    label: "サーブ"    },
   { key: "receive",  label: "レシーブ"  },
-  { key: "volley",   label: "ボレー"    },
+  { key: "attack",   label: "アタック"  },
+  { key: "top",      label: "トップ打ち" },
+  { key: "stroke",   label: "ストローク" },
+  { key: "shoot",    label: "シュート"  },
   { key: "high_volley", label: "ハイボレー" },
+  { key: "volley",   label: "ボレー"    },
   { key: "low_volley",  label: "ローボレー" },
   { key: "smash",    label: "スマッシュ" },
-  { key: "stroke",   label: "ストローク" },
-  { key: "top",      label: "トップ打ち" },
-  { key: "attack",   label: "アタック"  },
-  { key: "shoot",    label: "シュート"  },
   { key: "lob",      label: "ロブ"      },
   { key: "drop",     label: "ツイスト"  }, // ★旧「ドロップ」。過去データも同じキーなので表示だけ切り替わる
 ];
@@ -86,6 +88,9 @@ const RETIRED_MISS_LABELS = {};
 // ★ミス時は「サーブ」を選択肢から外す（サーブのミス＝ダブルフォルトで別に記録するため）
 const playTypesFor = (resultType) =>
   resultType === "error" ? PLAY_TYPES.filter(p => p.key !== "serve") : PLAY_TYPES;
+// ★3列のボタン表示用：ミス時も並びが崩れないよう「サーブ」は消さずに押せない状態で残す
+const playDisabledFor = (resultType, key) => resultType === "error" && key === "serve";
+const PLAY_OFF_STYLE = { opacity:0.3, pointerEvents:"none" };
 
 // shot_typeキー（DB保存用：プレイ内容_結果 の組み合わせで生成）
 const buildShotKey = (play, result) => play && result ? `${play}_${result}` : play ?? result ?? null;
@@ -4500,8 +4505,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         <div style={{ marginBottom:12 }}>
           {head(5, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
-            {playTypesFor(result).map(p => (
-              <button key={p.key} onClick={()=>setPlay(play===p.key?null:p.key)} style={{ ...btn, ...sel(play===p.key), padding:"10px 2px", fontSize:14 }}>{p.label}</button>
+            {PLAY_TYPES.map(p => (
+              <button key={p.key} disabled={playDisabledFor(result, p.key)} onClick={()=>setPlay(play===p.key?null:p.key)} style={{ ...btn, ...sel(play===p.key), padding:"10px 2px", fontSize:14, ...(playDisabledFor(result, p.key) ? PLAY_OFF_STYLE : {}) }}>{p.label}</button>
             ))}
           </div>
         </div>
@@ -17771,8 +17776,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         <div style={{ marginBottom:12 }}>
           {head(3, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
-            {playTypesFor(lp.result_type).map(p => (
-              <button key={p.key} onClick={()=>toggle("play_type", p.key)} style={{ ...btn, ...sel(lp.play_type===p.key), padding:"10px 2px", fontSize:14 }}>{p.label}</button>
+            {PLAY_TYPES.map(p => (
+              <button key={p.key} disabled={playDisabledFor(lp.result_type, p.key)} onClick={()=>toggle("play_type", p.key)} style={{ ...btn, ...sel(lp.play_type===p.key), padding:"10px 2px", fontSize:14, ...(playDisabledFor(lp.result_type, p.key) ? PLAY_OFF_STYLE : {}) }}>{p.label}</button>
             ))}
           </div>
         </div>
@@ -18943,8 +18948,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <div style={{ marginBottom:12, ...dim(step56Off) }}>
                     {head(5, !!osPlay, "どんなプレー？", "（任意）")}
                     <div ref={osRefs.play} style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
-                      {playTypesFor(osKind).map(p => (
-                        <button key={p.key} onClick={()=>osPickPlay(p.key)} style={{ ...btnBase, ...selStyle(osPlay===p.key), padding:"10px 2px", fontSize:14 }}>{p.label}</button>
+                      {PLAY_TYPES.map(p => (
+                        <button key={p.key} disabled={playDisabledFor(osKind, p.key)} onClick={()=>osPickPlay(p.key)} style={{ ...btnBase, ...selStyle(osPlay===p.key), padding:"10px 2px", fontSize:14, ...(playDisabledFor(osKind, p.key) ? PLAY_OFF_STYLE : {}) }}>{p.label}</button>
                       ))}
                     </div>
                   </div>
