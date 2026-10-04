@@ -16246,7 +16246,8 @@ function FormSec({ title, children }) {
 }
 // ★必須項目の目印（赤い丸）。FormRow の required と、フォーム上部の凡例で使う
 const RequiredDot = () => (
-  <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background:C.red, marginRight:6, verticalAlign:"middle", flexShrink:0 }} />
+  // ★目立つように：以前の8pxから大きくし、薄い赤の輪を付けた
+  <span style={{ display:"inline-block", width:12, height:12, borderRadius:"50%", background:C.red, boxShadow:"0 0 0 3px rgba(229,57,53,0.22)", marginLeft:3, marginRight:9, verticalAlign:"middle", flexShrink:0 }} />
 );
 
 function FormRow({ label, labelRight, children, required }) {
