@@ -11757,6 +11757,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
   const [mySchoolInitialized, setMySchoolInitialized] = useState(false); // プロフィール初期化済みフラグ
   const [mySchoolChanging, setMySchoolChanging] = useState(false); // 変更確認ポップ
   const [mySchoolPrefFilter, setMySchoolPrefFilter] = useState(""); // 自チーム側の都道府県フィルタ
+  const [mySchoolDraft, setMySchoolDraft] = useState(""); // ★変更ポップでの入力途中の学校名（決定するまで反映しない）
   const [existingId, setExistingId] = useState(null);
   // 過去の団体戦から候補を取得
   const [pastTournaments, setPastTournaments] = useState([]);
@@ -11852,9 +11853,25 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
     setSaving(true);
     try {
       const id = existingId || uid();
+      // ★自チームに学校マスターに無い学校名を入れた場合は、ここで学校として登録してから保存する
+      let schoolIdToSave = mySchoolId;
+      if (!schoolIdToSave && mySchoolName.trim()) {
+        const fresh = await getSchools(true).catch(() => schoolsWithId);
+        const same = (fresh || []).find(s => s.name === mySchoolName.trim());
+        if (same) schoolIdToSave = same.id;
+        else {
+          try {
+            const created = await addSchool(mySchoolName.trim(), mySchoolPrefFilter || null, null, "mixed");
+            schoolIdToSave = created.id;
+          } catch (e) {
+            throw new Error(`学校「${mySchoolName.trim()}」を登録できませんでした（学校マスターに追加する権限が無い可能性があります）。\n${e?.message || e}`);
+          }
+        }
+        setMySchoolId(schoolIdToSave);
+      }
       const tm = {
         id, match_date: matchDate, venue, tournament_name: tournamentName,
-        round, my_school_id: mySchoolId, my_team_division: myTeamDivision,
+        round, my_school_id: schoolIdToSave, my_team_division: myTeamDivision,
         opponent_name: opponentName.trim(), opponent_division: opponentDivision,
         my_entry_no: myEntryNo.trim() || null, opponent_entry_no: opponentEntryNo.trim() || null,
         format, status: existingId ? undefined : "scheduled",
@@ -11942,7 +11959,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
               </div>
               <button
                 style={{ padding:"8px 12px", borderRadius:8, border:"1px solid "+C.border, background:C.white, color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}
-                onClick={()=>setMySchoolChanging(true)}
+                onClick={()=>(setMySchoolDraft(""), setMySchoolChanging(true))}
               >変更</button>
             </div>
           </FormRow>
@@ -12004,10 +12021,13 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
             <h3 style={{ fontSize:15, fontWeight:800, marginBottom:6 }}>自チームを変更しますか？</h3>
             <p style={{ fontSize:12, color:C.textSec, marginBottom:14 }}>他校の団体戦を記録する場合など、自チームを変更できます。</p>
             <PrefMiniFilter value={mySchoolPrefFilter} onChange={setMySchoolPrefFilter} options={knownPrefsFrom(schools)} />
+            {/* ★以前は1文字入力した時点でポップが閉じてしまい、候補に無い学校名を入れられなかった。
+                候補をタップしたときはすぐ確定、手入力のときは「決定」を押すまで確定しない。 */}
             <SchoolField
-              value={mySchoolName}
+              value={mySchoolDraft}
               onChange={name => {
-                // idを持つschoolsWithIdからidを解決する
+                setMySchoolDraft(name);
+                // 候補（学校マスター）と完全一致したら、その学校で確定する
                 const found = schoolsWithId.find(s => s.name === name);
                 if (found) {
                   setMySchoolId(found.id);
@@ -12015,20 +12035,30 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
                   setMySchoolInitialized(true);
                   setMySchoolChanging(false);
                   setMySchoolPrefFilter("");
-                } else {
-                  // schoolsWithIdに見つからない場合は名前だけ更新（idはnull）
-                  setMySchoolName(name);
-                  setMySchoolInitialized(true);
-                  setMySchoolChanging(false);
-                  setMySchoolPrefFilter("");
                 }
               }}
               schools={schools}
-              placeholder="学校名を選択"
+              placeholder="学校名を入力・選択"
               prefFilter={mySchoolPrefFilter}
             />
+            {mySchoolDraft.trim() && !schoolsWithId.some(s => s.name === mySchoolDraft.trim()) && (
+              <div style={{ fontSize:11.5, color:C.textSec, marginTop:6, lineHeight:1.6 }}>候補に無い学校名は、保存するときに新しい学校として登録されます。</div>
+            )}
             <div style={{ display:"flex", gap:8, marginTop:14 }}>
               <button style={{ flex:1, padding:10, borderRadius:10, border:"1px solid "+C.border, background:C.white, color:C.text, fontSize:13, fontWeight:700, cursor:"pointer" }} onClick={()=>{ setMySchoolChanging(false); setMySchoolPrefFilter(""); }}>キャンセル</button>
+              <button
+                disabled={!mySchoolDraft.trim()}
+                style={{ flex:1, padding:10, borderRadius:10, border:"none", background:mySchoolDraft.trim()?C.accent:C.border, color:C.white, fontSize:13, fontWeight:700, cursor:mySchoolDraft.trim()?"pointer":"default" }}
+                onClick={()=>{
+                  const name = mySchoolDraft.trim();
+                  if (!name) return;
+                  const found = schoolsWithId.find(s => s.name === name);
+                  setMySchoolId(found ? found.id : null); // 新しい学校は保存時に登録してidを付ける
+                  setMySchoolName(name);
+                  setMySchoolInitialized(true);
+                  setMySchoolChanging(false);
+                }}
+              >決定</button>
             </div>
           </div>
         </Modal>
