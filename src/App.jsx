@@ -16532,7 +16532,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   const [matchNumber,    setMatchNumber]    = useState(base?.match_number ?? "");
   const [matchType,      setMatchType]      = useState(base?.match_type ?? initialMatchType ?? "tournament");
   const [courtNumber,    setCourtNumber]    = useState(base?.court_number ?? "");
-  const [isYounger,      setIsYounger]      = useState(base ? (base?.is_younger !== false ? true : false) : (prefillIsYounger !== undefined ? prefillIsYounger : null));
+  const [isYounger,      setIsYounger]      = useState(base ? (base?.is_younger !== false ? true : false) : (prefillIsYounger !== undefined && prefillIsYounger !== null ? prefillIsYounger : true)); // ★未指定のときは若番を初期値にする（ペア番号を入れれば自動判定で上書きされる）
   const [gameFormat,     setGameFormat]     = useState(base?.game_format ?? 7);
   const [isDoubles,      setIsDoubles]      = useState(base?.is_doubles ?? true);
   const [firstServer,    setFirstServer]    = useState(base?.first_server ?? null);
