@@ -18924,9 +18924,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 <div style={{ display:"flex", gap:8 }}>{teamBtn(leftTeam)}{teamBtn(rightTeam)}</div>
                 <div style={{ fontSize:15,fontWeight:800,color:C.navy,margin:"14px 0 8px" }}>このゲームの最終スコア（分かれば）</div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-                  <input type="number" inputMode="numeric" min="0" style={inp} value={skipGame.left} onChange={e=>setSkipGame(v=>({ ...v, left:e.target.value }))} placeholder="-"/>
+                  <input type="number" inputMode="numeric" min="0" style={inp} value={skipGame.left} onChange={e=>setSkipGame(v=>({ ...v, left:e.target.value }))}/>
                   <b style={{ color:C.textSec }}>-</b>
-                  <input type="number" inputMode="numeric" min="0" style={inp} value={skipGame.right} onChange={e=>setSkipGame(v=>({ ...v, right:e.target.value }))} placeholder="-"/>
+                  <input type="number" inputMode="numeric" min="0" style={inp} value={skipGame.right} onChange={e=>setSkipGame(v=>({ ...v, right:e.target.value }))}/>
                 </div>
                 <div style={{ fontSize:13.5,color:scoreBad?C.red:"#5a6478",textAlign:"center",marginTop:7 }}>{scoreBad ? "取ったチームの点数の方が大きくなるように入れてください" : "空欄のままなら「勝敗のみ」で記録します"}</div>
                 <button
