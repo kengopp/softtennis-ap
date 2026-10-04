@@ -2532,6 +2532,32 @@ async function getKnownVenues() {
   } catch(e) { console.error("getKnownVenues exception:", e); return []; }
 }
 
+// ★大会の会場欄の候補：大会・団体戦・個人戦で使った会場名を「最後に使った日」の新しい順に並べる。
+//   会場リンクは、その会場名で登録された大会のうち一番新しいもののリンクを使う（選んだときに自動で入れる）。
+async function getVenueHistory() {
+  try {
+    const [tours, tms, ms] = await Promise.all([
+      getTournaments(),
+      fetchAllRows("team_matches", "venue, match_date", q => q.not("venue", "is", null).is("deleted_at", null).order("id")).then(r => r.data ?? []),
+      fetchAllRows("matches", "venue, match_date", q => q.not("venue", "is", null).is("deleted_at", null).order("id")).then(r => r.data ?? []),
+    ]);
+    const map = new Map(); // name -> { name, date, link, linkDate }
+    const add = (rawName, date, link) => {
+      const name = String(rawName || "").trim();
+      if (!name) return;
+      const d = date || "";
+      const cur = map.get(name) || { name, date:"", link:"", linkDate:"" };
+      if (d > cur.date) cur.date = d;
+      if (link && d >= cur.linkDate) { cur.link = link; cur.linkDate = d; }
+      map.set(name, cur);
+    };
+    (tours || []).forEach(t => add(t.venue, t.start_date, t.venue_link));
+    (tms || []).forEach(t => add(t.venue, t.match_date, null));
+    (ms || []).forEach(m => add(m.venue, m.match_date, null));
+    return [...map.values()].sort((a, b) => (b.date || "").localeCompare(a.date || "") || a.name.localeCompare(b.name, "ja"));
+  } catch (e) { console.error("getVenueHistory exception:", e); return []; }
+}
+
 async function getKnownSchools() {
   const recent = recentMatchList();
   const [schoolsData, clubNames] = await Promise.all([
@@ -5965,7 +5991,8 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
   const [participantIds, setParticipantIds] = useState(initial?.participant_player_ids || []);
   const [roster, setRoster] = useState([]);
   const [rosterSearch, setRosterSearch] = useState("");
-  useEffect(() => { getKnownVenues().then(setVenues); }, []);
+  useEffect(() => { getVenueHistory().then(setVenues); }, []);
+  const [autoLinkFrom, setAutoLinkFrom] = useState(null); // ★会場を選んで前回のリンクを自動で入れたとき、その会場名
   useEffect(() => { getPlayerRoster().then(list => setRoster(list.filter(p => p.is_own_team))); }, []);
 
   function toggleParticipant(id) {
@@ -6001,7 +6028,8 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
       <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
       <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>場所 / 会場名（任意）</div>
       <div style={{ marginBottom:16 }}>
-        <VenueField value={venue} onChange={setVenue} venues={venues} placeholder="例：○○市民コート"/>
+        <VenueHistoryField value={venue} onChange={v=>{ setVenue(v); }} history={venues} placeholder="例：○○市民コート"
+          onPick={item=>{ setVenue(item.name); if (item.link) { setVenueLink(item.link); setAutoLinkFrom(item.name); } else { setAutoLinkFrom(null); } }}/>
       </div>
 
       <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>会場リンク（任意）</div>
@@ -6011,12 +6039,17 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
           style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
           placeholder="Googleマップ等のURLを貼り付け"
           value={venueLink}
-          onChange={e=>setVenueLink(e.target.value)}
+          onChange={e=>{ setVenueLink(e.target.value); setAutoLinkFrom(null); }}
         />
         {venueLink && (
-          <span style={{ color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }} onClick={()=>setVenueLink("")}>✕</span>
+          <span style={{ color:C.textSec, fontSize:16, cursor:"pointer", padding:"0 2px" }} onClick={()=>{ setVenueLink(""); setAutoLinkFrom(null); }}>✕</span>
         )}
       </div>
+      {autoLinkFrom && venueLink && (
+        <div style={{ fontSize:12.5, color:"#047a4c", background:"#eafaf3", borderRadius:8, padding:"8px 10px", margin:"-8px 0 16px", lineHeight:1.55 }}>
+          ✓ 前回「{autoLinkFrom}」で使った会場リンクを入れました（変える場合は ✕ で消して貼り直し）
+        </div>
+      )}
 
       <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>試合要項（任意）</div>
       <div style={{ border:"1px dashed "+C.border, borderRadius:10, padding:12, marginBottom:16 }}>
@@ -16344,6 +16377,44 @@ function VenueField({ value, onChange, venues, placeholder }) {
             <div key={v} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
               onMouseDown={e => { e.preventDefault(); onChange(v); setOpen(false); }}
             >{v}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ★大会の会場欄：前に使った会場を新しい順に最大10件。文字を入れると、その文字を含む会場にしぼり込む。
+//   リンクがある会場には印を付け、選んだときに onPick で会場リンクも入れられるようにする。
+function VenueHistoryField({ value, onChange, onPick, history, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const safeValue = value ?? "";
+  const q = safeValue.trim();
+  const list = (history ?? []).filter(h => !q || h.name.includes(q)).slice(0, 10);
+  const md = (d) => d ? `${Number(d.slice(5,7))}/${Number(d.slice(8,10))}` : "";
+  const hl = (name) => {
+    if (!q) return name;
+    const i = name.indexOf(q);
+    if (i < 0) return name;
+    return <>{name.slice(0,i)}<span style={{ background:"#fff3b0" }}>{name.slice(i, i+q.length)}</span>{name.slice(i+q.length)}</>;
+  };
+  return (
+    <div style={{ position:"relative" }}>
+      <input style={S.inp} placeholder={placeholder || "例：○○市民コート"} value={safeValue}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+      />
+      {open && list.length > 0 && (
+        <div style={{ position:"absolute", top:"100%", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, zIndex:200, boxShadow:"0 6px 18px rgba(0,0,0,0.14)", maxHeight:300, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+          <div style={{ fontSize:11.5, color:C.textSec, background:"#f5f6f8", padding:"6px 12px", fontWeight:700 }}>{q ? `「${q}」を含む会場` : "前に使った会場（新しい順）"}</div>
+          {list.map(h => (
+            <div key={h.name} style={{ display:"flex", alignItems:"center", gap:8, padding:"11px 12px", fontSize:14.5, color:C.text, borderTop:"1px solid #eef0f3", cursor:"pointer", background:C.white }}
+              onMouseDown={e => { e.preventDefault(); (onPick || (x=>onChange(x.name)))(h); setOpen(false); }}>
+              <span style={{ minWidth:0 }}>{hl(h.name)}</span>
+              {h.link && <span style={{ flexShrink:0, fontSize:11, fontWeight:800, color:"#0b6e75", background:"#e3f4f2", borderRadius:6, padding:"1px 6px" }}>🔗リンクあり</span>}
+              <span style={{ marginLeft:"auto", flexShrink:0, fontSize:11, color:"#8a92a0" }}>{md(h.date)}</span>
+            </div>
           ))}
         </div>
       )}
