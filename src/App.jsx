@@ -3637,6 +3637,9 @@ function checkFinalWinner(a, b) {
   if (b >= 7 && b - a >= 2) return "B";
   return null;
 }
+// ★「勝敗のみ」のゲーム：ゲームを飛ばした／途中から記録した場合など、どちらが取ったかだけが分かっていて
+//   スコアが入っていない（0-0のまま勝者だけある）ゲーム。表示では「勝敗のみ」と出す。
+const isWinOnlyGame = (g) => !!g?.winner_team && (g.score_a ?? 0) === 0 && (g.score_b ?? 0) === 0;
 function finalServer(first, played) {
   return Math.floor(played / 2) % 2 === 0 ? first : (first === "A" ? "B" : "A");
 }
@@ -17394,6 +17397,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [showGamePicker, setShowGamePicker] = useState(false); // 「どのゲームを直すか」の選択モーダル
   // ★記録し忘れた最初のゲームを、第1ゲームの前に「スコアだけ」で追加する（途中のゲームから記録を始めた場合用）
   const [insertFirst, setInsertFirst] = useState(null); // null | { left:"", right:"" }
+  // ★記録中のゲームを「飛ばす」（取ったチームだけ選んで次のゲームへ）。null | { winner, left, right }
+  const [skipGame, setSkipGame] = useState(null);
+  // ★試合の途中から記録する（前のゲームは取ったチームだけ入れる）。null | { startNum, winners:{1:"A",...}, server }
+  const [midStart, setMidStart] = useState(null);
   // ★個人戦の試合にもAI動画分析を追加できるようにする（団体戦の各番手と同様の機能）
   // 　undefined=未確認、null=未登録、オブジェクト=登録済み
   const [aiAnalysis, setAiAnalysis] = useState(undefined);
@@ -17905,6 +17912,43 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     setFault(0);
   }
 
+  // ★このゲームを飛ばす：取ったチームだけ決めて（分かればスコアも）、次のゲームへ進む。
+  //   ここまで記録したポイントは消さずに残す（スタッツにはそのまま入る）。
+  function skipCurrentGame(winner, scoreA, scoreB){
+    if(!currentGame || !winner) return;
+    const cg = currentGame;
+    const updG = { ...cg, score_a: scoreA ?? 0, score_b: scoreB ?? 0, winner_team: winner };
+    const games = match.games.map(g=>g.id===cg.id?updG:g);
+    const sA = games.filter(g=>g.winner_team==="A").length, sB = games.filter(g=>g.winner_team==="B").length;
+    resetSel(); setFault(0);
+    if (sA >= winGames || sB >= winGames) {
+      persist({ ...match, games, match_score_a:sA, match_score_b:sB });
+      setModal({ type:"matchOver", winner, gameId:cg.id, sA, sB });
+      return;
+    }
+    const num = games.length + 1;
+    const srv = gameServer(match.first_server || "A", num);
+    const ng = { id:uid(), match_id:match.id, game_number:num, server_team:srv, is_final:isFinalGame(match.game_format, sA, sB), score_a:0, score_b:0, winner_team:null, points:[], faults:[] };
+    persist({ ...match, games:[...games, ng], match_score_a:sA, match_score_b:sB });
+  }
+
+  // ★試合の途中から記録する：第1〜第(N-1)ゲームは取ったチームだけ入れ、第Nゲームから1点ずつ記録する
+  function startFromMiddle(startNum, winners, serverN){
+    if (startingGameRef.current) return;
+    const first = (startNum % 2 === 1) ? serverN : (serverN === "A" ? "B" : "A"); // 第Nゲームのサーブから第1ゲームのサーブを逆算
+    const prior = [];
+    for (let k=1; k<startNum; k++) {
+      prior.push({ id:uid(), match_id:match.id, game_number:k, server_team:gameServer(first, k), is_final:false, score_a:0, score_b:0, winner_team:winners[k], points:[], faults:[] });
+    }
+    const sA = prior.filter(g=>g.winner_team==="A").length, sB = prior.filter(g=>g.winner_team==="B").length;
+    const ng = { id:uid(), match_id:match.id, game_number:startNum, server_team:serverN, is_final:isFinalGame(match.game_format, sA, sB), score_a:0, score_b:0, winner_team:null, points:[], faults:[] };
+    const statusFix = (match.status === "scheduled" || match.status === "waiting") ? { status:"active" } : {};
+    startingGameRef.current = true; setStartingGame(true);
+    persist({ ...match, ...statusFix, first_server:first, order_a: match.order_a || "p1", order_b: match.order_b || "p1",
+      games:[...prior, ng], match_score_a:sA, match_score_b:sB });
+    setTimeout(()=>{ startingGameRef.current = false; setStartingGame(false); }, 800);
+  }
+
   // ★ゲーム終了直後（「第Nゲーム終了！」画面）に、その決着点だけを取り消して試合を続けられるようにする。
   //   通常のundo()はcurrentGame（勝者未確定のゲーム）にしか使えないため、
   //   すでにwinner_teamが確定した直後のゲームを対象にする専用処理を用意する。
@@ -17934,7 +17978,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const finalA = recalced.length ? recalced[recalced.length-1].score_a_after : 0;
     const finalB = recalced.length ? recalced[recalced.length-1].score_b_after : 0;
     const newWinner = g.is_final ? checkFinalWinner(finalA,finalB) : checkNormalWinner(finalA,finalB);
-    const updG = {...g, points:recalced, score_a:finalA, score_b:finalB, winner_team:newWinner};
+    // ★「飛ばした」「勝敗のみ」など、点の記録とスコアが合っていないゲームは、
+    //   あとから点を足している途中（まだ勝者が決まらない間）は、入れてあった勝敗・スコアをそのまま残す
+    const oldA = (g.points||[]).filter(p=>p.scoring_team==="A").length, oldB = (g.points||[]).filter(p=>p.scoring_team==="B").length;
+    const wasManual = !!g.winner_team && (oldA !== (g.score_a??0) || oldB !== (g.score_b??0));
+    const updG = (wasManual && !newWinner)
+      ? {...g, points:recalced}
+      : {...g, points:recalced, score_a:finalA, score_b:finalB, winner_team:newWinner};
     const newGames = match.games.map(gm=>gm.id===gameId?updG:gm);
     const newScoreA = newGames.filter(gm=>gm.winner_team==="A").length;
     const newScoreB = newGames.filter(gm=>gm.winner_team==="B").length;
@@ -18209,8 +18259,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         {/* ゲームバッジ */}
         <div style={{ display:"flex",gap:5,marginTop:8,flexWrap:"wrap",justifyContent:"center" }}>
           {match.games.map(g=>(
-            <div key={g.id} style={{ padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:g.winner_team===leftTeam?(isYounger?"#2ecc71":"#f97316"):g.winner_team===rightTeam?(isYounger?"#f97316":"#2ecc71"):"rgba(255,255,255,0.2)",color:C.white }}>
-              {g.is_final?"🔥":""}G{g.game_number}: {leftScore(g)}-{rightScore(g)}
+            <div key={g.id} style={{ padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:g.winner_team===leftTeam?(isYounger?"#2ecc71":"#f97316"):g.winner_team===rightTeam?(isYounger?"#f97316":"#2ecc71"):"rgba(255,255,255,0.2)",color:C.white,
+              ...(isWinOnlyGame(g) ? { background:"transparent", border:`1.5px dashed ${g.winner_team==="A"?"#2ecc71":"#f97316"}`, color:g.winner_team==="A"?"#7ee2a8":"#ffb27a", padding:"1px 7px" } : {}) }}>
+              {g.is_final?"🔥":""}G{g.game_number}: {isWinOnlyGame(g) ? osTeamName(g.winner_team) : `${leftScore(g)}-${rightScore(g)}`}
             </div>
           ))}
         </div>
@@ -18372,6 +18423,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               })()}
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 <button disabled={startingGame} style={{ width:"100%", padding:"15px 16px", background:startingGame?"#8a96ad":`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:"white", border:"none", borderRadius:14, fontSize:16, fontWeight:700, cursor:startingGame?"default":"pointer" }} onClick={()=>startNewGame(match.first_server ? match : { ...match, first_server:"A" })}>{startingGame?"開始中...":"第1ゲーム開始"}</button>
+                <button disabled={startingGame}
+                  style={{ width:"100%", padding:"10px 12px", background:"#f2fbf7", border:`1.5px dashed ${C.accent}`, borderRadius:12, color:"#047a4c", fontSize:14, fontWeight:800, cursor:"pointer" }}
+                  onClick={()=>{ const n=3; const fs=match.first_server||"A"; setMidStart({ startNum:n, winners:{}, server:gameServer(fs, n) }); }}
+                >⏩ 試合の途中から記録する
+                  <div style={{ fontSize:13, fontWeight:600, color:"#5a6478", marginTop:3 }}>前のゲームは「どっちが取ったか」だけ入れます</div>
+                </button>
                 <div style={{ display:"flex", gap:8 }}>
                   <button
                     style={{ flex:1, padding:"13px 16px", background:"#fff", border:"1px solid "+C.border, color:C.navy, borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" }}
@@ -18458,11 +18515,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 {match.games.map(g=>(
                   <div key={g.id} style={{ display:"flex",alignItems:"center",padding:"10px 14px",borderBottom:"1px solid "+C.border }}>
                     <span style={{ fontSize:12,color:C.textSec,width:46 }}>{g.is_final?"🔥":""}G{g.game_number}</span>
+                    {isWinOnlyGame(g) ? (
+                      <span style={{ flex:1,fontSize:12,fontWeight:700,textAlign:"center",color:C.textSec }}>勝敗のみ</span>
+                    ) : (
                     <span style={{ flex:1,fontSize:15,fontWeight:700,textAlign:"center" }}>
                       <span style={{ color:g.winner_team===leftTeam?(isYounger?"#2ecc71":"#f97316"):C.textSec }}>{leftScore(g)}</span>
                       <span style={{ color:C.textSec,margin:"0 8px" }}>-</span>
                       <span style={{ color:g.winner_team===rightTeam?(isYounger?"#f97316":"#2ecc71"):C.textSec }}>{rightScore(g)}</span>
                     </span>
+                    )}
                     <span style={{ width:74,textAlign:"center" }}>{g.winner_team===leftTeam?<span style={{ display:"inline-block",width:13,height:13,borderRadius:"50%",background:"#d4e157",border:"1px solid #aeb92a" }}/>:""}</span>
                     <span style={{ width:74,textAlign:"center" }}>{g.winner_team===rightTeam?<span style={{ display:"inline-block",width:13,height:13,borderRadius:"50%",background:"#d4e157",border:"1px solid #aeb92a" }}/>:""}</span>
                   </div>
@@ -18736,7 +18797,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                           }}
                         >🗑 削除</button>
                       )}
-                      <span style={{ fontWeight:900, fontSize:20 }}>{leftScore(g)} - {rightScore(g)}</span>
+                      <span style={{ fontWeight:900, fontSize: isWinOnlyGame(g) ? 13 : 20 }}>{isWinOnlyGame(g) ? `勝敗のみ（${osTeamName(g.winner_team)}）` : `${leftScore(g)} - ${rightScore(g)}`}</span>
                     </span>
                   </div>
                   <div style={{ padding:"8px 10px" }}>
@@ -18810,6 +18871,109 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             </div>
           )}
 
+          {skipGame && currentGame && (() => {
+            const cg = currentGame;
+            const pa = cg.points.filter(p=>p.scoring_team===leftTeam).length, pb = cg.points.filter(p=>p.scoring_team===rightTeam).length;
+            const lNum = parseInt(skipGame.left, 10), rNum = parseInt(skipGame.right, 10);
+            const hasScore = Number.isFinite(lNum) && Number.isFinite(rNum);
+            const w = skipGame.winner;
+            const scoreBad = hasScore && w && ((w===leftTeam && lNum<=rNum) || (w===rightTeam && rNum<=lNum));
+            const tA = w ? match.games.filter(g=>g.id!==cg.id && g.winner_team==="A").length + (w==="A"?1:0) : 0;
+            const tB = w ? match.games.filter(g=>g.id!==cg.id && g.winner_team==="B").length + (w==="B"?1:0) : 0;
+            const ends = w && (tA >= winGames || tB >= winGames);
+            const inp = { width:70, boxSizing:"border-box", padding:"8px 4px", fontSize:22, fontWeight:900, textAlign:"center", border:`2px solid ${C.border}`, borderRadius:10 };
+            const teamBtn = (t) => {
+              const on = w===t, col = osTeamColor(t);
+              return (
+                <button key={t} onClick={()=>setSkipGame(v=>({ ...v, winner:t }))}
+                  style={{ flex:1, padding:"12px 4px", borderRadius:12, border:`2px solid ${on?col:C.border}`, background:on?col:C.white, color:on?C.white:C.navy, fontSize:17, fontWeight:800, cursor:"pointer" }}>
+                  {osTeamName(t)}<div style={{ fontSize:13, fontWeight:600, marginTop:2 }}>{osPlayersOf(t).map(x=>osSurname(x.label)).join("・")}</div>
+                </button>
+              );
+            };
+            return (
+              <Modal onClose={()=>setSkipGame(null)}>
+                <h3 style={{ fontSize:19,fontWeight:800,color:C.navy,marginBottom:10,textAlign:"center" }}>第{cg.game_number}ゲームを飛ばす</h3>
+                <p style={{ fontSize:15,color:"#33415c",marginBottom:4,lineHeight:1.65,background:"#f2f6fb",borderRadius:10,padding:"10px 12px" }}>
+                  {cg.points.length>0 ? <>ここまで記録した <b>{cg.points.length}ポイント（{pa}-{pb}）</b> は消さずに、スタッツにそのまま残ります。</> : "このゲームは点を記録せず、取ったチームだけ記録します。"}
+                </p>
+                <div style={{ fontSize:15,fontWeight:800,color:C.navy,margin:"14px 0 8px",display:"flex",alignItems:"center" }}><RequiredDot />このゲームを取ったのは？</div>
+                <div style={{ display:"flex", gap:8 }}>{teamBtn(leftTeam)}{teamBtn(rightTeam)}</div>
+                <div style={{ fontSize:15,fontWeight:800,color:C.navy,margin:"14px 0 8px" }}>このゲームの最終スコア（分かれば）</div>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                  <input type="number" inputMode="numeric" min="0" style={inp} value={skipGame.left} onChange={e=>setSkipGame(v=>({ ...v, left:e.target.value }))} placeholder="-"/>
+                  <b style={{ color:C.textSec }}>-</b>
+                  <input type="number" inputMode="numeric" min="0" style={inp} value={skipGame.right} onChange={e=>setSkipGame(v=>({ ...v, right:e.target.value }))} placeholder="-"/>
+                </div>
+                <div style={{ fontSize:13.5,color:scoreBad?C.red:"#5a6478",textAlign:"center",marginTop:7 }}>{scoreBad ? "取ったチームの点数の方が大きくなるように入れてください" : "空欄のままなら「勝敗のみ」で記録します"}</div>
+                <button
+                  disabled={!w || scoreBad}
+                  style={{ ...S.btn((w && !scoreBad) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (w && !scoreBad) ? C.white : C.textSec), marginTop:14 }}
+                  onClick={()=>{
+                    if (!w || scoreBad) return;
+                    const sA = hasScore ? (leftTeam==="A" ? lNum : rNum) : 0;
+                    const sB = hasScore ? (leftTeam==="A" ? rNum : lNum) : 0;
+                    setSkipGame(null);
+                    skipCurrentGame(w, sA, sB);
+                  }}
+                >{!w ? "取ったチームを選んでください" : ends ? `第${cg.game_number}ゲームを終えて、試合終了` : `第${cg.game_number}ゲームを終えて、第${cg.game_number+1}ゲームへ`}</button>
+                <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setSkipGame(null)}>キャンセル</button>
+              </Modal>
+            );
+          })()}
+
+          {midStart && (() => {
+            const maxStart = winGames*2 - 1;
+            const n = midStart.startNum;
+            const prior = Array.from({ length:n-1 }, (_,i)=>i+1);
+            const allSet = prior.every(k=>midStart.winners[k]);
+            const wa = prior.filter(k=>midStart.winners[k]==="A").length, wb = prior.filter(k=>midStart.winners[k]==="B").length;
+            const over = wa >= winGames || wb >= winGames;
+            const lw = leftTeam==="A" ? wa : wb, rw = leftTeam==="A" ? wb : wa;
+            const pick = (k, t) => setMidStart(v=>({ ...v, winners:{ ...v.winners, [k]:t } }));
+            const qLab = { fontSize:15, fontWeight:800, color:C.navy, marginBottom:8, display:"flex", alignItems:"center" };
+            const tb = (on, t, onClick, extra={}) => (
+              <button onClick={onClick} style={{ flex:1, padding:"10px 2px", borderRadius:10, border:`2px solid ${on?osTeamColor(t):C.border}`, background:on?osTeamColor(t):C.white, color:on?C.white:C.navy, fontSize:15, fontWeight:800, cursor:"pointer", minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", ...extra }}>{osTeamName(t)}</button>
+            );
+            return (
+              <Modal onClose={()=>setMidStart(null)}>
+                <h3 style={{ fontSize:19,fontWeight:800,color:C.navy,marginBottom:12,textAlign:"center" }}>試合の途中から記録する</h3>
+                <div style={qLab}><RequiredDot />何ゲーム目から記録しますか？</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6, paddingLeft:12 }}>
+                  {Array.from({ length:maxStart-1 }, (_,i)=>i+2).map(k=>(
+                    <button key={k} onClick={()=>setMidStart(v=>({ ...v, startNum:k, server:gameServer(match.first_server||"A", k) }))}
+                      style={{ padding:"9px 0", borderRadius:10, border:`2px solid ${k===n?C.navy:C.border}`, background:k===n?C.navy:C.white, color:k===n?C.white:C.navy, fontSize:15, fontWeight:800, cursor:"pointer" }}>第{k}</button>
+                  ))}
+                </div>
+                <div style={{ ...qLab, marginTop:16 }}><RequiredDot />それまでのゲームを取ったチーム</div>
+                {prior.map(k=>(
+                  <div key={k} style={{ display:"flex", alignItems:"center", gap:6, marginTop:6, paddingLeft:12 }}>
+                    <span style={{ width:46, fontSize:15, fontWeight:800, color:C.navy, flexShrink:0 }}>第{k}G</span>
+                    {tb(midStart.winners[k]===leftTeam, leftTeam, ()=>pick(k, leftTeam))}
+                    {tb(midStart.winners[k]===rightTeam, rightTeam, ()=>pick(k, rightTeam))}
+                  </div>
+                ))}
+                {over && <div style={{ fontSize:13.5,color:C.red,marginTop:8,lineHeight:1.6 }}>この勝ち数だと、第{n}ゲームの前に試合が終わっています。ゲームの選び方を確認してください。</div>}
+                <div style={{ ...qLab, marginTop:16 }}><RequiredDot />第{n}ゲーム目でサーブをするのは？</div>
+                <div style={{ display:"flex", gap:8, paddingLeft:12 }}>
+                  {tb(midStart.server===leftTeam, leftTeam, ()=>setMidStart(v=>({ ...v, server:leftTeam })), { padding:"11px 2px", fontSize:17 })}
+                  {tb(midStart.server===rightTeam, rightTeam, ()=>setMidStart(v=>({ ...v, server:rightTeam })), { padding:"11px 2px", fontSize:17 })}
+                </div>
+                <button
+                  disabled={!allSet || over}
+                  style={{ ...S.btn((allSet && !over) ? `linear-gradient(135deg,${C.navy},${C.navyMid})` : C.border, (allSet && !over) ? C.white : C.textSec), marginTop:18 }}
+                  onClick={()=>{
+                    if (!allSet || over) return;
+                    const { startNum, winners, server } = midStart;
+                    setMidStart(null);
+                    startFromMiddle(startNum, winners, server);
+                  }}
+                >{allSet ? `${lw}-${rw} から第${n}ゲームを記録開始` : "それまでのゲームを全部選んでください"}</button>
+                <button style={{ ...S.btn("#f0f0f0"), color:C.text, fontSize:13, marginTop:8 }} onClick={()=>setMidStart(null)}>キャンセル</button>
+              </Modal>
+            );
+          })()}
+
           {insertFirst && (() => {
             const l = parseInt(insertFirst.left, 10), r = parseInt(insertFirst.right, 10);
             const valid = Number.isFinite(l) && Number.isFinite(r) && l >= 0 && r >= 0 && l !== r;
@@ -18878,7 +19042,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   onClick={()=>{ setCorrectGameId(g.id); setCorrectMode(true); setShowGamePicker(false); }}
                 >
                   <span style={{ fontSize:16,fontWeight:800,color:C.navy,width:70 }}>{g.is_final?"🔥":""}第{g.game_number}G</span>
-                  <span style={{ fontSize:19,fontWeight:900,color:C.text }}>{leftScore(g)} - {rightScore(g)}</span>
+                  <span style={{ fontSize:isWinOnlyGame(g)?13:19,fontWeight:900,color:C.text }}>{isWinOnlyGame(g) ? "勝敗のみ" : `${leftScore(g)} - ${rightScore(g)}`}</span>
                   <span style={{ marginLeft:"auto",fontSize:13.5,fontWeight:700,color:C.textSec }}>
                     {g.winner_team ? `${osTeamName(g.winner_team)}の勝ち` : "記録中"}
                   </span>
@@ -18996,6 +19160,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     <button style={{ width:"100%",padding:13,background:"#06C755",color:C.white,border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8 }} onClick={()=>{ setOsMenu(false); shareToLine("試合中"); }}>
                       <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg>
                       LINEで共有する
+                    </button>
+                    <button style={{ width:"100%",padding:"11px 13px",background:"#eafaf3",color:"#047a4c",border:"2px solid "+C.accent,borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",marginBottom:8 }} onClick={()=>{ setOsMenu(false); setSkipGame({ winner:null, left:"", right:"" }); }}>
+                      ⏭ このゲームを飛ばす
                     </button>
                     <button style={{ width:"100%",padding:13,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>{ setOsMenu(false); setSuspendConfirm(true); }}>⏸ 中断</button>
                     <button style={{ width:"100%",padding:13,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setAbandonConfirm(true); }}>⏹ 途中終了</button>
@@ -19146,7 +19313,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <div key={g.id} style={S.card}>
               <div style={{ padding:"8px 12px",background:g.winner_team==="A"?"#2ecc71":g.winner_team==="B"?"#f97316":C.accent,color:C.white,display:"flex",justifyContent:"space-between" }}>
                 <span style={{ fontWeight:700,fontSize:13 }}>{g.is_final?"🔥":""}第{g.game_number}ゲーム</span>
-                <span style={{ fontWeight:700 }}>{g.score_a} - {g.score_b}</span>
+                <span style={{ fontWeight:700 }}>{isWinOnlyGame(g) ? "勝敗のみ" : `${g.score_a} - ${g.score_b}`}</span>
               </div>
               <div style={{ padding:"10px 12px" }}>
                 <div style={{ display:"flex",gap:3,flexWrap:"wrap",marginBottom:8 }}>
