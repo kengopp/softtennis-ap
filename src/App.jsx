@@ -2853,7 +2853,9 @@ async function recalcTeamMatchScore(teamMatchId) {
   const allSlotsFilled = games.length >= totalGames;
   const allDone = allSlotsFilled && allRegisteredDone;
 
-  const newStatus = winDecided || allDone ? "finished" : "active";
+  // ★団体戦そのものを中断・途中終了にしている場合は、利用者が「再開」「取り消し」を押すまでその状態を保つ
+  const newStatus = (tm.status === "suspended" || tm.status === "abandoned") ? tm.status
+    : winDecided || allDone ? "finished" : "active";
   const changed = tm.my_score !== myScore || tm.opponent_score !== oppScore || tm.status !== newStatus;
 
   if (changed) {
@@ -4812,7 +4814,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   };
   // 団体戦の振り分け（match_dateがnullでもactive/scheduledは予定・進行中）
   const isUpcomingTeamMatch = (tm) => {
-    if (tm.status === "active" || tm.status === "scheduled") return true;
+    if (tm.status === "active" || tm.status === "scheduled" || tm.status === "suspended") return true;
     return false;
   };
 
@@ -4951,7 +4953,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         a.totalMatches++;
         if (isDoneStatus(statusById[g.match_id])) a.registeredMatches++;
       });
-      if (isDoneStatus(tm.status)) {
+      if (tm.status === "finished") { // ★途中終了した団体戦は勝敗に数えない
         if (tm.my_score > tm.opponent_score) a.teamWin++;
         else if (tm.my_score < tm.opponent_score) a.teamLoss++;
       }
@@ -5585,8 +5587,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {!loading && filteredTeamMatches.slice(0, visibleCount).map(tm => {
               const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
               const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
-              const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
-              const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "📅 予定";
+              const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : (tm.status === "suspended" || tm.status === "abandoned") ? C.textSec : C.accent;
+              const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : tm.status === "suspended" ? "⏸ 中断中" : tm.status === "abandoned" ? "⛔ 途中終了" : "📅 予定";
               const hasVideo = (tm.video_links || []).length > 0;
               const hasAi = (tm.games || []).some(g => g.match_id && aiAnalysesMap[g.match_id]);
               return (
@@ -6694,9 +6696,9 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         {!loading && seg==="team" && teamListMode==="card" && sortedTeamMatches.map(tm => {
           const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
-          const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : C.accent;
-          const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : "予定";
-          const notStarted = tm.status !== "finished" && tm.status !== "active";
+          const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : (tm.status === "suspended" || tm.status === "abandoned") ? C.textSec : C.accent;
+          const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : tm.status === "suspended" ? "⏸ 中断中" : tm.status === "abandoned" ? "⛔ 途中終了" : "予定";
+          const notStarted = tm.status !== "finished" && tm.status !== "active" && tm.status !== "suspended" && tm.status !== "abandoned";
           return (
             <div key={tm.id} style={{ ...S.card, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", marginBottom:10 }}>
               <div style={{ height:4, background:statusColor }}/>
@@ -12057,6 +12059,9 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
   const [videoView, setVideoView] = useState(null); // ★番手カードの🎥バッジから開く動画リンク一覧
   const [memoView, setMemoView] = useState(null); // ★番手カードの📝から開く試合メモ
   const [confirmDeleteBout, setConfirmDeleteBout] = useState(null); // ★番手の試合の削除確認 { matchId, gameId, orderNum }
+  const [tmMenuOpen, setTmMenuOpen] = useState(false); // ★右上「⋯」メニュー（中断・途中終了・再開）
+  const [confirmTmStop, setConfirmTmStop] = useState(false); // ★団体戦の途中終了の確認
+  const [tmStatusSaving, setTmStatusSaving] = useState(false);
   const intervalRef = useRef(null);
   const inactiveRef = useRef(null);
   const lastSignatureRef = useRef(null); // ★変化検知用：前回確認時点の軽量シグネチャ
@@ -12202,7 +12207,37 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
 
   const statusLabel = tm.status === "finished"
     ? (tm.my_score > tm.opponent_score ? `🏆 ${tm.my_score}-${tm.opponent_score} 勝利` : tm.my_score < tm.opponent_score ? `❌ ${tm.my_score}-${tm.opponent_score} 敗北` : `${tm.my_score}-${tm.opponent_score} 全試合終了`)
-    : tm.status === "active" ? `⏳ ${tm.my_score}-${tm.opponent_score} 進行中` : "📅 予定";
+    : tm.status === "active" ? `⏳ ${tm.my_score}-${tm.opponent_score} 進行中`
+    : tm.status === "suspended" ? `⏸ ${tm.my_score}-${tm.opponent_score} 中断中`
+    : tm.status === "abandoned" ? `⛔ ${tm.my_score}-${tm.opponent_score} 途中終了`
+    : "📅 予定";
+
+  // ★団体戦そのものの中断・途中終了（右上の「⋯」から操作）
+  //   suspended＝中断中（残りの番手は開始できない。再開で進行中に戻る）
+  //   abandoned＝途中終了（まだ行っていない番手は打ち切り。チームの勝敗成績には数えない）
+  const tmHold = tm.status === "suspended" || tm.status === "abandoned";
+  const showTmMenu = !isViewer && (tm.status === "active" || tmHold);
+  const boutRecordingNow = (tm.games || []).some(g => g.status === "active");
+  async function changeTmStatus(next) {
+    if (tmStatusSaving) return;
+    if ((next === "suspended" || next === "abandoned") && boutRecordingNow) {
+      alert("記録中の番手があります。先にその番手を終了するか中断してから操作してください。");
+      return;
+    }
+    setTmStatusSaving(true);
+    try {
+      const { error } = await supabase.from("team_matches").update({ status: next }).eq("id", teamMatchId);
+      if (error) throw error;
+      // 再開・取り消しのときは、番手の結果から状態（進行中／終了）を計算し直す
+      if (next === "active") await recalcTeamMatchScore(teamMatchId);
+      setTmMenuOpen(false); setConfirmTmStop(false);
+      await loadData({ markAsChanged:true });
+    } catch (e) {
+      alert("エラー: " + (e?.message || e));
+    } finally {
+      setTmStatusSaving(false);
+    }
+  }
 
   return (
     <div style={S.page}>
@@ -12212,8 +12247,27 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           <span style={{ fontSize:17,fontWeight:800,color:C.white,flex:1 }}>{myLabel||"自チーム"} vs {oppLabel||"相手"}</span>
           {/* ★団体戦情報はチーム全員で共有・記録するデータのため、作成者以外も編集できるようにする */}
           <button style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer" }} onClick={()=>onEdit&&onEdit(tm.id)}>✏️</button>
+          {showTmMenu && (
+            <button aria-label="その他の操作" style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:15,fontWeight:900,padding:"3px 10px",cursor:"pointer",lineHeight:1.2 }} onClick={()=>setTmMenuOpen(v=>!v)}>⋯</button>
+          )}
         </div>
       </div>
+      {tmMenuOpen && showTmMenu && (
+        <>
+          <div style={{ position:"fixed", inset:0, zIndex:50, background:"rgba(0,0,0,0.08)" }} onClick={()=>setTmMenuOpen(false)}/>
+          <div style={{ position:"fixed", top:52, right:12, zIndex:51, background:C.white, borderRadius:12, boxShadow:"0 8px 24px rgba(0,0,0,0.22)", minWidth:200, overflow:"hidden" }}>
+            {[
+              ...(tm.status === "active" ? [["⏸ 中断する", C.navy, ()=>changeTmStatus("suspended")]] : []),
+              ...(tm.status === "suspended" ? [["▶ 再開する", C.navy, ()=>changeTmStatus("active")]] : []),
+              ...(tm.status === "active" || tm.status === "suspended" ? [["⛔ 途中終了する", C.red, ()=>{ setTmMenuOpen(false); if (boutRecordingNow) { alert("記録中の番手があります。先にその番手を終了するか中断してから操作してください。"); return; } setConfirmTmStop(true); }]] : []),
+              ...(tm.status === "abandoned" ? [["↩ 途中終了を取り消す", C.navy, ()=>changeTmStatus("active")]] : []),
+            ].map(([label, color, fn], i) => (
+              <button key={label} disabled={tmStatusSaving} onClick={fn}
+                style={{ display:"block", width:"100%", textAlign:"left", padding:"13px 16px", background:C.white, border:"none", borderTop: i ? `1px solid ${C.border}` : "none", fontSize:14, fontWeight:700, color, cursor:"pointer" }}>{label}</button>
+            ))}
+          </div>
+        </>
+      )}
 
       <div style={{ padding:"12px 14px", paddingBottom:90 }}>
         {/* 試合情報カード */}
@@ -12221,7 +12275,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           <div style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:4 }}>{tm.tournament_name||"団体戦"}{tm.round ? ` · ${tm.round}` : ""}</div>
           {tm.match_date && <div style={{ fontSize:11,color:C.textSec }}>{fmtDate(tm.match_date)}{tm.venue ? ` · ${tm.venue}` : ""}</div>}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:8 }}>
-            <span style={{ fontSize:15,fontWeight:800,color:tm.status==="finished"?(tm.my_score>tm.opponent_score?C.teamA:C.teamB):C.navy }}>{statusLabel}</span>
+            <span style={{ fontSize:15,fontWeight:800,color:tm.status==="finished"?(tm.my_score>tm.opponent_score?C.teamA:C.teamB):tmHold?C.textSec:C.navy }}>{statusLabel}</span>
             <span style={{ fontSize:11,color:C.textSec }}>{tm.format==="best2" ? "2勝先取" : "3試合全部"}</span>
           </div>
         </div>
@@ -12261,6 +12315,9 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
             : C.textSec;
 
           const canStart = isWaiting || (isSuspended && !isRecording);
+          // ★団体戦を中断・途中終了しているときの、まだ終わっていない番手
+          const boutOnHold = tmHold && !isFinished && !isAbandoned && !isRecording && match?.status !== "finished";
+          const boutCut = boutOnHold && tm.status === "abandoned";
           const boutVideoLinks = normalizeVideoLinks(match?.video_links);
           const hasVideo = boutVideoLinks.length > 0;
           const finishedNow = isFinished || match?.status === "finished";
@@ -12279,8 +12336,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
 
           return (
             <div key={orderNum} style={{ position:"relative" }}>
-            <div style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
-              <div style={{ height:4, background:stripeColor }}/>
+            <div style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", ...(boutCut ? { opacity:0.7 } : {}) }}>
+              <div style={{ height:4, background: boutCut ? C.border : stripeColor }}/>
               {/* ★大会詳細の個人戦カードと同じ構造・同じ文字サイズで描画する（行タップで詳細へ） */}
               <div style={{ padding:"10px 14px", cursor: match?.id ? "pointer" : "default" }} onClick={()=>{ if (match?.id) onOpenMatch && onOpenMatch(match.id); }}>
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
@@ -12300,7 +12357,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                     color:isRecording?C.orange:C.textSec,
                     background:isRecording?"#fff3e0":"transparent",
                   }}>
-                    {finishedNow ? "終了" : isAbandoned ? "途中終了" : isSuspended ? "中断" : isRecording ? "試合中" : "予定"}
+                    {finishedNow ? "終了" : isAbandoned ? "途中終了" : boutCut ? "打ち切り" : isSuspended ? "中断" : isRecording ? "試合中" : "予定"}
                   </span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
@@ -12319,7 +12376,11 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
               </div>
 
               {/* ★操作ボタンも個人戦カードと同じ「枠いっぱい・区切り線だけ」のボタン列にする */}
-              {(!isFinished && !isAbandoned && canOperateGame(game)) ? (
+              {boutOnHold ? (
+                tm.status === "suspended" ? (
+                  <div style={{ borderTop:"1px solid "+C.border, padding:"7px", background:"#eef0f3", color:C.textSec, fontSize:11, fontWeight:700, textAlign:"center" }}>中断中（⋯ から再開できます）</div>
+                ) : null
+              ) : (!isFinished && !isAbandoned && canOperateGame(game)) ? (
                 <>
                   {isWaiting && (aPlayers || bPlayers) && game?.match_id && (
                     <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
@@ -12460,6 +12521,26 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
       )}
 
       {/* ★番手の試合の削除（個人戦一覧の削除と同じくゴミ箱行き。番手はペア未登録の状態に戻す） */}
+      {confirmTmStop && (
+        <Modal onClose={()=>setConfirmTmStop(false)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40,marginBottom:8 }}>⛔</div>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:8 }}>団体戦を途中終了しますか？</h3>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20,lineHeight:1.7,textAlign:"left" }}>
+              {tm.my_score}-{tm.opponent_score} の時点で終了します。<br/>
+              ・まだ行っていない番手は「打ち切り」になります<br/>
+              ・勝敗が決まっていないため、チームの勝敗成績には数えません<br/>
+              ・終わった番手の個人の成績はそのまま残ります<br/>
+              ・あとから「⋯」→「途中終了を取り消す」で戻せます
+            </p>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmTmStop(false)}>キャンセル</button>
+              <button disabled={tmStatusSaving} style={{ padding:"11px",background:C.red,color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>changeTmStatus("abandoned")}>{tmStatusSaving ? "保存中..." : "途中終了する"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {confirmDeleteBout && (
         <Modal onClose={()=>setConfirmDeleteBout(null)}>
           <div style={{ textAlign:"center" }}>
