@@ -4178,6 +4178,34 @@ function useBodyScrollLock(locked) {
   }, [locked]);
 }
 
+// ★団体戦（3人）・個人戦（1人）のアイコン。絵文字は機種で見た目が変わるため、アプリで描く。
+//   light：紺色の背景の上に置くとき用（白で描く）
+function TeamIcon({ size = 20, light = false, style }) {
+  const main = light ? "#ffffff" : C.navy, side = light ? "rgba(255,255,255,0.55)" : "#9fb0cc";
+  const p = (x, y, k, c) => (<g key={x}><circle cx={x} cy={y} r={3.4*k} fill={c}/><path d={`M${x-6*k} ${y+11.5*k} q0 -7 ${6*k} -7 q${6*k} 0 ${6*k} 7 z`} fill={c}/></g>);
+  return (
+    <svg viewBox="0 0 32 32" width={size} height={size} style={{ flexShrink:0, display:"inline-block", verticalAlign:"middle", ...style }} aria-hidden="true">
+      {p(7,12,0.82,side)}{p(25,12,0.82,side)}{p(16,11,1.05,main)}
+      <rect x="3" y="27" width="26" height="2.4" rx="1.2" fill={C.accent}/>
+    </svg>
+  );
+}
+function SoloIcon({ size = 20, light = false, style }) {
+  const main = light ? "#ffffff" : C.navy;
+  return (
+    <svg viewBox="0 0 32 32" width={size} height={size} style={{ flexShrink:0, display:"inline-block", verticalAlign:"middle", ...style }} aria-hidden="true">
+      <circle cx="16" cy="11" r={3.4*1.05} fill={main}/><path d={`M${16-6*1.05} ${11+11.5*1.05} q0 -7 ${6*1.05} -7 q${6*1.05} 0 ${6*1.05} 7 z`} fill={main}/>
+      <rect x="9" y="27" width="14" height="2.4" rx="1.2" fill={C.accent}/>
+    </svg>
+  );
+}
+// タブの文字（"団体戦" "個人戦" など）にアイコンを付けて表示する
+function TypeLabel({ v, label, size = 20 }) {
+  const icon = v === "team" ? <TeamIcon size={size}/> : v === "individual" ? <SoloIcon size={size}/> : null;
+  if (!icon) return label;
+  return <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", gap:5 }}>{icon}{label}</span>;
+}
+
 function Modal({ children, onClose }) {
   useBodyScrollLock(true);
   return (
@@ -5141,8 +5169,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 上段：大会 / 団体戦 / 個人戦 タブ */}
       <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 14px 0" }}>
         <div style={{ flex:1, display:"flex", background:"#f0f2f6", padding:3, borderRadius:10 }}>
-          {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); onModeChange && onModeChange(v); /* ★アプリ全体にも今のタブを伝える（試合から戻ったとき同じタブで開くため） */ if (v!=="individual") { setFilterHasVideo(false); setFilterHasAi(false); } }}>{l}</button>
+          {[["tournament","📋 大会"],["team","団体戦"],["individual","個人戦"]].map(([v,l])=>(
+            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); onModeChange && onModeChange(v); /* ★アプリ全体にも今のタブを伝える（試合から戻ったとき同じタブで開くため） */ if (v!=="individual") { setFilterHasVideo(false); setFilterHasAi(false); } }}><TypeLabel v={v} label={l}/></button>
           ))}
         </div>
       </div>
@@ -5386,8 +5414,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     )}
                     {(teamRecord.win+teamRecord.loss>0 || individualRecord.win+individualRecord.loss>0) && (
                       <div style={{ display:"flex", flexDirection:"column", gap:2, marginTop:6 }}>
-                        {teamRecord.win+teamRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}>🏆 団体戦：{teamRecord.win}勝{teamRecord.loss}敗</span>}
-                        {individualRecord.win+individualRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}>🎾 個人戦：{individualRecord.win}勝{individualRecord.loss}敗</span>}
+                        {teamRecord.win+teamRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}><TeamIcon size={16} style={{ marginRight:3 }}/>団体戦：{teamRecord.win}勝{teamRecord.loss}敗</span>}
+                        {individualRecord.win+individualRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}><SoloIcon size={16} style={{ marginRight:3 }}/>個人戦：{individualRecord.win}勝{individualRecord.loss}敗</span>}
                       </div>
                     )}
                     <div
@@ -5746,7 +5774,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         return (
           <FullScreenSheet title={`🎾 ${t.name} の試合数の内訳`} onClose={()=>setBreakdownModalFor(null)}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <div style={{ fontSize:13, fontWeight:800, color:C.navy }}>🏆 団体戦の内訳</div>
+              <div style={{ fontSize:13, fontWeight:800, color:C.navy, display:"flex", alignItems:"center", gap:5 }}><TeamIcon size={18}/>団体戦の内訳</div>
               <button
                 style={{ border:"none", background:"none", color:C.navy, fontSize:12, fontWeight:700, cursor:"pointer", textDecoration:"underline" }}
                 onClick={()=>{ setBreakdownModalFor(null); onOpenTournament && onOpenTournament(t); }}
@@ -5791,7 +5819,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               );
             })}
 
-            <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"18px 0 8px" }}>🎾 個人戦の内訳</div>
+            <div style={{ fontSize:13, fontWeight:800, color:C.navy, margin:"18px 0 8px", display:"flex", alignItems:"center", gap:5 }}><SoloIcon size={18}/>個人戦の内訳</div>
             {individualForT.length===0 ? (
               <div style={{ fontSize:12, color:C.textSec }}>この大会の個人戦記録がありません。</div>
             ) : individualForT.map(m => {
@@ -5831,8 +5859,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             <h3 style={{ fontSize:16,fontWeight:800,marginBottom:4 }}>🗑 ゴミ箱</h3>
             <p style={{ fontSize:11,color:C.textSec,marginBottom:10 }}>削除してから24時間以内であれば元に戻せます。24時間を過ぎると自動的に完全に削除されます。</p>
             <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, marginBottom:12 }}>
-              {[["tournament","📋 大会"],["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-                <button key={v} style={{ flex:1, padding:8, border:"none", cursor:"pointer", borderRadius:8, fontSize:12, fontWeight:700, background:trashTab===v?C.white:"transparent", color:trashTab===v?C.navy:C.textSec, boxShadow:trashTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTrashTab(v)}>{l}</button>
+              {[["tournament","📋 大会"],["team","団体戦"],["individual","個人戦"]].map(([v,l])=>(
+                <button key={v} style={{ flex:1, padding:8, border:"none", cursor:"pointer", borderRadius:8, fontSize:12, fontWeight:700, background:trashTab===v?C.white:"transparent", color:trashTab===v?C.navy:C.textSec, boxShadow:trashTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTrashTab(v)}><TypeLabel v={v} label={l}/></button>
               ))}
             </div>
 
@@ -6485,8 +6513,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
       </div>
 
       <div style={{ display:"flex", background:"#f0f2f6", padding:3, borderRadius:10, margin:"10px 14px 0" }}>
-        {[["team","🏆 団体戦"],["individual","🎾 個人戦"]].map(([v,l])=>(
-          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:seg===v?C.white:"transparent", color:seg===v?C.navy:C.textSec, boxShadow:seg===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setSeg(v)}>{l}</button>
+        {[["team","団体戦"],["individual","個人戦"]].map(([v,l])=>(
+          <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:seg===v?C.white:"transparent", color:seg===v?C.navy:C.textSec, boxShadow:seg===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setSeg(v)}><TypeLabel v={v} label={l}/></button>
         ))}
       </div>
 
@@ -6526,7 +6554,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         const total = win + lose;
         return (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"10px 14px 0", background:"#f7f9fc", borderRadius:10, padding:"11px 14px" }}>
-            <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec }}>{seg==="team" ? "🏆 団体戦成績" : "🎾 個人戦成績"}</span>
+            <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec, display:"inline-flex", alignItems:"center", gap:5 }}>{seg==="team" ? <><TeamIcon size={18}/>団体戦成績</> : <><SoloIcon size={18}/>個人戦成績</>}</span>
             <span style={{ fontSize:17, fontWeight:800, color:C.text }}>{total>0 ? `${win}勝${lose}敗` : "ー"}</span>
           </div>
         );
@@ -7021,7 +7049,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         return (
           <Modal onClose={()=>setSimpleTeamResultFor(null)}>
             <div>
-              <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>{simpleTeamResultFor.status === "finished" ? "✏️ 団体戦の結果を修正" : "🏆 団体戦の結果だけ記録"}</div>
+              <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>{simpleTeamResultFor.status === "finished" ? "✏️ 団体戦の結果を修正" : "団体戦の結果だけ記録"}</div>
               <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>各番手を記録せず、団体戦の最終スコアだけ入力します</div>
               <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
                 <div style={{ flex:1, textAlign:"center" }}>
@@ -8673,8 +8701,8 @@ function DrawSetup({ tournament, category, onBack }) {
       </div>
 
       <div style={{ display: "flex", background: "#f0f2f6", padding: 3, margin: "14px 14px 0", borderRadius: 10 }}>
-        {[["team", "🏆 団体戦"], ["individual", "🎾 個人戦"]].map(([v, l]) => (
-          <button key={v} style={{ flex: 1, padding: 9, border: "none", cursor: "pointer", borderRadius: 8, fontSize: 13, fontWeight: 700, background: catMode === v ? C.white : "transparent", color: catMode === v ? C.navy : C.textSec, boxShadow: catMode === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none" }} onClick={() => setCatMode(v)}>{l}</button>
+        {[["team", "団体戦"], ["individual", "個人戦"]].map(([v, l]) => (
+          <button key={v} style={{ flex: 1, padding: 9, border: "none", cursor: "pointer", borderRadius: 8, fontSize: 13, fontWeight: 700, background: catMode === v ? C.white : "transparent", color: catMode === v ? C.navy : C.textSec, boxShadow: catMode === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none" }} onClick={() => setCatMode(v)}><TypeLabel v={v} label={l}/></button>
         ))}
       </div>
 
@@ -11600,14 +11628,14 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                       style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), padding:"14px" }}
                       onClick={()=>{ setShowNewModal(false); onNew(); }}
                     >
-                      <div style={{ fontSize:15, fontWeight:700 }}>🎾 個人戦</div>
+                      <div style={{ fontSize:15, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}><span style={{ display:"inline-flex", background:"#fff", borderRadius:7, padding:2, marginRight:8, verticalAlign:"middle" }}><SoloIcon size={22}/></span>個人戦</div>
                       <div style={{ fontSize:11, opacity:0.85, marginTop:2 }}>ダブルス・シングルスの1試合を記録</div>
                     </button>
                     <button
                       style={{ ...S.btn(`linear-gradient(135deg,${C.navy},${C.navyMid})`), padding:"14px" }}
                       onClick={()=>{ setShowNewModal(false); onNewTeamMatch && onNewTeamMatch(); }}
                     >
-                      <div style={{ fontSize:15, fontWeight:700 }}>🏆 団体戦</div>
+                      <div style={{ fontSize:15, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}><span style={{ display:"inline-flex", background:"#fff", borderRadius:7, padding:2, marginRight:8, verticalAlign:"middle" }}><TeamIcon size={22}/></span>団体戦</div>
                       <div style={{ fontSize:11, opacity:0.85, marginTop:2 }}>3番手制の団体戦を登録</div>
                     </button>
                     <button
@@ -11859,7 +11887,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
       <div style={S.hdr}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onCancel}>←</button>
-          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>🏆 団体戦情報登録{editId ? "（編集）" : ""}</span>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white, display:"inline-flex", alignItems:"center", gap:6 }}><TeamIcon size={22} light/>団体戦情報登録{editId ? "（編集）" : ""}</span>
         </div>
       </div>
       <div style={{ padding:14 }}>
@@ -12618,7 +12646,7 @@ function TeamMatchGameSetupWrapper({ teamMatchId, orderNum, onSave, onSavePairOn
       sourceMatchId={null}
       editMatchId={editMatchId || null}
       initialMatchType="tournament"
-      headerLabel={editMatchId ? `🏆 団体戦 ${orderLabel} 選手を編集` : `🏆 団体戦 ${orderLabel} ペア登録`}
+      headerLabel={<span style={{ display:"inline-flex", alignItems:"center", gap:6 }}><TeamIcon size={22} light/>{editMatchId ? `団体戦 ${orderLabel} 選手を編集` : `団体戦 ${orderLabel} ペア登録`}</span>}
       prefillTournament={tm?.tournament_name || ""}
       prefillRound={tm?.round || ""}
       prefillVenue={tm?.venue || ""}
