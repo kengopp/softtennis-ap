@@ -193,6 +193,10 @@ let _rosterCache = null;         // { at, promise }
 let _lastMatchListData = null;   // { at, list }
 // ★作成した直後の試合。記録画面を開くときに、サーバーから取り直さずこれを使う（1回だけ）
 const _primedMatches = new Map(); // matchId -> { at, data }
+// ★サーブを選んで「試合開始」した直後の試合：記録画面を開いたら「第1ゲームの準備」を出さずに第1ゲームを始める
+const _autoStartMatchIds = new Set();
+function markAutoStart(id) { if (id) _autoStartMatchIds.add(id); }
+function takeAutoStart(id) { const hit = _autoStartMatchIds.has(id); _autoStartMatchIds.delete(id); return hit; }
 // ★個人戦の試合ID（団体戦の番手ではないと分かっている試合）。試合を開く前の問い合わせを省くために使う
 let _knownIndividualMatchIds = new Set();
 // ★団体戦の番手として登録されている試合ID（分析の「個人戦のみ／団体戦のみ」に使う）。試合一覧の取得時にも作る
@@ -1973,6 +1977,7 @@ async function startScheduledMatch(id, firstServer, orderA, orderB, recvA, recvB
   }
   const { error } = await supabase.from("matches").update(updates).eq("id", id);
   if (error) throw error;
+  if (firstServer) markAutoStart(id); // ★サーブを選んで開始したので、記録画面ですぐ第1ゲームを始める
 }
 
 // ★記録者ロックを外す（試合終了・中断・途中終了のとき）
@@ -16848,6 +16853,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       const savedRow = await saveMatch(match, { isNew: true });
       // ★記録画面を開くときにサーバーから取り直さなくて済むよう、今保存した内容を渡しておく
       primeMatch(rowToMatchFull({ ...match, ...savedRow }, match.players, [], [], []));
+      if (selectedServer) markAutoStart(mid); // ★サーブを選んで開始したので、記録画面ですぐ第1ゲームを始める
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
       // ★完了を待たずに記録画面へ進む（以前は4人分の登録が終わるまで画面が切り替わらなかった）
       autoRegisterPlayersToRoster([
@@ -17401,6 +17407,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [skipGame, setSkipGame] = useState(null);
   // ★試合の途中から記録する（前のゲームは取ったチームだけ入れる）。null | { startNum, winners:{1:"A",...}, server }
   const [midStart, setMidStart] = useState(null);
+  const [orderDraft, setOrderDraft] = useState(null); // サーブレシーブの順番変更の下書き（保存を押すまで反映しない）
   // ★個人戦の試合にもAI動画分析を追加できるようにする（団体戦の各番手と同様の機能）
   // 　undefined=未確認、null=未登録、オブジェクト=登録済み
   const [aiAnalysis, setAiAnalysis] = useState(undefined);
@@ -17626,6 +17633,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const g={id:uid(),match_id:base.id,game_number:num,server_team:srv,is_final:isFin,score_a:0,score_b:0,winner_team:null,points:[],faults:[]};
     persist({...base,games:[...base.games,g]});
     setTimeout(()=>{ startingGameRef.current = false; setStartingGame(false); }, 800); // 保存が実行された後にロック解除
+  }
+
+  // ★サーブを選んで「試合開始」した直後は、「第1ゲームの準備」画面を出さずにそのまま第1ゲームを始める
+  //   （準備画面にあった順番の変更などは、記録画面の「⋯」→「サーブレシーブの順番変更」でできる）
+  useEffect(() => {
+    if (!takeAutoStart(initialMatch.id)) return;
+    if (viewOnly || match.status === "finished" || match.games.length > 0) return;
+    startNewGame(match.first_server ? match : { ...match, first_server:"A" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ★サーブレシーブの順番変更を保存する。最初にサーブするペアを変えた場合は、各ゲームのサーブ側も付け直す
+  function saveOrderDraft(d){
+    const fsChanged = d.first_server !== (match.first_server || "A");
+    const games = fsChanged ? match.games.map(g => ({ ...g, server_team: gameServer(d.first_server, g.game_number) })) : match.games;
+    persist({ ...match, games, first_server:d.first_server, order_a:d.order_a, order_b:d.order_b, receive_order_a:d.receive_order_a, receive_order_b:d.receive_order_b });
   }
 
   function addPoint(team, resultKey=selResult, playerName=selPlayer, extra=null){
@@ -19099,7 +19122,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             const step3Off = osIsDF || !osTeam;
             const step4Off = osIsDF || !osKind;
             const step56Off = osIsDF || !osPlayer;
-            const serverName = curServerIndividual || serverLabel;
+            const serverName = curServerIndividual || serverLabel || (curServer ? osTeamName(curServer) : ""); // ★相手の選手名が未登録でも「（相手のサーブ）」と出す
             const summary = osIsDF
               ? `ダブルフォルト（${serverName}）：${osTeamName(osScoreTeam)}に1点`
               : osReady
@@ -19156,17 +19179,22 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 </div>
                 {osMenu && (
                   <Modal onClose={()=>setOsMenu(false)}>
-                    <div style={{ fontSize:16, fontWeight:800, textAlign:"center", marginBottom:14 }}>その他の操作</div>
-                    <button style={{ width:"100%",padding:13,background:"#06C755",color:C.white,border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8 }} onClick={()=>{ setOsMenu(false); shareToLine("試合中"); }}>
-                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg>
-                      LINEで共有する
-                    </button>
-                    <button style={{ width:"100%",padding:"11px 13px",background:"#eafaf3",color:"#047a4c",border:"2px solid "+C.accent,borderRadius:10,fontSize:14,fontWeight:800,cursor:"pointer",marginBottom:8 }} onClick={()=>{ setOsMenu(false); setSkipGame({ winner:null, left:"", right:"" }); }}>
-                      ⏭ このゲームを飛ばす
-                    </button>
-                    <button style={{ width:"100%",padding:13,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer" }} onClick={()=>{ setOsMenu(false); setSuspendConfirm(true); }}>⏸ 中断</button>
-                    <button style={{ width:"100%",padding:13,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setAbandonConfirm(true); }}>⏹ 途中終了</button>
+                    <div style={{ fontSize:16, fontWeight:800, textAlign:"center", marginBottom:6 }}>その他の操作</div>
+                    {(() => {
+                      // ★「途中から記録する」「結果だけ記録」は、まだ1点も記録していないときだけ出す
+                      const noPoints = match.games.every(g => (g.points?.length ?? 0) === 0 && !g.winner_team);
+                      return (<>
+                        <button style={{ width:"100%",padding:13,background:C.white,border:"1px solid "+C.border,borderRadius:10,color:C.navy,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false);
+                          setOrderDraft({ first_server: match.first_server || "A", order_a: match.order_a === "p2" ? "p2" : "p1", order_b: match.order_b === "p2" ? "p2" : "p1",
+                            receive_order_a: effectiveReceiveOrder(match, "A"), receive_order_b: effectiveReceiveOrder(match, "B") }); }}>🎾 サーブレシーブの順番変更</button>
+                        <button style={{ width:"100%",padding:13,background:C.white,border:"1px solid "+C.border,borderRadius:10,color:C.navy,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setSkipGame({ winner:null, left:"", right:"" }); }}>⏭ このゲームを飛ばす</button>
+                        {noPoints && <button style={{ width:"100%",padding:13,background:C.white,border:"1px solid "+C.border,borderRadius:10,color:C.navy,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); const n=3; setMidStart({ startNum:n, winners:{}, server:gameServer(match.first_server||"A", n) }); }}>⏩ 試合の途中から記録する</button>}
+                        {noPoints && <button style={{ width:"100%",padding:13,background:C.white,border:"1px solid "+C.border,borderRadius:10,color:C.navy,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true); }}>📝 結果だけ記録</button>}
+                      </>);
+                    })()}
                     <button style={{ width:"100%",padding:13,background:"#eaeef7",border:"1px solid #b9c4dc",borderRadius:10,color:C.navy,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setShowGamePicker(true); }}>🔧 記録済みのゲームを修正する</button>
+                    <button style={{ width:"100%",padding:13,background:"#fff3e0",color:"#b45309",border:"1px solid #fbbf24",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setSuspendConfirm(true); }}>⏸ 中断</button>
+                    <button style={{ width:"100%",padding:13,background:C.redL,color:C.red,border:"1px solid #f5b5b0",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setAbandonConfirm(true); }}>⏹ 途中終了</button>
                     {/* ★自動スクロールのON/OFF（この端末で覚えておく） */}
                     <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:8, padding:"10px 12px", border:`1px solid ${C.border}`, borderRadius:10 }}>
                       <div style={{ flex:1, minWidth:0 }}>
@@ -19175,6 +19203,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       </div>
                       <button onClick={toggleOsAutoScroll} style={{ flexShrink:0, minWidth:76, padding:"9px 12px", borderRadius:20, border:"none", fontSize:14, fontWeight:800, cursor:"pointer", background: osAutoScroll ? "#0b6e75" : "#e6e8ee", color: osAutoScroll ? C.white : C.textSec }}>{osAutoScroll ? "ON" : "OFF"}</button>
                     </div>
+                    <button style={{ width:"100%",padding:13,background:"#06C755",color:C.white,border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8 }} onClick={()=>{ setOsMenu(false); shareToLine("試合中"); }}>
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 3C6.48 3 2 6.69 2 11.25c0 2.99 1.91 5.61 4.79 7.08-.21.79-.76 2.83-.87 3.27-.14.55.2.54.42.4.17-.11 2.77-1.88 3.89-2.65.57.08 1.16.13 1.77.13 5.52 0 10-3.69 10-8.25S17.52 3 12 3z" fill="white"/></svg>
+                      LINEで共有する
+                    </button>
                     <button style={{ width:"100%",padding:12,background:C.gray,color:C.textSec,border:"1px solid "+C.border,borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8 }} onClick={()=>{ setOsMenu(false); setResetConfirm(true); }}>🗑️ スコア全削除</button>
                     <button style={{ width:"100%",padding:12,background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",marginTop:14 }} onClick={()=>setOsMenu(false)}>閉じる</button>
                   </Modal>
@@ -19376,6 +19408,53 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <button style={{ ...S.btn("#fff"), color:C.navy, border:`1px solid ${C.border}`, fontSize:13 }} onClick={onBack}>← 戻る</button>
         </div>
       )}
+
+      {/* ★サーブレシーブの順番変更（保存を押すまで反映しない） */}
+      {orderDraft && (() => {
+        const d = orderDraft;
+        const fs = d.first_server, other = fs==="A" ? "B" : "A";
+        const COLORS = { A: C.teamA, B: C.orange };
+        const pairShort = (t) => familyNamesOf(t) || (t==="A" ? teamALabel : teamBLabel) || (t==="A" ? "自チーム" : "相手");
+        const isDoublesMatch = match.players.filter(p=>p.team==="A").length>1;
+        const row = (team, role) => {
+          const names = sortedTeamNames(team);
+          const key = role==="serve" ? (team==="A"?"order_a":"order_b") : (team==="A"?"receive_order_a":"receive_order_b");
+          const cur = d[key]==="p2" ? "p2" : "p1";
+          const set = (v) => setOrderDraft(o => {
+            const nx = { ...o, [key]: v };
+            return nx;
+          });
+          return (
+            <div style={{ marginTop:12 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:13.5, fontWeight:800, marginBottom:6 }}>
+                <span style={{ fontSize:11.5, fontWeight:800, color:C.white, background:COLORS[team], borderRadius:5, padding:"2px 6px" }}>{role==="serve"?"サーブ":"レシーブ"}</span>
+                <span style={{ color:COLORS[team] }}>{pairShort(team)} の1人目</span>
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <OrderSegBtn active={cur!=="p2"} color={COLORS[team]} onClick={()=>set("p1")}>{osDisp(names[0]) || "選手1"}</OrderSegBtn>
+                <OrderSegBtn active={cur==="p2"} color={COLORS[team]} onClick={()=>set("p2")}>{osDisp(names[1]) || "選手2"}</OrderSegBtn>
+              </div>
+            </div>
+          );
+        };
+        return (
+          <Modal onClose={()=>setOrderDraft(null)}>
+            <div style={{ fontSize:18, fontWeight:800, color:C.navy, textAlign:"center", marginBottom:12 }}>サーブレシーブの順番変更</div>
+            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>最初にサーブするペア（第1ゲーム）</div>
+            <div style={{ display:"flex", background:C.gray, borderRadius:12, padding:4, gap:4 }}>
+              {["A","B"].map(t => (
+                <button key={t} onClick={()=>setOrderDraft(o=>({ ...o, first_server:t }))}
+                  style={{ flex:1, border:"none", borderRadius:9, padding:"12px 4px", fontSize:15, fontWeight:800, cursor:"pointer", background: fs===t ? COLORS[t] : "transparent", color: fs===t ? C.white : C.textSec }}>{pairShort(t)}</button>
+              ))}
+            </div>
+            {isDoublesMatch && (<>{row(fs, "serve")}{row(other, "receive")}</>)}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:18 }}>
+              <button style={{ padding:13, background:"#f0f0f0", color:C.text, border:"none", borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer" }} onClick={()=>setOrderDraft(null)}>キャンセル</button>
+              <button style={{ padding:13, background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, color:C.white, border:"none", borderRadius:12, fontSize:15, fontWeight:800, cursor:"pointer" }} onClick={()=>{ saveOrderDraft(orderDraft); setOrderDraft(null); }}>保存</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {modal?.type==="gameOver"&&(
         <Modal>
