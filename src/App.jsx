@@ -12674,16 +12674,16 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
             )}
 
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-              <div style={{ flex:1, textAlign:"center" }}>
-                <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6 }}>{simpleResultFor.aLabel}</div>
+              <div style={{ flex:1, minWidth:0, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6, minHeight:18, lineHeight:"18px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{simpleResultFor.aLabel}</div>
                 <input type="number" inputMode="numeric" value={simpleResultScoreA} onChange={e=>setSimpleResultScoreA(e.target.value)}
-                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamA}`, color:C.teamA }} />
+                  style={{ width:"100%", boxSizing:"border-box", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamA}`, color:C.teamA }} />
               </div>
               <div style={{ fontSize:18, color:C.textSec, marginTop:24 }}>-</div>
-              <div style={{ flex:1, textAlign:"center" }}>
-                <div style={{ fontSize:12, fontWeight:700, color:C.teamB, marginBottom:6 }}>{simpleResultFor.bLabel}</div>
+              <div style={{ flex:1, minWidth:0, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamB, marginBottom:6, minHeight:18, lineHeight:"18px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{simpleResultFor.bLabel}</div>
                 <input type="number" inputMode="numeric" value={simpleResultScoreB} onChange={e=>setSimpleResultScoreB(e.target.value)}
-                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB }} />
+                  style={{ width:"100%", boxSizing:"border-box", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB }} />
               </div>
             </div>
             <button
@@ -19476,16 +19476,16 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <div style={{ fontSize:15, fontWeight:800, marginBottom:4 }}>結果だけ記録</div>
             <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>ポイントを記録せず、ゲームカウントだけ入力します</div>
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-              <div style={{ flex:1, textAlign:"center" }}>
-                <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6 }}>{teamALabel}</div>
+              <div style={{ flex:1, minWidth:0, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamA, marginBottom:6, minHeight:18, lineHeight:"18px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{teamALabel || osPlayersOf("A").map(x=>x.label).join("/")}</div>
                 <input type="number" inputMode="numeric" value={simpleScoreA} onChange={e=>setSimpleScoreA(e.target.value)}
-                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamA}`, color:C.teamA }} />
+                  style={{ width:"100%", boxSizing:"border-box", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamA}`, color:C.teamA }} />
               </div>
               <div style={{ fontSize:18, color:C.textSec, marginTop:24 }}>-</div>
-              <div style={{ flex:1, textAlign:"center" }}>
-                <div style={{ fontSize:12, fontWeight:700, color:C.teamB, marginBottom:6 }}>{teamBLabel}</div>
+              <div style={{ flex:1, minWidth:0, textAlign:"center" }}>
+                <div style={{ fontSize:12, fontWeight:700, color:C.teamB, marginBottom:6, minHeight:18, lineHeight:"18px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{teamBLabel || osPlayersOf("B").map(x=>x.label).join("/")}</div>
                 <input type="number" inputMode="numeric" value={simpleScoreB} onChange={e=>setSimpleScoreB(e.target.value)}
-                  style={{ width:"100%", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB }} />
+                  style={{ width:"100%", boxSizing:"border-box", textAlign:"center", fontSize:24, fontWeight:800, padding:"10px 4px", borderRadius:10, border:`2px solid ${C.teamB}`, color:C.teamB }} />
               </div>
             </div>
 
