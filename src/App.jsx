@@ -13229,6 +13229,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [oppSort, setOppSort] = useState("count");             // ★相手分析：学校・ペアの並び順（rate|win|lose|count）
   const [openSchools, setOpenSchools] = useState(() => new Set()); // ★相手分析：開いている学校
   const [breakdownDim, setBreakdownDim] = useState("play");
+  // ★自分たちのペア：個人分析と同じ「勝敗」「直近◯試合」の絞り込み
+  const [pairResult, setPairResult] = useState("all"); // all | win | lose
+  const [pairRecent, setPairRecent] = useState("all"); // all | 1 | 3 | 5 | 10
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
   const [noteEditing, setNoteEditing] = useState(null); // {id?, text, match_id}
@@ -13370,9 +13373,16 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   }
 
   // 表示対象の試合（自分たち＝そのペアの全試合／相手分析＝その相手ペアとの試合）
-  const targetMatches = side === "own"
+  const pairBaseMatches = side === "own"
     ? (selectedOwnPair?.matches ?? [])
     : (selectedOppPair?.matches ?? []).filter(m => oppOwnFilter.size === 0 || oppOwnFilter.has(ownPairOf(m, mySchoolName)?.key));
+  // ★自分たちのペアだけ：「直近◯試合」で成績の対象をしぼり、「勝敗」で下の内訳の対象をしぼる
+  const targetMatches = (side === "own" && pairRecent !== "all")
+    ? pairBaseMatches.map((m,i)=>({ m, i })).sort((x,y)=> String(y.m.match_date||"").localeCompare(String(x.m.match_date||"")) || (y.i - x.i)).slice(0, pairRecent).map(x=>x.m)
+    : pairBaseMatches;
+  const detailTargetMatches = (side === "own" && pairResult !== "all")
+    ? targetMatches.filter(m => winnerSideOf(m) === (pairResult === "win" ? "A" : "B"))
+    : targetMatches;
   // ★この相手と当たった自チームのペア（勝敗・最後の対戦）
   const oppOwnRows = (() => {
     if (side !== "opp" || !selectedOppPair) return [];
@@ -13418,7 +13428,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   // ★points込みの詳細は、見る対象が決まったタイミングでその分だけ読み込む
   useEffect(() => {
     // ★簡易記録（ポイントなし）の試合は詳細の読み込み対象から外す
-    const ids = targetMatches.filter(m=>!m.is_simple_draw_result).map(m=>m.id);
+    const ids = detailTargetMatches.filter(m=>!m.is_simple_draw_result).map(m=>m.id);
     if (ids.length === 0) { setDetailMatches([]); return; }
     let cancelled = false;
     (async () => {
@@ -13432,7 +13442,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // ★相手分析で自チームのペアを選んで絞り込んだときも、内訳・サーブ・コースなどを読み直す
-  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart, [...oppOwnFilter].sort().join("|")]);
+  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart, [...oppOwnFilter].sort().join("|"), pairRecent, pairResult]);
 
   const wins = targetMatches.filter(m => winnerSideOf(m)==="A").length;
   const losses = targetMatches.filter(m => winnerSideOf(m)==="B").length;
@@ -13830,6 +13840,39 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                     </div>
                   </div>
                 )}
+
+                {/* ★自分たちのペア：勝敗・直近◯試合の絞り込み（個人分析と同じ） */}
+                {side === "own" && selectedOwnPair && pairBaseMatches.length > 0 && (() => {
+                  const wN = targetMatches.filter(m => winnerSideOf(m)==="A").length;
+                  const lN = targetMatches.filter(m => winnerSideOf(m)==="B").length;
+                  return (
+                    <div style={{ marginBottom:12 }}>
+                      <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+                        {[["all",`すべて（${targetMatches.length}）`],["win",`○ 勝った試合（${wN}）`],["lose",`× 負けた試合（${lN}）`]].map(([key,label])=>{
+                          const active = pairResult===key;
+                          const activeColor = key==="win" ? C.accent : key==="lose" ? C.red : C.navy;
+                          const activeBg = key==="win" ? C.accentL : key==="lose" ? C.redL : C.navy;
+                          return (
+                            <button key={key} onClick={()=>setPairResult(key)}
+                              style={{ flex:1, padding:"12px 4px", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
+                                border:`1px solid ${active?activeColor:C.border}`, background:active?activeBg:"#fff", color:active?(key==="all"?"#fff":activeColor):C.textSec }}>{label}</button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:6 }}>ペアはそのままで試合数だけ変える</div>
+                      <div style={{ display:"flex", gap:6 }}>
+                        {[[1,"直近1試合"],[3,"直近3試合"],[5,"直近5試合"],[10,"直近10試合"],["all","全部"]].map(([n,l]) => {
+                          const active = pairRecent === n;
+                          return (
+                            <button key={n} onClick={()=>setPairRecent(n)}
+                              style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:"pointer",
+                                border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}>{l}</button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {detailLoading ? (
                   <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0" }}>集計中...</div>
