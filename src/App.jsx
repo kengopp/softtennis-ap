@@ -13738,13 +13738,13 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                       style={{ flex:1, border:"none", outline:"none", background:"transparent", fontSize:16, padding:"10px 0", color:C.text, minWidth:0 }} />
                     {oppQuery && <button aria-label="文字を消す" onClick={()=>setOppQuery("")} style={{ border:"none", background:"none", color:C.textSec, fontSize:13, cursor:"pointer", padding:"0 2px" }}>✖</button>}
                   </div>
-                  <div style={{ fontSize:12, fontWeight:800, color:C.textSec, margin:"12px 2px 6px" }}>
+                  <div style={{ fontSize:14, fontWeight:800, color:C.textSec, margin:"12px 2px 6px" }}>
                     {qq ? `「${oppQuery}」で見つかった学校（${list.length}校）` : `対戦した学校（${list.length}校）`}
                   </div>
                   {/* ★並び順（チーム分析と同じ） */}
                   <div style={{ display:"flex", gap:5, marginBottom:8 }}>
                     {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
-                      <button key={k} style={{ ...S.togBtn(oppSort===k,C.navy), flex:1, fontSize:12.5, padding:"7px 4px", whiteSpace:"nowrap" }} onClick={()=>setOppSort(k)}>{l}</button>
+                      <button key={k} style={{ ...S.togBtn(oppSort===k,C.navy), flex:1, fontSize:14, padding:"9px 4px", whiteSpace:"nowrap" }} onClick={()=>setOppSort(k)}>{l}</button>
                     ))}
                   </div>
                   {list.length === 0 && <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0", fontSize:13.5 }}>{qq ? "見つかりませんでした" : "対戦した記録がありません"}</div>}
@@ -13753,24 +13753,24 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                     return (
                       <div key={sc.club} style={{ ...S.card, marginBottom:8 }}>
                         <div onClick={()=>setOpenSchools(prev => { const nx = new Set(prev); nx.has(sc.club) ? nx.delete(sc.club) : nx.add(sc.club); return nx; })}
-                          style={{ display:"flex", alignItems:"center", gap:8, padding:12, cursor:"pointer" }}>
-                          <div style={{ flex:1, minWidth:0, fontSize:15.5, fontWeight:900, color:C.text }}>
-                            {sc.club}<span style={{ fontSize:11.5, color:C.textSec, fontWeight:700, marginLeft:6 }}>{sc.pairs.length}ペア・{sc.n}試合</span>
+                          style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px", cursor:"pointer" }}>
+                          <div style={{ flex:1, minWidth:0, fontSize:18, fontWeight:900, color:C.text, lineHeight:1.35 }}>
+                            {sc.club}<span style={{ display:"block", fontSize:13.5, color:C.textSec, fontWeight:700, marginTop:1 }}>{sc.pairs.length}ペア・{sc.n}試合</span>
                           </div>
-                          <div style={{ fontSize:14, fontWeight:900, color:wlColor(sc.w, sc.l), whiteSpace:"nowrap" }}>{sc.w}勝{sc.l}敗</div>
-                          <span style={{ color:"#a0a8b8", fontSize:13 }}>{open ? "▴" : "▾"}</span>
+                          <div style={{ fontSize:17, fontWeight:900, color:wlColor(sc.w, sc.l), whiteSpace:"nowrap" }}>{sc.w}勝{sc.l}敗</div>
+                          <span style={{ color:"#a0a8b8", fontSize:16 }}>{open ? "▴" : "▾"}</span>
                         </div>
                         {open && (
                           <div style={{ borderTop:`1px solid ${C.border}`, background:"#fafbfc", padding:"4px 10px 6px" }}>
                             {[...sc.pairs].sort((a,b)=> sortByRecord(oppSort)({ wins:a.w, losses:a.l, total:a.matches.length }, { wins:b.w, losses:b.l, total:b.matches.length })).map((p, idx, arr) => (
                               <div key={p.key} onClick={()=>{ setOppPairKey(p.key); window.scrollTo(0,0); }}
                                 style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 4px", borderBottom: idx===arr.length-1 ? "none" : `1px solid ${C.border}`, cursor:"pointer" }}>
-                                <span style={{ flex:1, minWidth:0, fontSize:14, fontWeight:800, color:C.text }}>
+                                <span style={{ flex:1, minWidth:0, fontSize:16, fontWeight:800, color:C.text }}>
                                   {p.label}
-                                  <span style={{ display:"block", fontSize:11, color:C.textSec, fontWeight:700, marginTop:1 }}>自チーム{p.ownPairKeys.size}ペアと対戦・{p.matches.length}試合</span>
+                                  <span style={{ display:"block", fontSize:13, color:C.textSec, fontWeight:700, marginTop:2 }}>自チーム{p.ownPairKeys.size}ペアと対戦・{p.matches.length}試合</span>
                                 </span>
-                                <span style={{ fontSize:13.5, fontWeight:900, color:wlColor(p.w, p.l), whiteSpace:"nowrap" }}>{p.w}勝{p.l}敗</span>
-                                <span style={{ color:"#a0a8b8", fontSize:16 }}>›</span>
+                                <span style={{ fontSize:15.5, fontWeight:900, color:wlColor(p.w, p.l), whiteSpace:"nowrap" }}>{p.w}勝{p.l}敗</span>
+                                <span style={{ color:"#a0a8b8", fontSize:18 }}>›</span>
                               </div>
                             ))}
                           </div>
