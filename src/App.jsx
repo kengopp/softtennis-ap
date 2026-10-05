@@ -496,14 +496,25 @@ function withinLastDays(matchList, days) {
 }
 // 期間チップ＋勝率ソートチップ（一覧画面で共通使用）
 function PeriodSortBar({ period, setPeriod, sort, setSort }) {
+  // ★「期間」と「並び順」を分けて、それぞれ同じ幅のボタンを1行に並べる（以前は混ざって折り返していた）
+  const lbl = { fontSize:12.5, fontWeight:800, color:"#5a6478", margin:"0 2px 5px" };
+  const seg = { display:"flex", background:"#e6e9ef", borderRadius:11, padding:4, gap:4 };
+  const btn = (on, onColor) => ({ flex:1, textAlign:"center", padding:"9px 2px", fontSize:14, fontWeight:on?800:700, borderRadius:8, border:"none", cursor:"pointer", whiteSpace:"nowrap",
+    background: on ? (onColor || C.white) : "transparent", color: on ? (onColor ? C.white : C.navy) : "#5a6478", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.12)" : "none" });
   return (
-    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-      <button style={{ ...S.togBtn(period==="all",C.navy),fontSize:11,padding:"6px 10px" }} onClick={()=>setPeriod("all")}>全期間</button>
-      <button style={{ ...S.togBtn(period==="month1",C.navy),fontSize:11,padding:"6px 10px" }} onClick={()=>setPeriod("month1")}>直近1ヶ月</button>
-      <button style={{ ...S.togBtn(sort==="rate",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("rate")}>勝率順</button>
-      <button style={{ ...S.togBtn(sort==="win",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("win")}>勝数順</button>
-      <button style={{ ...S.togBtn(sort==="lose",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("lose")}>負数順</button>
-      <button style={{ ...S.togBtn(sort==="count",C.accent),fontSize:12.5,padding:"8px 12px" }} onClick={()=>setSort("count")}>試合数順</button>
+    <div style={{ marginBottom:12 }}>
+      <div style={lbl}>期間</div>
+      <div style={{ ...seg, marginBottom:10 }}>
+        {[["all","全期間"],["month1","直近1ヶ月"]].map(([k,l]) => (
+          <button key={k} style={btn(period===k)} onClick={()=>setPeriod(k)}>{l}</button>
+        ))}
+      </div>
+      <div style={lbl}>並び順</div>
+      <div style={seg}>
+        {[["rate","勝率"],["win","勝数"],["lose","負数"],["count","試合数"]].map(([k,l]) => (
+          <button key={k} style={btn(sort===k, C.accent)} onClick={()=>setSort(k)}>{l}</button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -16171,6 +16182,8 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState("rate");
+  const [oppTab, setOppTab] = useState("player"); // ★相手別の成績：player(選手別) | pair(ペア別)
+  const [oppShowAll, setOppShowAll] = useState(false); // ★最初は5件だけ。「すべて見る」で全部
   const [mySchoolName, setMySchoolName] = useState("");
   const [detail, setDetail] = useState([]);       // points込みの詳細
   const [detailLoading, setDetailLoading] = useState(false);
@@ -16298,25 +16311,50 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                   </div>
                 </div>
 
-                <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>相手選手別の成績（自チームの勝率）</div>
-                  {oppPlayerRows.map(r=>(
-                    <div key={r.name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}` }}>
-                      <span style={{ fontSize:14 }}>{r.name}</span>
-                      <span style={{ fontSize:13,color:C.textSec,whiteSpace:"nowrap",marginLeft:8 }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
+                {/* ★相手別の成績：選手別／ペア別をタブで切り替える1枚のカード。各行に勝ち負けの棒グラフ */}
+                {(() => {
+                  const list = oppTab==="pair" ? oppPairRows : oppPlayerRows;
+                  const shown = oppShowAll ? list : list.slice(0, 5);
+                  const unit = oppTab==="pair" ? "ペア" : "人";
+                  return (
+                    <div style={{ ...S.card, padding:16, marginBottom:16 }}>
+                      <div style={{ fontSize:13,fontWeight:800,color:C.navy,marginBottom:8 }}>相手別の成績（自チームの勝率）</div>
+                      <div style={{ display:"flex", borderBottom:"2px solid #eef0f3", marginBottom:4 }}>
+                        {[["player","選手別"],["pair","ペア別"]].map(([k,l]) => {
+                          const on = oppTab===k;
+                          return (
+                            <button key={k} onClick={()=>{ setOppTab(k); setOppShowAll(false); }}
+                              style={{ flex:1, background:"none", border:"none", borderBottom: on ? `3px solid ${C.navy}` : "3px solid transparent", marginBottom:-2,
+                                padding:"8px 0", fontSize:14.5, fontWeight:on?800:700, color:on?C.navy:"#8a92a0", cursor:"pointer" }}>{l}</button>
+                          );
+                        })}
+                      </div>
+                      {shown.map(r => {
+                        const rateColor = r.rate >= 50 ? C.accent : C.red;
+                        return (
+                          <div key={r.name} style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) 64px auto 44px", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid ${C.border}` }}>
+                            <div style={{ minWidth:0 }}>
+                              <div style={{ fontSize:14.5, fontWeight:700, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{r.name}</div>
+                              <div style={{ fontSize:12, color:"#8a92a0", fontWeight:600 }}>{r.total}試合</div>
+                            </div>
+                            <div style={{ display:"flex", height:8, borderRadius:4, overflow:"hidden", background:"#eef0f3" }}>
+                              <div style={{ width:`${r.total>0 ? r.wins/r.total*100 : 0}%`, background:"#2ecc71" }}/>
+                              <div style={{ width:`${r.total>0 ? r.losses/r.total*100 : 0}%`, background:"#f08a80" }}/>
+                            </div>
+                            <div style={{ fontSize:13.5, fontWeight:700, color:"#3d4457", whiteSpace:"nowrap", textAlign:"right" }}>{r.wins}勝{r.losses}敗</div>
+                            <div style={{ fontSize:15, fontWeight:900, color:rateColor, textAlign:"right" }}>{r.rate}%</div>
+                          </div>
+                        );
+                      })}
+                      {list.length > 5 && (
+                        <button onClick={()=>setOppShowAll(v=>!v)}
+                          style={{ width:"100%", background:"none", border:"none", padding:"12px 0 2px", fontSize:14, fontWeight:800, color:C.navy, cursor:"pointer" }}>
+                          {oppShowAll ? "▲ 閉じる" : `▼ すべて見る（全${list.length}${unit}）`}
+                        </button>
+                      )}
                     </div>
-                  ))}
-                </div>
-
-                <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:C.navy,marginBottom:10 }}>相手ペア別の成績（自チームの勝率）</div>
-                  {oppPairRows.map(r=>(
-                    <div key={r.name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}` }}>
-                      <span style={{ fontSize:14 }}>{r.name}</span>
-                      <span style={{ fontSize:13,color:C.textSec,whiteSpace:"nowrap",marginLeft:8 }}>{r.wins}勝{r.losses}敗（{r.total}試合）・<span style={{ fontWeight:700,color:C.accent }}>{r.rate}%</span></span>
-                    </div>
-                  ))}
-                </div>
+                  );
+                })()}
 
                 <MonthlyTrendCard finishedMatches={allFinishedForTrend} winFn={m=>winnerSideOf(m)==="A"} />
 
