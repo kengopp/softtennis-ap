@@ -14582,9 +14582,13 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const displayedMatchesNewest = newestFirst(displayedMatches);
 
   const agg = aggregatePlayerStats(displayedMatches, selectedPlayer, effectiveSchoolName);
-  const topPlaysWin = Object.entries(agg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,4);
-  const topPlaysErr = Object.entries(agg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,4);
-  const maxPlayCount = Math.max(1, ...topPlaysWin.map(x=>x[1]), ...topPlaysErr.map(x=>x[1]));
+  // ★得点・ミスの内訳は全部の項目を出す（以前は多い順に4つまでで、足しても総得点・総ミスと合わなかった）。
+  //   プレーを選ばずに記録したポイントは「プレー未入力」として最後に出す。
+  const topPlaysWin = Object.entries(agg.playsWin).sort((a,b)=>b[1]-a[1]);
+  const topPlaysErr = Object.entries(agg.playsErr).sort((a,b)=>b[1]-a[1]);
+  const noPlayWin = Math.max(0, (agg.winners ?? 0) - topPlaysWin.reduce((n,[,c])=>n+c, 0));
+  const noPlayErr = Math.max(0, (agg.errors ?? 0) - topPlaysErr.reduce((n,[,c])=>n+c, 0));
+  const maxPlayCount = Math.max(1, ...topPlaysWin.map(x=>x[1]), ...topPlaysErr.map(x=>x[1]), noPlayWin, noPlayErr);
 
   // ★ミスの傾向（ネット／オーバー／チップ／サイドアウト、フォア／バック、多い組み合わせ）
   //   ミスの種類は入力が任意なので、母数は「種類まで入力されたミスの件数」を使う。
@@ -14987,23 +14991,28 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   ))}
                 </div>
 
-                {breakdownDim==="play" && (<>
-                {topPlaysWin.map(([label,count])=>(
-                  <div key={"w"+label} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
-                    <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
-                    <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.accent, borderRadius:5 }}/></div>
-                    <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
-                  </div>
-                ))}
-                {topPlaysWin.length>0 && topPlaysErr.length>0 && <div style={{ height:8 }}/>}
-                {topPlaysErr.map(([label,count])=>(
-                  <div key={"e"+label} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
-                    <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
-                    <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:C.red, borderRadius:5 }}/></div>
-                    <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
-                  </div>
-                ))}
-                </>)}
+                {breakdownDim==="play" && (() => {
+                  const barRow = (key, label, count, color) => (
+                    <div key={key} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
+                      <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{label}</div>
+                      <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:color, borderRadius:5 }}/></div>
+                      <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
+                    </div>
+                  );
+                  const groupHead = (title, total, color, first) => (
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, fontWeight:800, color, margin: first ? "0 0 2px" : "12px 0 2px", paddingBottom:4, borderBottom:"1px solid #eef0f3" }}>
+                      <span>{title}</span><span>計 {total}</span>
+                    </div>
+                  );
+                  return (<>
+                    {groupHead("得点の内訳", agg.winners, "#047a4c", true)}
+                    {topPlaysWin.map(([label,count])=>barRow("w"+label, getPlayLabel(label), count, C.accent))}
+                    {noPlayWin>0 && barRow("w_none", "プレー未入力", noPlayWin, "#a9b2c4")}
+                    {groupHead("ミスの内訳", agg.errors, "#b42318", false)}
+                    {topPlaysErr.map(([label,count])=>barRow("e"+label, getPlayLabel(label), count, C.red))}
+                    {noPlayErr>0 && barRow("e_none", "プレー未入力", noPlayErr, "#a9b2c4")}
+                  </>);
+                })()}
 
                 {breakdownDim==="course" && courseStats.all===0 && (
                   <div style={{ padding:"20px 0", textAlign:"center", color:C.textSec, fontSize:13 }}>コースが入力されたポイントがありません</div>
