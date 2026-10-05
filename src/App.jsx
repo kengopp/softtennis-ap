@@ -15087,14 +15087,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
                   {/* ① 引っ張り / 流し */}
                   <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:7 }}>① 引っ張り / 流し</div>
-                  <div style={{ display:"flex", height:34, borderRadius:8, overflow:"hidden", background:"#eef0f3" }}>
+                  <div style={{ display:"flex", height:26, borderRadius:7, overflow:"hidden", background:"#eef0f3" }}>
                     {courseStats.pull>0 && (
-                      <div style={{ width:`${courseStats.pull/courseStats.all*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13.5, fontWeight:800, color:C.white }}>
+                      <div style={{ width:`${courseStats.pull/courseStats.all*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white }}>
                         {Math.round(courseStats.pull/courseStats.all*100)}%
                       </div>
                     )}
                     {courseStats.nagashi>0 && (
-                      <div style={{ width:`${courseStats.nagashi/courseStats.all*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13.5, fontWeight:800, color:C.white }}>
+                      <div style={{ width:`${courseStats.nagashi/courseStats.all*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white }}>
                         {Math.round(courseStats.nagashi/courseStats.all*100)}%
                       </div>
                     )}
@@ -15117,14 +15117,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                         </div>
                         {sd.total>0 && (
                           <>
-                            <div style={{ display:"flex", height:20, borderRadius:6, overflow:"hidden", background:"#eef0f3" }}>
+                            <div style={{ display:"flex", height:26, borderRadius:7, overflow:"hidden", background:"#eef0f3" }}>
                               {sd.pull>0 && (
-                                <div style={{ width:`${sd.pull/sd.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${sd.pull/sd.total*100}%`, background:COURSE_PULL_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white }}>
                                   {Math.round(sd.pull/sd.total*100)}%
                                 </div>
                               )}
                               {sd.nagashi>0 && (
-                                <div style={{ width:`${sd.nagashi/sd.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:800, color:C.white }}>
+                                <div style={{ width:`${sd.nagashi/sd.total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white }}>
                                   {Math.round(sd.nagashi/sd.total*100)}%
                                 </div>
                               )}
