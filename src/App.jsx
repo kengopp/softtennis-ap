@@ -42,7 +42,7 @@ const PLAY_TYPES = [
   { key: "drop",     label: "ツイスト"  }, // ★旧「ドロップ」。過去データも同じキーなので表示だけ切り替わる
 ];
 // ★プレーの選択肢から外したもの（過去の記録の表示用）。ネットインは③「この得点は？」の区分に移した
-const RETIRED_PLAY_LABELS = { net_in: "ネットイン" };
+const RETIRED_PLAY_LABELS = { net_in: "ネットイン", __none: "プレー未入力" };
 
 // 結果（新規記録時の選択肢：決めた / 相手ミスの2択）
 const RESULT_TYPES = [
@@ -103,7 +103,8 @@ const RETIRED_MISS_LABELS = {};
 const playTypesFor = (resultType) =>
   resultType === "error" ? PLAY_TYPES.filter(p => p.key !== "serve") : PLAY_TYPES;
 // ★3列のボタン表示用：ミス時も並びが崩れないよう「サーブ」は消さずに押せない状態で残す
-const playDisabledFor = (resultType, key) => resultType === "error" && key === "serve";
+// ★ネットインのときもサーブは押せない（サーブのネットインはレット＝やり直しのため）
+const playDisabledFor = (resultType, key) => (resultType === "error" || resultType === "net_in") && key === "serve";
 const PLAY_OFF_STYLE = { opacity:0.3, pointerEvents:"none" };
 
 // shot_typeキー（DB保存用：プレイ内容_結果 の組み合わせで生成）
@@ -1143,12 +1144,17 @@ function aggregatePlayerStats(fullMatches, playerName, mySchoolName, pairNames) 
     missTypes: {}, missTyped: 0, sideWin: {}, sideErr: {}, missCombos: {},
     courseWin: {}, courseErr: {},
     sideCourseWin: {}, sideCourseErr: {},
+    netIns: 0, netInPlays: {},
+    _matchObjs: [], // ★記録があった試合（ペアの1試合平均の母数用）
   };
   for (const m of fullMatches) {
     const s = playerStatsInMatch(m, playerName, mySchoolName, pairNames);
     if (!s) continue;
     agg.matchesCounted++;
+    agg._matchObjs.push(m);
     agg.total += s.total; agg.winners += s.winners; agg.errors += s.errors;
+    agg.netIns += s.netIns ?? 0;
+    for (const k in (s.netInPlays ?? {})) agg.netInPlays[k] = (agg.netInPlays[k] ?? 0) + s.netInPlays[k];
     agg.serveTotal += s.serveTotal; agg.serveFault += s.serveFault;
     agg.serve1st += s.serve1st ?? 0; agg.serve2nd += s.serve2nd ?? 0; agg.serveDf += s.serveDf ?? 0;
     agg.serve1stWin += s.serve1stWin ?? 0; agg.serve2ndWin += s.serve2ndWin ?? 0;
@@ -1175,10 +1181,10 @@ function aggregatePairStats(fullMatches, nameA, nameB, mySchoolName, isOpponent)
   const b = aggregatePlayerStats(fullMatches, nameB, mySchoolName, pairNames);
   const sum = { ...a };
   const numKeys = ["total","winners","errors","serveTotal","serveFault","receiveTotal","receiveMiss",
-                   "serve1st","serve2nd","serveDf","serve1stWin","serve2ndWin","missTyped"];
+                   "serve1st","serve2nd","serveDf","serve1stWin","serve2ndWin","missTyped","netIns"];
   numKeys.forEach(k => { sum[k] = (a[k]??0) + (b[k]??0); });
   const mapKeys = ["plays","playsWin","playsErr","missTypes","sideWin","sideErr","missCombos",
-                   "courseWin","courseErr","sideCourseWin","sideCourseErr"];
+                   "courseWin","courseErr","sideCourseWin","sideCourseErr","netInPlays"];
   mapKeys.forEach(k => {
     const merged = {};
     for (const key in (a[k]??{})) merged[key] = (merged[key]??0) + a[k][key];
@@ -1186,10 +1192,15 @@ function aggregatePairStats(fullMatches, nameA, nameB, mySchoolName, isOpponent)
     sum[k] = merged;
   });
   sum.matchesCounted = fullMatches.length;
+  // ★2人のどちらかに記録があった試合の数（1試合平均の母数）
+  sum.matchesWithData = new Set([...(a._matchObjs ?? []), ...(b._matchObjs ?? [])]).size;
   return { pair: sum, byPlayer: { [nameA]: a, [nameB]: b } };
 }
 
 // ★コース分析の集計（個人・ペアの両方で使う）。aggはaggregatePlayerStats/aggregatePairStatsの結果。
+// ★内訳の「○回 ○%」と「1試合平均 ○回」の表示用
+const pctOf = (n, total) => total > 0 ? Math.round(n / total * 100) : 0;
+const perMatchAvg = (n, matches) => matches > 0 ? (n / matches).toFixed(1) : null;
 function buildCourseStats(agg) {
     const cell = (key) => {
       const win = agg.courseWin?.[key] ?? 0;
@@ -1226,7 +1237,10 @@ function buildCourseStats(agg) {
       if (!worst || rate < worst.rate) worst = { ...r, rate };
     });
 
-  return { all, pull, nagashi, sides, rows, best, worst };
+  // ★コースが入力された「得点」「ミス」の回数（注意書き用）
+  const winAll = rows.reduce((a, r) => a + r.win, 0);
+  const errAll = rows.reduce((a, r) => a + r.err, 0);
+  return { all, pull, nagashi, sides, rows, best, worst, winAll, errAll };
 }
 
 // 合算スタッツから、画面表示用の主要指標（%）を計算する
@@ -3823,7 +3837,13 @@ function calcPlayerStats(match) {
       const playerTeam = inferredTeam ?? teamOf[pt.player_name];
       const r = ensure(playerTeam, pt.player_name);
       // ★ネットインは運の得点なので「決めた」「ミス」「決定率」には入れず、本数だけ別に数える
-      if (isNetIn(pt)) { r.netIns = (r.netIns ?? 0) + 1; continue; }
+      if (isNetIn(pt)) {
+        r.netIns = (r.netIns ?? 0) + 1;
+        const nk = pt.play_type || "__none"; // ★何のプレーでネットインしたか（未入力は __none）
+        r.netInPlays = r.netInPlays ?? {};
+        r.netInPlays[nk] = (r.netInPlays[nk] ?? 0) + 1;
+        continue;
+      }
       r.total++;
       if (pt.is_winner) r.winners++; else r.errors++;
       if (pt.play_type)   r.plays[pt.play_type]     = (r.plays[pt.play_type]   ?? 0) + 1;
@@ -4462,7 +4482,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
     const isWin = result ? isWinnerResult(result) : null;
     // 「決めた」に変更した場合、ミスの種類は保存しない。ネットインはプレー・くわしくを保存しない
     const ni = isNetIn(result);
-    onSave({ scoring_team:team, play_type: ni ? null : play, side_type: ni ? null : side, course_type: ni ? null : course, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
+    onSave({ scoring_team:team, play_type:play, side_type: ni ? null : side, course_type: ni ? null : course, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
   }
 
   // ★記録画面（一画面記録）と同じ見た目・並び：①サーブ ②得点チーム ③決めた/ミスした ④誰が ⑤プレー ⑥よりくわしく
@@ -4493,7 +4513,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
     setResult(k); setPlayerName(null);
     if (k !== "error") setMiss(null);
     if (k === "error" && play === "serve") setPlay(null);
-    if (k === "net_in") { setPlay(null); setSide(null); setCourse(null); }
+    if (k === "net_in") { if (play === "serve") setPlay(null); setSide(null); setCourse(null); }
   };
   const group = (t) => {
     const off = !!target && target!==t, wide = !!target && target===t, color = U.teamColor(t);
@@ -4574,8 +4594,6 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           <div style={{ display:"flex", gap:8 }}>{group(U.leftTeam)}{group(U.rightTeam)}</div>
         </div>
 
-        {/* ★ネットインのときは⑤⑥を選べない */}
-        <div style={kind==="net_in" ? { opacity:0.35, pointerEvents:"none" } : undefined}>
         <div style={{ marginBottom:12 }}>
           {head(5, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
@@ -4585,6 +4603,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           </div>
         </div>
 
+        {/* ★ネットインのときは⑥を選べない */}
+        <div style={kind==="net_in" ? { opacity:0.35, pointerEvents:"none" } : undefined}>
         <div style={{ marginBottom:16 }}>
           {head(6, "よりくわしく", "（任意）")}
           {sub("フォア／バック")}
@@ -13481,9 +13501,16 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     return aggregatePairStats(detailMatches, statNames[0], statNames[1], mySchoolName, side === "opp");
   }, [detailMatches, statNames.join("|"), mySchoolName, side]);
 
-  const topWin = pairAgg ? Object.entries(pairAgg.playsWin).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
-  const topErr = pairAgg ? Object.entries(pairAgg.playsErr).sort((a,b)=>b[1]-a[1]).slice(0,5) : [];
-  const maxPlay = Math.max(1, ...topWin.map(x=>x[1]), ...topErr.map(x=>x[1]));
+  // ★全部の項目を出し、プレーを選ばずに記録した分は「プレー未入力」として最後に出す（足すと合計と一致する）
+  const withNoPlay = (entries, total) => {
+    const rest = Math.max(0, (total ?? 0) - entries.reduce((n,[,c])=>n+c, 0));
+    return rest > 0 ? [...entries, ["__none", rest]] : entries;
+  };
+  const topWin = pairAgg ? withNoPlay(Object.entries(pairAgg.playsWin).sort((a,b)=>b[1]-a[1]), pairAgg.winners) : [];
+  const topErr = pairAgg ? withNoPlay(Object.entries(pairAgg.playsErr).sort((a,b)=>b[1]-a[1]), pairAgg.errors) : [];
+  // ★ネットインの内訳（プレー別。プレー未入力は最後）
+  const netInRows = pairAgg ? Object.entries(pairAgg.netInPlays ?? {}).sort((a,b)=>(a[0]==="__none")-(b[0]==="__none") || b[1]-a[1]) : [];
+  const maxPlay = Math.max(1, ...topWin.map(x=>x[1]), ...topErr.map(x=>x[1]), ...netInRows.map(x=>x[1]));
   const courseStats = pairAgg ? buildCourseStats(pairAgg) : null;
 
   // ★試合展開：1ゲーム目を取れたかどうか、ファイナル、ストレート勝ちなど
@@ -13519,21 +13546,31 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
         {nagashi>0 && <div style={{ width:`${nagashi/total*100}%`, background:COURSE_NAGASHI_COLOR, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:C.white }}>{Math.round(nagashi/total*100)}%</div>}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.textSec, marginTop:6 }}>
-        <span>引っ張り <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{pull}</b>本</span>
-        <span>流し <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{nagashi}</b>本</span>
+        <span>引っ張り <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{pull}</b>回</span>
+        <span>流し <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{nagashi}</b>回</span>
       </div>
     </>
   );
 
-  const Bar = ({ label, count, color }) => (
+  const Bar = ({ label, count, color, total }) => (
     <div style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
       <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{getPlayLabel ? getPlayLabel(label) : label}</div>
       <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}>
-        <div style={{ height:"100%", width:`${count/maxPlay*100}%`, background:color, borderRadius:5 }}/>
+        <div style={{ height:"100%", width:`${count/maxPlay*100}%`, background:label==="__none" ? "#a9b2c4" : color, borderRadius:5 }}/>
       </div>
-      <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
+      <div style={{ width:82, textAlign:"right", fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>{count}回 {pctOf(count, total)}%</div>
     </div>
   );
+  // ★「✅ 決めた」などの見出し：合計回数と1試合平均
+  const PairHead = ({ title, total, color, first }) => {
+    const avg = perMatchAvg(total, pairAgg?.matchesWithData ?? 0);
+    return (
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, fontSize:13.5, fontWeight:800, color, margin: first ? "0 0 5px" : "12px 0 5px" }}>
+        <span style={{ whiteSpace:"nowrap" }}>{title}</span>
+        <span style={{ whiteSpace:"nowrap" }}>計 {total}回{avg!=null && <span style={{ marginLeft:8 }}>1試合平均 {avg}回</span>}</span>
+      </div>
+    );
+  };
 
   const selStyle = { width:"100%", padding:"11px 10px", borderRadius:9, border:`1.5px solid ${C.border}`,
     background:C.white, fontSize:14.5, fontWeight:700, color:C.text, marginBottom:10, fontFamily:"inherit" };
@@ -13926,10 +13963,14 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                             <div style={{ fontSize:12, color:C.textSec, marginTop:3 }}>決定率</div>
                           </div>
                         </div>
-                        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:5 }}>✅ 決めた</div>
-                        {topWin.map(([l,c])=><Bar key={"w"+l} label={l} count={c} color={C.accent}/>)}
-                        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, margin:"12px 0 5px" }}>⚠️ ミス</div>
-                        {topErr.map(([l,c])=><Bar key={"e"+l} label={l} count={c} color={C.red}/>)}
+                        <PairHead title="✅ 決めた" total={pairAgg.winners} color="#047a4c" first />
+                        {topWin.map(([l,c])=><Bar key={"w"+l} label={l} count={c} color={C.accent} total={pairAgg.winners}/>)}
+                        <PairHead title="⚠️ ミス" total={pairAgg.errors} color="#b42318" />
+                        {topErr.map(([l,c])=><Bar key={"e"+l} label={l} count={c} color={C.red} total={pairAgg.errors}/>)}
+                        {netInRows.length>0 && (<>
+                          <PairHead title="🍀 ネットイン" total={pairAgg.netIns} color="#6a4bb0" />
+                          {netInRows.map(([l,c])=><Bar key={"n"+l} label={l} count={c} color="#8a6fd1" total={pairAgg.netIns}/>)}
+                        </>)}
                       </div>
                     </div>
 
@@ -13946,6 +13987,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                                   決め <b style={{ fontSize:16, color:C.text }}>{a?.winners ?? 0}</b>
                                   　ミス <b style={{ fontSize:16, color:C.text }}>{a?.errors ?? 0}</b>
                                 </div>
+                                {(a?.netIns ?? 0) > 0 && (
+                                  <div style={{ fontSize:13, color:"#6a4bb0", marginTop:2 }}>ネットイン <b style={{ fontSize:16 }}>{a.netIns}</b></div>
+                                )}
                               </div>
                             );
                           })}
@@ -13974,6 +14018,14 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                       <div style={S.card}>
                         <div style={{ padding:14 }}>
                           <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>🎯 コース傾向</div>
+                          {/* ★集計の元になった回数 */}
+                          <div style={{ background:C.gray, borderRadius:8, padding:"10px 12px", fontSize:15, fontWeight:700, color:"#5a6478", lineHeight:1.7, marginBottom:14 }}>
+                            ※コースが入力された回数をもとに集計しています<br/>
+                            <span style={{ marginLeft:"1em" }}>得点 <b style={{ fontSize:16.5, color:C.navy }}>{courseStats.winAll}/{pairAgg.winners}回</b></span>
+                            <span style={{ margin:"0 10px" }}>・</span>
+                            <span>ミス <b style={{ fontSize:16.5, color:C.navy }}>{courseStats.errAll}/{pairAgg.errors}回</b></span><br/>
+                            <span style={{ marginLeft:"1em" }}>合計 <b style={{ fontSize:16.5, color:C.navy }}>{courseStats.all}/{pairAgg.winners + pairAgg.errors}回</b></span>
+                          </div>
 
                           <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:7 }}>① 引っ張り / 流し</div>
                           <SplitBar pull={courseStats.pull} nagashi={courseStats.nagashi} total={courseStats.all} />
@@ -13983,7 +14035,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                             {courseStats.sides.filter(sd=>sd.total>0).map(sd => (
                               <div key={sd.side} style={{ marginBottom:12 }}>
                                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
-                                  <span>{sd.label}</span><span style={{ fontSize:13, fontWeight:400, color:C.textSec }}><b style={{ fontSize:15, fontWeight:800, color:C.text }}>{sd.total}</b>本</span>
+                                  <span>{sd.label}</span><span style={{ fontSize:13, fontWeight:400, color:C.textSec }}><b style={{ fontSize:15, fontWeight:800, color:C.text }}>{sd.total}</b>回</span>
                                 </div>
                                 <SplitBar pull={sd.pull} nagashi={sd.nagashi} total={sd.total} />
                               </div>
@@ -13999,7 +14051,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
                                     <span>{r.label}</span>
                                     {r.total>0
-                                      ? <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>{r.total}本中 <b style={{ fontSize:14.5, fontWeight:800, color:rate<40?C.red:C.text }}>決定率 {rate}%</b></span>
+                                      ? <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>{r.total}回中 <b style={{ fontSize:14.5, fontWeight:800, color:rate<40?C.red:C.text }}>決定率 {rate}%</b></span>
                                       : <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>記録なし</span>}
                                   </div>
                                   {r.total>0 && (
@@ -14011,9 +14063,6 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                                 </div>
                               );
                             })}
-                          </div>
-                          <div style={{ fontSize:12, color:"#8a92a0", marginTop:6, lineHeight:1.6 }}>
-                            ※コースが入力された{courseStats.all}本をもとに集計しています。
                           </div>
                         </div>
                       </div>
@@ -14656,7 +14705,9 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const topPlaysErr = Object.entries(agg.playsErr).sort((a,b)=>b[1]-a[1]);
   const noPlayWin = Math.max(0, (agg.winners ?? 0) - topPlaysWin.reduce((n,[,c])=>n+c, 0));
   const noPlayErr = Math.max(0, (agg.errors ?? 0) - topPlaysErr.reduce((n,[,c])=>n+c, 0));
-  const maxPlayCount = Math.max(1, ...topPlaysWin.map(x=>x[1]), ...topPlaysErr.map(x=>x[1]), noPlayWin, noPlayErr);
+  // ★ネットインの内訳（プレー別。プレー未入力は最後）
+  const netInRows = Object.entries(agg.netInPlays ?? {}).sort((a,b)=>(a[0]==="__none")-(b[0]==="__none") || b[1]-a[1]);
+  const maxPlayCount = Math.max(1, ...topPlaysWin.map(x=>x[1]), ...topPlaysErr.map(x=>x[1]), noPlayWin, noPlayErr, ...netInRows.map(x=>x[1]));
 
   // ★ミスの傾向（ネット／オーバー／チップ／サイドアウト、フォア／バック、多い組み合わせ）
   //   ミスの種類は入力が任意なので、母数は「種類まで入力されたミスの件数」を使う。
@@ -15060,28 +15111,48 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                 </div>
 
                 {breakdownDim==="play" && (() => {
-                  const barRow = (key, label, count, color) => (
+                  // ★「○回 ○%」（%はその欄の合計を100%としたときの割合）
+                  const barRow = (key, label, count, color, total) => (
                     <div key={key} style={{ display:"flex", alignItems:"center", fontSize:13.5, padding:"6px 0" }}>
                       <div style={{ width:100, color:C.text, fontWeight:700, whiteSpace:"nowrap" }}>{label}</div>
                       <div style={{ flex:1, height:10, background:"#eef0f3", borderRadius:5, margin:"0 8px", overflow:"hidden" }}><div style={{ height:"100%", width:`${count/maxPlayCount*100}%`, background:color, borderRadius:5 }}/></div>
-                      <div style={{ width:30, textAlign:"right", fontWeight:800, color:C.navy }}>{count}</div>
+                      <div style={{ width:82, textAlign:"right", fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>{count}回 {pctOf(count, total)}%</div>
                     </div>
                   );
-                  const groupHead = (title, total, color, first) => (
-                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, fontWeight:800, color, margin: first ? "0 0 2px" : "12px 0 2px", paddingBottom:4, borderBottom:"1px solid #eef0f3" }}>
-                      <span>{title}</span><span>計 {total}</span>
-                    </div>
-                  );
+                  // ★合計回数の横に1試合平均（記録があった試合数で割る）
+                  const groupHead = (title, total, color, first) => {
+                    const avg = perMatchAvg(total, agg.matchesCounted);
+                    return (
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, fontSize:13.5, fontWeight:800, color, margin: first ? "0 0 2px" : "12px 0 2px", paddingBottom:4, borderBottom:"1px solid #eef0f3" }}>
+                        <span style={{ whiteSpace:"nowrap" }}>{title}</span>
+                        <span style={{ whiteSpace:"nowrap" }}>計 {total}回{avg!=null && <span style={{ marginLeft:8 }}>1試合平均 {avg}回</span>}</span>
+                      </div>
+                    );
+                  };
                   return (<>
                     {groupHead("得点の内訳", agg.winners, "#047a4c", true)}
-                    {topPlaysWin.map(([label,count])=>barRow("w"+label, getPlayLabel(label), count, C.accent))}
-                    {noPlayWin>0 && barRow("w_none", "プレー未入力", noPlayWin, "#a9b2c4")}
+                    {topPlaysWin.map(([label,count])=>barRow("w"+label, getPlayLabel(label), count, C.accent, agg.winners))}
+                    {noPlayWin>0 && barRow("w_none", "プレー未入力", noPlayWin, "#a9b2c4", agg.winners)}
                     {groupHead("ミスの内訳", agg.errors, "#b42318", false)}
-                    {topPlaysErr.map(([label,count])=>barRow("e"+label, getPlayLabel(label), count, C.red))}
-                    {noPlayErr>0 && barRow("e_none", "プレー未入力", noPlayErr, "#a9b2c4")}
+                    {topPlaysErr.map(([label,count])=>barRow("e"+label, getPlayLabel(label), count, C.red, agg.errors))}
+                    {noPlayErr>0 && barRow("e_none", "プレー未入力", noPlayErr, "#a9b2c4", agg.errors)}
+                    {netInRows.length>0 && (<>
+                      {groupHead("ネットインの内訳", agg.netIns, "#6a4bb0", false)}
+                      {netInRows.map(([k,count])=>barRow("n"+k, getPlayLabel(k), count, k==="__none" ? "#a9b2c4" : "#8a6fd1", agg.netIns))}
+                    </>)}
                   </>);
                 })()}
 
+                {/* ★コース別：集計の元になった回数（総得点・総ミスと数字が合わない理由が分かるように） */}
+                {breakdownDim==="course" && courseStats.all > 0 && (
+                  <div style={{ background:C.gray, borderRadius:8, padding:"10px 12px", fontSize:15, fontWeight:700, color:"#5a6478", lineHeight:1.7 }}>
+                    ※コースが入力された回数をもとに集計しています<br/>
+                    <span style={{ marginLeft:"1em" }}>得点 <b style={{ fontSize:16.5, color:C.navy }}>{courseStats.winAll}/{agg.winners}回</b></span>
+                    <span style={{ margin:"0 10px" }}>・</span>
+                    <span>ミス <b style={{ fontSize:16.5, color:C.navy }}>{courseStats.errAll}/{agg.errors}回</b></span><br/>
+                    <span style={{ marginLeft:"1em" }}>合計 <b style={{ fontSize:16.5, color:C.navy }}>{courseStats.all}/{agg.winners + agg.errors}回</b></span>
+                  </div>
+                )}
                 {breakdownDim==="course" && courseStats.all===0 && (
                   <div style={{ padding:"20px 0", textAlign:"center", color:C.textSec, fontSize:13 }}>コースが入力されたポイントがありません</div>
                 )}
@@ -15109,8 +15180,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                     )}
                   </div>
                   <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.textSec, marginTop:6 }}>
-                    <span>引っ張り <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{courseStats.pull}</b>本</span>
-                    <span>流し <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{courseStats.nagashi}</b>本</span>
+                    <span>引っ張り <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{courseStats.pull}</b>回</span>
+                    <span>流し <b style={{ fontSize:15, fontWeight:800, color:C.text }}>{courseStats.nagashi}</b>回</span>
                   </div>
 
                   {/* ② フォア／バック別の 引っ張り / 流し */}
@@ -15121,7 +15192,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:5 }}>
                           <span>{sd.label}</span>
                           {sd.total>0
-                            ? <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}><b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.total}</b>本</span>
+                            ? <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}><b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.total}</b>回</span>
                             : <span style={{ fontSize:12, fontWeight:400, color:C.textSec }}>記録なし</span>}
                         </div>
                         {sd.total>0 && (
@@ -15139,24 +15210,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                               )}
                             </div>
                             <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.textSec, marginTop:5, marginBottom:8 }}>
-                              <span>引っ張り <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.pull}</b>本</span>
-                              <span>流し <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.nagashi}</b>本</span>
+                              <span>引っ張り <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.pull}</b>回</span>
+                              <span>流し <b style={{ fontSize:13.5, fontWeight:800, color:C.text }}>{sd.nagashi}</b>回</span>
                             </div>
                             
                           </>
                         )}
                       </div>
                     ))}
-                  </div>
-
-                  {/* 気づき（本数が少ないと割合が極端に出るため、3本以上のコースだけを対象にしている） */}
-                  <div style={{ background:"#f7f9fc", borderLeft:`3px solid ${C.navy}`, borderRadius:6, padding:"8px 10px", fontSize:13, lineHeight:1.65, marginTop:16 }}>
-                    {courseStats.best ? (
-                      <>
-                        よく決まっているのは<b>{courseStats.best.label}</b>（決定率{Math.round(courseStats.best.rate*100)}%・{courseStats.best.total}本）。
-                        {courseStats.worst && courseStats.worst.key !== courseStats.best.key && (<><br/>苦しいのは<b>{courseStats.worst.label}</b>（決定率{Math.round(courseStats.worst.rate*100)}%・{courseStats.worst.total}本）。</>)}
-                      </>
-                    ) : "まだ本数が少なく、傾向は出ていません。"}
                   </div>
 
                   {/* ③ コース別の 決めた / ミス */}
@@ -15169,7 +15230,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13.5, fontWeight:700, color:C.text, marginBottom:6 }}>
                           <span>{r.label}</span>
                           {r.total>0
-                            ? <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>{r.total}本中 <b style={{ fontSize:14.5, fontWeight:800, color:rate<40?C.red:C.text }}>決定率 {rate}%</b></span>
+                            ? <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>{r.total}回中 <b style={{ fontSize:14.5, fontWeight:800, color:rate<40?C.red:C.text }}>決定率 {rate}%</b></span>
                             : <span style={{ fontSize:13, fontWeight:400, color:C.textSec }}>記録なし</span>}
                         </div>
                         {r.total>0 && (
@@ -15191,9 +15252,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                     })}
                   </div>
 
-                  <div style={{ fontSize:12, color:"#8a92a0", marginTop:10, lineHeight:1.6 }}>
-                    ※コースが入力された{courseStats.all}本をもとに集計しています。
-                  </div>
                 </div>
               </div>
             )}
@@ -18003,7 +18061,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <button onClick={()=>{ if(kind!=="error") setLastPointFields(gameId, { result_type:"error", player_name:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="error","#d8645c"), flex:1, padding:"10px 4px", fontSize:16 }}>
               ミスした<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{osTeamName(osOther(scoreTeam))}のミス）</div>
             </button>
-            <button onClick={()=>{ if(kind!=="net_in") setLastPointFields(gameId, { result_type:"net_in", player_name:null, miss_type:null, play_type:null, side_type:null, course_type:null }); }} style={{ ...btn, ...sel(kind==="net_in"), flex:1, padding:"10px 4px", fontSize:16 }}>
+            <button onClick={()=>{ if(kind!=="net_in") setLastPointFields(gameId, { result_type:"net_in", player_name:null, miss_type:null, side_type:null, course_type:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="net_in"), flex:1, padding:"10px 4px", fontSize:16 }}>
               ネットイン<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（運の得点）</div>
             </button>
           </div>
@@ -18012,8 +18070,6 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           {head(2, kind==="error" ? "誰がミスした？" : kind==="winner" ? "誰が決めた？" : kind==="net_in" ? "誰のネットイン？" : "誰が？")}
           <div style={{ display:"flex", gap:8 }}>{group(leftTeam)}{group(rightTeam)}</div>
         </div>
-        {/* ★ネットインのときは「どんなプレー」「よりくわしく」を選べない */}
-        <div style={kind==="net_in" ? { opacity:0.35, pointerEvents:"none" } : undefined}>
         <div style={{ marginBottom:12 }}>
           {head(3, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
@@ -18022,6 +18078,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             ))}
           </div>
         </div>
+        {/* ★ネットインのときは「よりくわしく」を選べない */}
+        <div style={kind==="net_in" ? { opacity:0.35, pointerEvents:"none" } : undefined}>
         <div>
           {head(4, "よりくわしく", "（任意）")}
           {sub("フォア／バック")}
@@ -18257,9 +18315,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     if (v !== "df") osGoTo("team", 0.5);
   }
   function osPickTeam(t){ setOsTeam(t); setOsKind(null); setOsPlayer(null); setOsMiss(null); osGoTo("kind"); }
-  function osPickKind(k){ setOsKind(k); setOsPlayer(null); setOsMiss(null); if (k==="error" && osPlay==="serve") setOsPlay(null); if (k==="net_in") { setOsPlay(null); setOsSide(null); setOsCourse(null); } osGoTo("player"); }
-  function osPickPlayer(n){ setOsPlayer(n); if (osKind!=="net_in") osGoTo("play"); }
-  function osPickPlay(k){ const v = osPlay===k ? null : k; setOsPlay(v); if (v) osGoTo("side"); }
+  function osPickKind(k){ setOsKind(k); setOsPlayer(null); setOsMiss(null); if ((k==="error" || k==="net_in") && osPlay==="serve") setOsPlay(null); if (k==="net_in") { setOsSide(null); setOsCourse(null); } osGoTo("player"); }
+  function osPickPlayer(n){ setOsPlayer(n); osGoTo("play"); }
+  function osPickPlay(k){ const v = osPlay===k ? null : k; setOsPlay(v); if (v && osKind!=="net_in") osGoTo("side"); }
   function osPickSide(k){ const v = osSide===k ? null : k; setOsSide(v); if (v) osGoTo(osKind==="error" ? "miss" : "course"); }
   function osPickMiss(k){ const v = osMiss===k ? null : k; setOsMiss(v); if (v) osGoTo("course"); }
   function osPickCourse(k){ setOsCourse(osCourse===k ? null : k); }
@@ -18274,7 +18332,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const team = osScoreTeam;
     const sc = currentGame ? { a: currentGame.score_a + (team==="A"?1:0), b: currentGame.score_b + (team==="B"?1:0) } : null;
     if (osIsDF) addPoint(team, null, null, {});
-    else if (osKind==="net_in") addPoint(team, "net_in", osPlayer, { play_type:null, side_type:null, course_type:null, miss_type:null });
+    else if (osKind==="net_in") addPoint(team, "net_in", osPlayer, { play_type:osPlay, side_type:null, course_type:null, miss_type:null });
     else addPoint(team, osKind, osPlayer, { play_type:osPlay, side_type:osSide, course_type:osCourse, miss_type: osKind==="error" ? osMiss : null });
     if (sc) {
       const l = isYounger ? sc.a : sc.b, r = isYounger ? sc.b : sc.a;
@@ -19281,7 +19339,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             const step2Off = osIsDF;
             const step3Off = osIsDF || !osTeam;
             const step4Off = osIsDF || !osKind;
-            const step56Off = osIsDF || !osPlayer || osKind==="net_in"; // ★ネットインは⑤⑥を選べない
+            const step56Off = osIsDF || !osPlayer;
+            const step6Off = step56Off || osKind==="net_in"; // ★ネットインは⑤のプレーだけ選べる（⑥は選べない）
             const serverName = curServerIndividual || serverLabel || (curServer ? osTeamName(curServer) : ""); // ★相手の選手名が未登録でも「（相手のサーブ）」と出す
             const summary = osIsDF
               ? `ダブルフォルト（${serverName}）：${osTeamName(osScoreTeam)}に1点`
@@ -19433,7 +19492,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   </div>
 
                   {/* ⑥ よりくわしく */}
-                  <div style={{ ...dim(step56Off) }}>
+                  <div style={{ ...dim(step6Off) }}>
                     {head(6, !!(osSide||osMiss||osCourse), "よりくわしく", "（任意・分かる範囲で）")}
                     <div style={{ fontSize:12.5, fontWeight:800, color:C.textSec, margin:"0 0 5px 2px" }}>フォア／バック</div>
                     <div ref={osRefs.side} style={{ display:"flex", gap:8 }}>
