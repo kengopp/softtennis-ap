@@ -4732,6 +4732,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [isAdmin, setIsAdmin] = useState(false);
   const [myId, setMyId] = useState(null);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
+  const [linkedPlayerId, setLinkedPlayerId] = useState(null); // ★大会の「出場選手」に入っているかの判定用
   const [mySchoolName, setMySchoolName] = useState("");
   const [mySchoolId, setMySchoolId] = useState(null);
   const [tmMySchoolOnly, setTmMySchoolOnly] = useState(false); // 自校のみ絞り込み
@@ -4849,6 +4850,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       if (p?.linked_player_id) {
         const found = roster.find(r => r.id === p.linked_player_id);
         setLinkedPlayerName(found?.player_name ?? null);
+        setLinkedPlayerId(p.linked_player_id);
       }
       if (p?.school_id) {
         setMySchoolId(p.school_id);
@@ -5093,7 +5095,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (filterStatus === "upcoming" && !isUpcomingTournament(t)) return false;
     if (filterStatus === "finished" && isUpcomingTournament(t)) return false;
     if (!tournamentMatchesDateFilter(t)) return false;
-    if (childOnly && linkedPlayerName && !tournamentAgg[t.name]?.hasLinkedPlayer) return false;
+    // ★選手で絞り込むとき：試合に出ている大会に加えて、大会の「出場選手」に登録されている大会も表示する
+    //   （以前は試合が1つも無い大会＝これからの大会が、出場選手に入っていても消えていた）
+    if (childOnly && linkedPlayerName && !tournamentAgg[t.name]?.hasLinkedPlayer
+        && !(linkedPlayerId && (t.participant_player_ids || []).includes(linkedPlayerId))) return false;
     return true;
   });
 
