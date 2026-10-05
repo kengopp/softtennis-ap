@@ -13258,6 +13258,41 @@ function AnalysisUnitPager({ unit, page, pageCount, title, sub, onUnit, onPage, 
     </div>
   );
 }
+// ★ペア・チーム用：区切りを作る共通処理（個人と同じルール）
+function sortNewestFirst(list) {
+  return (list||[]).map((m,i)=>({ m, i }))
+    .sort((x,y)=> String(y.m.match_date||"").localeCompare(String(x.m.match_date||"")) || (roundProgressRank(y.m.round)-roundProgressRank(x.m.round)) || (y.i - x.i))
+    .map(x=>x.m);
+}
+function buildUnitGroups(newest, unit) {
+  if (unit === "all") return [newest];
+  if (unit === "tour") {
+    const g = [];
+    newest.forEach(m => {
+      const key = (m.tournament_name || "").trim() || "練習試合・大会外";
+      const last = g[g.length-1];
+      if (last && last.key === key) last.list.push(m); else g.push({ key, list:[m] });
+    });
+    return g.slice(0, ANALYSIS_UNIT_MAX_PAGES).map(x => Object.assign(x.list, { tourName: x.key }));
+  }
+  const g = [];
+  for (let i = 0; i < newest.length && g.length < ANALYSIS_UNIT_MAX_PAGES; i += unit) g.push(newest.slice(i, i + unit));
+  if (g.length > 1 && g[g.length-1].length < unit) g.pop();
+  return g;
+}
+function unitLabels(cur, unit, page, isWin, oneLabel) {
+  const title = unit === "tour" ? `${cur.tourName ?? ""}${page===0 ? "（最新）" : ""}`
+    : unit === 1 ? (page===0 ? "最新の試合" : `最新から${page+1}試合目`)
+    : unit === "all" ? "" : (page===0 ? `最新 1〜${unit}試合目` : `最新から ${page*unit+1}〜${page*unit+cur.length}試合目`);
+  if (!cur || cur.length === 0) return { title, sub:"" };
+  const fmtD = (d) => { const x = String(d||"").split("-"); return x.length===3 ? `${Number(x[1])}/${Number(x[2])}` : ""; };
+  const w = cur.filter(isWin).length;
+  const newestD = fmtD(cur[0].match_date), oldestD = fmtD(cur[cur.length-1].match_date);
+  const sub = unit === 1
+    ? `${newestD}${oneLabel ? " "+oneLabel(cur[0]) : ""}（${w ? "勝ち" : "負け"}）`
+    : `${oldestD===newestD ? newestD : oldestD+" 〜 "+newestD}（${cur.length}試合・${w}勝${cur.length-w}敗）`;
+  return { title, sub };
+}
 // ★「前より ±○」の小さな表示（goodUp=true：増えると良い）
 function PrevDiff({ cur, prev, unit="", goodUp=true }) {
   if (prev == null || cur == null) return null;
@@ -13419,7 +13454,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [breakdownDim, setBreakdownDim] = useState("play");
   // ★自分たちのペア：個人分析と同じ「勝敗」「直近◯試合」の絞り込み
   const [pairResult, setPairResult] = useState("all"); // all | win | lose
-  const [pairRecent, setPairRecent] = useState("all"); // all | 1 | 3 | 5 | 10
+  const [pairUnit, setPairUnit] = useState("all");   // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
+  const [pairUnitPage, setPairUnitPage] = useState(0);
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
   const [noteEditing, setNoteEditing] = useState(null); // {id?, text, match_id}
@@ -13565,9 +13601,13 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     ? (selectedOwnPair?.matches ?? [])
     : (selectedOppPair?.matches ?? []).filter(m => oppOwnFilter.size === 0 || oppOwnFilter.has(ownPairOf(m, mySchoolName)?.key));
   // ★自分たちのペアだけ：「直近◯試合」で成績の対象をしぼり、「勝敗」で下の内訳の対象をしぼる
-  const targetMatches = (side === "own" && pairRecent !== "all")
-    ? pairBaseMatches.map((m,i)=>({ m, i })).sort((x,y)=> String(y.m.match_date||"").localeCompare(String(x.m.match_date||"")) || (y.i - x.i)).slice(0, pairRecent).map(x=>x.m)
-    : pairBaseMatches;
+  // ★どの単位で見る？：最新から○試合ずつ／大会ごとに区切った、今の区切りの試合
+  const pairUnitGroups = buildUnitGroups(sortNewestFirst(pairBaseMatches), pairUnit);
+  const pairUnitPageSafe = Math.min(pairUnitPage, Math.max(0, pairUnitGroups.length - 1));
+  const pairUnitCur = pairUnitGroups[pairUnitPageSafe] ?? [];
+  const pairUnitInfo = unitLabels(pairUnitCur, pairUnit, pairUnitPageSafe, m => winnerSideOf(m)==="A",
+    m => { const o = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName); return o ? (o.club || o.label) : ""; });
+  const targetMatches = pairUnit === "all" ? pairBaseMatches : [...pairUnitCur].reverse();
   const detailTargetMatches = (side === "own" && pairResult !== "all")
     ? targetMatches.filter(m => winnerSideOf(m) === (pairResult === "win" ? "A" : "B"))
     : targetMatches;
@@ -13630,7 +13670,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // ★相手分析で自チームのペアを選んで絞り込んだときも、内訳・サーブ・コースなどを読み直す
-  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart, [...oppOwnFilter].sort().join("|"), pairRecent, pairResult]);
+  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart, [...oppOwnFilter].sort().join("|"), pairUnit, pairUnitPageSafe, pairResult]);
+  // ★見るペア・期間が変わったら、最新の区切りに戻す
+  useEffect(() => { setPairUnitPage(0); }, [side, ownPairKey, oppPairKey, period]);
 
   const wins = targetMatches.filter(m => winnerSideOf(m)==="A").length;
   const losses = targetMatches.filter(m => winnerSideOf(m)==="B").length;
@@ -13839,9 +13881,15 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                   label={side==="own" ? "自チームのペア" : `相手ペア${selectedOppPair?.club ? "（"+selectedOppPair.club+"）" : ""}`}
                   name={side==="own" ? selectedOwnPair?.label : selectedOppPair.label}
                   onChange={side==="own" ? ()=>setPairPickerOpen(true) : ()=>{ setOppPairKey(""); window.scrollTo(0,0); }}
-                  cond={`${periodCur[1]}・${targetMatches.length}試合`}
+                  cond={`${periodCur[1]}・${pairBaseMatches.length}試合`}
                   condSelect={periodSelect}
                 />
+                {pairBaseMatches.length > 0 && (
+                  <AnalysisUnitPager unit={pairUnit} page={pairUnitPageSafe} pageCount={pairUnitGroups.length}
+                    title={pairUnitInfo.title} sub={pairUnitInfo.sub}
+                    onUnit={k=>{ setPairUnit(k); setPairUnitPage(0); setPairResult("all"); setRecordOpen(false); }}
+                    onPage={p=>{ setPairUnitPage(p); setPairResult("all"); setRecordOpen(false); }} />
+                )}
                 <AnalysisRecordCard total={targetMatches.length} wins={wins} losses={losses}
                   filter={pairResult} onFilter={side==="own" ? setPairResult : undefined}>
                   {side === "opp" && ((oppOwnFilter.size === 0 || oppOwnFilter.size === oppOwnRows.length)
@@ -13870,7 +13918,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                       })}
 
                 </AnalysisMatchListCard>
-                {side === "own" && <AnalysisRecentSegment value={pairRecent} onPick={setPairRecent} />}
+
 
                 {/* ★この相手と当たった自チームのペア（押すと、そのペアとの試合だけに絞る。複数選べる） */}
                 {side === "opp" && selectedOppPair && oppOwnRows.length > 0 && (
@@ -15397,6 +15445,8 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [trendOpen, setTrendOpen] = useState(false); // 月別の勝率推移（折りたたみ）
   const [scoreOpen, setScoreOpen] = useState(false); // 得点・ミス（折りたたみ）
   const [filterOpen, setFilterOpen] = useState(false);
+  const [teamUnit, setTeamUnit] = useState("all");  // ★どの単位で見る？
+  const [teamUnitPage, setTeamUnitPage] = useState(0);
 
   // ②見る内容タブ：players(選手別) | pairs(ペア別) | opponents(対戦別)
   // ★自チーム／対戦チームの2分割。既存の「選手別・ペア別・対戦別」をこの2つに振り分ける
@@ -15507,7 +15557,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   ), [allMatches, deletedTournamentNameSet]);
 
   // ①カテゴリ・期間による絞り込み
-  const finished = useMemo(() => {
+  const finishedAll = useMemo(() => {
     let categoryMatches;
     if (statsCat === "tournament") categoryMatches = allMatches.filter(m => m.tournament_name && !deletedTournamentNameSet.has(m.tournament_name));
     else if (statsCat === "team") categoryMatches = allMatches.filter(m => teamMatchIds.has(m.id));
@@ -15524,6 +15574,14 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
       : categoryMatches;
     return periodMatches.filter(countsAsFinished);
   }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period, seasonStart]);
+  // ★どの単位で見る？：最新から○試合ずつ／大会ごとに区切り、選んだ区切りの試合だけで下を集計する
+  const teamUnitGroups = useMemo(() => buildUnitGroups(sortNewestFirst(finishedAll), teamUnit), [finishedAll, teamUnit]);
+  const teamUnitPageSafe = Math.min(teamUnitPage, Math.max(0, teamUnitGroups.length - 1));
+  const finished = useMemo(() => teamUnit === "all" ? finishedAll : [...(teamUnitGroups[teamUnitPageSafe] ?? [])].reverse(),
+    [finishedAll, teamUnit, teamUnitGroups, teamUnitPageSafe]);
+  const teamUnitInfo = unitLabels(teamUnitGroups[teamUnitPageSafe] ?? [], teamUnit, teamUnitPageSafe, m => winnerSideOf(m)==="A",
+    m => m.players.find(p=>p.team==="B")?.club_name || "");
+  useEffect(() => { setTeamUnitPage(0); }, [finishedAll]);
 
   const teamRecord = useMemo(() => recordOf(finished, m=>winnerSideOf(m)==="A"), [finished]);
 
@@ -15754,6 +15812,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                   </div>
                 </div>
               )}
+
+            <AnalysisUnitPager unit={teamUnit} page={teamUnitPageSafe} pageCount={teamUnitGroups.length}
+              title={teamUnitInfo.title} sub={teamUnitInfo.sub}
+              onUnit={k=>{ setTeamUnit(k); setTeamUnitPage(0); }}
+              onPage={p=>setTeamUnitPage(p)} />
 
             {/* 総合成績（チーム全体）。勝ち・負けを押すとその試合の一覧が開く */}
             <AnalysisRecordCard total={teamRecord.total} wins={teamRecord.wins} losses={teamRecord.losses}
