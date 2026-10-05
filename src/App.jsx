@@ -16184,6 +16184,7 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   const [sort, setSort] = useState("rate");
   const [oppTab, setOppTab] = useState("player"); // ★相手別の成績：player(選手別) | pair(ペア別)
   const [oppShowAll, setOppShowAll] = useState(false); // ★最初は5件だけ。「すべて見る」で全部
+  const [oppOpen, setOppOpen] = useState({}); // ★ペア別で開いている相手ペア
   const [mySchoolName, setMySchoolName] = useState("");
   const [detail, setDetail] = useState([]);       // points込みの詳細
   const [detailLoading, setDetailLoading] = useState(false);
@@ -16216,7 +16217,20 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   });
   const oppPlayerRows = Object.entries(byOppPlayer).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
   oppPlayerRows.sort(sortByRecord(sort));
-  const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
+  // ★ペア別の行を開くと「この相手に当たった自チームのペア」の成績を出す（以前の「相性」カードをここに統合）
+  const ownPairsAgainst = (list) => {
+    const by = {};
+    list.forEach(mm => {
+      const mine = pairOnSide(mm, "A");
+      if (!mine) return;
+      const o = (by[mine.key] ??= { label:mine.label, list:[] });
+      o.list.push(mm);
+    });
+    return Object.values(by)
+      .map(o => ({ label:o.label, ...recordOf(o.list, x=>winnerSideOf(x)==="A") }))
+      .sort((a,b)=> b.total-a.total || b.rate-a.rate);
+  };
+  const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A"), own: ownPairsAgainst(list) }));
   oppPairRows.sort(sortByRecord(sort));
 
   const allFinishedForTrend = matches.filter(m => countsAsFinished(m) && oppOf(m)===schoolName);
@@ -16331,8 +16345,13 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                       </div>
                       {shown.map(r => {
                         const rateColor = r.rate >= 50 ? C.accent : C.red;
+                        const canOpen = oppTab==="pair" && (r.own?.length ?? 0) > 0;
+                        const isOpen = canOpen && !!oppOpen[r.name];
                         return (
-                          <div key={r.name} style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) 64px auto 44px", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid ${C.border}` }}>
+                          <Fragment key={r.name}>
+                          <div onClick={canOpen ? ()=>setOppOpen(o=>({ ...o, [r.name]: !o[r.name] })) : undefined}
+                            style={{ display:"grid", gridTemplateColumns: canOpen ? "minmax(0,1fr) 60px auto 42px 14px" : "minmax(0,1fr) 64px auto 44px", alignItems:"center", gap:8, padding:"9px 4px", borderBottom:`1px solid ${C.border}`,
+                              background: isOpen ? "#f6f8fc" : "transparent", cursor: canOpen ? "pointer" : "default" }}>
                             <div style={{ minWidth:0 }}>
                               <div style={{ fontSize:14.5, fontWeight:700, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{r.name}</div>
                               <div style={{ fontSize:12, color:"#8a92a0", fontWeight:600 }}>{r.total}試合</div>
@@ -16343,7 +16362,24 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                             </div>
                             <div style={{ fontSize:13.5, fontWeight:700, color:"#3d4457", whiteSpace:"nowrap", textAlign:"right" }}>{r.wins}勝{r.losses}敗</div>
                             <div style={{ fontSize:15, fontWeight:900, color:rateColor, textAlign:"right" }}>{r.rate}%</div>
+                            {canOpen && <div style={{ fontSize:11, color:"#8a92a0", textAlign:"right" }}>{isOpen ? "▲" : "▼"}</div>}
                           </div>
+                          {isOpen && (
+                            <div style={{ background:C.gray, borderRadius:10, padding:"8px 10px", margin:"4px 0 8px" }}>
+                              <div style={{ fontSize:12.5, fontWeight:800, color:"#5a6478", marginBottom:2 }}>この相手に当たった自チームのペア</div>
+                              {r.own.map((o, oi) => (
+                                <div key={o.label} style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) auto 44px", gap:8, alignItems:"center", padding:"7px 0", borderBottom: oi < r.own.length-1 ? "1px solid #e3e7ee" : "none" }}>
+                                  <div style={{ minWidth:0 }}>
+                                    <div style={{ fontSize:14, fontWeight:700, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{o.label}</div>
+                                    <div style={{ fontSize:12, color:"#8a92a0", fontWeight:600 }}>{o.total}試合</div>
+                                  </div>
+                                  <div style={{ fontSize:13.5, fontWeight:700, color:"#3d4457", whiteSpace:"nowrap" }}>{o.wins}勝{o.losses}敗</div>
+                                  <div style={{ fontSize:15, fontWeight:900, color: o.rate >= 50 ? C.accent : C.red, textAlign:"right" }}>{o.rate}%</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          </Fragment>
                         );
                       })}
                       {list.length > 5 && (
@@ -16392,33 +16428,6 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
                     </div>
                   );
                 })()}
-
-                {/* ★相性：相手ペアごとに、自チームの誰が当たって何勝何敗か */}
-                {compatRows.length > 0 && (
-                  <>
-                    <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:4 }}>🤝 相性</div>
-                    <div style={{ fontSize:12.5, color:C.textSec, marginBottom:8, lineHeight:1.7 }}>
-                      相手ペアごとに、自チームの誰が当たって何勝何敗かが分かります
-                    </div>
-                    {compatRows.map(r => (
-                      <div key={r.label} style={{ ...S.card, padding:"12px 13px", marginBottom:8 }}>
-                        <div style={{ fontSize:14.5, fontWeight:800, color:C.text, marginBottom:8 }}>
-                          <span style={{ fontSize:13, fontWeight:900, color:C.teamB, marginRight:4 }}>vs</span>{r.label}　<span style={{ fontSize:13, fontWeight:700, color:C.textSec }}>{r.w}勝{r.l}敗</span>
-                        </div>
-                        {r.own.map(o => (
-                          <div key={o.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
-                            background:C.gray, borderRadius:9, padding:"10px 11px", marginBottom:6 }}>
-                            <div>
-                              <div style={{ fontSize:14, fontWeight:800, color:C.text }}>{o.label}</div>
-                              <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{o.w+o.l}試合</div>
-                            </div>
-                            <div style={{ fontSize:14, fontWeight:900, color:C.text }}>{o.w}勝{o.l}敗</div>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </>
-                )}
 
                 <div style={{ fontSize:13,fontWeight:700,color:C.navy,marginBottom:8 }}>試合一覧</div>
                 {vsMatches.map(m=>{
