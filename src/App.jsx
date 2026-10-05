@@ -13454,7 +13454,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [breakdownDim, setBreakdownDim] = useState("play");
   // ★自分たちのペア：個人分析と同じ「勝敗」「直近◯試合」の絞り込み
   const [pairResult, setPairResult] = useState("all"); // all | win | lose
-  const [pairUnit, setPairUnit] = useState("all");   // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
+  const [pairUnit, setPairUnit] = useState("tour");   // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
   const [pairUnitPage, setPairUnitPage] = useState(0);
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
@@ -14282,7 +14282,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const [calMonthViewYear, setCalMonthViewYear] = useState(new Date().getFullYear());
 
   const [resultMatchesAll, setResultMatches] = useState([]); // 詳細データ込みの試合（分析対象・条件で絞った全部）
-  const [unitSize, setUnitSize] = useState("all"); // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
+  const [unitSize, setUnitSize] = useState("tour"); // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
   const [unitPage, setUnitPage] = useState(0);     // ★何区切り目か（0＝最新）
   const [resultLoading, setResultLoading] = useState(false);
   const [resultCondLabel, setResultCondLabel] = useState("");
@@ -15445,7 +15445,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [trendOpen, setTrendOpen] = useState(false); // 月別の勝率推移（折りたたみ）
   const [scoreOpen, setScoreOpen] = useState(false); // 得点・ミス（折りたたみ）
   const [filterOpen, setFilterOpen] = useState(false);
-  const [teamUnit, setTeamUnit] = useState("all");  // ★どの単位で見る？
+  const [teamUnit, setTeamUnit] = useState("tour");  // ★どの単位で見る？
   const [teamUnitPage, setTeamUnitPage] = useState(0);
 
   // ②見る内容タブ：players(選手別) | pairs(ペア別) | opponents(対戦別)
