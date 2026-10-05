@@ -13153,6 +13153,92 @@ function AnalysisTabs({ current, onPersonal, onPair, onTeam }) {
     </div>
   );
 }
+// ============================================================
+// ★分析（個人・ペア・チーム）の上部をそろえる共通部品
+//   ①対象カード（紺→青のグラデーション）②戦績カード ③集計している試合の一覧 ④直近の試合数
+// ============================================================
+const ANALYSIS_TARGET_BG = "linear-gradient(135deg,#1b2a4e,#3a6fc4)";
+const analysisChip = { position:"relative", fontSize:13.5, fontWeight:800, background:"rgba(255,255,255,0.18)", color:"#fff", borderRadius:8, padding:"6px 11px", whiteSpace:"nowrap", border:"none", cursor:"pointer", flexShrink:0 };
+function AnalysisTargetCard({ label, name, onChange, cond, onCond, condSelect, children }) {
+  return (
+    <div style={{ background:ANALYSIS_TARGET_BG, color:"#fff", borderRadius:14, padding:"13px 14px", marginBottom:12 }}>
+      <div style={{ fontSize:12.5, fontWeight:700, color:"#dce8ff" }}>{label}</div>
+      <div style={{ display:"flex", alignItems:"center", gap:10, margin:"2px 0 9px" }}>
+        <div style={{ flex:1, minWidth:0, fontSize:22, fontWeight:900, lineHeight:1.3, wordBreak:"break-word" }}>{name}</div>
+        {onChange && <button onClick={onChange} style={analysisChip}>変更 ›</button>}
+      </div>
+      {children}
+      <div style={{ display:"flex", alignItems:"center", gap:10, borderTop:"1px solid rgba(255,255,255,0.25)", paddingTop:9 }}>
+        <div style={{ flex:1, minWidth:0, fontSize:13.5, fontWeight:700, color:"#eef3ff" }}>🗓 {cond}</div>
+        {condSelect
+          ? <div style={analysisChip}>条件 ›{condSelect}</div>
+          : onCond && <button onClick={onCond} style={analysisChip}>条件 ›</button>}
+      </div>
+    </div>
+  );
+}
+// ★戦績カード：試合数・勝率・○勝○敗と、「すべて／勝ち／負け」の切り替え
+function AnalysisRecordCard({ total, wins, losses, filter, onFilter, children }) {
+  const rate = total > 0 ? Math.round(wins / total * 100) : 0;
+  return (
+    <div style={{ ...S.card, padding:"13px 14px", marginBottom:12 }}>
+      <div style={{ fontSize:13.5, fontWeight:800, color:C.navy, marginBottom:8 }}>🏅 戦績</div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1.35fr", textAlign:"center" }}>
+        <div><div style={{ fontSize:24, fontWeight:800 }}>{total}</div><div style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginTop:2 }}>試合数</div></div>
+        <div><div style={{ fontSize:24, fontWeight:800, color:C.accent }}>{rate}%</div><div style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginTop:2 }}>勝率</div></div>
+        <div><div style={{ fontSize:24, fontWeight:800 }}><WinLossText wins={wins} losses={losses} /></div><div style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginTop:2 }}>戦績</div></div>
+      </div>
+      {onFilter && (
+        <div style={{ display:"flex", gap:6, marginTop:12 }}>
+          {[["all",`すべて（${total}）`],["win",`○ 勝ち（${wins}）`],["lose",`× 負け（${losses}）`]].map(([key,lbl]) => {
+            const active = filter === key;
+            const fg = key==="win" ? C.accent : key==="lose" ? C.red : C.navy;
+            const bg = key==="win" ? C.accentL : key==="lose" ? C.redL : C.navy;
+            return (
+              <button key={key} onClick={()=>onFilter(key)}
+                style={{ flex:1, padding:"10px 2px", borderRadius:9, fontSize:13, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap",
+                  border:`1px solid ${active ? fg : C.border}`, background: active ? bg : "#fff", color: active ? (key==="all" ? "#fff" : fg) : fg }}>{lbl}</button>
+            );
+          })}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+// ★集計している試合の一覧（タップで開閉）
+function AnalysisMatchListCard({ title="集計している試合の一覧", open, onToggle, children, arrow }) {
+  return (
+    <div style={{ ...S.card, marginBottom:12 }}>
+      <button onClick={onToggle}
+        style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background:"none", border:"none", cursor:"pointer", padding:"13px 14px" }}>
+        <span style={{ fontSize:14, fontWeight:800, color:C.navy }}>📋 {title}</span>
+        {arrow ? <span style={{ fontSize:16, color:C.textSec }}>{arrow}</span>
+               : <span style={{ fontSize:12, color:C.textSec, transform:open?"rotate(180deg)":"none", transition:"transform .15s" }}>▼</span>}
+      </button>
+      {open && <div style={{ padding:"0 14px 12px" }}>{children}</div>}
+    </div>
+  );
+}
+// ★直近の試合数（1・3・5・10・全部）
+function AnalysisRecentSegment({ value, onPick, disabled }) {
+  return (
+    <div style={{ marginBottom:12 }}>
+      <div style={{ fontSize:12.5, fontWeight:800, color:"#5a6478", margin:"0 2px 5px" }}>直近の試合数</div>
+      <div style={{ display:"flex", background:"#e6e9ef", borderRadius:11, padding:4, gap:4 }}>
+        {[[1,"1"],[3,"3"],[5,"5"],[10,"10"],["all","全部"]].map(([n,l]) => {
+          const on = value === n;
+          return (
+            <button key={n} disabled={disabled} onClick={()=>onPick(n)}
+              style={{ flex:1, padding:"8px 2px", fontSize:14, fontWeight:on?800:700, borderRadius:8, border:"none", cursor:disabled?"default":"pointer",
+                background: on ? C.navy : "transparent", color: on ? "#fff" : "#5a6478" }}>{l}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ★期間の切り替え（「期間 ▾」のボタン。押すとスマホのいつもの選択画面が開く）
 function PeriodPicker({ period, setPeriod, seasonLabel }) {
   const opts = [...(seasonLabel ? [["season", `📌 ${seasonLabel}以降`]] : []), ["month1","直近1ヶ月"], ["all","全期間"]];
@@ -13550,6 +13636,15 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     return { firstWon, firstLost, finalGame, straight };
   }, [detailMatches, side]);
 
+  // ★期間：対象カードの「条件 ›」から、スマホのいつもの選択画面で選ぶ
+  const periodOpts = [...(seasonStart ? [["season", `📌 ${seasonLabel}以降`]] : []), ["month1","直近1ヶ月"], ["all","全期間"]];
+  const periodCur = periodOpts.find(o => o[0] === period) || periodOpts[periodOpts.length-1];
+  const periodSelect = (
+    <select aria-label="期間" value={periodCur[0]} onChange={e=>setPeriod(e.target.value)}
+      style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, cursor:"pointer", fontSize:16 }}>
+      {periodOpts.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+    </select>
+  );
   const SplitBar = ({ pull, nagashi, total }) => (
     <>
       <div style={{ display:"flex", height:26, borderRadius:7, overflow:"hidden", background:"#eef0f3" }}>
@@ -13600,17 +13695,14 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
         )}
         <AnalysisTabs current="pair" onPersonal={()=>onOpenPersonal && onOpenPersonal()} onTeam={()=>onOpenTeamStats && onOpenTeamStats()} />
 
-        {/* ★「自分たち／相手分析」の切り替えと期間を1行にまとめる */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
-          <div style={{ display:"flex", flex:1, minWidth:0, border:`2px solid ${C.navy}`, borderRadius:10, overflow:"hidden" }}>
-            {[["own","自分たち"],["opp","相手分析"]].map(([k,l])=>(
-              <div key={k} onClick={()=>{ setSide(k); setOppPairKey(""); }}
-                style={{ flex:1, textAlign:"center", padding:"9px 2px", fontSize:14, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap",
-                  background: side===k ? C.navy : C.white, color: side===k ? C.white : C.navy }}
-              >{l}</div>
-            ))}
-          </div>
-          <PeriodPicker period={period} setPeriod={setPeriod} seasonLabel={seasonStart ? seasonLabel : null} />
+        {/* ★「自分たち／相手分析」の切り替え（期間は下の対象カードの「条件 ›」で変える） */}
+        <div style={{ display:"flex", background:"#e6e9ef", borderRadius:11, padding:4, gap:4, marginBottom:12 }}>
+          {[["own","自分たち"],["opp","相手分析"]].map(([k,l])=>(
+            <div key={k} onClick={()=>{ setSide(k); setOppPairKey(""); }}
+              style={{ flex:1, textAlign:"center", padding:"8px 2px", fontSize:14, fontWeight:800, borderRadius:8, cursor:"pointer", whiteSpace:"nowrap",
+                background: side===k ? C.navy : "transparent", color: side===k ? C.white : "#5a6478" }}
+            >{l}</div>
+          ))}
         </div>
 
         {loading ? (
@@ -13639,6 +13731,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
               const wlColor = (w,l) => w > l ? C.accent : w < l ? C.teamB : C.textSec;
               return (
                 <>
+                  <AnalysisTargetCard label="相手分析" name="対戦した相手ペア" cond={periodCur[1]} condSelect={periodSelect} />
                   <div style={{ display:"flex", alignItems:"center", gap:6, background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"0 11px", marginBottom:4 }}>
                     <span style={{ fontSize:14 }}>🔍</span>
                     <input value={oppQuery} onChange={e=>setOppQuery(e.target.value)} placeholder="学校名・選手名で探す"
@@ -13696,59 +13789,23 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                   <div onClick={()=>{ setOppPairKey(""); window.scrollTo(0,0); }} style={{ fontSize:13.5, fontWeight:700, color:C.navy, marginBottom:10, cursor:"pointer" }}>← 相手ペアの一覧に戻る</div>
                 )}
 
-                <div onClick={side==="own" ? undefined : ()=>setRecordOpen(v=>!v)} style={{ ...S.card, padding:14, marginBottom:12, cursor: side==="own" ? "default" : "pointer" }}>
-                  {side === "own" ? (() => {
-                    const recent = [...targetMatches].sort((a,b)=> String(b.match_date||"").localeCompare(String(a.match_date||"")) || (roundProgressRank(b.round)-roundProgressRank(a.round))).slice(0,5);
-                    return (
-                      <>
-                        <div style={{ fontSize:12, fontWeight:800, color:C.textSec, marginBottom:3 }}>自チームのペア</div>
-                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                          <div style={{ flex:1, minWidth:0, fontSize:19, fontWeight:900, color:C.text }}>{selectedOwnPair?.label}</div>
-                          <button onClick={()=>setPairPickerOpen(true)}
-                            style={{ flexShrink:0, fontSize:13, fontWeight:800, color:C.navy, background:"#eceff4", border:"none", borderRadius:16, padding:"7px 12px", whiteSpace:"nowrap", cursor:"pointer" }}>変更 ▾</button>
-                        </div>
-                        <div style={{ display:"flex", alignItems:"baseline", gap:8, marginTop:6 }}>
-                          <span style={{ fontSize:28, fontWeight:900, color:C.text }}><WinLossText wins={wins} losses={losses} /></span>
-                          <span style={{ fontSize:13.5, color:C.textSec, fontWeight:700 }}>
-                            {targetMatches.length}試合{targetMatches.length>0 && `・勝率${Math.round(wins/targetMatches.length*100)}%`}
-                          </span>
-                        </div>
-                        <div style={{ display:"flex", alignItems:"center", gap:4, marginTop:8 }}>
-                          {recent.map(m => { const w = winnerSideOf(m)==="A"; return (
-                            <span key={m.id} style={{ width:22, height:22, borderRadius:"50%", background: w ? C.accent : C.red, color:C.white, fontSize:11, fontWeight:800, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{w?"勝":"敗"}</span>
-                          ); })}
-                          {recent.length > 0 && <span style={{ fontSize:11.5, color:C.textSec, fontWeight:700, marginLeft:4 }}>直近{recent.length}試合</span>}
-                          <span onClick={()=>setRecordOpen(v=>!v)} style={{ marginLeft:"auto", fontSize:13, fontWeight:800, color:C.navy, cursor:"pointer", padding:"4px 0 4px 8px", whiteSpace:"nowrap" }}>試合一覧 {recordOpen?"▴":"▾"}</span>
-                        </div>
-                      </>
-                    );
-                  })() : (
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div>
-                      {side === "opp" && <div style={{ fontSize:12.5, color:C.textSec, fontWeight:700 }}>{selectedOppPair.club}</div>}
-                      <div style={{ fontSize:19, fontWeight:900, color:C.text, margin:"2px 0 6px" }}>
-                        {side === "own" ? selectedOwnPair?.label : selectedOppPair.label}
-                      </div>
-                      <div>
-                        <span style={{ fontSize:24, fontWeight:900, color:C.text }}>{wins}</span><span style={{ fontSize:14, color:C.textSec }}>勝</span>
-                        <span style={{ fontSize:24, fontWeight:900, color:C.text, marginLeft:4 }}>{losses}</span><span style={{ fontSize:14, color:C.textSec }}>敗</span>
-                        <span style={{ fontSize:13.5, color:C.textSec, marginLeft:8 }}>
-                          {targetMatches.length}試合{targetMatches.length>0 && `・勝率${Math.round(wins/targetMatches.length*100)}%`}
-                        </span>
-                      </div>
-                      {side === "opp" && ((oppOwnFilter.size === 0 || oppOwnFilter.size === oppOwnRows.length)
-                        ? <div style={{ fontSize:11.5, color:C.textSec, fontWeight:700, marginTop:3 }}>自チーム全体での通算</div>
-                        : <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:6, fontSize:11.5, color:"#0b6e75", fontWeight:800, marginTop:4 }}>
-                            <span>{oppOwnFilter.size === 1 ? `${oppOwnRows.find(r=>oppOwnFilter.has(r.key))?.label ?? ""} との対戦だけ表示中` : `${oppOwnFilter.size}ペアとの対戦だけ表示中`}</span>
-                            <span onClick={e=>{ e.stopPropagation(); setOppOwnFilter(new Set()); }} style={{ background:"#e3f3f3", borderRadius:10, padding:"2px 9px", cursor:"pointer", whiteSpace:"nowrap" }}>全体に戻す</span>
-                          </div>)}
-                    </div>
-                    <div style={{ color:C.textSec, fontSize:15 }}>{recordOpen?"▲":"▼"}</div>
-                  </div>
-                  )}
-
-                  {recordOpen && (
-                    <div style={{ marginTop:12, borderTop:`1px solid ${C.border}`, paddingTop:10 }}>
+                <AnalysisTargetCard
+                  label={side==="own" ? "自チームのペア" : `相手ペア${selectedOppPair?.club ? "（"+selectedOppPair.club+"）" : ""}`}
+                  name={side==="own" ? selectedOwnPair?.label : selectedOppPair.label}
+                  onChange={side==="own" ? ()=>setPairPickerOpen(true) : ()=>{ setOppPairKey(""); window.scrollTo(0,0); }}
+                  cond={`${periodCur[1]}・${targetMatches.length}試合`}
+                  condSelect={periodSelect}
+                />
+                <AnalysisRecordCard total={targetMatches.length} wins={wins} losses={losses}
+                  filter={pairResult} onFilter={side==="own" ? setPairResult : undefined}>
+                  {side === "opp" && ((oppOwnFilter.size === 0 || oppOwnFilter.size === oppOwnRows.length)
+                    ? <div style={{ fontSize:12.5, color:C.textSec, fontWeight:700, marginTop:10, textAlign:"center" }}>自チーム全体での通算</div>
+                    : <div style={{ display:"flex", alignItems:"center", justifyContent:"center", flexWrap:"wrap", gap:6, fontSize:12.5, color:"#0b6e75", fontWeight:800, marginTop:10 }}>
+                        <span>{oppOwnFilter.size === 1 ? `${oppOwnRows.find(r=>oppOwnFilter.has(r.key))?.label ?? ""} との対戦だけ表示中` : `${oppOwnFilter.size}ペアとの対戦だけ表示中`}</span>
+                        <span onClick={()=>setOppOwnFilter(new Set())} style={{ background:"#e3f3f3", borderRadius:10, padding:"2px 9px", cursor:"pointer", whiteSpace:"nowrap" }}>全体に戻す</span>
+                      </div>)}
+                </AnalysisRecordCard>
+                <AnalysisMatchListCard open={recordOpen} onToggle={()=>setRecordOpen(v=>!v)}>
                       {[...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
                         const win = winnerSideOf(m)==="A";
                         const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
@@ -13765,9 +13822,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                           </div>
                         );
                       })}
-                    </div>
-                  )}
-                </div>
+
+                </AnalysisMatchListCard>
+                {side === "own" && <AnalysisRecentSegment value={pairRecent} onPick={setPairRecent} />}
 
                 {/* ★この相手と当たった自チームのペア（押すと、そのペアとの試合だけに絞る。複数選べる） */}
                 {side === "opp" && selectedOppPair && oppOwnRows.length > 0 && (
@@ -13913,39 +13970,6 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                     </div>
                   </div>
                 )}
-
-                {/* ★自分たちのペア：勝敗・直近◯試合の絞り込み（個人分析と同じ） */}
-                {side === "own" && selectedOwnPair && pairBaseMatches.length > 0 && (() => {
-                  const wN = targetMatches.filter(m => winnerSideOf(m)==="A").length;
-                  const lN = targetMatches.filter(m => winnerSideOf(m)==="B").length;
-                  return (
-                    <div style={{ marginBottom:12 }}>
-                      <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-                        {[["all",`すべて（${targetMatches.length}）`],["win",`○ 勝った試合（${wN}）`],["lose",`× 負けた試合（${lN}）`]].map(([key,label])=>{
-                          const active = pairResult===key;
-                          const activeColor = key==="win" ? C.accent : key==="lose" ? C.red : C.navy;
-                          const activeBg = key==="win" ? C.accentL : key==="lose" ? C.redL : C.navy;
-                          return (
-                            <button key={key} onClick={()=>setPairResult(key)}
-                              style={{ flex:1, padding:"12px 4px", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
-                                border:`1px solid ${active?activeColor:C.border}`, background:active?activeBg:"#fff", color:active?(key==="all"?"#fff":activeColor):C.textSec }}>{label}</button>
-                          );
-                        })}
-                      </div>
-                      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:6 }}>ペアはそのままで試合数だけ変える</div>
-                      <div style={{ display:"flex", gap:6 }}>
-                        {[[1,"直近1試合"],[3,"直近3試合"],[5,"直近5試合"],[10,"直近10試合"],["all","全部"]].map(([n,l]) => {
-                          const active = pairRecent === n;
-                          return (
-                            <button key={n} onClick={()=>setPairRecent(n)}
-                              style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:"pointer",
-                                border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}>{l}</button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 {detailLoading ? (
                   <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0" }}>集計中...</div>
@@ -14839,20 +14863,13 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         {/* ★個人／ペア／チームのタブ。ペアは未実装のため準備中の案内を出す */}
         <AnalysisTabs current="personal" onPair={()=>onOpenPairAnalysis && onOpenPairAnalysis()} onTeam={onOpenTeamStats} />
 
-        <div
-          onClick={()=>setMode("scope")}
-          style={{ background:C.navy, color:"#fff", borderRadius:14, padding:14, marginBottom:12, display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer" }}
-        >
-          <div>
-            <div style={{ fontSize:12.5, color:"#c6cee0", marginBottom:5 }}>{resultCondLabel}</div>
-            <div style={{ fontSize:23, fontWeight:900, lineHeight:1.25 }}>{selectedPlayer}</div>
-            <div style={{ fontSize:14, color:"#d5dbe8", fontWeight:700, marginTop:3 }}>
-              {resultMatches.length}試合
-              {resultMatches.length>0 && `（${(resultMatches[0].match_date||"").replace(/-/g,"/")} 〜 ${(resultMatches[resultMatches.length-1].match_date||"").replace(/-/g,"/")}）`}
-            </div>
-          </div>
-          <div style={{ fontSize:13, fontWeight:700, color:"#c6cee0", display:"flex", alignItems:"center", gap:3, flexShrink:0, marginLeft:10 }}>🔧 変更 ›</div>
-        </div>
+        <AnalysisTargetCard
+          label="選手"
+          name={selectedPlayer}
+          onChange={()=>setMode("wizardPlayer")}
+          cond={`${resultCondLabel}・${resultMatches.length}試合`}
+          onCond={()=>setMode("scope")}
+        />
 
         {resultCapped > 0 && (
           <div style={{ background:"#fff4e5", border:"1px solid #f5c979", borderRadius:10, padding:12, fontSize:13, fontWeight:700, color:"#8a5a00", lineHeight:1.7, marginBottom:12 }}>
@@ -14861,141 +14878,16 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           </div>
         )}
 
-        {/* ★戦績カード（勝敗の○×一覧） */}
+        {/* ★戦績カード（試合数・勝率・戦績と、勝敗の切り替え） */}
         {resultMatches.length>0 && (
-          <div style={S.card}>
-            <div style={{ padding:14 }}>
-              <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:10 }}>🏅 戦績</div>
-              <div>
-                <span style={{ fontSize:24, fontWeight:900, color:C.text }}>{wonMatches.length}</span>
-                <span style={{ fontSize:14, color:C.textSec }}>勝</span>
-                <span style={{ fontSize:24, fontWeight:900, color:C.text, marginLeft:4 }}>{lostMatches.length}</span>
-                <span style={{ fontSize:14, color:C.textSec }}>敗</span>
-              </div>
-              <div style={{ fontSize:13, color:C.textSec, marginTop:2 }}>勝率{resultMatches.length>0?Math.round(wonMatches.length/resultMatches.length*100):0}%（{resultCondLabel}）</div>
-              <div style={{ display:"flex", gap:10, marginTop:10, flexWrap:"wrap" }}>
-                {resultMatches.map(m=>{
-                  const w = winForPlayer(m, selectedPlayer, effectiveSchoolName);
-                  return <span key={m.id} style={{ fontSize:20, fontWeight:900, color:C.text, lineHeight:1 }}>{w?"○":"×"}</span>;
-                })}
-              </div>
-            </div>
-          </div>
+          <AnalysisRecordCard total={resultMatches.length} wins={wonMatches.length} losses={lostMatches.length}
+            filter={resultFilter} onFilter={k=>{ setResultFilter(k); setResultListOpen(false); }} />
         )}
 
-        {/* ★勝敗フィルター */}
-        {resultMatches.length>0 && (
-          <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-            {[["all",`すべて（${resultMatches.length}）`],["win",`○ 勝った試合（${wonMatches.length}）`],["lose",`× 負けた試合（${lostMatches.length}）`]].map(([key,label])=>{
-              const active = resultFilter===key;
-              const activeColor = key==="win" ? C.accent : key==="lose" ? C.red : C.navy;
-              const activeBg = key==="win" ? C.accentL : key==="lose" ? C.redL : C.navy;
-              return (
-                <button
-                  key={key}
-                  onClick={()=>{ setResultFilter(key); setResultListOpen(false); }}
-                  style={{ flex:1, padding:"12px 4px", borderRadius:10, fontSize:13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap",
-                    border:`1px solid ${active?activeColor:C.border}`,
-                    background:active?activeBg:"#fff",
-                    color:active?(key==="all"?"#fff":activeColor):C.textSec }}
-                >{label}</button>
-              );
-            })}
-          </div>
-        )}
-
-        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginBottom:6 }}>選手はそのままで試合数だけ変える</div>
-        <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-          {[1,3,5,10].map(n => {
-            const active = scope.limit === n && (scope.pickedIds??[]).length===0;
-            return (
-              <button
-                key={n}
-                disabled={resultLoading}
-                onClick={()=>{
-                  // ★シートを開かずに試合数だけ変えるショートカット。条件（scope）も合わせて更新する
-                  const next = { ...scope, limit:n, pickedIds:[] };
-                  setScope(next);
-                  const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
-                  loadResults(list, scopeShortLabel(next, seasonLabel), capped);
-                }}
-                style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
-                  border:`1px solid ${active?C.navy:C.border}`, background:active?C.navy:"#fff", color:active?"#fff":C.textSec }}
-              >直近{n}試合</button>
-            );
-          })}
-          <button
-            disabled={resultLoading}
-            onClick={()=>{
-              const next = { ...scope, limit:0, pickedIds:[] };
-              setScope(next);
-              const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
-              loadResults(list, scopeShortLabel(next, seasonLabel), capped);
-            }}
-            style={{ flex:1, padding:"9px 4px", borderRadius:9, fontSize:12, fontWeight:700, cursor:resultLoading?"default":"pointer",
-              border:`1px solid ${!scope.limit?C.navy:C.border}`, background:!scope.limit?C.navy:"#fff", color:!scope.limit?"#fff":C.textSec }}
-          >全部</button>
-        </div>
-
-
-        {/* ★どの試合を集計しているのかを、切り替えボタンのすぐ下で確認できるようにする。
-              以前は上の条件バーまで戻らないと分からず、絞り込むたびに往復が必要だった。 */}
         {!resultLoading && resultMatches.length>0 && (
-          <div style={{ background:C.white, border:`1.5px solid ${C.accent}`, borderRadius:12, padding:"11px 13px", marginBottom:12 }}>
-            <div style={{ fontSize:13, fontWeight:800, color:C.accent, marginBottom:7 }}>✓ いま集計している試合（{resultMatches.length}件）</div>
-            {newestFirst(resultMatches)
-              .slice(0,3)
-              .map((m,i,arr)=>{
-                const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
-                const oppTeam = team==="A" ? "B" : "A";
-                const oppNames = m.players.filter(p=>p.team===oppTeam).map(p=>p.player_name).join("/");
-                const myScore = team==="A" ? m.match_score_a : m.match_score_b;
-                const oppScore = team==="A" ? m.match_score_b : m.match_score_a;
-                const win = winForPlayer(m, selectedPlayer, effectiveSchoolName);
-                return (
-                  <div
-                    key={m.id}
-                    onClick={()=>onOpenMatch && onOpenMatch(m.id)}
-                    style={{ display:"flex", alignItems:"center", gap:8, fontSize:13.5, padding:"6px 0",
-                      borderBottom: i===arr.length-1 ? "none" : "1px solid #f2f4f8", cursor:"pointer" }}
-                  >
-                    <span style={{ color:C.textSec, fontSize:13, width:38, flexShrink:0 }}>{(m.match_date||"").slice(5).replace("-","/")}</span>
-                    <span style={{ flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {m.round ? m.round+"・" : ""}{oppNames || "相手未登録"}
-                    </span>
-                    <span style={{ fontWeight:800, fontSize:13, borderRadius:20, padding:"2px 8px", whiteSpace:"nowrap",
-                      color:win?C.accent:C.red, background:win?C.accentL:C.redL }}>{win?"○":"●"} {myScore}-{oppScore}</span>
-                  </div>
-                );
-              })}
-            {resultMatches.length > 3 && (
-              <div style={{ fontSize:13, color:C.textSec, marginTop:6 }}>
-                ほか{resultMatches.length - 3}試合（下の「試合の一覧」で確認できます）
-              </div>
-            )}
-          </div>
-        )}
-
-        {resultLoading ? (
-          <div style={{ textAlign:"center", padding:40, color:C.textSec }}>集計中...</div>
-        ) : resultMatches.length===0 ? (
-          <div style={{ ...S.card, padding:24, textAlign:"center", color:C.textSec, fontSize:12.5 }}>対象の試合がありません</div>
-        ) : (
-          <>
-            {/* ★勝敗内訳の一覧（初期は閉じた状態。▼タップで開閉） */}
-            <div style={S.card}>
-              <div style={{ padding:14 }}>
-                <button
-                  onClick={()=>setResultListOpen(v=>!v)}
-                  style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background:"none", border:"none", cursor:"pointer", padding:0 }}
-                >
-                  <span style={{ fontSize:13, fontWeight:800, color:C.navy }}>
-                    {resultFilter==="win" ? "○ 勝った試合の一覧" : resultFilter==="lose" ? "× 負けた試合の一覧" : "すべての試合の一覧"}
-                  </span>
-                  <span style={{ fontSize:12, color:C.textSec, transform:resultListOpen?"rotate(180deg)":"none", transition:"transform .15s" }}>▼</span>
-                </button>
-                {resultListOpen && (
-                  <div style={{ marginTop:10 }}>
+          <AnalysisMatchListCard
+            title={resultFilter==="win" ? "勝った試合の一覧" : resultFilter==="lose" ? "負けた試合の一覧" : "集計している試合の一覧"}
+            open={resultListOpen} onToggle={()=>setResultListOpen(v=>!v)}>
                     {displayedMatches.length===0 ? (
                       <div style={{ fontSize:12, color:C.textSec }}>該当する試合がありません</div>
                     ) : displayedMatchesNewest.map(m=>{
@@ -15025,11 +14917,28 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                         </div>
                       );
                     })}
-                  </div>
-                )}
-              </div>
-            </div>
+                  
+          </AnalysisMatchListCard>
+        )}
 
+        <AnalysisRecentSegment
+          value={(scope.pickedIds??[]).length>0 ? null : (scope.limit && [1,3,5,10].includes(scope.limit) ? scope.limit : (!scope.limit ? "all" : null))}
+          disabled={resultLoading}
+          onPick={n=>{
+            // ★シートを開かずに試合数だけ変えるショートカット。条件（scope）も合わせて更新する
+            const next = { ...scope, limit: n==="all" ? 0 : n, pickedIds:[] };
+            setScope(next);
+            const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+            loadResults(list, scopeShortLabel(next, seasonLabel), capped);
+          }}
+        />
+
+        {resultLoading ? (
+          <div style={{ textAlign:"center", padding:40, color:C.textSec }}>集計中...</div>
+        ) : resultMatches.length===0 ? (
+          <div style={{ ...S.card, padding:24, textAlign:"center", color:C.textSec, fontSize:12.5 }}>対象の試合がありません</div>
+        ) : (
+          <>
             {/* ★サーブ分析（集計）：1st/2nd/DFの本数比率をドーナツ図＋凡例で、それぞれのサーブ時得点率も表示 */}
             {serveStats.total > 0 && (
               <div style={S.card}>
@@ -15676,17 +15585,10 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>集計できる試合がまだありません</div>
         ) : (
           <>
-            {/* 折りたたみ式：①試合対象・期間フィルター */}
-            <div style={{ background:C.white, border:"1px solid "+C.border, borderRadius:12, marginBottom:12, overflow:"hidden" }}>
-              <div
-                style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, padding:"12px 14px", cursor:"pointer" }}
-                onClick={()=>setFilterOpen(v=>!v)}
-              >
-                <span style={{ fontSize:15, fontWeight:800, color:C.text, minWidth:0 }}>{filterSummary}</span>
-                <span style={{ fontSize:13, fontWeight:700, color:C.navy, flexShrink:0 }}>{filterOpen ? "条件 ▲" : "条件 ▼"}</span>
-              </div>
+            {/* ★対象カード（個人・ペアと同じ形）。「条件 ›」で絞り込みの欄を開く */}
+            <AnalysisTargetCard label="チーム" name={mySchoolName || "自チーム"} cond={filterSummary} onCond={()=>setFilterOpen(v=>!v)} />
               {filterOpen && (
-                <div style={{ padding:"12px 14px 14px", borderTop:"1px solid "+C.border }}>
+                <div style={{ ...S.card, padding:"12px 14px 14px", marginBottom:12 }}>
                   <div style={{ fontSize:13,color:"#5a6478",fontWeight:800,marginBottom:6 }}>試合の種類</div>
                   <div style={{ display:"flex", gap:6, marginBottom:8 }}>
                     {[["all","すべて"],["tournament","大会"],["team","団体戦"],["individual","個人戦"]].map(([v,l])=>(
@@ -15736,37 +15638,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                   </div>
                 </div>
               )}
-            </div>
 
-            {/* 総合成績（チーム全体） */}
-            <div style={{ ...S.card, padding:16, marginBottom:12 }}>
-              <div style={{ fontSize:15,fontWeight:800,color:C.navy,marginBottom:10 }}>総合成績</div>
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1.35fr",textAlign:"center", cursor:"pointer" }} onClick={()=>{ setBreakdownFilter("all"); setShowBreakdown(true); }}>
-                <div>
-                  <div style={{ fontSize:24,fontWeight:800 }}>{teamRecord.total}</div>
-                  <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>試合数</div>
-                </div>
-                <div>
-                  <div style={{ fontSize:24,fontWeight:800,color:C.accent }}>{teamRecord.rate}%</div>
-                  <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>勝率</div>
-                </div>
-                <div>
-                  <div style={{ fontSize:24,fontWeight:800 }}><WinLossText wins={teamRecord.wins} losses={teamRecord.losses} /></div>
-                  <div style={{ fontSize:13,fontWeight:700,color:"#5a6478",marginTop:2 }}>戦績</div>
-                </div>
-              </div>
-              {/* ★ここのボタンで試合一覧を開けるため、「タップして試合一覧を見る ›」の文字は削除 */}
-              <div style={{ display:"flex", gap:6, marginTop:12 }}>
-                {[["all",`すべて（${teamRecord.total}）`,C.navy,C.navy],["win",`○ 勝ち（${teamRecord.wins}）`,C.accent,C.accentL],["lose",`× 負け（${teamRecord.losses}）`,C.red,C.redL]].map(([key,label,fg,bg])=>(
-                  <button
-                    key={key}
-                    onClick={()=>{ setBreakdownFilter(key); setShowBreakdown(true); }}
-                    style={{ flex:1, padding:"10px 2px", borderRadius:9, fontSize:13, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap",
-                      border:`1px solid ${C.border}`, background:key==="all"?"#fff":bg, color:key==="all"?C.navy:fg }}
-                  >{label}</button>
-                ))}
-              </div>
-            </div>
+            {/* 総合成績（チーム全体）。勝ち・負けを押すとその試合の一覧が開く */}
+            <AnalysisRecordCard total={teamRecord.total} wins={teamRecord.wins} losses={teamRecord.losses}
+              filter="" onFilter={k=>{ setBreakdownFilter(k); setShowBreakdown(true); }} />
+            <AnalysisMatchListCard arrow="›" onToggle={()=>{ setBreakdownFilter("all"); setShowBreakdown(true); }} />
             <MonthlyTrendCard finishedMatches={finished} winFn={m=>winnerSideOf(m)==="A"} open={trendOpen} onToggle={()=>setTrendOpen(v=>!v)} />
 
             {/* ★見る内容：3つに統一（相手ペアの一覧はペアタブと同じ内容のため、ペアタブに任せる） */}
