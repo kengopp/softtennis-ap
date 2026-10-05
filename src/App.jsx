@@ -25,7 +25,7 @@ class ErrorBoundary extends Component {
 const GAME_FORMATS = [5, 7, 9];
 // プレイ内容（ショット種別）
 // ★並び順＝記録画面の3列ボタンの並び（2026-10 指定）
-//   サーブ・レシーブ・アタック／トップ打ち・ストローク・シュート／ハイボレー・ボレー・ローボレー／スマッシュ・ロブ・ツイスト
+//   サーブ・レシーブ・アタック／トップ打ち・ストローク・シュート／ハイボレー・ボレー・ローボレー／ポーチボレー・スマッシュ・ロブ／ツイスト
 const PLAY_TYPES = [
   { key: "serve",    label: "サーブ"    },
   { key: "receive",  label: "レシーブ"  },
@@ -36,21 +36,33 @@ const PLAY_TYPES = [
   { key: "high_volley", label: "ハイボレー" },
   { key: "volley",   label: "ボレー"    },
   { key: "low_volley",  label: "ローボレー" },
+  { key: "porch_volley", label: "ポーチボレー" }, // ★2026-10 追加
   { key: "smash",    label: "スマッシュ" },
   { key: "lob",      label: "ロブ"      },
   { key: "drop",     label: "ツイスト"  }, // ★旧「ドロップ」。過去データも同じキーなので表示だけ切り替わる
-  { key: "net_in",   label: "ネットイン" }, // ★2026-10 追加
 ];
+// ★プレーの選択肢から外したもの（過去の記録の表示用）。ネットインは③「この得点は？」の区分に移した
+const RETIRED_PLAY_LABELS = { net_in: "ネットイン" };
 
 // 結果（新規記録時の選択肢：決めた / 相手ミスの2択）
 const RESULT_TYPES = [
   { key: "winner", label: "決めた",   is_winner: true  },
   { key: "error",  label: "相手ミス", is_winner: false },
+  // ★2026-10 追加：ネットイン（運の得点）。is_winner=true で保存し「得点したチームの選手」として扱うが、
+  //   分析では「決めた」にも「相手ミス」にも数えない（決定率の計算から外す）。isNetIn() で判定する。
+  { key: "net_in", label: "ネットイン", is_winner: true },
 ];
 // ラベル・勝敗判定（過去データに残る "ace" も正しく表示できるよう選択肢とは別管理。
 // 「エース」は保護者など初見の利用者に伝わりにくいため、表示上は「決めた」に統一する）
-const RESULT_LABELS    = { winner: "決めた", ace: "決めた", error: "相手ミス" };
-const RESULT_IS_WINNER = { winner: true,        ace: true,    error: false   };
+const RESULT_LABELS    = { winner: "決めた", ace: "決めた", error: "相手ミス", net_in: "ネットイン" };
+const RESULT_IS_WINNER = { winner: true,        ace: true,    error: false,      net_in: true };
+const isNetIn = (resultOrPoint) => (typeof resultOrPoint === "string" ? resultOrPoint : resultOrPoint?.result_type) === "net_in";
+// ★「決めた」本数（ネットインは除く）
+const isAttackWin = (pt) => pt?.is_winner === true && !isNetIn(pt);
+// ★記録一覧の小さなタグ（決め／ミス／ネットイン）
+const resultTagOf = (result) => isNetIn(result)
+  ? { text:"ネットイン", color:"#6a4bb0", background:"#efe9fb" }
+  : isWinnerResult(result) ? { text:"決め", color:"#1565c0", background:"#e3eefb" } : { text:"ミス", color:C.red, background:"#fbe6ea" };
 
 // フォア / バック
 const SIDE_TYPES = [
@@ -98,7 +110,7 @@ const PLAY_OFF_STYLE = { opacity:0.3, pointerEvents:"none" };
 const buildShotKey = (play, result) => play && result ? `${play}_${result}` : play ?? result ?? null;
 
 // ★ダブルフォルトはプレー選択肢には無いが、ミス集計ではサーブを打った選手の「ミスしたプレイ」として数えるため表示名を持たせる
-const getPlayLabel   = (key) => key === "double_fault" ? "ダブルフォルト" : (PLAY_TYPES.find(p => p.key === key)?.label ?? key ?? "—");
+const getPlayLabel   = (key) => key === "double_fault" ? "ダブルフォルト" : (PLAY_TYPES.find(p => p.key === key)?.label ?? RETIRED_PLAY_LABELS[key] ?? key ?? "—");
 // 成功率を5段階の色に変換（90%〜緑／70-89%黄緑／50-69%黄／30-49%橙／〜29%赤）
 const getRateTierColor = (rate) => {
   if (rate>=90) return C.accent;
@@ -3810,6 +3822,8 @@ function calcPlayerStats(match) {
                          : null;
       const playerTeam = inferredTeam ?? teamOf[pt.player_name];
       const r = ensure(playerTeam, pt.player_name);
+      // ★ネットインは運の得点なので「決めた」「ミス」「決定率」には入れず、本数だけ別に数える
+      if (isNetIn(pt)) { r.netIns = (r.netIns ?? 0) + 1; continue; }
       r.total++;
       if (pt.is_winner) r.winners++; else r.errors++;
       if (pt.play_type)   r.plays[pt.play_type]     = (r.plays[pt.play_type]   ?? 0) + 1;
@@ -3898,9 +3912,12 @@ function calcMatchSummary(match) {
   const allPts = match.games.flatMap(g => g.points);
   const totalA = allPts.filter(p=>p.scoring_team==="A").length;
   const totalB = allPts.filter(p=>p.scoring_team==="B").length;
-  const winA   = allPts.filter(p=>p.scoring_team==="A"&&p.is_winner===true).length;
-  const winB   = allPts.filter(p=>p.scoring_team==="B"&&p.is_winner===true).length;
-  const attackA = winA, oppMissA = totalA-winA, selfMissA = totalB-winB, oppAttackA = winB;
+  const winA   = allPts.filter(p=>p.scoring_team==="A"&&isAttackWin(p)).length;
+  const winB   = allPts.filter(p=>p.scoring_team==="B"&&isAttackWin(p)).length;
+  // ★ネットインは「決めた」にも「相手ミス」にも入れない
+  const netInA = allPts.filter(p=>p.scoring_team==="A"&&isNetIn(p)).length;
+  const netInB = allPts.filter(p=>p.scoring_team==="B"&&isNetIn(p)).length;
+  const attackA = winA, oppMissA = totalA-winA-netInA, selfMissA = totalB-winB-netInB, oppAttackA = winB;
   const decisionRate = (attackA+selfMissA)>0 ? Math.round(attackA/(attackA+selfMissA)*100) : null;
 
   const stats = calcPlayerStats(match);
@@ -3988,7 +4005,7 @@ function calcMatchSummary(match) {
   // 得点推移（1ゲーム目）
   const firstGame = match.games[0];
   const timeline = firstGame ? firstGame.points.map(p=>({
-    team:p.scoring_team, isWinner:p.is_winner, player:p.player_name, play:p.play_type,
+    team:p.scoring_team, isWinner:p.is_winner, result:p.result_type, player:p.player_name, play:p.play_type,
   })) : [];
 
   return {
@@ -4443,8 +4460,9 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
 
   function handleSave(){
     const isWin = result ? isWinnerResult(result) : null;
-    // 「決めた」に変更した場合、ミスの種類は保存しない
-    onSave({ scoring_team:team, play_type:play, side_type:side, course_type:course, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
+    // 「決めた」に変更した場合、ミスの種類は保存しない。ネットインはプレー・くわしくを保存しない
+    const ni = isNetIn(result);
+    onSave({ scoring_team:team, play_type: ni ? null : play, side_type: ni ? null : side, course_type: ni ? null : course, miss_type: isMiss ? miss : null, result_type:result, player_name:playerName, is_winner:isWin, fault_count: fault });
   }
 
   // ★記録画面（一画面記録）と同じ見た目・並び：①サーブ ②得点チーム ③決めた/ミスした ④誰が ⑤プレー ⑥よりくわしく
@@ -4459,8 +4477,8 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
     famOf:(t)=> players.filter(p=>p.team===t).map(p=>String(p.name||"").trim().split(/[\s　]+/)[0]).filter(Boolean).join("・"),
   };
   const SEL = "#0b6e75";
-  const kind = result ? (isWinnerResult(result) ? "winner" : "error") : null;
-  const target = kind==="winner" ? team : kind==="error" ? (team==="A"?"B":"A") : null;
+  const kind = result ? (isNetIn(result) ? "net_in" : isWinnerResult(result) ? "winner" : "error") : null;
+  const target = (kind==="winner" || kind==="net_in") ? team : kind==="error" ? (team==="A"?"B":"A") : null;
   const btn = { borderRadius:12, borderWidth:2, borderStyle:"solid", borderColor:C.border, background:C.white, color:C.text, fontWeight:800, cursor:"pointer", textAlign:"center", outline:"none", minWidth:0, WebkitTapHighlightColor:"transparent" };
   const sel = (on, color=SEL) => on ? { background:color, borderColor:color, color:C.white } : { borderColor:C.border };
   const head = (n, text, hint) => (
@@ -4475,6 +4493,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
     setResult(k); setPlayerName(null);
     if (k !== "error") setMiss(null);
     if (k === "error" && play === "serve") setPlay(null);
+    if (k === "net_in") { setPlay(null); setSide(null); setCourse(null); }
   };
   const group = (t) => {
     const off = !!target && target!==t, wide = !!target && target===t, color = U.teamColor(t);
@@ -4544,14 +4563,19 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
             <button onClick={()=>pickKind("error")} style={{ ...btn, ...sel(kind==="error","#d8645c"), flex:1, padding:"10px 4px", fontSize:16 }}>
               ミスした<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{U.teamName(team==="A"?"B":"A")}のミス）</div>
             </button>
+            <button onClick={()=>pickKind("net_in")} style={{ ...btn, ...sel(kind==="net_in"), flex:1, padding:"10px 4px", fontSize:16 }}>
+              ネットイン<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（運の得点）</div>
+            </button>
           </div>
         </div>
 
         <div style={{ marginBottom:12, ...(kind ? {} : { opacity:0.35, pointerEvents:"none" }) }}>
-          {head(4, kind==="error" ? "誰がミスした？" : kind==="winner" ? "誰が決めた？" : "誰が？")}
+          {head(4, kind==="error" ? "誰がミスした？" : kind==="winner" ? "誰が決めた？" : kind==="net_in" ? "誰のネットイン？" : "誰が？")}
           <div style={{ display:"flex", gap:8 }}>{group(U.leftTeam)}{group(U.rightTeam)}</div>
         </div>
 
+        {/* ★ネットインのときは⑤⑥を選べない */}
+        <div style={kind==="net_in" ? { opacity:0.35, pointerEvents:"none" } : undefined}>
         <div style={{ marginBottom:12 }}>
           {head(5, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
@@ -4577,6 +4601,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           <div style={{ display:"flex", gap:8 }}>
             {COURSE_TYPES.map(c => <button key={c.key} onClick={()=>setCourse(course===c.key?null:c.key)} style={{ ...btn, ...sel(course===c.key), flex:1, padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
           </div>
+        </div>
         </div>
 
         <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:8, fontSize:16 }} onClick={handleSave}>{mode==="add"?"追加する":"保存する"}</button>
@@ -17897,7 +17922,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     if(!g || g.points.length===0) return null;
     const lp = g.points[g.points.length-1];
     const who = osDisp(lp.player_name) || (lp.fault_count===2 ? "ダブルフォルト" : "");
-    const parts = [lp.result_type && (isWinnerResult(lp.result_type) ? "決め" : "ミス"), lp.side_type&&getSideLabel(lp.side_type), lp.result_type==="error"&&lp.miss_type&&getMissLabel(lp.miss_type), lp.course_type&&getCourseLabel(lp.course_type)].filter(Boolean);
+    const parts = [lp.result_type && resultTagOf(lp.result_type).text, lp.side_type&&getSideLabel(lp.side_type), lp.result_type==="error"&&lp.miss_type&&getMissLabel(lp.miss_type), lp.course_type&&getCourseLabel(lp.course_type)].filter(Boolean);
     return (
       <div style={{ textAlign:"left", marginTop:14, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
         <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:4 }}>最後の1点</div>
@@ -17931,9 +17956,9 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
       return <div style={{ marginTop:12, fontSize:13, color:C.textSec, background:"#f7f8fb", borderRadius:12, padding:12 }}>ダブルフォルトの1点なので、直す項目はありません。間違いのときは「1点前に戻す」で記録し直してください。</div>;
     }
     const SEL = "#0b6e75";
-    const kind = lp.result_type ? (isWinnerResult(lp.result_type) ? "winner" : "error") : null;
+    const kind = lp.result_type ? (isNetIn(lp.result_type) ? "net_in" : isWinnerResult(lp.result_type) ? "winner" : "error") : null;
     const scoreTeam = lp.scoring_team;
-    const target = kind==="winner" ? scoreTeam : kind==="error" ? osOther(scoreTeam) : null;
+    const target = (kind==="winner" || kind==="net_in") ? scoreTeam : kind==="error" ? osOther(scoreTeam) : null;
     const btn = { borderRadius:12, borderWidth:2, borderStyle:"solid", borderColor:C.border, background:C.white, color:C.text, fontWeight:800, cursor:"pointer", textAlign:"center", outline:"none", minWidth:0, WebkitTapHighlightColor:"transparent" };
     const sel = (on, color=SEL) => on ? { background:color, borderColor:color, color:C.white } : { borderColor:C.border };
     const head = (n, text, hint) => (
@@ -17978,12 +18003,17 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             <button onClick={()=>{ if(kind!=="error") setLastPointFields(gameId, { result_type:"error", player_name:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="error","#d8645c"), flex:1, padding:"10px 4px", fontSize:16 }}>
               ミスした<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{osTeamName(osOther(scoreTeam))}のミス）</div>
             </button>
+            <button onClick={()=>{ if(kind!=="net_in") setLastPointFields(gameId, { result_type:"net_in", player_name:null, miss_type:null, play_type:null, side_type:null, course_type:null }); }} style={{ ...btn, ...sel(kind==="net_in"), flex:1, padding:"10px 4px", fontSize:16 }}>
+              ネットイン<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（運の得点）</div>
+            </button>
           </div>
         </div>
         <div style={{ marginBottom:12, ...(kind ? {} : { opacity:0.35, pointerEvents:"none" }) }}>
-          {head(2, kind==="error" ? "誰がミスした？" : kind==="winner" ? "誰が決めた？" : "誰が？")}
+          {head(2, kind==="error" ? "誰がミスした？" : kind==="winner" ? "誰が決めた？" : kind==="net_in" ? "誰のネットイン？" : "誰が？")}
           <div style={{ display:"flex", gap:8 }}>{group(leftTeam)}{group(rightTeam)}</div>
         </div>
+        {/* ★ネットインのときは「どんなプレー」「よりくわしく」を選べない */}
+        <div style={kind==="net_in" ? { opacity:0.35, pointerEvents:"none" } : undefined}>
         <div style={{ marginBottom:12 }}>
           {head(3, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
@@ -18008,6 +18038,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <div style={{ display:"flex", gap:8 }}>
             {COURSE_TYPES.map(c => <button key={c.key} onClick={()=>toggle("course_type", normCourse(lp.course_type)===c.key ? lp.course_type : c.key)} style={{ ...btn, ...sel(normCourse(lp.course_type)===c.key), flex:1, padding:"10px 2px", fontSize:15 }}>{c.dir}</button>)}
           </div>
+        </div>
         </div>
         <button onClick={()=>setLastPtEditOpen(false)} style={{ width:"100%", marginTop:14, padding:12, background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:C.navy, cursor:"pointer" }}>▲ 閉じる（変更はすぐ保存されます）</button>
       </div>
@@ -18204,7 +18235,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   // DFのときは得点チーム＝レシーブ側に自動で決まる
   const osScoreTeam = osIsDF ? (curServer ? osOther(curServer) : null) : osTeam;
   // ④で押せるチーム：決めた＝得点したチーム／ミスした＝ミスした側（相手）
-  const osTargetTeam = osIsDF || !osKind || !osTeam ? null : (osKind==="winner" ? osTeam : osOther(osTeam));
+  const osTargetTeam = osIsDF || !osKind || !osTeam ? null : ((osKind==="winner" || osKind==="net_in") ? osTeam : osOther(osTeam));
   const osReady = !!currentGame && (osIsDF ? !!osScoreTeam : (!!osTeam && !!osKind && !!osPlayer));
   // ★自動スクロール：次に押すボタンの列が、①サーブのボタンが最初に表示されていた高さに来るようにする
   function osGoTo(key, ratio=1){
@@ -18226,8 +18257,8 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     if (v !== "df") osGoTo("team", 0.5);
   }
   function osPickTeam(t){ setOsTeam(t); setOsKind(null); setOsPlayer(null); setOsMiss(null); osGoTo("kind"); }
-  function osPickKind(k){ setOsKind(k); setOsPlayer(null); setOsMiss(null); if (k==="error" && osPlay==="serve") setOsPlay(null); osGoTo("player"); }
-  function osPickPlayer(n){ setOsPlayer(n); osGoTo("play"); }
+  function osPickKind(k){ setOsKind(k); setOsPlayer(null); setOsMiss(null); if (k==="error" && osPlay==="serve") setOsPlay(null); if (k==="net_in") { setOsPlay(null); setOsSide(null); setOsCourse(null); } osGoTo("player"); }
+  function osPickPlayer(n){ setOsPlayer(n); if (osKind!=="net_in") osGoTo("play"); }
   function osPickPlay(k){ const v = osPlay===k ? null : k; setOsPlay(v); if (v) osGoTo("side"); }
   function osPickSide(k){ const v = osSide===k ? null : k; setOsSide(v); if (v) osGoTo(osKind==="error" ? "miss" : "course"); }
   function osPickMiss(k){ const v = osMiss===k ? null : k; setOsMiss(v); if (v) osGoTo("course"); }
@@ -18243,6 +18274,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     const team = osScoreTeam;
     const sc = currentGame ? { a: currentGame.score_a + (team==="A"?1:0), b: currentGame.score_b + (team==="B"?1:0) } : null;
     if (osIsDF) addPoint(team, null, null, {});
+    else if (osKind==="net_in") addPoint(team, "net_in", osPlayer, { play_type:null, side_type:null, course_type:null, miss_type:null });
     else addPoint(team, osKind, osPlayer, { play_type:osPlay, side_type:osSide, course_type:osCourse, miss_type: osKind==="error" ? osMiss : null });
     if (sc) {
       const l = isYounger ? sc.a : sc.b, r = isYounger ? sc.b : sc.a;
@@ -18971,7 +19003,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                               <span style={{ flex:1,minWidth:0,fontSize:15,fontWeight:700,color:C.text,lineHeight:1.5 }}>
                                 {osDisp(pt.player_name) || (pt.fault_count===2 ? "ダブルフォルト" : "—")}{pt.play_type ? `（${getPlayLabel(pt.play_type)}）` : ""}
                                 <span style={{ ...tag, color: sv==="DF" ? C.white : "#3d4457", background: sv==="DF" ? "#e74c3c" : "#e6e9ef" }}>{sv}</span>
-                                {pt.result_type && <span style={{ ...tag, color: isWinnerResult(pt.result_type) ? "#1565c0" : C.red, background: isWinnerResult(pt.result_type) ? "#e3eefb" : "#fbe6ea" }}>{isWinnerResult(pt.result_type) ? "決め" : "ミス"}</span>}
+                                {pt.result_type && (()=>{ const t=resultTagOf(pt.result_type); return <span style={{ ...tag, color:t.color, background:t.background }}>{t.text}</span>; })()}
                                 {det && <div style={{ fontSize:13,fontWeight:600,color:C.textSec,marginTop:1 }}>{det}</div>}
                               </span>
                               <span style={{ fontSize:17,fontWeight:900,color:C.text,whiteSpace:"nowrap",fontVariantNumeric:"tabular-nums" }}>{l}-{r}</span>
@@ -19249,12 +19281,12 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
             const step2Off = osIsDF;
             const step3Off = osIsDF || !osTeam;
             const step4Off = osIsDF || !osKind;
-            const step56Off = osIsDF || !osPlayer;
+            const step56Off = osIsDF || !osPlayer || osKind==="net_in"; // ★ネットインは⑤⑥を選べない
             const serverName = curServerIndividual || serverLabel || (curServer ? osTeamName(curServer) : ""); // ★相手の選手名が未登録でも「（相手のサーブ）」と出す
             const summary = osIsDF
               ? `ダブルフォルト（${serverName}）：${osTeamName(osScoreTeam)}に1点`
               : osReady
-                ? `${osTeamName(osTeam)}に1点：${osDisp(osPlayer)}${osPlay?`（${getPlayLabel(osPlay)}）`:""} ${osKind==="winner"?"決め":"ミス"}${[osSide&&getSideLabel(osSide), osKind==="error"&&osMiss&&getMissLabel(osMiss), osCourse&&getCourseLabel(osCourse)].filter(Boolean).map(t=>"・"+t).join("")}`
+                ? `${osTeamName(osTeam)}に1点：${osDisp(osPlayer)}${osPlay?`（${getPlayLabel(osPlay)}）`:""} ${osKind==="net_in"?"ネットイン":osKind==="winner"?"決め":"ミス"}${[osSide&&getSideLabel(osSide), osKind==="error"&&osMiss&&getMissLabel(osMiss), osCourse&&getCourseLabel(osCourse)].filter(Boolean).map(t=>"・"+t).join("")}`
                 : "②〜④を選んでください";
             const teamBtn = (t) => {
               const on = osScoreTeam===t, color = osTeamColor(t);
@@ -19376,12 +19408,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       <button onClick={()=>osPickKind("error")} style={{ ...btnBase, ...selStyle(osKind==="error","#d8645c"), flex:1, padding:"10px 4px", fontSize:17 }}>
                         ミスした<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（{osTeam ? osTeamName(osOther(osTeam)) : "相手"}のミス）</div>
                       </button>
+                      <button onClick={()=>osPickKind("net_in")} style={{ ...btnBase, ...selStyle(osKind==="net_in"), flex:1, padding:"10px 4px", fontSize:17 }}>
+                        ネットイン<div style={{ fontSize:12, fontWeight:700, opacity:0.8, marginTop:2 }}>（運の得点）</div>
+                      </button>
                     </div>
                   </div>
 
                   {/* ④ 誰が */}
                   <div style={{ marginBottom:12, ...dim(step4Off) }}>
-                    {head(4, !!osPlayer, osKind==="error" ? "誰がミスした？" : osKind==="winner" ? "誰が決めた？" : "誰が？")}
+                    {head(4, !!osPlayer, osKind==="error" ? "誰がミスした？" : osKind==="winner" ? "誰が決めた？" : osKind==="net_in" ? "誰のネットイン？" : "誰が？")}
                     <div ref={osRefs.player} style={{ display:"flex", gap:8 }}>
                       {playerGroup(leftTeam)}{playerGroup(rightTeam)}
                     </div>
@@ -19437,7 +19472,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                           <span style={{ flex:1, minWidth:0, fontSize:13 }}>
                             {osDisp(pt.player_name) || (pt.fault_count===2 ? "ダブルフォルト" : "—")}{pt.play_type ? `（${getPlayLabel(pt.play_type)}）` : ""}
                             <span style={{ ...tagStyle, color: sv==="DF" ? C.white : "#3d4457", background: sv==="DF" ? "#e74c3c" : "#eef0f4" }}>{sv}</span>
-                            {pt.result_type && <span style={{ ...tagStyle, color: isWinnerResult(pt.result_type) ? "#1565c0" : C.red, background: isWinnerResult(pt.result_type) ? "#e3eefb" : "#fbe6ea" }}>{isWinnerResult(pt.result_type) ? "決め" : "ミス"}</span>}
+                            {pt.result_type && (()=>{ const t=resultTagOf(pt.result_type); return <span style={{ ...tagStyle, color:t.color, background:t.background }}>{t.text}</span>; })()}
                             {det && <div style={{ fontSize:11, color:C.textSec, marginTop:1 }}>{det}</div>}
                           </span>
                           <span style={{ fontSize:14, fontWeight:800, fontVariantNumeric:"tabular-nums", whiteSpace:"nowrap" }}>{l} - {r}</span>
@@ -20155,7 +20190,7 @@ function MatchSummaryPanel({ match, part="all" }) {
                       {/* ★そのプレーが「決め（ウィナー）」か「ミス」かを小さなバッジで表示 */}
                       {p.player && (p.isWinner===true || p.isWinner===false) && (
                         <span style={{ display:"inline-block", marginLeft:6, padding:"1px 7px", borderRadius:10, fontSize:11, fontWeight:800, verticalAlign:"1px",
-                          color: p.isWinner ? "#1565c0" : C.red, background: p.isWinner ? "#e3eefb" : "#fbe6ea" }}>{p.isWinner ? "決め" : "ミス"}</span>
+                          color: resultTagOf(isNetIn(p.result) ? "net_in" : p.isWinner ? "winner" : "error").color, background: resultTagOf(isNetIn(p.result) ? "net_in" : p.isWinner ? "winner" : "error").background }}>{resultTagOf(isNetIn(p.result) ? "net_in" : p.isWinner ? "winner" : "error").text}</span>
                       )}
                     </span>
                     <span style={{ flexShrink:0, fontSize:14, fontWeight:800, fontVariantNumeric:"tabular-nums" }}>
@@ -20280,7 +20315,7 @@ function ServeSheetTab({ match, teamALabel, teamBLabel, onReload }) {
 
                   {(pt.player_name || pt.play_type) && (
                     <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>
-                      内容　{[pt.player_name, pt.play_type?getPlayLabel(pt.play_type):"", pt.side_type?getSideLabel(pt.side_type):"", pt.course_type?getCourseLabel(pt.course_type):"", pt.miss_type?getMissLabel(pt.miss_type):"", pt.is_winner?"決めた":"ミス"].filter(Boolean).join("・")}
+                      内容　{[pt.player_name, pt.play_type?getPlayLabel(pt.play_type):"", pt.side_type?getSideLabel(pt.side_type):"", pt.course_type?getCourseLabel(pt.course_type):"", pt.miss_type?getMissLabel(pt.miss_type):"", isNetIn(pt)?"ネットイン":pt.is_winner?"決めた":"ミス"].filter(Boolean).join("・")}
                     </div>
                   )}
                 </div>
@@ -20343,8 +20378,10 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
   const allPts = match.games.flatMap(g => g.points);
   const totalA = allPts.filter(p=>p.scoring_team==="A").length;
   const totalB = allPts.filter(p=>p.scoring_team==="B").length;
-  const winA   = allPts.filter(p=>p.scoring_team==="A"&&p.is_winner===true).length;
-  const winB   = allPts.filter(p=>p.scoring_team==="B"&&p.is_winner===true).length;
+  const winA   = allPts.filter(p=>p.scoring_team==="A"&&isAttackWin(p)).length;
+  const winB   = allPts.filter(p=>p.scoring_team==="B"&&isAttackWin(p)).length;
+  const netInA = allPts.filter(p=>p.scoring_team==="A"&&isNetIn(p)).length;
+  const netInB = allPts.filter(p=>p.scoring_team==="B"&&isNetIn(p)).length;
 
   // ★内訳を1行の横棒で表す小さな部品（ミスの種類・フォア/バック用）
   function MiniBar({ label, count, max, total, color }) {
@@ -20415,7 +20452,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         </div>
         <Bar a={totalA} b={totalB} label="総ポイント"/>
         <Bar a={winA}   b={winB}   label="決めた得点"/>
-        <Bar a={totalA-winA} b={totalB-winB} label="相手ミスで得点"/>
+        <Bar a={totalA-winA-netInA} b={totalB-winB-netInB} label="相手ミスで得点"/>
+        {(netInA+netInB)>0 && <Bar a={netInA} b={netInB} label="ネットインで得点"/>}
       </div>
 
       {/* ★自チーム/相手チーム切替タブ */}
