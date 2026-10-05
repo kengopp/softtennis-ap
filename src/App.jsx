@@ -13220,6 +13220,52 @@ function AnalysisMatchListCard({ title="集計している試合の一覧", open
     </div>
   );
 }
+// ★個人分析：「どの単位で見る？」（全部・大会別・1/3/5/10試合ずつ）と「◀ 前へ／次へ ▶」
+const ANALYSIS_UNITS = [["all","全部"],["tour","大会別"],[1,"1試合"],[3,"3試合"],[5,"5試合"],[10,"10試合"]];
+const ANALYSIS_UNIT_MAX_PAGES = 10; // ★最新から数えて最大10区切りまで
+function AnalysisUnitPager({ unit, page, pageCount, title, sub, onUnit, onPage, disabled }) {
+  const pBtn = (dis) => ({ flexShrink:0, background:C.white, border:"1.5px solid #c9d6ee", borderRadius:10, padding:"10px 11px", fontSize:14, fontWeight:800, color:C.navy, cursor:dis?"default":"pointer", whiteSpace:"nowrap", opacity:dis?0.35:1 });
+  return (
+    <div style={{ ...S.card, padding:"12px 12px 10px", marginBottom:12 }}>
+      <div style={{ fontSize:12.5, fontWeight:800, color:"#5a6478", margin:"0 2px 5px" }}>どの単位で見る？</div>
+      <div style={{ display:"flex", background:"#e6e9ef", borderRadius:11, padding:4, gap:3 }}>
+        {ANALYSIS_UNITS.map(([k,l]) => {
+          const on = unit === k;
+          return (
+            <button key={k} disabled={disabled} onClick={()=>onUnit(k)}
+              style={{ flex:1, padding:"9px 1px", fontSize:13.5, fontWeight:on?800:700, borderRadius:8, border:"none", cursor:disabled?"default":"pointer", whiteSpace:"nowrap",
+                background: on ? C.navy : "transparent", color: on ? "#fff" : "#5a6478" }}>{l}</button>
+          );
+        })}
+      </div>
+      {unit !== "all" && pageCount > 0 && (
+        <>
+          <div style={{ display:"flex", alignItems:"center", gap:8, background:"#eef3fc", borderRadius:12, padding:8, marginTop:10 }}>
+            <button disabled={page<=0} onClick={()=>onPage(page-1)} style={pBtn(page<=0)}>◀ 前へ</button>
+            <div style={{ flex:1, minWidth:0, textAlign:"center", lineHeight:1.35 }}>
+              <div style={{ fontSize:15.5, fontWeight:900, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{title}</div>
+              <div style={{ fontSize:12, fontWeight:700, color:"#5a6478" }}>{sub}</div>
+            </div>
+            <button disabled={page>=pageCount-1} onClick={()=>onPage(page+1)} style={pBtn(page>=pageCount-1)}>次へ ▶</button>
+          </div>
+          <div style={{ display:"flex", justifyContent:"center", gap:5, marginTop:8 }}>
+            {Array.from({ length: pageCount }, (_, i) => (
+              <span key={i} style={{ width: i===page ? 18 : 7, height:7, borderRadius:4, background: i===page ? "#3a6fc4" : "#d5dbe5" }} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+// ★「前より ±○」の小さな表示（goodUp=true：増えると良い）
+function PrevDiff({ cur, prev, unit="", goodUp=true }) {
+  if (prev == null || cur == null) return null;
+  const v = cur - prev;
+  if (v === 0) return <div style={{ fontSize:11.5, fontWeight:800, color:C.textSec, marginTop:2 }}>前と同じ</div>;
+  const good = goodUp ? v > 0 : v < 0;
+  return <div style={{ fontSize:11.5, fontWeight:800, color: good ? C.accent : C.red, marginTop:2 }}>前より {v>0?"+":"−"}{Math.abs(v)}{unit}</div>;
+}
 // ★直近の試合数（1・3・5・10・全部）
 function AnalysisRecentSegment({ value, onPick, disabled }) {
   return (
@@ -14187,7 +14233,9 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const [calViewMonth, setCalViewMonth] = useState(new Date().getMonth());
   const [calMonthViewYear, setCalMonthViewYear] = useState(new Date().getFullYear());
 
-  const [resultMatches, setResultMatches] = useState([]); // 詳細データ込みの試合（分析対象）
+  const [resultMatchesAll, setResultMatches] = useState([]); // 詳細データ込みの試合（分析対象・条件で絞った全部）
+  const [unitSize, setUnitSize] = useState("all"); // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
+  const [unitPage, setUnitPage] = useState(0);     // ★何区切り目か（0＝最新）
   const [resultLoading, setResultLoading] = useState(false);
   const [resultCondLabel, setResultCondLabel] = useState("");
   const [hasLoadedDefault, setHasLoadedDefault] = useState(false);
@@ -14377,9 +14425,11 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   // ★計測用：画面が描かれた時点を記録する（集計・描画の時間を含む）
   useEffect(() => {
     if (!PERF_ON) return;
-    const label = loading ? "「読み込み中...」を表示" : resultLoading ? "「集計中...」を表示" : resultMatches.length > 0 ? `結果を表示（${resultMatches.length}試合）` : `画面を表示（${mode}）`;
+    const label = loading ? "「読み込み中...」を表示" : resultLoading ? "「集計中...」を表示" : resultMatchesAll.length > 0 ? `結果を表示（${resultMatchesAll.length}試合）` : `画面を表示（${mode}）`;
     requestAnimationFrame(() => perfLog(label));
-  }, [loading, resultLoading, resultMatches, mode]);
+  }, [loading, resultLoading, resultMatchesAll, mode]);
+  // ★選手や条件が変わって集計し直したら、最新の区切りに戻す
+  useEffect(() => { setUnitPage(0); }, [resultMatchesAll]);
   if (loading) {
     return (
       <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
@@ -14719,6 +14769,55 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   }
 
   // ============ ③ 分析結果（デフォルト表示もここ） ============
+  // ★「どの単位で見る？」：最新から○試合ずつ／大会ごとに区切り、選んだ区切りの試合だけを下の全カードで集計する
+  const unitGroups = (() => {
+    const newest = [...resultMatchesAll].reverse(); // resultMatchesAll は古い順
+    if (unitSize === "all") return [newest];
+    if (unitSize === "tour") {
+      const g = [];
+      newest.forEach(m => {
+        const key = (m.tournament_name || "").trim() || "練習試合・大会外";
+        const last = g[g.length-1];
+        if (last && last.key === key) last.list.push(m); else g.push({ key, list:[m] });
+      });
+      return g.slice(0, ANALYSIS_UNIT_MAX_PAGES).map(x => Object.assign(x.list, { tourName: x.key }));
+    }
+    const n = unitSize, g = [];
+    for (let i = 0; i < newest.length && g.length < ANALYSIS_UNIT_MAX_PAGES; i += n) g.push(newest.slice(i, i + n));
+    // ★割り切れずに余った古い端数は出さない（区切りが1つしかないときはそのまま出す）
+    if (g.length > 1 && g[g.length-1].length < n) g.pop();
+    return g;
+  })();
+  const unitPageSafe = Math.min(unitPage, Math.max(0, unitGroups.length - 1));
+  const unitCur = unitGroups[unitPageSafe] ?? [];
+  const unitPrev = unitSize !== "all" ? (unitGroups[unitPageSafe + 1] ?? null) : null;
+  const resultMatches = [...unitCur].reverse(); // ★下の集計は今までどおり古い順で渡す
+  const unitTitle = unitSize === "tour" ? `${unitCur.tourName ?? ""}${unitPageSafe===0 ? "（最新）" : ""}`
+    : unitSize === 1 ? (unitPageSafe===0 ? "最新の試合" : `最新から${unitPageSafe+1}試合目`)
+    : unitSize === "all" ? "" : (unitPageSafe===0 ? `最新 1〜${unitSize}試合目` : `最新から ${unitPageSafe*unitSize+1}〜${unitPageSafe*unitSize+unitCur.length}試合目`);
+  const unitSub = (() => {
+    if (unitCur.length === 0) return "";
+    const fmtD = (d) => { const x = String(d||"").split("-"); return x.length===3 ? `${Number(x[1])}/${Number(x[2])}` : ""; };
+    const w = unitCur.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true).length;
+    const newestD = fmtD(unitCur[0].match_date), oldestD = fmtD(unitCur[unitCur.length-1].match_date);
+    if (unitSize === 1) {
+      const m = unitCur[0];
+      const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
+      const oppClub = m.players.find(p=>p.team===(team==="A"?"B":"A"))?.club_name || "";
+      return `${newestD}${oppClub ? " "+oppClub : ""}（${w ? "勝ち" : "負け"}）`;
+    }
+    return `${oldestD===newestD ? newestD : oldestD+" 〜 "+newestD}（${unitCur.length}試合・${w}勝${unitCur.length-w}敗）`;
+  })();
+  function pickUnit(k) {
+    setUnitSize(k); setUnitPage(0); setResultFilter("all"); setResultListOpen(false);
+    // ★以前の「直近○試合」で試合数をしぼっていた場合は、区切るために全部（上限100）を読み直す
+    if (scope.limit && (scope.pickedIds??[]).length===0) {
+      const next = { ...scope, limit:0 };
+      setScope(next);
+      const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+      loadResults(list, scopeShortLabel(next, seasonLabel), capped);
+    }
+  }
   const wonMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true);
   const lostMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === false);
   const wonRates = keyRatesFromAgg(aggregatePlayerStats(wonMatches, selectedPlayer, effectiveSchoolName));
@@ -14734,6 +14833,16 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const displayedMatchesNewest = newestFirst(displayedMatches);
 
   const agg = aggregatePlayerStats(displayedMatches, selectedPlayer, effectiveSchoolName);
+  // ★1つ古い区切り（「前より ±○」の比較用。勝ち・負けの絞り込みも同じ条件で比べる）
+  const prevUnit = (() => {
+    if (!unitPrev || unitPrev.length === 0) return null;
+    const list = [...unitPrev].reverse();
+    const wins = list.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true).length;
+    const shown = resultFilter==="win" ? list.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true)
+                : resultFilter==="lose" ? list.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === false) : list;
+    const a = shown.length ? aggregatePlayerStats(shown, selectedPlayer, effectiveSchoolName) : null;
+    return { total:list.length, wins, rate: list.length ? Math.round(wins/list.length*100) : 0, rateRaw: list.length ? wins/list.length*100 : 0, agg:a };
+  })();
   // ★得点・ミスの内訳は全部の項目を出す（以前は多い順に4つまでで、足しても総得点・総ミスと合わなかった）。
   //   プレーを選ばずに記録したポイントは「プレー未入力」として最後に出す。
   const topPlaysWin = Object.entries(agg.playsWin).sort((a,b)=>b[1]-a[1]);
@@ -14867,13 +14976,21 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           label="選手"
           name={selectedPlayer}
           onChange={()=>setMode("wizardPlayer")}
-          cond={`${resultCondLabel}・${resultMatches.length}試合`}
+          cond={`${resultCondLabel}・${resultMatchesAll.length}試合`}
           onCond={()=>setMode("scope")}
         />
 
+        {/* ★どの単位で見る？：選んだ区切りの試合だけで、下のカードすべてを集計する */}
+        {resultMatchesAll.length>0 && (
+          <AnalysisUnitPager unit={unitSize} page={unitPageSafe} pageCount={unitGroups.length}
+            title={unitTitle} sub={unitSub} disabled={resultLoading}
+            onUnit={pickUnit}
+            onPage={p=>{ setUnitPage(p); setResultFilter("all"); setResultListOpen(false); }} />
+        )}
+
         {resultCapped > 0 && (
           <div style={{ background:"#fff4e5", border:"1px solid #f5c979", borderRadius:10, padding:12, fontSize:13, fontWeight:700, color:"#8a5a00", lineHeight:1.7, marginBottom:12 }}>
-            ⚠️ 該当する試合が{resultMatches.length + resultCapped}件ありますが、新しい{SCOPE_MAX}試合を対象にしています。<br/>
+            ⚠️ 該当する試合が{resultMatchesAll.length + resultCapped}件ありますが、新しい{SCOPE_MAX}試合を対象にしています。<br/>
             それ以前も見たい場合は、期間や大会でしぼってください。
           </div>
         )}
@@ -14881,7 +14998,15 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         {/* ★戦績カード（試合数・勝率・戦績と、勝敗の切り替え） */}
         {resultMatches.length>0 && (
           <AnalysisRecordCard total={resultMatches.length} wins={wonMatches.length} losses={lostMatches.length}
-            filter={resultFilter} onFilter={k=>{ setResultFilter(k); setResultListOpen(false); }} />
+            filter={resultFilter} onFilter={k=>{ setResultFilter(k); setResultListOpen(false); }}>
+            {prevUnit && (
+              <div style={{ textAlign:"center", fontSize:12.5, fontWeight:700, color:C.textSec, marginTop:8 }}>
+                1つ前の区切り：{prevUnit.wins}勝{prevUnit.total-prevUnit.wins}敗・勝率{prevUnit.rate}%
+                {(() => { const r = resultMatches.length ? wonMatches.length/resultMatches.length*100 : 0; const v = Math.round(r - prevUnit.rateRaw);
+                  return v===0 ? null : <span style={{ marginLeft:6, fontWeight:800, color: v>0 ? C.accent : C.red }}>（勝率 {v>0?"+":"−"}{Math.abs(v)}%）</span>; })()}
+              </div>
+            )}
+          </AnalysisRecordCard>
         )}
 
         {!resultLoading && resultMatches.length>0 && (
@@ -14920,18 +15045,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   
           </AnalysisMatchListCard>
         )}
-
-        <AnalysisRecentSegment
-          value={(scope.pickedIds??[]).length>0 ? null : (scope.limit && [1,3,5,10].includes(scope.limit) ? scope.limit : (!scope.limit ? "all" : null))}
-          disabled={resultLoading}
-          onPick={n=>{
-            // ★シートを開かずに試合数だけ変えるショートカット。条件（scope）も合わせて更新する
-            const next = { ...scope, limit: n==="all" ? 0 : n, pickedIds:[] };
-            setScope(next);
-            const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
-            loadResults(list, scopeShortLabel(next, seasonLabel), capped);
-          }}
-        />
 
         {resultLoading ? (
           <div style={{ textAlign:"center", padding:40, color:C.textSec }}>集計中...</div>
@@ -15008,14 +15121,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{agg.winners}</div>
                     <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>総得点</div>
+                    <PrevDiff cur={agg.winners} prev={prevUnit?.agg?.winners} />
                   </div>
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{agg.errors}</div>
                     <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>総ミス</div>
+                    <PrevDiff cur={agg.errors} prev={prevUnit?.agg?.errors} goodUp={false} />
                   </div>
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:agg.winners-agg.errors>=0?C.accent:C.red }}>{agg.winners-agg.errors>=0?"+":""}{agg.winners-agg.errors}</div>
                     <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>得失点差</div>
+                    <PrevDiff cur={agg.winners-agg.errors} prev={prevUnit?.agg ? prevUnit.agg.winners-prevUnit.agg.errors : null} />
                   </div>
                 </div>
 
