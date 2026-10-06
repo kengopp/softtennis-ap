@@ -5508,18 +5508,18 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
               return (
                 <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: `6px solid ${isPast ? C.textSec : C.navy}` }}>
-                  <div style={{ padding:"12px 14px 10px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                  <div style={{ padding:"12px 14px 0", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
                     {/* ★大会名の欄全体が「試合作成／一覧」へのボタン。右の丸い › で押せることを示す */}
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <div style={{ flex:1, minWidth:0 }}>
                     {/* ★文字が見えにくいという声への対応：日付は大会名の上に、大会名と同じ大きさ・曜日付きで表示する */}
-                    {t.start_date && <div style={{ fontSize:16, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:2 }}>{fmtDateRangeDow(t.start_date, t.end_date)}</div>}
+                    {t.start_date && <div style={{ fontSize:17, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:10 }}>{fmtDateRangeDow(t.start_date, t.end_date)}</div>}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
-                      <div style={{ fontSize:16, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
+                      <div style={{ fontSize:18, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
                       {isPast && <span style={{ flexShrink:0, fontSize:11, fontWeight:800, color:C.textSec, background:C.border, borderRadius:20, padding:"3px 10px" }}>終了</span>}
                     </div>
                     {t.venue && (
-                      <div style={{ marginTop:6, fontSize:15, lineHeight:1.5, color: isPast ? C.textSec : "#5a6478" }}>
+                      <div style={{ marginTop:13, fontSize:17, fontWeight:700, lineHeight:1.5, color: isPast ? C.textSec : "#3d4457" }}>
                         <span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</span> {t.venue}
                       </div>
                     )}
@@ -5536,44 +5536,37 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     </div>
                     </div>
                     <div
-                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:12, padding:"16px 0 2px", borderTop:`1px solid ${C.border}` }}
+                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:22, padding:"14px 0 8px", borderTop:`1px solid ${C.border}` }}
                     >
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>👥</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.participantCount}人</div>
-                        <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>👥</span>{stats.participantCount}人</div>
                       </div>
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setBreakdownModalFor(t); }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>🎾</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.totalMatches}試合`}</div>
-                        <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>試合数</div>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>🎾</span>{loading ? "…" : `${stats.totalMatches}試合`}</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>✅</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.registeredMatches}試合`}</div>
-                        <div style={{ fontSize:9.5, color:C.textSec }}>終了</div>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>✅</span>{loading ? "…" : `${stats.registeredMatches}試合`}</div>
                       </div>
                       {/* ★対戦表（登録されていれば開く。未登録はうすいグレー） */}
                       <div style={{ textAlign:"center", cursor: t.draw_url ? "pointer" : "default", opacity: t.draw_url ? 1 : 0.4 }}
                         onClick={e=>{ e.stopPropagation(); if (t.draw_url) window.open(t.draw_url, "_blank", "noopener,noreferrer"); }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📋</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>対戦表</div>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📋</span>対戦表</div>
                       </div>
                     </div>
                   </div>
-                  <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
+                  <div style={{ display:"flex", gap:8, padding:"6px 14px 14px" }}>
                     <button
                       disabled={!t.venue_link}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.venue_link ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.venue_link ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
                     ><span style={{ color: isPast ? C.textSec : (t.venue_link ? "#e53935" : "#c3c9d4") }}>📍</span> 地図</button>
                     <button
                       disabled={!t.guideline_url}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.guideline_url ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.guideline_url ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
                     ><span style={{ color: isPast ? C.textSec : (t.guideline_url ? "#1976d2" : "#c3c9d4") }}>📄</span> 要項</button>
                     <button
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
                       onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(v => v===t.id ? null : t.id); }}
                     >⋯ その他</button>
                   </div>
