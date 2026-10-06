@@ -2161,6 +2161,7 @@ async function uploadTournamentGuideline(file) {
   if (!user) throw new Error("ログインしていません");
   const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
   const path = `${user.id}/${uid()}.${ext}`;
+  // ★対戦表は写真（画像）も添付できるため、ファイルの種類はそのまま使う
   const { error: upErr } = await supabase.storage.from("guidelines").upload(path, file, { upsert: true, contentType: file.type || "application/pdf" });
   if (upErr) throw upErr;
   const { data } = supabase.storage.from("guidelines").getPublicUrl(path);
@@ -3054,9 +3055,16 @@ async function saveTournament(t) {
     venue: t.venue || null,
     venue_link: t.venue_link || null,
     guideline_url: t.guideline_url || null,
+    draw_url: t.draw_url || null, // ★対戦表（PDF・画像のファイル、またはリンク）
     participant_player_ids: t.participant_player_ids || [],
   };
-  const { error } = await supabase.from("tournaments").upsert(row);
+  let { error } = await supabase.from("tournaments").upsert(row);
+  // ★Supabaseに draw_url 列をまだ追加していない場合でも、大会の保存自体はできるようにする
+  if (error && /draw_url/.test(error.message || "")) {
+    const { draw_url, ...rest } = row;
+    ({ error } = await supabase.from("tournaments").upsert(rest));
+    if (!error && draw_url) alert("対戦表は保存できませんでした（データベースに対戦表の項目がまだありません）。大会のほかの内容は保存しました。");
+  }
   if (error) throw error;
   return row;
 }
@@ -5158,7 +5166,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     return true;
   });
 
-  async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds) {
+  async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl) {
     const trimmed = name.trim();
     if (!trimmed) { alert("大会名を入力してください"); return; }
     if (!startDate) { alert("開始日を選択してください"); return; }
@@ -5171,6 +5179,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         venue: venue || null,
         venue_link: venueLink || null,
         guideline_url: guidelineUrl || null,
+        draw_url: drawUrl || null,
         participant_player_ids: participantIds || [],
       });
       // ★既存の大会の名前を変更した場合、紐づく個人戦・団体戦の大会名も追従させる
@@ -5498,9 +5507,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
               return (
-                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: isPast ? `6px solid ${C.textSec}` : `1px solid ${C.border}` }}>
-                  <div style={{ height:4, background: isPast ? "transparent" : C.navy }}/>
-                  <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: `6px solid ${isPast ? C.textSec : C.navy}` }}>
+                  <div style={{ padding:"12px 14px 10px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                    {/* ★大会名の欄全体が「試合作成／一覧」へのボタン。右の丸い › で押せることを示す */}
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <div style={{ flex:1, minWidth:0 }}>
                     {/* ★文字が見えにくいという声への対応：日付は大会名の上に、大会名と同じ大きさ・曜日付きで表示する */}
                     {t.start_date && <div style={{ fontSize:16, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:2 }}>{fmtDateRangeDow(t.start_date, t.end_date)}</div>}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
@@ -5518,8 +5529,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         {individualRecord.win+individualRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}><SoloIcon size={16} style={{ marginRight:3 }}/>個人戦：{individualRecord.win}勝{individualRecord.loss}敗</span>}
                       </div>
                     )}
+                    </div>
+                    <div style={{ flexShrink:0, width:40, height:40, borderRadius:"50%", background: isPast ? C.textSec : C.navy, color:"#fff", fontSize:26, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1, paddingBottom:3, boxSizing:"border-box" }}>›</div>
+                    </div>
                     <div
-                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background: isPast ? "#f0f1f4" : "#f7f9fc", borderRadius:10 }}
+                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"10px 0 0", borderTop:`1px solid ${C.border}` }}
                     >
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}>
                         <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>👥</div>
@@ -5536,16 +5550,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.registeredMatches}試合`}</div>
                         <div style={{ fontSize:9.5, color:C.textSec }}>終了</div>
                       </div>
-                      <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.venueCount}か所`}</div>
-                        <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
+                      {/* ★対戦表（登録されていれば開く。未登録はうすいグレー） */}
+                      <div style={{ textAlign:"center", cursor: t.draw_url ? "pointer" : "default", opacity: t.draw_url ? 1 : 0.4 }}
+                        onClick={e=>{ e.stopPropagation(); if (t.draw_url) window.open(t.draw_url, "_blank", "noopener,noreferrer"); }}>
+                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📋</div>
+                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>対戦表</div>
                       </div>
                     </div>
-                    <button
-                      style={{ width:"100%", marginTop:10, padding:"13px 10px", border: isPast ? `1px solid ${C.border}` : "1px solid #BFD5FF", borderRadius:14, background: isPast ? "#f0f1f4" : "#EEF4FF", color: isPast ? C.textSec : "#1E3A8A", fontSize:15, fontWeight:700, cursor:"pointer" }}
-                      onClick={e=>{ e.stopPropagation(); onOpenTournament && onOpenTournament(t); }}
-                    >▶ 試合作成／一覧へ</button>
                   </div>
                   <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
                     <button
@@ -5584,6 +5595,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                               venue: t.venue,
                               venue_link: t.venue_link,
                               guideline_url: t.guideline_url,
+                              draw_url: t.draw_url,
                             });
                             setShowTournamentModal(true);
                           }}
@@ -6047,6 +6059,11 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
     initial?.guideline_url ? decodeURIComponent(initial.guideline_url.split("/").pop() || "") : ""
   );
   const [uploadingGuideline, setUploadingGuideline] = useState(false);
+  // ★対戦表（要項と同じく、ファイル添付かリンク）
+  const [drawMode, setDrawMode] = useState("file");
+  const [drawUrl, setDrawUrl] = useState(initial?.draw_url || "");
+  const [drawFileName, setDrawFileName] = useState(initial?.draw_url ? decodeURIComponent(initial.draw_url.split("/").pop() || "") : "");
+  const [uploadingDraw, setUploadingDraw] = useState(false);
   const [saving, setSaving] = useState(false);
   // ★出場選手（選手マスターの自チーム選手から複数選択）
   const [participantIds, setParticipantIds] = useState(initial?.participant_player_ids || []);
@@ -6073,6 +6090,21 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
       alert("アップロードに失敗しました: " + (err.message || err));
     }
     setUploadingGuideline(false);
+    e.target.value = "";
+  }
+
+  async function handleDrawFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDraw(true);
+    try {
+      const url = await uploadTournamentGuideline(file);
+      setDrawUrl(url);
+      setDrawFileName(file.name);
+    } catch(err) {
+      alert("アップロードに失敗しました: " + (err.message || err));
+    }
+    setUploadingDraw(false);
     e.target.value = "";
   }
 
@@ -6155,6 +6187,43 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         )}
       </div>
 
+      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>対戦表（任意）</div>
+      <div style={{ border:"1px dashed "+C.border, borderRadius:10, padding:12, marginBottom:16 }}>
+        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+          {[["file","📎 ファイル添付"],["link","🔗 リンクを貼る"]].map(([k,l]) => (
+            <button key={k} type="button"
+              style={{ flex:1, textAlign:"center", padding:"6px", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer",
+                border:"1px solid "+(drawMode===k?C.navy:C.border), background:drawMode===k?C.navy:"#fff", color:drawMode===k?"#fff":C.textSec }}
+              onClick={()=>setDrawMode(k)}
+            >{l}</button>
+          ))}
+        </div>
+        {drawMode==="file" ? (
+          drawUrl ? (
+            <div style={{ display:"flex", alignItems:"center", gap:8, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
+              <span style={{ fontSize:18 }}>📋</span>
+              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{drawFileName || "添付済みファイル"}</span>
+              <span style={{ color:C.textSec, fontSize:12, cursor:"pointer" }} onClick={()=>{ setDrawUrl(""); setDrawFileName(""); }}>✕</span>
+            </div>
+          ) : (
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, color:C.textSec, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
+              {uploadingDraw ? "アップロード中..." : "📎 PDF・画像を選択"}
+              <input type="file" accept="application/pdf,image/*" style={{ display:"none" }} disabled={uploadingDraw} onChange={handleDrawFileChange}/>
+            </label>
+          )
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:14, color:C.textSec }}>🔗</span>
+            <input
+              style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+              placeholder="対戦表が載っているURLを貼り付け"
+              value={drawUrl}
+              onChange={e=>{ setDrawUrl(e.target.value); setDrawFileName(""); }}
+            />
+          </div>
+        )}
+      </div>
+
       <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>出場選手（任意・複数選択可）</div>
       <div style={{ border:"1px solid "+C.border, borderRadius:10, padding:10, marginBottom:16 }}>
         <input
@@ -6190,7 +6259,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         <button
           style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
           disabled={saving || uploadingGuideline}
-          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds); setSaving(false); }}
+          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl); setSaving(false); }}
         >{initial ? "保存する" : "作成する"}</button>
       </div>
     </div>
@@ -7059,12 +7128,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <TournamentFormFields
             initial={tournament}
             onCancel={()=>setShowEditModal(false)}
-            onSave={async (name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds)=>{
+            onSave={async (name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl)=>{
               const trimmed = name.trim();
               if (!trimmed) { alert("大会名を入力してください"); return; }
               if (!startDate) { alert("開始日を選択してください"); return; }
               try {
-                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null, participant_player_ids: participantIds || [] });
+                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null, draw_url: drawUrl || null, participant_player_ids: participantIds || [] });
                 // ★大会名が変わった場合、既存の個人戦・団体戦の大会名も追従させる（見えない文字ズレによる紐付け解除を防ぐ）
                 if (tournament.name && tournament.name.trim() !== trimmed) {
                   await renameTournamentCascade(tournament.name, trimmed);
