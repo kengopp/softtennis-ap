@@ -5509,12 +5509,18 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {loading && !tournamentsReady && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {(!loading || tournamentsReady) && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
             {(!loading || tournamentsReady) && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
-            {(!loading || tournamentsReady) && filteredTournaments.map(t => {
+            {(!loading || tournamentsReady) && (() => {
+              // ★ホームの「次の試合予定」と同じ決め方：まだ終わっていない大会のうち、いちばん日付が近い日（同じ日の大会はすべて）
+              const nextDate = tournaments
+                .filter(t => (t.end_date || t.start_date) >= todayStr && t.start_date)
+                .map(t => t.start_date).sort()[0] || null;
+              return filteredTournaments.map(t => {
               const stats = statsForTournament(t);
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
+              const isNext = !!nextDate && t.start_date === nextDate && (t.end_date || t.start_date) >= todayStr; // ★次の試合の大会は薄い青
               return (
-                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: `6px solid ${isPast ? C.textSec : C.navy}` }}>
+                <div key={t.id} style={{ ...S.card, ...(isNext ? { background:"#e8f0fd" } : {}), marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: `6px solid ${isPast ? C.textSec : C.navy}` }}>
                   <div style={{ padding:"12px 14px 0", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
                     {/* ★大会名の欄全体が「試合作成／一覧」へのボタン。右の丸い › で押せることを示す */}
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -5612,7 +5618,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   )}
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
           {/* 大会FAB（★閲覧専用アカウントには出さない） */}
           {!isViewer && <button style={{ padding:0, position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>}
