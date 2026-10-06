@@ -13159,10 +13159,12 @@ function AnalysisTabs({ current, onPersonal, onPair, onTeam }) {
 // ============================================================
 const ANALYSIS_TARGET_BG = "linear-gradient(135deg,#1b2a4e,#3a6fc4)";
 const analysisChip = { position:"relative", fontSize:13.5, fontWeight:800, background:"rgba(255,255,255,0.18)", color:"#fff", borderRadius:8, padding:"6px 11px", whiteSpace:"nowrap", border:"none", cursor:"pointer", flexShrink:0 };
-function AnalysisTargetCard({ label, name, onChange, cond, onCond, condSelect, children }) {
+function AnalysisTargetCard({ label, labelLarge, name, onChange, cond, onCond, condSelect, children }) {
   return (
     <div style={{ background:ANALYSIS_TARGET_BG, color:"#fff", borderRadius:14, padding:"13px 14px", marginBottom:12 }}>
-      <div style={{ fontSize:12.5, fontWeight:700, color:"#dce8ff" }}>{label}</div>
+      {label && (labelLarge
+        ? <div style={{ fontSize:16, fontWeight:800, color:"#fff", lineHeight:1.3 }}>{label}</div>
+        : <div style={{ fontSize:12.5, fontWeight:700, color:"#dce8ff" }}>{label}</div>)}
       <div style={{ display:"flex", alignItems:"center", gap:10, margin:"2px 0 9px" }}>
         <div style={{ flex:1, minWidth:0, fontSize:22, fontWeight:900, lineHeight:1.3, wordBreak:"break-word" }}>{name}</div>
         {onChange && <button onClick={onChange} style={analysisChip}>変更 ›</button>}
@@ -14284,6 +14286,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const [resultMatchesAll, setResultMatches] = useState([]); // 詳細データ込みの試合（分析対象・条件で絞った全部）
   const [unitSize, setUnitSize] = useState("tour"); // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
   const [unitPage, setUnitPage] = useState(0);     // ★何区切り目か（0＝最新）
+  const [pendingPlayerApply, setPendingPlayerApply] = useState(false); // ★選手をタップしたら、今の条件のまま結果画面へ
   const [resultLoading, setResultLoading] = useState(false);
   const [resultCondLabel, setResultCondLabel] = useState("");
   const [hasLoadedDefault, setHasLoadedDefault] = useState(false);
@@ -14428,6 +14431,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     ? allMatches.filter(m => countsAsFinished(m) && ownSideFor(m, selectedPlayer, effectiveSchoolName))
     : [],
     [allMatches, selectedPlayer, effectiveSchoolName]);
+  // ★選手一覧で選手をタップしたら「集計対象の設定」を通らず、今の条件（期間・大会など）のまま集計して結果画面へ戻る。
+  //   試合を個別に選ぶ条件は前の選手の試合なので外す。
+  useEffect(() => {
+    if (!pendingPlayerApply || !selectedPlayer) return;
+    setPendingPlayerApply(false);
+    const next = { ...scope, pickedIds:[] };
+    setScope(next);
+    const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+    loadResults(list, scopeShortLabel(next, seasonLabel), capped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPlayerApply, selectedPlayer, playerMatches]);
 
   async function loadResults(matchSummaries, condLabel, capped = 0, { silent = false } = {}) {
     // silent：前回の結果を表示したまま裏で差し替える（「集計中...」を出さない・フィルターも戻さない）
@@ -14564,7 +14578,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           <div style={S.card}>
             {filteredRoster.length===0 && <div style={{ padding:16, textAlign:"center", color:C.textSec, fontSize:12 }}>選手が見つかりません</div>}
             {filteredRoster.map(p => (
-              <div key={p.id} onClick={()=>{ setSelectedPlayer(p.player_name); saveLastAnalysisPlayer(p.player_name, selectedSchoolName); }}
+              <div key={p.id} onClick={()=>{ setSelectedPlayer(p.player_name); saveLastAnalysisPlayer(p.player_name, selectedSchoolName); setPendingPlayerApply(true); }}
                 style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", borderBottom:`1px solid ${C.border}`, cursor:"pointer", background:p.player_name===selectedPlayer?C.accentL:"transparent" }}>
                 <div style={{ width:34,height:34,borderRadius:"50%",background:C.accentL,color:C.accent,fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{p.player_name[0]}</div>
                 <div style={{ flex:1 }}>
@@ -14577,12 +14591,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           </div>
         </div>
         <div style={{ position:"fixed", left:0, right:0, bottom:0, padding:14, background:C.gray, borderTop:`1px solid ${C.border}` }}>
-          <button
-            disabled={!selectedPlayer}
-            onClick={()=>setMode("scope")}
-            style={{ width:"100%", padding:13, borderRadius:11, border:"none", fontSize:14, fontWeight:800, cursor:selectedPlayer?"pointer":"default",
-              background: selectedPlayer ? C.navy : "#d5dae2", color:"#fff" }}
-          >{selectedPlayer ? "次へ →" : "選手を選んでください"}</button>
+          {/* ★「次へ →」は廃止：選手をタップした時点で結果画面へ戻る */}
+          <div style={{ textAlign:"center", fontSize:13, fontWeight:700, color:C.textSec }}>選手をタップすると、その選手の分析を表示します</div>
           {autoPickNote && <div style={{ fontSize:10, color:"#9aa3b5", marginTop:6, textAlign:"center" }}>{autoPickNote}</div>}
         </div>
       </div>
@@ -15021,7 +15031,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         <AnalysisTabs current="personal" onPair={()=>onOpenPairAnalysis && onOpenPairAnalysis()} onTeam={onOpenTeamStats} />
 
         <AnalysisTargetCard
-          label="選手"
+          label={effectiveSchoolName}
+          labelLarge
           name={selectedPlayer}
           onChange={()=>setMode("wizardPlayer")}
           cond={`${resultCondLabel}・${resultMatchesAll.length}試合`}
