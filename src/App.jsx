@@ -5459,7 +5459,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             const pick = (name) => { setTournamentSearch(name); setTournamentDropdownOpen(false); };
             return (
           <div style={{ position:"relative", margin:"10px 14px 8px" }}>
-            <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
+            <div style={{ position:"relative", zIndex:21, display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
               <span style={{ fontSize:14, color:C.textSec }}>🔍</span>
               <input
                 value={tournamentSearch}
@@ -5471,10 +5471,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               {tournamentSearch && (
                 <button onClick={()=>{ setTournamentSearch(""); setTournamentDropdownOpen(false); }} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"2px 6px" }} title="絞り込みをクリア">✕</button>
               )}
-              <button onClick={()=>setTournamentDropdownOpen(v=>!v)} style={{ border:"none", background:"none", color:C.textSec, fontSize:14, cursor:"pointer", padding:"2px 4px" }}>{tournamentDropdownOpen ? "▲" : "▼"}</button>
+              <button aria-label={tournamentDropdownOpen ? "一覧を閉じる" : "大会一覧を開く"} onClick={()=>setTournamentDropdownOpen(v=>!v)} style={{ border:"none", background:"none", color:C.textSec, fontSize:15, cursor:"pointer", padding:"8px 10px", margin:"-6px -8px -6px 0", minWidth:40, minHeight:40 }}>{tournamentDropdownOpen ? "▲" : "▼"}</button>
             </div>
+            {/* ★一覧の外を押したら、何も選ばずに閉じる */}
+            {tournamentDropdownOpen && <div onClick={()=>setTournamentDropdownOpen(false)} style={{ position:"fixed", inset:0, zIndex:19 }} />}
             {tournamentDropdownOpen && (
               <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:20, maxHeight:300, overflowY:"auto" }}>
+                {/* ★いちばん上に「✕ 閉じる」（スクロールしても上に残る） */}
+                <div style={{ position:"sticky", top:0, zIndex:1, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 10px 8px 14px", background:"#f7f9fc", borderBottom:"1px solid "+C.border }}>
+                  <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec }}>大会を選ぶ</span>
+                  <button onClick={()=>setTournamentDropdownOpen(false)} style={{ border:"1px solid "+C.border, background:C.white, color:C.navy, fontSize:13.5, fontWeight:800, borderRadius:8, padding:"6px 12px", cursor:"pointer" }}>✕ 閉じる</button>
+                </div>
                 {tournaments.length===0 ? (
                   <div style={{ padding:"12px 14px", fontSize:14, color:C.textSec }}>大会がまだありません</div>
                 ) : (<>
