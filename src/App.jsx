@@ -5519,7 +5519,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       {isPast && <span style={{ flexShrink:0, fontSize:11, fontWeight:800, color:C.textSec, background:C.border, borderRadius:20, padding:"3px 10px" }}>終了</span>}
                     </div>
                     {t.venue && (
-                      <div style={{ marginTop:6, fontSize:13, lineHeight:1.5, color: isPast ? C.textSec : "#5a6478" }}>
+                      <div style={{ marginTop:6, fontSize:15, lineHeight:1.5, color: isPast ? C.textSec : "#5a6478" }}>
                         <span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</span> {t.venue}
                       </div>
                     )}
@@ -5530,10 +5530,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       </div>
                     )}
                     </div>
-                    <div style={{ flexShrink:0, width:40, height:40, borderRadius:"50%", background: isPast ? C.textSec : C.navy, color:"#fff", fontSize:26, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1, paddingBottom:3, boxSizing:"border-box" }}>›</div>
+                    <div style={{ flexShrink:0, width:40, height:40, borderRadius:"50%", background: isPast ? C.textSec : C.navy, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      {/* ★文字の「›」はフォントで位置がずれるため、図形で丸の真ん中に描く */}
+                      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 L11 8 L6 13" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </div>
                     </div>
                     <div
-                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"10px 0 0", borderTop:`1px solid ${C.border}` }}
+                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:12, padding:"16px 0 2px", borderTop:`1px solid ${C.border}` }}
                     >
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}>
                         <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>👥</div>
