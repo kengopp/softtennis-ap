@@ -5510,26 +5510,27 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {(!loading || tournamentsReady) && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
             {(!loading || tournamentsReady) && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
             {(!loading || tournamentsReady) && (() => {
-              // ★ホームの「次の試合予定」と同じ決め方：まだ終わっていない大会のうち、いちばん日付が近い日（同じ日の大会はすべて）
-              const nextDate = tournaments
-                .filter(t => (t.end_date || t.start_date) >= todayStr && t.start_date)
-                .map(t => t.start_date).sort()[0] || null;
               return filteredTournaments.map(t => {
               const stats = statsForTournament(t);
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
-              const isNext = !!nextDate && t.start_date === nextDate && (t.end_date || t.start_date) >= todayStr; // ★次の試合の大会は薄い青
+              // ★大会の状態：予定（まだ始まっていない）／開催中（今日が開催期間）／終了
+              const tStatus = isPast ? "終了" : (t.start_date && t.start_date <= todayStr ? "開催中" : "予定");
+              const statusStyle = tStatus === "開催中" ? { background:"#f97316", color:"#fff", border:"1.5px solid #f97316" }
+                : tStatus === "予定" ? { background:"#fff", color:"#1b4fa8", border:"1.5px solid #1b4fa8" }
+                : { background:C.border, color:C.textSec, border:`1.5px solid ${C.text}` };
               return (
-                <div key={t.id} style={{ ...S.card, ...(isNext ? { background:"#e8f0fd" } : {}), marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: `6px solid ${isPast ? C.textSec : C.navy}` }}>
+                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: `6px solid ${isPast ? C.textSec : C.navy}` }}>
                   <div style={{ padding:"12px 14px 0", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
                     {/* ★大会名の欄全体が「試合作成／一覧」へのボタン。右の丸い › で押せることを示す */}
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <div style={{ flex:1, minWidth:0 }}>
                     {/* ★文字が見えにくいという声への対応：日付は大会名の上に、大会名と同じ大きさ・曜日付きで表示する */}
-                    {t.start_date && <div style={{ fontSize:17, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:10 }}>{fmtDateRangeDow(t.start_date, t.end_date)}</div>}
+                    {t.start_date && <div style={{ fontSize:17, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:10 }}>
+                      <span style={{ ...statusStyle, display:"inline-block", fontSize:13, fontWeight:800, borderRadius:20, padding:"1px 10px", marginRight:8, verticalAlign:2 }}>{tStatus==="開催中" ? "● " : ""}{tStatus}</span>
+                      {fmtDateRangeDow(t.start_date, t.end_date)}</div>}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
                       <div style={{ fontSize:18, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
-                      {isPast && <span style={{ flexShrink:0, fontSize:11, fontWeight:800, color:C.textSec, background:C.border, borderRadius:20, padding:"3px 10px" }}>終了</span>}
                     </div>
                     {t.venue && (
                       <div style={{ marginTop:13, fontSize:17, fontWeight:700, lineHeight:1.5, color: isPast ? C.textSec : "#3d4457" }}>
