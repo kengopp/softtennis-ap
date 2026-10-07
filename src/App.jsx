@@ -13981,8 +13981,12 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         <span onClick={()=>setOppOwnFilter(new Set())} style={{ background:"#e3f3f3", borderRadius:10, padding:"2px 9px", cursor:"pointer", whiteSpace:"nowrap" }}>全体に戻す</span>
                       </div>)}
                 </AnalysisRecordCard>
-                <AnalysisMatchListCard open={recordOpen} onToggle={()=>setRecordOpen(v=>!v)}>
-                      {[...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
+                <AnalysisMatchListCard
+                  title={pairResult==="win" ? "勝った試合の一覧" : pairResult==="lose" ? "負けた試合の一覧" : "集計している試合の一覧"}
+                  open={recordOpen} onToggle={()=>setRecordOpen(v=>!v)}>
+                      {/* ★戦績カードの「勝ち／負け」の切り替えに合わせて、一覧も絞り込む */}
+                      {detailTargetMatches.length===0 && <div style={{ fontSize:12, color:C.textSec }}>該当する試合がありません</div>}
+                      {[...detailTargetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
                         const win = winnerSideOf(m)==="A";
                         const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
                         return (
