@@ -15141,7 +15141,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         {/* ★戦績カード（試合数・勝率・戦績と、勝敗の切り替え） */}
         {resultMatches.length>0 && (
           <AnalysisRecordCard total={resultMatches.length} wins={wonMatches.length} losses={lostMatches.length}
-            filter={resultFilter} onFilter={k=>{ setResultFilter(k); setResultListOpen(false); }}>
+            filter={resultFilter} onFilter={k=>setResultFilter(k)}>
             {prevUnit && (
               <div style={{ textAlign:"center", fontSize:12.5, fontWeight:700, color:C.textSec, marginTop:8 }}>
                 1つ前の区切り：{prevUnit.wins}勝{prevUnit.total-prevUnit.wins}敗・勝率{prevUnit.rate}%
