@@ -411,21 +411,16 @@ const mySideOf = (m, mySchoolName) => {
 // ★並び順のボタン（勝率は高い順・低い順の両方）
 const SORT_RECORD_OPTIONS = [["rate","勝率高"],["rateLow","勝率低"],["win","勝数順"],["lose","負数順"],["count","試合数順"]];
 const sortByRecord = (sort) => (a,b) => {
-  // ★勝率順：丸めた%ではなく勝数÷試合数で比べる。同じ勝率なら試合数が多い方（＝より確かな数字）を上にする
-  if (sort === "rate") {
-    const ra = a.total > 0 ? a.wins / a.total : -1;
-    const rb = b.total > 0 ? b.wins / b.total : -1;
-    return (rb - ra) || (b.total - a.total) || (b.wins - a.wins);
-  }
-  // ★勝率が低い順：同じ勝率なら試合数が多い方を上にする
-  if (sort === "rateLow") {
-    const ra = a.total > 0 ? a.wins / a.total : 2;
-    const rb = b.total > 0 ? b.wins / b.total : 2;
-    return (ra - rb) || (b.total - a.total) || (b.losses - a.losses);
-  }
-  if (sort === "lose")  return (b.losses - a.losses) || (b.total - a.total);
-  if (sort === "count") return (b.total - a.total) || (b.wins - a.wins);
-  return (b.wins - a.wins) || (b.total - a.total);
+  const rate = (x, empty) => x.total > 0 ? x.wins / x.total : empty;
+  // ★勝率高：勝数÷試合数で比べる（丸めた%ではなく）。同じ勝率なら試合数が多い方を上にする
+  if (sort === "rate")    return (rate(b,-1) - rate(a,-1)) || (b.total - a.total) || (b.wins - a.wins);
+  // ★勝率低：勝率が低い順。同じ勝率なら試合数が多い方を上にする
+  if (sort === "rateLow") return (rate(a,2) - rate(b,2)) || (b.total - a.total) || (b.losses - a.losses);
+  // ★負数：同じ負数なら勝率が低い方を上に（それも同じなら試合数が多い方）
+  if (sort === "lose")    return (b.losses - a.losses) || (rate(a,2) - rate(b,2)) || (b.total - a.total);
+  if (sort === "count")   return (b.total - a.total) || (b.wins - a.wins);
+  // ★勝数：同じ勝数なら勝率が高い方を上に（それも同じなら試合数が多い方）
+  return (b.wins - a.wins) || (rate(b,-1) - rate(a,-1)) || (b.total - a.total);
 };
 
 const winnerSideOf = (m) => {
@@ -519,7 +514,7 @@ function PeriodSortBar({ period, setPeriod, sort, setSort }) {
       </div>
       <div style={lbl}>並び順</div>
       <div style={seg}>
-        {[["rate","勝率"],["win","勝数"],["lose","負数"],["count","試合数"]].map(([k,l]) => (
+        {[["rate","勝率高"],["rateLow","勝率低"],["win","勝数"],["lose","負数"],["count","試合数"]].map(([k,l]) => (
           <button key={k} style={btn(sort===k, C.accent)} onClick={()=>setSort(k)}>{l}</button>
         ))}
       </div>
