@@ -13546,6 +13546,39 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
     : pref ? `${prefName}の${prefSchools.length}校`
     : `全${schools.length}校`;
   const nothing = !pref && !club && !pairKey;
+  const [listOpen, setListOpen] = useState(null); // ★開いている一覧（"club" | "pair" | null）
+  // ★学校・ペアは自前の一覧で選ぶ（名前と「◯試合 ◯勝◯敗」を2行にして揃えるため）
+  const Picker = ({ id, value, placeholder, disabled, items, onPick }) => {
+    const open = listOpen === id;
+    const cur = items.find(it => it.value === value);
+    const wl = (it) => it.w != null && <span style={{ color: it.w > it.l ? C.accent : it.w < it.l ? C.red : C.textSec, fontWeight:800 }}>{it.w}勝{it.l}敗</span>;
+    return (
+      <>
+        <div onClick={()=>{ if (!disabled) setListOpen(open ? null : id); }}
+          style={{ ...selStyle(!!value, disabled), display:"flex", alignItems:"center", gap:8, cursor: disabled ? "default" : "pointer", ...(open ? { borderColor:C.navy } : {}) }}>
+          <span style={{ flex:1, minWidth:0, wordBreak:"break-word" }}>{cur ? cur.label : placeholder}</span>
+          <span style={{ fontSize:12, color: disabled ? "#c4cbd8" : C.text }}>{open ? "▲" : "▼"}</span>
+        </div>
+        {open && (
+          <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:4, maxHeight:"38vh", overflowY:"auto", boxShadow:"0 4px 12px rgba(0,0,0,0.12)", WebkitOverflowScrolling:"touch" }}>
+            {[{ value:"", label:placeholder }, ...items].map((it, i) => {
+              const on = it.value === value;
+              return (
+                <div key={it.value || "__all"} onClick={()=>{ onPick(it.value); setListOpen(null); }}
+                  style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderTop: i ? `1px solid ${C.border}` : "none", background: on ? "#eef8f8" : C.white, cursor:"pointer" }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:16, fontWeight: on || !it.value ? 800 : 600, color: !it.value ? "#1d4fa8" : C.text, wordBreak:"break-word" }}>{it.label}</div>
+                    {it.sub && <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginTop:2 }}>{it.sub}{it.w != null && <>　{wl(it)}</>}</div>}
+                  </div>
+                  {on && <span style={{ color:"#0b6e75", fontSize:16, fontWeight:900 }}>✓</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  };
   const lbl = (t) => <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"12px 0 6px" }}>{t}</div>;
   const selStyle = (on, disabled) => ({ width:"100%", boxSizing:"border-box", fontSize:16, padding:"11px 12px", borderRadius:10,
     border:`1.5px solid ${on ? C.accent : C.border}`, background: disabled ? "#f4f6f9" : C.white, color: disabled ? "#a0a8b8" : C.text, appearance:"auto" });
@@ -13560,7 +13593,7 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
         </div>
         {lbl("都道府県")}
         <select value={pref} style={selStyle(!!pref)}
-          onChange={e=>{ const v = e.target.value; setPref(v);
+          onChange={e=>{ const v = e.target.value; setPref(v); setListOpen(null);
             const sc = schools.find(x => x.name === club);
             if (sc && v && !(v === OPP_NO_PREF ? !sc.pref : sc.pref === v)) { setClub(""); setPairKey(""); } }}>
           <option value="">すべての県</option>
@@ -13568,20 +13601,16 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
           {hasNoPref && <option value={OPP_NO_PREF}>県の登録なし</option>}
         </select>
         {lbl("チーム名（学校名）")}
-        <select value={club} style={selStyle(!!club)} onChange={e=>{ setClub(e.target.value); setPairKey(""); }}>
-          <option value="">すべての学校</option>
-          {prefSchools.map(sc => <option key={sc.name} value={sc.name}>{sc.name}（{sc.n}試合）</option>)}
-        </select>
+        <Picker id="club" value={club} placeholder="すべての学校"
+          items={prefSchools.map(sc => ({ value:sc.name, label:sc.name, sub:`${sc.pref ? sc.pref+"・" : ""}${sc.pairs.length}ペア・${sc.n}試合`, w:sc.pairs.reduce((t,p)=>t+p.w,0), l:sc.pairs.reduce((t,p)=>t+p.l,0) }))}
+          onPick={v=>{ setClub(v); setPairKey(""); }} />
         {lbl("ペア名")}
-        <select value={pairKey} disabled={!curSchool} style={selStyle(!!pairKey, !curSchool)} onChange={e=>setPairKey(e.target.value)}>
-          {curSchool
-            ? <><option value="">すべてのペア</option>
-                {clubPairs.map(p => <option key={p.key} value={p.key}>{p.label}（{p.matches.length}試合 {p.w}勝{p.l}敗）</option>)}</>
-            : <option value="">先に学校を選んでください</option>}
-        </select>
+        <Picker id="pair" value={pairKey} placeholder={curSchool ? "すべてのペア" : "先に学校を選んでください"} disabled={!curSchool}
+          items={clubPairs.map(p => ({ value:p.key, label:p.label, sub:`${p.matches.length}試合`, w:p.w, l:p.l }))}
+          onPick={v=>setPairKey(v)} />
         {!curSchool && <div style={{ fontSize:12.5, color:C.textSec, marginTop:6 }}>※学校を選ぶと、その学校のペアが選べます</div>}
         <div style={{ display:"flex", gap:8, marginTop:18 }}>
-          <button onClick={()=>{ setPref(""); setClub(""); setPairKey(""); }}
+          <button onClick={()=>{ setPref(""); setClub(""); setPairKey(""); setListOpen(null); }}
             style={{ flex:1, padding:"13px 0", borderRadius:12, border:`2px solid ${C.red}`, background:C.white, color:C.red, fontSize:15, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>条件をクリア</button>
           <button onClick={()=>onApply({ pref, club: curSchool ? club : "", pairKey: curPair ? pairKey : "" })}
             style={{ flex:1.6, padding:"13px 0", borderRadius:12, border:"none", background:C.accent, color:"#fff", fontSize:16, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>{nothing ? "すべての相手を表示" : "この条件で表示"}</button>
