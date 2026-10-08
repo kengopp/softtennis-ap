@@ -13239,15 +13239,16 @@ function AnalysisTabs({ current, onPersonal, onPair, onTeam }) {
 // ============================================================
 const ANALYSIS_TARGET_BG = "linear-gradient(135deg,#1b2a4e,#3a6fc4)";
 const analysisChip = { position:"relative", fontSize:13.5, fontWeight:800, background:"rgba(255,255,255,0.18)", color:"#fff", borderRadius:8, padding:"6px 11px", whiteSpace:"nowrap", border:"none", cursor:"pointer", flexShrink:0 };
-function AnalysisTargetCard({ label, labelLarge, name, onChange, cond, onCond, condSelect, children }) {
+function AnalysisTargetCard({ label, labelLarge, name, onChange, changeLabel, changeActive, teamLine, cond, onCond, condSelect, children }) {
   return (
     <div style={{ background:ANALYSIS_TARGET_BG, color:"#fff", borderRadius:14, padding:"13px 14px", marginBottom:12 }}>
       {label && (labelLarge
         ? <div style={{ fontSize:16, fontWeight:800, color:"#fff", lineHeight:1.3 }}>{label}</div>
         : <div style={{ fontSize:12.5, fontWeight:700, color:"#dce8ff" }}>{label}</div>)}
+      {teamLine && <div style={{ fontSize:16, fontWeight:800, color:"#fff", marginTop:3, lineHeight:1.35, wordBreak:"break-word" }}>{teamLine}</div>}
       <div style={{ display:"flex", alignItems:"center", gap:10, margin:"2px 0 9px" }}>
         <div style={{ flex:1, minWidth:0, fontSize:22, fontWeight:900, lineHeight:1.3, wordBreak:"break-word" }}>{name}</div>
-        {onChange && <button onClick={onChange} style={analysisChip}>変更 ›</button>}
+        {onChange && <button onClick={onChange} style={changeActive ? { ...analysisChip, background:C.accent, border:`1px solid ${C.accent}`, color:"#fff" } : analysisChip}>{changeLabel || "変更"} ›</button>}
       </div>
       {children}
       <div style={{ display:"flex", alignItems:"center", gap:10, borderTop:"1px solid rgba(255,255,255,0.25)", paddingTop:9 }}>
@@ -13515,6 +13516,82 @@ function PairPickerSheet({ pairs, selectedKey, onSelect, onClose, allowAll }) {
   );
 }
 
+// ★相手分析：都道府県・学校・ペアをプルダウンで選ぶシート（前回の条件が入った状態で開く）
+const OPP_NO_PREF = "__none";
+function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onApply, onClose }) {
+  const [pref, setPref] = useState(initPref || "");
+  const [club, setClub] = useState(initClub || "");
+  const [pairKey, setPairKey] = useState(initPairKey || "");
+  // 対戦した学校（試合数・ペア数つき）
+  const schools = useMemo(() => {
+    const map = {};
+    oppPairs.forEach(p => {
+      const name = p.club || "";
+      if (!name) return;
+      const sc = (map[name] ??= { name, pref: prefOf(name) || "", n:0, pairs:[] });
+      sc.n += p.matches.length; sc.pairs.push(p);
+    });
+    return Object.values(map).sort((a,b)=> b.n - a.n || a.name.localeCompare(b.name, "ja"));
+  }, [oppPairs, prefOf]);
+  const prefMatch = (sc) => !pref || (pref === OPP_NO_PREF ? !sc.pref : sc.pref === pref);
+  const prefs = [...new Set(schools.map(sc => sc.pref).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ja"));
+  const hasNoPref = schools.some(sc => !sc.pref);
+  const prefSchools = schools.filter(prefMatch);
+  const curSchool = schools.find(sc => sc.name === club) || null;
+  const clubPairs = curSchool ? [...curSchool.pairs].sort((a,b)=> b.matches.length - a.matches.length) : [];
+  const curPair = clubPairs.find(p => p.key === pairKey) || null;
+  const prefName = pref === OPP_NO_PREF ? "県の登録なし" : pref;
+  const countText = curPair ? `${club}の${curPair.label}ペア`
+    : curSchool ? `${club}の${clubPairs.length}ペア`
+    : pref ? `${prefName}の${prefSchools.length}校`
+    : `全${schools.length}校`;
+  const nothing = !pref && !club && !pairKey;
+  const lbl = (t) => <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"12px 0 6px" }}>{t}</div>;
+  const selStyle = (on, disabled) => ({ width:"100%", boxSizing:"border-box", fontSize:16, padding:"11px 12px", borderRadius:10,
+    border:`1.5px solid ${on ? C.accent : C.border}`, background: disabled ? "#f4f6f9" : C.white, color: disabled ? "#a0a8b8" : C.text, appearance:"auto" });
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{ width:"100%", maxWidth:520, maxHeight:"85vh", overflowY:"auto", background:C.white, borderRadius:"18px 18px 0 0", padding:"8px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))" }}>
+        <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
+        <div style={{ display:"flex", alignItems:"center" }}>
+          <div style={{ flex:1, fontSize:17, fontWeight:900, color:C.navy }}>相手を選択</div>
+          <button aria-label="閉じる" onClick={onClose} style={{ padding:0, width:32, height:32, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+        </div>
+        {lbl("都道府県")}
+        <select value={pref} style={selStyle(!!pref)}
+          onChange={e=>{ const v = e.target.value; setPref(v);
+            const sc = schools.find(x => x.name === club);
+            if (sc && v && !(v === OPP_NO_PREF ? !sc.pref : sc.pref === v)) { setClub(""); setPairKey(""); } }}>
+          <option value="">すべての県</option>
+          {prefs.map(p => <option key={p} value={p}>{p}</option>)}
+          {hasNoPref && <option value={OPP_NO_PREF}>県の登録なし</option>}
+        </select>
+        {lbl("チーム名（学校名）")}
+        <select value={club} style={selStyle(!!club)} onChange={e=>{ setClub(e.target.value); setPairKey(""); }}>
+          <option value="">すべての学校</option>
+          {prefSchools.map(sc => <option key={sc.name} value={sc.name}>{sc.name}（{sc.n}試合）</option>)}
+        </select>
+        {lbl("ペア名")}
+        <select value={pairKey} disabled={!curSchool} style={selStyle(!!pairKey, !curSchool)} onChange={e=>setPairKey(e.target.value)}>
+          {curSchool
+            ? <><option value="">すべてのペア</option>
+                {clubPairs.map(p => <option key={p.key} value={p.key}>{p.label}（{p.matches.length}試合 {p.w}勝{p.l}敗）</option>)}</>
+            : <option value="">先に学校を選んでください</option>}
+        </select>
+        {!curSchool && <div style={{ fontSize:12.5, color:C.textSec, marginTop:6 }}>※学校を選ぶと、その学校のペアが選べます</div>}
+        <div style={{ display:"flex", gap:8, marginTop:18 }}>
+          <button onClick={()=>{ setPref(""); setClub(""); setPairKey(""); }}
+            style={{ flex:1, padding:"13px 0", borderRadius:12, border:`2px solid ${C.red}`, background:C.white, color:C.red, fontSize:15, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>条件をクリア</button>
+          <button onClick={()=>onApply({ pref, club: curSchool ? club : "", pairKey: curPair ? pairKey : "" })}
+            style={{ flex:1.6, padding:"13px 0", borderRadius:12, border:"none", background:C.accent, color:"#fff", fontSize:16, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>{nothing ? "すべての相手を表示" : "この条件で表示"}</button>
+        </div>
+        <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginTop:7 }}>該当：{countText}</div>
+      </div>
+    </div>
+  );
+}
+
 function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpenMatch }) {
   const [mySchoolName, setMySchoolName] = useState("");
   const [allMatches, setAllMatches] = useState([]);
@@ -13533,6 +13610,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [oppQuery, setOppQuery] = useState("");                // ★相手分析：学校名・選手名で絞り込み
   const [oppSort, setOppSort] = useState("count");             // ★相手分析：学校・ペアの並び順（rate|win|lose|count）
   const [openSchools, setOpenSchools] = useState(() => new Set()); // ★相手分析：開いている学校
+  const [oppSel, setOppSel] = useState(() => readScreenCache("pairAnalysis")?.oppSel ?? { pref:"", club:"" }); // ★相手分析：「選択 ›」で選んだ県・学校
+  const [oppSelectOpen, setOppSelectOpen] = useState(false);
+  const [schoolPrefMap, setSchoolPrefMap] = useState({}); // ★学校名 → 都道府県（学校マスターより）
   const [breakdownDim, setBreakdownDim] = useState("play");
   // ★自分たちのペア：個人分析と同じ「勝敗」「直近◯試合」の絞り込み
   const [pairResult, setPairResult] = useState("all"); // all | win | lose
@@ -13553,6 +13633,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   //   期間の初期値（シーズン）を決めるのは最初の1回だけ。裏の更新で、選び直した期間が戻らないようにする。
   const periodInitRef = useRef(false);
   const applyData = useCallback(([p, list, schools, simpleList, season]) => {
+    { const pm = {}; (schools||[]).forEach(s => { if (s.name && s.prefecture) pm[s.name.trim()] = s.prefecture; }); setSchoolPrefMap(pm); }
     if (p?.school_id) {
       setSchoolId(p.school_id);
       const s = (schools||[]).find(s => s.id === p.school_id);
@@ -13584,8 +13665,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   // ★試合スタッツを見て戻ってきたときに、選んでいたペアと画面の状態を復元する
   useEffect(() => {
-    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, period });
-  }, [side, ownPairKey, oppPairKey, period]);
+    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, period, oppSel });
+  }, [side, ownPairKey, oppPairKey, period, oppSel]);
+  const prefOf = useCallback((name) => schoolPrefMap[String(name||"").trim()] || "", [schoolPrefMap]);
 
   // 自チームが出場した、終了済みの試合（自チーム側をA側にそろえたもの。期間で絞り込み）
   const ownMatches = useMemo(() => {
@@ -13863,6 +13945,19 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
             onSelect={k=>{ setOwnPairKey(k); setOppPairKey(""); setRecordOpen(false); setPairPickerOpen(false); window.scrollTo(0,0); }}
             onClose={()=>setPairPickerOpen(false)} />
         )}
+        {oppSelectOpen && (
+          <OppSelectSheet oppPairs={oppPairs} prefOf={prefOf}
+            initPref={oppSel.pref || (selectedOppPair ? (prefOf(selectedOppPair.club) || "") : "")}
+            initClub={selectedOppPair ? (selectedOppPair.club || "") : oppSel.club}
+            initPairKey={selectedOppPair ? selectedOppPair.key : ""}
+            onApply={({ pref, club, pairKey })=>{
+              setOppSel({ pref, club });
+              setOppPairKey(pairKey || "");
+              setOpenSchools(club ? new Set([club]) : new Set());
+              setOppSelectOpen(false); window.scrollTo(0,0);
+            }}
+            onClose={()=>setOppSelectOpen(false)} />
+        )}
         <AnalysisTabs current="pair" onPersonal={()=>onOpenPersonal && onOpenPersonal()} onTeam={()=>onOpenTeamStats && onOpenTeamStats()} />
 
         {/* ★「自分たち／相手分析」の切り替え（期間は下の対象カードの「条件 ›」で変える） */}
@@ -13894,6 +13989,10 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
               const rec = (x) => ({ wins:x.w, losses:x.l, total:x.n ?? x.matches.length });
               const cmp = (a,b) => sortByRecord(oppSort)(rec(a), rec(b));
               let list = Object.values(schools).sort((a,b)=> cmp(a,b) || a.club.localeCompare(b.club, "ja"));
+              // ★「選択 ›」で選んだ県・学校で絞り込む
+              if (oppSel.pref) list = list.filter(sc => oppSel.pref === OPP_NO_PREF ? !prefOf(sc.club) : prefOf(sc.club) === oppSel.pref);
+              if (oppSel.club) list = list.filter(sc => sc.club === oppSel.club);
+              const selActive = !!(oppSel.pref || oppSel.club);
               if (qq) {
                 list = list.map(sc => norm(sc.club).includes(qq) ? sc : { ...sc, pairs: sc.pairs.filter(p => norm(p.label).includes(qq)) })
                            .filter(sc => sc.pairs.length > 0);
@@ -13901,7 +14000,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
               const wlColor = (w,l) => w > l ? C.accent : w < l ? C.teamB : C.textSec;
               return (
                 <>
-                  <AnalysisTargetCard label="相手分析" name="対戦した相手ペア" cond={periodCur[1]} condSelect={periodSelect} />
+                  <AnalysisTargetCard label="相手分析" name="対戦した相手ペア" cond={periodCur[1]} condSelect={periodSelect}
+                    onChange={()=>setOppSelectOpen(true)} changeLabel={selActive ? "選択中" : "選択"} changeActive={selActive} />
                   <div style={{ display:"flex", alignItems:"center", gap:6, background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"0 11px", marginBottom:4 }}>
                     <span style={{ fontSize:14 }}>🔍</span>
                     <input value={oppQuery} onChange={e=>setOppQuery(e.target.value)} placeholder="学校名・選手名で探す"
@@ -13925,7 +14025,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         <div onClick={()=>setOpenSchools(prev => { const nx = new Set(prev); nx.has(sc.club) ? nx.delete(sc.club) : nx.add(sc.club); return nx; })}
                           style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px", cursor:"pointer" }}>
                           <div style={{ flex:1, minWidth:0, fontSize:18, fontWeight:900, color:C.text, lineHeight:1.35 }}>
-                            {sc.club}<span style={{ display:"block", fontSize:13.5, color:C.textSec, fontWeight:700, marginTop:1 }}>{sc.pairs.length}ペア・{sc.n}試合</span>
+                            {sc.club}<span style={{ display:"block", fontSize:13.5, color:C.textSec, fontWeight:700, marginTop:1 }}>{selActive && prefOf(sc.club) ? `${prefOf(sc.club)}・` : ""}{sc.pairs.length}ペア・{sc.n}試合</span>
                           </div>
                           <div style={{ fontSize:17, fontWeight:900, color:wlColor(sc.w, sc.l), whiteSpace:"nowrap" }}>{sc.w}勝{sc.l}敗</div>
                           <span style={{ color:"#a0a8b8", fontSize:16 }}>{open ? "▴" : "▾"}</span>
@@ -13960,9 +14060,11 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                 )}
 
                 <AnalysisTargetCard
-                  label={side==="own" ? "自チームのペア" : `相手ペア${selectedOppPair?.club ? "（"+selectedOppPair.club+"）" : ""}`}
+                  label={side==="own" ? "自チームのペア" : "相手分析"}
+                  teamLine={side==="own" ? null : (selectedOppPair?.club ? <>🏫 {selectedOppPair.club}{prefOf(selectedOppPair.club) && <span style={{ fontSize:13, fontWeight:700, color:"#dce8ff" }}>（{prefOf(selectedOppPair.club)}）</span>}</> : null)}
                   name={side==="own" ? selectedOwnPair?.label : selectedOppPair.label}
-                  onChange={side==="own" ? ()=>setPairPickerOpen(true) : ()=>{ setOppPairKey(""); window.scrollTo(0,0); }}
+                  onChange={side==="own" ? ()=>setPairPickerOpen(true) : ()=>setOppSelectOpen(true)}
+                  changeLabel={side==="own" ? "変更" : "選択"}
                   cond={`${periodCur[1]}・${pairBaseMatches.length}試合`}
                   condSelect={periodSelect}
                 />
