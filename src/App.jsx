@@ -13641,6 +13641,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [oppSel, setOppSel] = useState(() => readScreenCache("pairAnalysis")?.oppSel ?? { pref:"", club:"" }); // ★相手分析：「選択 ›」で選んだ県・学校
   const [oppSelectOpen, setOppSelectOpen] = useState(false);
   const [schoolPrefMap, setSchoolPrefMap] = useState({}); // ★学校名 → 都道府県（学校マスターより）
+  const [myPlayerName, setMyPlayerName] = useState(null);  // ★ログインした選手本人（保護者は子ども）の選手名
+  // ★自分でペアを選んだ（またはこのページで前に選んでいた）か。選んでいなければ自分の最新ペアを出す
+  const ownPairPickedRef = useRef(!!readScreenCache("pairAnalysis")?.ownPicked);
   const [breakdownDim, setBreakdownDim] = useState("play");
   // ★自分たちのペア：個人分析と同じ「勝敗」「直近◯試合」の絞り込み
   const [pairResult, setPairResult] = useState("all"); // all | win | lose
@@ -13660,7 +13663,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   // ★前回開いたときのデータをすぐ表示し、裏で最新に差し替える（「読み込み中...」で待たせない）
   //   期間の初期値（シーズン）を決めるのは最初の1回だけ。裏の更新で、選び直した期間が戻らないようにする。
   const periodInitRef = useRef(false);
-  const applyData = useCallback(([p, list, schools, simpleList, season]) => {
+  const applyData = useCallback(([p, list, schools, simpleList, season, rosterList]) => {
+    if (rosterList) setMyPlayerName(pickDefaultAnalysisPlayer(p, rosterList));
     { const pm = {}; (schools||[]).forEach(s => { if (s.name && s.prefecture) pm[s.name.trim()] = s.prefecture; }); setSchoolPrefMap(pm); }
     if (p?.school_id) {
       setSchoolId(p.school_id);
@@ -13685,7 +13689,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     (async () => {
       // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブと同じ数え方にする）
       // ★シーズン設定も同時に取得する（以前はプロフィール等を待ってから、もう1往復していた）
-      const fresh = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches(), getMySchoolSeason()]);
+      const fresh = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches(), getMySchoolSeason(), getPlayerRoster().catch(() => null)]);
       writeScreenCache("pairAnalysisData", fresh);
       applyData(fresh);
     })();
@@ -13693,7 +13697,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   // ★試合スタッツを見て戻ってきたときに、選んでいたペアと画面の状態を復元する
   useEffect(() => {
-    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, period, oppSel });
+    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, period, oppSel, ownPicked: ownPairPickedRef.current });
   }, [side, ownPairKey, oppPairKey, period, oppSel]);
   const prefOf = useCallback((name) => schoolPrefMap[String(name||"").trim()] || "", [schoolPrefMap]);
 
@@ -13722,13 +13726,32 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     }).sort((a,b)=>b.matches.length-a.matches.length);
   }, [ownMatches, mySchoolName]);
 
+  // ★選手本人（保護者は子ども）が入っている、いちばん最近試合をしたペア
+  const myLatestPairKey = useMemo(() => {
+    if (!myPlayerName) return "";
+    const me = normalizePlayerName(myPlayerName);
+    let best = null;
+    ownMatches.forEach(m => {
+      const pr = ownPairOf(m, mySchoolName);
+      if (!pr || !pr.names.some(n => normalizePlayerName(n) === me)) return;
+      const d = m.match_date || "";
+      if (!best || d > best.d || (d === best.d && String(m.created_at||"") > best.c)) best = { d, c:String(m.created_at||""), key:pr.key };
+    });
+    return best && ownPairs.some(p => p.key === best.key) ? best.key : "";
+  }, [myPlayerName, ownMatches, mySchoolName, ownPairs]);
+
   useEffect(() => {
     if (ownPairs.length === 0) return;
+    // ★まだペアを選んでいない（この画面を初めて開いた）ときは、自分（保護者は子ども）の最新のペアを出す
+    if (!ownPairPickedRef.current && myLatestPairKey) {
+      if (ownPairKey !== myLatestPairKey) setOwnPairKey(myLatestPairKey);
+      return;
+    }
     // ★選んでいたペアが一覧に無い（データ更新で消えた等）ときや、
     //   「すべて」のまま自分たちタブに切り替えたときは、先頭のペアに戻す
     const valid = ownPairs.some(p => p.key === ownPairKey) || (side === "opp" && ownPairKey === "all");
-    if (!valid) setOwnPairKey(ownPairs[0].key);
-  }, [ownPairs, ownPairKey, side]);
+    if (!valid) setOwnPairKey(myLatestPairKey || ownPairs[0].key);
+  }, [ownPairs, ownPairKey, side, myLatestPairKey]);
 
   const selectedOwnPair = ownPairs.find(p => p.key === ownPairKey) || null;
 
@@ -13970,7 +13993,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
         {pairPickerOpen && (
           <PairPickerSheet pairs={ownPairs} selectedKey={ownPairKey} allowAll={side === "opp"}
-            onSelect={k=>{ setOwnPairKey(k); setOppPairKey(""); setRecordOpen(false); setPairPickerOpen(false); window.scrollTo(0,0); }}
+            onSelect={k=>{ ownPairPickedRef.current = true; setOwnPairKey(k); setOppPairKey(""); setRecordOpen(false); setPairPickerOpen(false); window.scrollTo(0,0); }}
             onClose={()=>setPairPickerOpen(false)} />
         )}
         {oppSelectOpen && (
