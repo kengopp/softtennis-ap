@@ -408,12 +408,20 @@ const mySideOf = (m, mySchoolName) => {
 //   通常はゲームカウントの大小で決まるが、「棄権による試合終了」ではゲームカウントの数字だけでは
 //   勝敗が決まらない（棄権した側の方が数字上多いこともある）ため、その場合はmatch.walkover_winnerを
 //   最優先で使う。勝敗が関わるすべての箇所は、直接スコアを比較せず必ずこの関数を使うこと。
+// ★並び順のボタン（勝率は高い順・低い順の両方）
+const SORT_RECORD_OPTIONS = [["rate","勝率高"],["rateLow","勝率低"],["win","勝数順"],["lose","負数順"],["count","試合数順"]];
 const sortByRecord = (sort) => (a,b) => {
   // ★勝率順：丸めた%ではなく勝数÷試合数で比べる。同じ勝率なら試合数が多い方（＝より確かな数字）を上にする
   if (sort === "rate") {
     const ra = a.total > 0 ? a.wins / a.total : -1;
     const rb = b.total > 0 ? b.wins / b.total : -1;
     return (rb - ra) || (b.total - a.total) || (b.wins - a.wins);
+  }
+  // ★勝率が低い順：同じ勝率なら試合数が多い方を上にする
+  if (sort === "rateLow") {
+    const ra = a.total > 0 ? a.wins / a.total : 2;
+    const rb = b.total > 0 ? b.wins / b.total : 2;
+    return (ra - rb) || (b.total - a.total) || (b.losses - a.losses);
   }
   if (sort === "lose")  return (b.losses - a.losses) || (b.total - a.total);
   if (sort === "count") return (b.total - a.total) || (b.wins - a.wins);
@@ -14064,8 +14072,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                   </div>
                   {/* ★並び順（チーム分析と同じ） */}
                   <div style={{ display:"flex", gap:5, marginBottom:8 }}>
-                    {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
-                      <button key={k} style={{ ...S.togBtn(oppSort===k,C.navy), flex:1, fontSize:14, padding:"9px 4px", whiteSpace:"nowrap" }} onClick={()=>setOppSort(k)}>{l}</button>
+                    {SORT_RECORD_OPTIONS.map(([k,l])=>(
+                      <button key={k} style={{ ...S.togBtn(oppSort===k,C.navy), flex:1, fontSize:13.5, padding:"9px 2px", whiteSpace:"nowrap", minWidth:0 }} onClick={()=>setOppSort(k)}>{l}</button>
                     ))}
                   </div>
                   {list.length === 0 && <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0", fontSize:13.5 }}>{qq ? "見つかりませんでした" : "対戦した記録がありません"}</div>}
@@ -16081,12 +16089,12 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 >{l}</button>
               ))}
             </div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, margin:"0 2px 8px" }}>
+            <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:6, margin:"0 2px 8px" }}>
               <span style={{ fontSize:12, color:"#5a6478", minWidth:0 }}>
                 {tab==="players" ? "タップで選手の戦績へ" : tab==="pairs" ? "タップでペアの詳細へ" : "タップで学校の詳細へ"}
               </span>
-              <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+              <div style={{ display:"flex", gap:4, flexShrink:0, marginLeft:"auto" }}>
+                {SORT_RECORD_OPTIONS.map(([k,l])=>(
                   <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12,padding:"6px 6px",whiteSpace:"nowrap" }} onClick={()=>setSort(k)}>{l}</button>
                 ))}
               </div>
@@ -16416,12 +16424,12 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
 
                 {/* ペア別成績 */}
                 <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10 }}>
+                  <div style={{ display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10 }}>
                     <div style={{ fontSize:15,fontWeight:800,color:C.navy }}>ペア別の成績</div>
                     {/* ★並び替えはペアが2組以上のときだけ出す（1組では並び替える意味がないため） */}
                     {partnerRows.length>=2 && (
-                      <div style={{ display:"flex",gap:4 }}>
-                        {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+                      <div style={{ display:"flex",gap:4,marginLeft:"auto" }}>
+                        {SORT_RECORD_OPTIONS.map(([k,l])=>(
                           <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12,padding:"6px 6px",whiteSpace:"nowrap" }} onClick={()=>setSort(k)}>{l}</button>
                         ))}
                       </div>
