@@ -16515,11 +16515,17 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   // 相手選手別・相手ペア別（こちらの勝率で集計）
   const byOppPlayer = {};
   const byOppPair = {};
+  const oppPairVotes = {}; // ★ペアの表示順（試合と同じ「選手1（後衛）／選手2（前衛）」）を、そのペアの試合で一番多い並びにする
   finished.forEach(m=>{
     const bNames = m.players.filter(p=>p.team==="B").map(p=>p.player_name);
     bNames.forEach(name => { (byOppPlayer[name] ??= []).push(m); });
     const pairKey = bNames.slice().sort().join(" / ");
-    if (pairKey) (byOppPair[pairKey] ??= []).push(m);
+    if (pairKey) {
+      (byOppPair[pairKey] ??= []).push(m);
+      const ordered = m.players.filter(p=>p.team==="B").sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p=>p.player_name);
+      const v = (oppPairVotes[pairKey] ??= {});
+      v[ordered.join("\t")] = (v[ordered.join("\t")] ?? 0) + 1;
+    }
   });
   const oppPlayerRows = Object.entries(byOppPlayer).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
   oppPlayerRows.sort(sortByRecord(sort));
@@ -16529,14 +16535,15 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
     list.forEach(mm => {
       const mine = pairOnSide(mm, "A");
       if (!mine) return;
-      const o = (by[mine.key] ??= { label:mine.label, list:[] });
+      const o = (by[mine.key] ??= { label:mine.label, list:[], votes:{} });
       o.list.push(mm);
+      o.votes[mine.names.join("\t")] = (o.votes[mine.names.join("\t")] ?? 0) + 1;
     });
     return Object.values(by)
-      .map(o => ({ label:o.label, ...recordOf(o.list, x=>winnerSideOf(x)==="A") }))
+      .map(o => { const ord = majorityPairOrder(o.votes); return { label: ord.length ? ord.join("・") : o.label, ...recordOf(o.list, x=>winnerSideOf(x)==="A") }; })
       .sort((a,b)=> b.total-a.total || b.rate-a.rate);
   };
-  const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A"), own: ownPairsAgainst(list) }));
+  const oppPairRows = Object.entries(byOppPair).map(([key,list])=>({ name: (majorityPairOrder(oppPairVotes[key]).join(" / ") || key), ...recordOf(list, mm=>winnerSideOf(mm)==="A"), own: ownPairsAgainst(list) }));
   oppPairRows.sort(sortByRecord(sort));
 
   const allFinishedForTrend = matches.filter(m => countsAsFinished(m) && oppOf(m)===schoolName);
