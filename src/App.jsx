@@ -13592,14 +13592,13 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
           <button aria-label="閉じる" onClick={onClose} style={{ padding:0, width:32, height:32, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
         </div>
         {lbl("都道府県")}
-        <select value={pref} style={selStyle(!!pref)}
-          onChange={e=>{ const v = e.target.value; setPref(v); setListOpen(null);
+        <Picker id="pref" value={pref} placeholder="すべての県"
+          items={[...prefs.map(p => ({ value:p, label:p, n:schools.filter(sc=>sc.pref===p).length })),
+                  ...(hasNoPref ? [{ value:OPP_NO_PREF, label:"県の登録なし", n:schools.filter(sc=>!sc.pref).length }] : [])]
+                 .map(it => ({ ...it, sub:`${it.n}校` }))}
+          onPick={v=>{ setPref(v);
             const sc = schools.find(x => x.name === club);
-            if (sc && v && !(v === OPP_NO_PREF ? !sc.pref : sc.pref === v)) { setClub(""); setPairKey(""); } }}>
-          <option value="">すべての県</option>
-          {prefs.map(p => <option key={p} value={p}>{p}</option>)}
-          {hasNoPref && <option value={OPP_NO_PREF}>県の登録なし</option>}
-        </select>
+            if (sc && v && !(v === OPP_NO_PREF ? !sc.pref : sc.pref === v)) { setClub(""); setPairKey(""); } }} />
         {lbl("チーム名（学校名）")}
         <Picker id="club" value={club} placeholder="すべての学校"
           items={prefSchools.map(sc => ({ value:sc.name, label:sc.name, sub:`${sc.pref ? sc.pref+"・" : ""}${sc.pairs.length}ペア・${sc.n}試合`, w:sc.pairs.reduce((t,p)=>t+p.w,0), l:sc.pairs.reduce((t,p)=>t+p.l,0) }))}
