@@ -19905,7 +19905,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 {/* 記録するボタン（画面の一番下に固定） */}
                 <div style={{ position:"fixed", left:0, right:0, bottom:0, display:"flex", justifyContent:"center", padding:"0 10px calc(10px + env(safe-area-inset-bottom))", pointerEvents:"none", zIndex:50 }}>
                   <button disabled={!osReady} onClick={osRecord} style={{ pointerEvents:"auto", maxWidth:520, width:"100%", border:"none", borderRadius:14, padding:"13px 10px", background: osReady ? "#ffd23f" : "#e6e8ee", color: osReady ? C.navy : "#a6adbd", fontWeight:900, fontSize:18, boxShadow: osReady ? "0 4px 14px rgba(0,0,0,.18)" : "none", cursor: osReady ? "pointer" : "default" }}>
-                    🎥 記録する
+                    記録する
                     <span style={{ display:"block", fontSize:12, fontWeight:700, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{summary}</span>
                   </button>
                 </div>
