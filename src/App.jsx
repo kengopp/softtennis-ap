@@ -15701,7 +15701,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [trendOpen, setTrendOpen] = useState(false); // 月別の勝率推移（折りたたみ）
   const [scoreOpen, setScoreOpen] = useState(false); // 得点・ミス（折りたたみ）
   const [filterOpen, setFilterOpen] = useState(false);
-  const [teamUnit, setTeamUnit] = useState("tour");  // ★どの単位で見る？
+  const [teamUnit, setTeamUnit] = useState("all");  // ★どの単位で見る？（チーム分析は「全部」が初期値）
   const [teamUnitPage, setTeamUnitPage] = useState(0);
 
   // ②見る内容タブ：players(選手別) | pairs(ペア別) | opponents(対戦別)
