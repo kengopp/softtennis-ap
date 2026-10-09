@@ -11382,8 +11382,8 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
   };
   // ★見出し（大きめ）と、右上のコンパクトな「＋ 追加」ボタン
   const secHead = (icon, title, count, onAdd) => (
-    <div style={{ display:"flex", alignItems:"center", gap:12, background:"#e8edf5", borderRadius:12, padding:"10px 12px 10px 14px", margin:"16px 0 10px" }}>
-      <EqIcon name={icon} size={26} />
+    <div style={{ display:"flex", alignItems:"center", gap:12, background:C.white, borderLeft:"6px solid #f08a1c", borderRadius:12, padding:"10px 12px 10px 12px", margin:"16px 0 10px", boxShadow:"0 1px 3px rgba(15,32,68,0.06)" }}>
+      <EqIcon name={icon} size={26} color={C.navy} />
       <div style={{ flex:1, minWidth:0, display:"flex", alignItems:"baseline", gap:8 }}>
         <span style={{ fontSize:21, fontWeight:900, color:C.navy }}>{title}</span>
         <span style={{ fontSize:15, fontWeight:700, color:"#5a6478" }}>（{count}）</span>
@@ -11433,7 +11433,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                     <span style={{ fontSize:14, fontWeight:700, color:"#6b7487", whiteSpace:"nowrap" }}>持ってくる人</span>
                     <span style={{ flex:1, minWidth:0, marginLeft:6, wordBreak:"break-word" }}>
                       {it.player
-                        ? <><span style={{ fontSize:18, fontWeight:900, color:C.navy }}>{it.player}</span><span style={{ fontSize:14, fontWeight:700, color:"#6b7487", marginLeft:10 }}>{equipWhoLabel(it.who)}</span></>
+                        ? <><span style={{ fontSize:18, fontWeight:900, color:C.navy }}>{it.player}</span><span style={{ fontSize:16, fontWeight:800, color:"#3d4657", marginLeft:10 }}>{equipWhoLabel(it.who)}</span></>
                         : <span style={{ fontSize:16, fontWeight:800, color:"#9aa3b2" }}>未定</span>}
                     </span>
                   </div>
@@ -11448,7 +11448,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                   <div style={{ flex:1, minWidth:0, wordBreak:"break-word" }}>
                     <span style={{ fontSize:22, fontWeight:900, color:C.navy }}>{s.player}</span>
-                    <span style={{ fontSize:14, fontWeight:700, color:"#6b7487", marginLeft:10 }}>{equipWhoLabel(s.who)}</span>
+                    <span style={{ fontSize:17, fontWeight:800, color:"#3d4657", marginLeft:10 }}>{equipWhoLabel(s.who)}</span>
                   </div>
                   <EqIcon name="chev" size={22} color="#7a8499" />
                 </div>
