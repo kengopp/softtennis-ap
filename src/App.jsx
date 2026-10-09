@@ -11441,7 +11441,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
       </div>
       <div style={{ padding:"12px 14px 40px", maxWidth:640, margin:"0 auto" }}>
         <div style={{ fontSize:15, fontWeight:900, color:C.navy }}>{tournament.name}
-          <span style={{ fontSize:12.5, color:C.textSec, fontWeight:700, marginLeft:6 }}>{fmtDateRangeDow(tournament.start_date, tournament.end_date)}</span></div>
+          <span style={{ fontSize:14.5, color:"#5a6478", fontWeight:800, marginLeft:8 }}>{fmtDateRangeDow(tournament.start_date, tournament.end_date)}</span></div>
         {loading ? <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0" }}>読み込み中...</div> : (
           <>
             {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13, fontWeight:700, borderRadius:10, padding:"10px 12px", marginTop:10 }}>{loadError}</div>}
@@ -11483,7 +11483,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:8 }}>
                   <EqIcon name="clock" size={20} color="#6b7487" />
-                  {multiDay && <span style={{ fontSize:18, fontWeight:900, color:C.navy, marginRight:6 }}>{eqDayLabel(spotDay(s))}</span>}
+                  {spotDay(s) && <span style={{ fontSize:18, fontWeight:900, color:C.navy, marginRight:6 }}>{eqDayLabel(spotDay(s))}</span>}
                   <span style={{ fontSize:18, fontWeight:800, color:"#5a6478", fontVariantNumeric:"tabular-nums" }}>{s.time || "時間未定"}</span>
                 </div>
                 {s.memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, marginTop:6, lineHeight:1.5, wordBreak:"break-word" }}>📝 {s.memo}</div>}
