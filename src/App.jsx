@@ -11398,7 +11398,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     setSaving(true);
     try {
       const plan = {
-        items: items.map(x => ({ item_id: x.item_id, name: nameOf(x), quantity: qtyOf(x), player: x.player || "", who: x.who || "self" })),
+        items: items.map(x => ({ item_id: x.item_id, name: nameOf(x), quantity: qtyOf(x), memo: (x.memo || "").trim(), player: x.player || "", who: x.who || "self" })),
         spots: spotOrder.map(x => x.s).filter(s => s.player).map(s => ({ player: s.player, who: s.who || "self", day: spotDay(s), time: s.time || "", memo: s.memo || "" })),
       };
       await saveTournamentEquipmentPlan(tournament.id, plan);
@@ -11420,7 +11420,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
       <button onClick={onAdd} style={{ border:"none", background:C.navy, color:"#fff", borderRadius:18, padding:"7px 14px", fontSize:14, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>＋ 追加</button>
     </div>
   );
-  const card = { display:"block", width:"100%", textAlign:"left", background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"13px 12px 12px 14px", marginBottom:10, cursor:"pointer", boxShadow:"0 1px 3px rgba(15,32,68,0.05)", fontFamily:"inherit" };
+  const card = { display:"block", width:"100%", boxSizing:"border-box", textAlign:"left", background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"13px 12px 12px 14px", marginBottom:10, cursor:"pointer", boxShadow:"0 1px 3px rgba(15,32,68,0.05)", fontFamily:"inherit" };
   const empty = { textAlign:"center", color:C.textSec, fontSize:14, padding:"20px 10px", background:C.white, border:`1px dashed ${C.border}`, borderRadius:12 };
   const personTitle = sheet?.type === "person"
     ? (sheet.kind === "eq" ? `${sheet.idxs.map(k => nameOf(items[k])).join("・")}を持ってくる人` : "場所取りの担当")
@@ -11448,11 +11448,13 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
             {secHead("bag", "備品", `${items.length}件`, ()=>setSheet({ type:"items", sel:[] }))}
             {items.length === 0 && <div style={empty}>まだ備品がありません。右上の「＋ 追加」から選んでください</div>}
             {items.map((it, i) => {
-              const memo = memoOf(it);
+              const memo = it.memo || ""; // ★この大会だけのメモ（設定の備品メモは「備品を選ぶ」画面だけに出す）
               return (
-                <button key={it.item_id + "_" + i} style={card} onClick={()=>setSheet({ type:"person", kind:"eq", idxs:[i] })}>
+                <div key={it.item_id + "_" + i} role="button" tabIndex={0} style={card} onClick={()=>setSheet({ type:"person", kind:"eq", idxs:[i] })}>
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                     <div style={{ flex:1, minWidth:0, fontSize:22, fontWeight:900, color:C.navy, wordBreak:"break-word" }}>{nameOf(it)}{qtyOf(it) > 1 && <span style={{ fontSize:14, fontWeight:800, color:"#5a6478", marginLeft:8 }}>×{qtyOf(it)}</span>}</div>
+                    <button onClick={e=>{ e.stopPropagation(); setSheet({ type:"memo", i, text: it.memo || "" }); }}
+                      style={{ border:"1px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:16, padding:"5px 11px", fontSize:13.5, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}>📝 メモ</button>
                     <EqIcon name="chev" size={22} color="#7a8499" />
                   </div>
                   {memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, marginTop:5, lineHeight:1.5, wordBreak:"break-word" }}>📝 {memo}</div>}
@@ -11466,7 +11468,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                         : <span style={{ fontSize:16, fontWeight:800, color:"#9aa3b2" }}>未定</span>}
                     </span>
                   </div>
-                </button>
+                </div>
               );
             })}
 
@@ -11533,6 +11535,15 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
               <div style={{ fontSize:12.5, color:"#8a93a3", textAlign:"center", marginTop:8 }}>次の画面で、選んだ備品をまとめて持ってくる人を決めます</div>
             </>
           )}
+        </EquipSheet>
+      )}
+      {sheet?.type === "memo" && (
+        <EquipSheet title={`${nameOf(items[sheet.i])}のメモ`} onClose={()=>setSheet(null)}>
+          <div style={{ fontSize:12.5, color:"#8a93a3", margin:"6px 0 8px" }}>この大会だけのメモです（例：2個持ってくる、雨なら不要 など）</div>
+          <textarea value={sheet.text} onChange={e=>{ const v = e.target.value; setSheet(sh => ({ ...sh, text:v })); }} placeholder="メモを入力"
+            style={{ display:"block", width:"100%", boxSizing:"border-box", minHeight:100, border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", fontSize:16, lineHeight:1.5, color:C.text, outline:"none", resize:"vertical", fontFamily:"inherit" }} />
+          <button onClick={()=>{ setItems(prev => prev.map((x, k) => k === sheet.i ? { ...x, memo: sheet.text.trim() } : x)); setSheet(null); }}
+            style={{ display:"block", width:"100%", height:50, marginTop:14, border:"none", borderRadius:12, background:C.accent, color:"#fff", fontSize:16, fontWeight:800, cursor:"pointer" }}>決定</button>
         </EquipSheet>
       )}
       {sheet?.type === "person" && (
