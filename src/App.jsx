@@ -11363,8 +11363,13 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
   };
   const chip = { border:"1px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:8, padding:"6px 11px", fontSize:13, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 };
   const xBtn = { border:"none", background:"none", color:"#a0a8b8", fontSize:18, padding:"2px 4px", cursor:"pointer", flexShrink:0 };
-  const addBtn = { display:"block", width:"100%", border:"1.5px dashed #c4cbd8", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:800, color:C.navy, background:C.white, marginTop:9, cursor:"pointer" };
-  const lbl = { fontSize:13.5, fontWeight:800, color:"#5a6478", margin:"16px 2px 7px" };
+  // ★見出し（大きめ）と、右上のコンパクトな「＋ 追加」ボタン
+  const secHead = (title, onAdd) => (
+    <div style={{ display:"flex", alignItems:"center", gap:8, margin:"18px 2px 8px" }}>
+      <div style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, color:C.navy }}>{title}</div>
+      <button onClick={onAdd} style={{ border:"none", background:C.navy, color:"#fff", borderRadius:18, padding:"7px 14px", fontSize:14, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>＋ 追加</button>
+    </div>
+  );
   const empty = { textAlign:"center", color:C.textSec, fontSize:14, padding:"20px 10px", background:C.white, border:`1px dashed ${C.border}`, borderRadius:12 };
   const personTitle = sheet?.type === "person"
     ? (sheet.kind === "eq" ? `${sheet.idxs.map(k => nameOf(items[k])).join("・")}を持ってくる人` : "場所取りの担当")
@@ -11389,8 +11394,8 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
         {loading ? <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0" }}>読み込み中...</div> : (
           <>
             {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13, fontWeight:700, borderRadius:10, padding:"10px 12px", marginTop:10 }}>{loadError}</div>}
-            <div style={lbl}>備品（{items.length}件）</div>
-            {items.length === 0 && <div style={empty}>まだ備品がありません</div>}
+            {secHead(`🎒 備品（${items.length}件）`, ()=>setSheet({ type:"items", sel:[] }))}
+            {items.length === 0 && <div style={empty}>まだ備品がありません。右上の「＋ 追加」から選んでください</div>}
             {items.map((it, i) => {
               const memo = memoOf(it);
               return (
@@ -11411,9 +11416,8 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                 </div>
               );
             })}
-            <button style={addBtn} onClick={()=>setSheet({ type:"items", sel:[] })}>＋ 備品を追加（登録済みから選ぶ）</button>
 
-            <div style={lbl}>🚩 場所取り（{spots.length}人）</div>
+            {secHead(`🚩 場所取り（${spots.length}人）`, ()=>setSheet({ type:"person", kind:"spot", i:-1 }))}
             {spots.length === 0 ? <div style={empty}>まだ場所取りの担当がいません</div> : (
               <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
                 {spots.map((s, i) => (
@@ -11428,7 +11432,6 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                 ))}
               </div>
             )}
-            <button style={addBtn} onClick={()=>setSheet({ type:"person", kind:"spot", i:-1 })}>＋ 場所取りの担当を追加</button>
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr", gap:8, marginTop:18 }}>
               <button onClick={onClose} style={{ height:50, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15.5, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
