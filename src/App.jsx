@@ -12786,9 +12786,10 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
                 候補をタップしたときはすぐ確定、手入力のときは「決定」を押すまで確定しない。 */}
             <SchoolField
               value={mySchoolDraft}
-              onChange={name => {
-                setMySchoolDraft(name);
-                // 候補（学校マスター）と完全一致したら、その学校で確定する
+              onChange={name => setMySchoolDraft(name)}
+              // ★候補をタップしたときだけすぐ確定する。以前は入力した文字が学校名と一致した瞬間に確定していたため、
+              //   「ちくし」→「筑紫」と変換した時点で「筑紫」に決まって閉じてしまい、「筑紫台」まで入力できなかった。
+              onPick={name => {
                 const found = schoolsWithId.find(s => s.name === name);
                 if (found) {
                   setMySchoolId(found.id);
@@ -17485,7 +17486,7 @@ function VenueHistoryField({ value, onChange, onPick, history, placeholder }) {
 // ★学校名の誤入力防止用：入力しながら候補が絞り込まれるサジェスト式の入力欄
 // schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
 // prefFilter: 親から渡される都道府県絞り込み値（任意）
-function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
+function SchoolField({ value, onChange, onPick, schools, placeholder, prefFilter }) {
   const [open, setOpen] = useState(false);
   const safeValue = value || "";
   const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
@@ -17507,7 +17508,7 @@ function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
           <div style={{ padding:"4px 14px", fontSize:10, color:C.textSec, background:"#f5f6f8" }}>{filtered.length}件中 最大200件を表示（枠内をスクロールできます）</div>
           {filtered.slice(0, 200).map(s => (
             <div key={s.name} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
-              onMouseDown={e => { e.preventDefault(); onChange(s.name); setOpen(false); }}
+              onMouseDown={e => { e.preventDefault(); onChange(s.name); onPick && onPick(s.name); setOpen(false); }}
             >{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</div>
           ))}
         </div>
