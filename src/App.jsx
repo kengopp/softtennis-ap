@@ -11209,6 +11209,21 @@ function pushEquipHistory(name) {
   try { localStorage.setItem(EQUIP_HISTORY_KEY, JSON.stringify([name, ...loadEquipHistory().filter(n => n !== name)].slice(0, 10))); } catch {}
 }
 
+// ★大会の日にち一覧（"YYYY-MM-DD" の配列）。最大14日まで
+function tournamentDays(t) {
+  const s = t?.start_date, e = t?.end_date || t?.start_date;
+  if (!s) return [];
+  const out = [];
+  const d = new Date(`${s}T00:00:00`), end = new Date(`${e}T00:00:00`);
+  while (d <= end && out.length < 14) {
+    out.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+// ★「10/18（日）」の形
+const eqDayLabel = (iso) => { const f = fmtDateDow(iso); return f.slice(5).replace(/^0/, "").replace("/0", "/"); };
+
 // ---------- 備品・場所取りの線画アイコン ----------
 const EqIcon = ({ name, size=22, color="#1f3466" }) => {
   const p = { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{ flexShrink:0, display:"block" } };
@@ -11245,12 +11260,13 @@ const EquipStep = ({ no, children }) => (
 
 // ---------- 持ってくる人（場所取りの担当）を選ぶシート ----------
 // ①名前（ログイン中の選手本人／保護者なら子どもが最初から入る）②本人か保護者か（③場所取りは時間・メモ）
-function EquipPersonSheet({ title, kind, players, initial, onDecide, onUndecided, onRemove, removeLabel, onClose }) {
+function EquipPersonSheet({ title, kind, players, initial, days = [], onDecide, onUndecided, onRemove, removeLabel, onClose }) {
   const [player, setPlayer] = useState(initial.player || "");
   const [who, setWho] = useState(initial.who || "self");
   const [q, setQ] = useState("");
   const [listOpen, setListOpen] = useState(false);
   const [time, setTime] = useState(initial.time || "");
+  const [day, setDay] = useState(initial.day && days.includes(initial.day) ? initial.day : (days[0] || ""));
   const [memo, setMemo] = useState(initial.memo || "");
   const inputRef = useRef(null);
   const norm = (t) => String(t || "").replace(/[\s　]/g, "");
@@ -11303,14 +11319,22 @@ function EquipPersonSheet({ title, kind, players, initial, onDecide, onUndecided
       </div>
       {kind === "spot" && (
         <>
-          <EquipStep no="3">時間・メモ<span style={{ fontSize:12, color:"#888", fontWeight:700 }}>任意</span></EquipStep>
-          <div style={{ display:"grid", gridTemplateColumns:"120px 1fr", gap:8 }}>
-            <input type="time" value={time} onChange={e=>setTime(e.target.value)} style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", minWidth:0 }} />
-            <input value={memo} onChange={e=>setMemo(e.target.value)} placeholder="メモ（例：テント2張り分）" style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", minWidth:0 }} />
-          </div>
+          <EquipStep no="3">{days.length > 1 ? "日時" : "時間"}<span style={{ fontSize:12, color:"#888", fontWeight:700 }}>{days.length > 1 ? "" : "任意"}</span></EquipStep>
+          {days.length > 1 && (
+            <div style={{ display:"grid", gridTemplateColumns:`repeat(${Math.min(days.length, 3)}, 1fr)`, gap:8, marginBottom:8 }}>
+              {days.map(d => {
+                const on = day === d;
+                return <button key={d} onClick={()=>setDay(d)}
+                  style={{ border:`1.5px solid ${on ? C.navy : "#cfd6e2"}`, background: on ? "#eef2fa" : C.white, color: on ? C.navy : C.textSec, borderRadius:12, padding:"11px 0", fontSize:15.5, fontWeight:800, cursor:"pointer" }}>{eqDayLabel(d)}</button>;
+              })}
+            </div>
+          )}
+          <input type="time" value={time} onChange={e=>setTime(e.target.value)} style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", minWidth:0, width:"100%" }} />
+          <EquipStep no="4">メモ<span style={{ fontSize:12, color:"#888", fontWeight:700 }}>任意</span></EquipStep>
+          <input value={memo} onChange={e=>setMemo(e.target.value)} placeholder="メモ（例：テント2張り分）" style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", minWidth:0, width:"100%" }} />
         </>
       )}
-      <button disabled={!player} onClick={()=>{ pushEquipHistory(player); onDecide({ player, who, time, memo: memo.trim() }); }}
+      <button disabled={!player} onClick={()=>{ pushEquipHistory(player); onDecide({ player, who, time, memo: memo.trim(), ...(kind === "spot" ? { day: days.length > 1 ? day : (days[0] || "") } : {}) }); }}
         style={{ display:"block", width:"100%", height:50, marginTop:20, border:"none", borderRadius:12, background: player ? C.accent : "#b7e8d2", color:"#fff", fontSize:16, fontWeight:800, cursor: player ? "pointer" : "default" }}>決定</button>
       {!player && <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginTop:8 }}>名前を選ぶと「決定」が押せます</div>}
       {onRemove && <button data-no-back="1" onClick={onRemove} style={{ display:"block", margin:"14px auto 0", background:"none", border:"none", color:C.red, fontSize:14, fontWeight:800, cursor:"pointer" }}>🗑 {removeLabel}</button>}
@@ -11360,6 +11384,11 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     return () => { cancelled = true; };
   }, []);
   const qtyOf = (it) => Number(master.find(m => m.id === it.item_id)?.quantity || it.quantity || 1);
+  const days = tournamentDays(tournament);
+  const multiDay = days.length > 1;
+  const spotDay = (s) => (s.day && days.includes(s.day)) ? s.day : (days[0] || "");
+  // ★場所取りは日にち→時間の早い順に並べる（並べ替えた後も、元の番号で変更・削除できるようにする）
+  const spotOrder = spots.map((s, i) => ({ s, i })).sort((a, b) => (spotDay(a.s) + (a.s.time || "99:99")).localeCompare(spotDay(b.s) + (b.s.time || "99:99")));
   const memoOf = (it) => master.find(m => m.id === it.item_id)?.memo || "";
   const nameOf = (it) => master.find(m => m.id === it.item_id)?.name || it.name || "（削除された備品）";
   const used = new Set(items.map(x => x.item_id));
@@ -11370,7 +11399,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     try {
       const plan = {
         items: items.map(x => ({ item_id: x.item_id, name: nameOf(x), quantity: qtyOf(x), player: x.player || "", who: x.who || "self" })),
-        spots: spots.filter(s => s.player).map(s => ({ player: s.player, who: s.who || "self", time: s.time || "", memo: s.memo || "" })),
+        spots: spotOrder.map(x => x.s).filter(s => s.player).map(s => ({ player: s.player, who: s.who || "self", day: spotDay(s), time: s.time || "", memo: s.memo || "" })),
       };
       await saveTournamentEquipmentPlan(tournament.id, plan);
       onSaved && onSaved({ ...tournament, equipment_plan: plan });
@@ -11443,7 +11472,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
 
             {secHead("flag", "場所取り", `${spots.length}人`, ()=>setSheet({ type:"person", kind:"spot", i:-1 }))}
             {spots.length === 0 && <div style={empty}>まだ場所取りの担当がいません</div>}
-            {spots.map((s, i) => (
+            {spotOrder.map(({ s, i }) => (
               <button key={i} style={card} onClick={()=>setSheet({ type:"person", kind:"spot", i })}>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                   <div style={{ flex:1, minWidth:0, wordBreak:"break-word" }}>
@@ -11454,6 +11483,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:8 }}>
                   <EqIcon name="clock" size={20} color="#6b7487" />
+                  {multiDay && <span style={{ fontSize:18, fontWeight:900, color:C.navy, marginRight:6 }}>{eqDayLabel(spotDay(s))}</span>}
                   <span style={{ fontSize:18, fontWeight:800, color:"#5a6478", fontVariantNumeric:"tabular-nums" }}>{s.time || "時間未定"}</span>
                 </div>
                 {s.memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, marginTop:6, lineHeight:1.5, wordBreak:"break-word" }}>📝 {s.memo}</div>}
@@ -11512,6 +11542,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
           kind={sheet.kind}
           players={players}
           initial={personInitial()}
+          days={days}
           onClose={()=>setSheet(null)}
           onUndecided={()=>{ setItems(prev => prev.map((x, k) => sheet.idxs.includes(k) ? { ...x, player:"" } : x)); setSheet(null); }}
           onRemove={sheet.kind === "eq"
