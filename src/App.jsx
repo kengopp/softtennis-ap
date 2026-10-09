@@ -11170,10 +11170,16 @@ async function getEquipmentItems(schoolId) {
   if (error) { console.error(error); throw new Error("備品の一覧を読み込めませんでした: " + error.message); }
   return data ?? [];
 }
-async function saveEquipmentItem({ id, school_id, name, memo, sort_order }) {
-  const row = { id: id || uid(), school_id, name: (name || "").trim(), memo: (memo || "").trim() || null, updated_at: new Date().toISOString() };
+async function saveEquipmentItem({ id, school_id, name, memo, quantity, sort_order }) {
+  const row = { id: id || uid(), school_id, name: (name || "").trim(), memo: (memo || "").trim() || null, quantity: Math.max(1, Number(quantity) || 1), updated_at: new Date().toISOString() };
   if (sort_order != null) row.sort_order = sort_order;
-  const { error } = await supabase.from("equipment_items").upsert(row);
+  let { error } = await supabase.from("equipment_items").upsert(row);
+  // ★データベースに数量の項目をまだ追加していない場合は、数量なしで保存する
+  if (error && /quantity/.test(error.message || "")) {
+    const { quantity: _q, ...rest } = row;
+    ({ error } = await supabase.from("equipment_items").upsert(rest));
+    if (!error) alert("数量は保存できませんでした（データベースに数量の項目がまだありません）。名前とメモは保存しました。");
+  }
   if (error) throw error;
   return row;
 }
@@ -11334,6 +11340,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     })();
     return () => { cancelled = true; };
   }, []);
+  const qtyOf = (it) => Number(master.find(m => m.id === it.item_id)?.quantity || it.quantity || 1);
   const memoOf = (it) => master.find(m => m.id === it.item_id)?.memo || "";
   const nameOf = (it) => master.find(m => m.id === it.item_id)?.name || it.name || "（削除された備品）";
   const used = new Set(items.map(x => x.item_id));
@@ -11343,7 +11350,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     setSaving(true);
     try {
       const plan = {
-        items: items.map(x => ({ item_id: x.item_id, name: nameOf(x), player: x.player || "", who: x.who || "self" })),
+        items: items.map(x => ({ item_id: x.item_id, name: nameOf(x), quantity: qtyOf(x), player: x.player || "", who: x.who || "self" })),
         spots: spots.filter(s => s.player).map(s => ({ player: s.player, who: s.who || "self", time: s.time || "", memo: s.memo || "" })),
       };
       await saveTournamentEquipmentPlan(tournament.id, plan);
@@ -11389,7 +11396,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
               return (
                 <div key={it.item_id + "_" + i} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"11px 12px", marginBottom:9 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <div style={{ flex:1, minWidth:0, fontSize:16, fontWeight:900, color:C.text }}>{nameOf(it)}</div>
+                    <div style={{ flex:1, minWidth:0, fontSize:16, fontWeight:900, color:C.text }}>{nameOf(it)}{qtyOf(it) > 1 && <span style={{ fontSize:13, fontWeight:800, color:"#1565c0", background:"#e3eefb", borderRadius:6, padding:"1px 7px", marginLeft:8 }}>数量 {qtyOf(it)}</span>}</div>
                     <button style={xBtn} aria-label="この備品を外す" onClick={()=>setItems(prev => prev.filter((_, k) => k !== i))}>✕</button>
                   </div>
                   {memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, margin:"6px 0 2px", lineHeight:1.5, wordBreak:"break-word" }}>📝 {memo}</div>}
@@ -11448,7 +11455,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                     style={{ display:"flex", alignItems:"center", gap:12, width:"100%", textAlign:"left", padding:"11px 12px", border:`1.5px solid ${on ? "#0b6e75" : "#e3e7ee"}`, background: on ? "#eef8f8" : C.white, borderRadius:12, marginBottom:6, cursor:"pointer" }}>
                     <span style={{ flex:"0 0 24px", width:24, height:24, borderRadius:6, border:`2px solid ${on ? "#0b6e75" : "#b5bdca"}`, background: on ? "#0b6e75" : C.white, color:"#fff", fontSize:14, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", boxSizing:"border-box" }}>{on ? "✓" : ""}</span>
                     <span style={{ flex:1, minWidth:0 }}>
-                      <span style={{ display:"block", fontSize:15.5, fontWeight:800, color:C.text }}>{m.name}</span>
+                      <span style={{ display:"block", fontSize:15.5, fontWeight:800, color:C.text }}>{m.name}{Number(m.quantity) > 1 && <span style={{ fontSize:13, fontWeight:800, color:"#1565c0", marginLeft:8 }}>数量 {m.quantity}</span>}</span>
                       {m.memo && <span style={{ display:"block", fontSize:13, color:"#5a6478", fontWeight:600, marginTop:3, wordBreak:"break-word" }}>{m.memo}</span>}
                     </span>
                   </button>
@@ -11516,7 +11523,7 @@ function EquipmentRegistryScreen({ onBack }) {
     if (!edit.name.trim()) { alert("備品名を入れてください"); return; }
     setSaving(true);
     try {
-      await saveEquipmentItem({ id: edit.id, school_id: schoolId, name: edit.name, memo: edit.memo, sort_order: edit.id ? undefined : list.length });
+      await saveEquipmentItem({ id: edit.id, school_id: schoolId, name: edit.name, memo: edit.memo, quantity: edit.quantity, sort_order: edit.id ? undefined : list.length });
       setEdit(null);
       await reload(schoolId);
     } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
@@ -11548,16 +11555,16 @@ function EquipmentRegistryScreen({ onBack }) {
                 {list.map((it, i) => (
                   <div key={it.id} style={{ display:"flex", alignItems:"center", gap:10, padding:12, borderTop: i ? "1px solid #eef1f5" : "none" }}>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:15.5, fontWeight:800, color:C.text }}>{it.name}</div>
+                      <div style={{ fontSize:15.5, fontWeight:800, color:C.text }}>{it.name}<span style={{ fontSize:13, fontWeight:800, color:"#1565c0", background:"#e3eefb", borderRadius:6, padding:"1px 7px", marginLeft:8 }}>数量 {it.quantity || 1}</span></div>
                       <div style={{ fontSize:13, color: it.memo ? "#5a6478" : "#aaa", fontWeight:600, marginTop:3, lineHeight:1.45, wordBreak:"break-word" }}>{it.memo || "メモなし"}</div>
                     </div>
-                    <button onClick={()=>open({ id:it.id, name:it.name, memo:it.memo || "" })}
+                    <button onClick={()=>open({ id:it.id, name:it.name, memo:it.memo || "", quantity: it.quantity || 1 })}
                       style={{ border:"1px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:8, padding:"6px 11px", fontSize:13, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>編集</button>
                   </div>
                 ))}
               </div>
             )}
-            <button onClick={()=>open({ name:"", memo:"" })}
+            <button onClick={()=>open({ name:"", memo:"", quantity:1 })}
               style={{ display:"block", width:"100%", border:"1.5px dashed #c4cbd8", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:800, color:C.navy, background:C.white, marginTop:9, cursor:"pointer" }}>＋ 備品を追加</button>
             <div style={{ fontSize:12.5, color:"#8a93a3", marginTop:8, lineHeight:1.5 }}>※ここで登録した備品が、大会一覧の「🎒 管理」で選べるようになります。</div>
           </>
@@ -11567,6 +11574,19 @@ function EquipmentRegistryScreen({ onBack }) {
         <EquipSheet title={edit.id ? "備品を編集" : "備品を追加"} onClose={()=>setEdit(null)}>
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>備品名<span style={{ fontSize:11.5, color:"#fff", background:C.red, borderRadius:5, padding:"1px 6px", marginLeft:6 }}>必須</span></div>
           <input value={edit.name} onChange={e=>setEdit(v => ({ ...v, name:e.target.value }))} placeholder="例：テント3" style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%" }} />
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>数量</div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {[["−",-1],["＋",1]].map(([l,d],k) => {
+              const btn = <button key={l} aria-label={d<0?"1つ減らす":"1つ増やす"} disabled={d<0 && (edit.quantity||1)<=1}
+                onClick={()=>setEdit(v => ({ ...v, quantity: Math.max(1, (Number(v.quantity)||1) + d) }))}
+                style={{ width:48, height:48, borderRadius:12, border:"1.5px solid #cfd6e2", background:C.white, fontSize:22, fontWeight:800, color: d<0 && (edit.quantity||1)<=1 ? "#c4cbd8" : C.navy, cursor:"pointer" }}>{l}</button>;
+              return k===0 ? [btn, <input key="q" inputMode="numeric" value={edit.quantity ?? 1}
+                onChange={e=>{ const v = e.target.value.replace(/[^0-9]/g, ""); setEdit(x => ({ ...x, quantity: v === "" ? "" : Math.min(99, Number(v)) })); }}
+                onBlur={()=>setEdit(x => ({ ...x, quantity: Math.max(1, Number(x.quantity) || 1) }))}
+                style={{ width:70, height:48, boxSizing:"border-box", textAlign:"center", border:"1.5px solid #cfd6e2", borderRadius:10, fontSize:18, fontWeight:800, color:C.text, outline:"none" }} />] : btn;
+            })}
+            <span style={{ fontSize:14, color:C.textSec, fontWeight:700 }}>個</span>
+          </div>
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>メモ<span style={{ fontSize:12, color:"#888", marginLeft:6, fontWeight:700 }}>任意</span></div>
           <textarea value={edit.memo} onChange={e=>setEdit(v => ({ ...v, memo:e.target.value }))} placeholder="例：袋の色・中身・注意点など"
             style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%", minHeight:76, resize:"vertical", lineHeight:1.5, fontFamily:"inherit" }} />
