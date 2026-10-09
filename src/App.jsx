@@ -6141,22 +6141,22 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 
   return (
     <div>
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>大会名</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>大会名</div>
       <input style={{ ...S.inp, marginBottom:14 }} placeholder="例：令和8年度 新人戦" value={name} onChange={e=>setName(e.target.value)}/>
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>開催期間</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>開催期間</div>
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
         <input type="date" style={{ ...S.inp, flex:1 }} value={startDate} onChange={e=>setStartDate(e.target.value)}/>
         <span style={{ fontSize:12, color:C.textSec }}>〜</span>
         <input type="date" style={{ ...S.inp, flex:1 }} value={endDate} onChange={e=>setEndDate(e.target.value)}/>
       </div>
-      <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>場所 / 会場名（任意）</div>
+      <div style={{ fontSize:13, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>場所 / 会場名（任意）</div>
       <div style={{ marginBottom:16 }}>
         <VenueHistoryField value={venue} onChange={v=>{ setVenue(v); }} history={venues} placeholder="例：○○市民コート"
           onPick={item=>{ setVenue(item.name); if (item.link) { setVenueLink(item.link); setAutoLinkFrom(item.name); } else { setAutoLinkFrom(null); } }}/>
       </div>
 
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>会場リンク（任意）</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>会場リンク（任意）</div>
       <div style={{ display:"flex", alignItems:"center", gap:8, borderBottom:"1px solid "+C.border, paddingBottom:8, marginBottom:16 }}>
         <span style={{ fontSize:14, color:C.textSec }}>🔗</span>
         <input
@@ -6175,7 +6175,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         </div>
       )}
 
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>試合要項（任意）</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>試合要項（任意）</div>
       <div style={{ border:"1px dashed "+C.border, borderRadius:10, padding:12, marginBottom:16 }}>
         <div style={{ display:"flex", gap:6, marginBottom:10 }}>
           <button
@@ -6218,7 +6218,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         )}
       </div>
 
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>対戦表（任意）</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>対戦表（任意）</div>
       <div style={{ border:"1px dashed "+C.border, borderRadius:10, padding:12, marginBottom:16 }}>
         <div style={{ display:"flex", gap:6, marginBottom:10 }}>
           {[["file","📎 ファイル添付"],["link","🔗 リンクを貼る"]].map(([k,l]) => (
@@ -6255,7 +6255,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         )}
       </div>
 
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>出場選手（任意・複数選択可）</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>出場選手（任意・複数選択可）</div>
       <div style={{ border:"1px solid "+C.border, borderRadius:10, padding:10, marginBottom:16 }}>
         <input
           style={{ ...S.inp, marginBottom:8 }}
@@ -6282,7 +6282,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
             <span key={p.id} style={S.chip(participantIds.includes(p.id))} onClick={()=>toggleParticipant(p.id)}>{p.player_name}</span>
           ))}
         </div>
-        <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{participantIds.length}人選択中</div>
+        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginTop:8 }}>{participantIds.length}人選択中</div>
       </div>
 
       <div style={{ display:"flex", gap:8, position:"sticky", bottom:0, background:C.white, padding:"12px 0 18px", marginTop:16, borderTop:`1px solid ${C.border}` }}>
