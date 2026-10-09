@@ -11337,7 +11337,7 @@ function EquipPersonSheet({ title, kind, players, initial, days = [], onDecide, 
       <button disabled={!player} onClick={()=>{ pushEquipHistory(player); onDecide({ player, who, time, memo: memo.trim(), ...(kind === "spot" ? { day: days.length > 1 ? day : (days[0] || "") } : {}) }); }}
         style={{ display:"block", width:"100%", height:50, marginTop:20, border:"none", borderRadius:12, background: player ? C.accent : "#b7e8d2", color:"#fff", fontSize:16, fontWeight:800, cursor: player ? "pointer" : "default" }}>決定</button>
       {!player && <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginTop:8 }}>名前を選ぶと「決定」が押せます</div>}
-      {onRemove && <button data-no-back="1" onClick={onRemove} style={{ display:"block", margin:"14px auto 0", background:"none", border:"none", color:C.red, fontSize:14, fontWeight:800, cursor:"pointer" }}>🗑 {removeLabel}</button>}
+      {onRemove && <button data-no-back="1" aria-label={removeLabel} onClick={onRemove} style={{ display:"block", width:"100%", height:46, marginTop:10, background:C.white, border:`1.5px solid ${C.red}`, borderRadius:12, color:C.red, fontSize:15.5, fontWeight:800, cursor:"pointer" }}>🗑 削除</button>}
     </EquipSheet>
   );
 }
