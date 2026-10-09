@@ -11209,6 +11209,17 @@ function pushEquipHistory(name) {
   try { localStorage.setItem(EQUIP_HISTORY_KEY, JSON.stringify([name, ...loadEquipHistory().filter(n => n !== name)].slice(0, 10))); } catch {}
 }
 
+// ---------- 備品・場所取りの線画アイコン ----------
+const EqIcon = ({ name, size=22, color="#1f3466" }) => {
+  const p = { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{ flexShrink:0, display:"block" } };
+  if (name === "bag") return <svg {...p}><path d="M8 7V5.5A2.5 2.5 0 0 1 10.5 3h3A2.5 2.5 0 0 1 16 5.5V7"/><rect x="4.5" y="7" width="15" height="14" rx="3.5"/><path d="M8.5 13.5h7v3h-7z"/></svg>;
+  if (name === "flag") return <svg {...p}><path d="M5 21V4"/><path d="M5 4h11l-2.5 4L16 12H5" fill={color}/></svg>;
+  if (name === "clock") return <svg {...p}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
+  if (name === "person") return <svg {...p} stroke="none" fill={color}><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg>;
+  if (name === "chev") return <svg {...p} strokeWidth={2.2}><path d="M9 5l7 7-7 7"/></svg>;
+  return null;
+};
+
 // ---------- 下から出るシートの外枠 ----------
 function EquipSheet({ title, onClose, children }) {
   return (
@@ -11234,7 +11245,7 @@ const EquipStep = ({ no, children }) => (
 
 // ---------- 持ってくる人（場所取りの担当）を選ぶシート ----------
 // ①名前（ログイン中の選手本人／保護者なら子どもが最初から入る）②本人か保護者か（③場所取りは時間・メモ）
-function EquipPersonSheet({ title, kind, players, initial, onDecide, onUndecided, onClose }) {
+function EquipPersonSheet({ title, kind, players, initial, onDecide, onUndecided, onRemove, removeLabel, onClose }) {
   const [player, setPlayer] = useState(initial.player || "");
   const [who, setWho] = useState(initial.who || "self");
   const [q, setQ] = useState("");
@@ -11302,6 +11313,7 @@ function EquipPersonSheet({ title, kind, players, initial, onDecide, onUndecided
       <button disabled={!player} onClick={()=>{ pushEquipHistory(player); onDecide({ player, who, time, memo: memo.trim() }); }}
         style={{ display:"block", width:"100%", height:50, marginTop:20, border:"none", borderRadius:12, background: player ? C.accent : "#b7e8d2", color:"#fff", fontSize:16, fontWeight:800, cursor: player ? "pointer" : "default" }}>決定</button>
       {!player && <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginTop:8 }}>名前を選ぶと「決定」が押せます</div>}
+      {onRemove && <button data-no-back="1" onClick={onRemove} style={{ display:"block", margin:"14px auto 0", background:"none", border:"none", color:C.red, fontSize:14, fontWeight:800, cursor:"pointer" }}>🗑 {removeLabel}</button>}
     </EquipSheet>
   );
 }
@@ -11368,15 +11380,18 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
       setSaving(false);
     }
   };
-  const chip = { border:"1px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:8, padding:"6px 11px", fontSize:13, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 };
-  const xBtn = { border:"none", background:"none", color:"#a0a8b8", fontSize:18, padding:"2px 4px", cursor:"pointer", flexShrink:0 };
   // ★見出し（大きめ）と、右上のコンパクトな「＋ 追加」ボタン
-  const secHead = (title, onAdd) => (
-    <div style={{ display:"flex", alignItems:"center", gap:8, margin:"18px 2px 8px" }}>
-      <div style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, color:C.navy }}>{title}</div>
+  const secHead = (icon, title, count, onAdd) => (
+    <div style={{ display:"flex", alignItems:"center", gap:12, background:"#e8edf5", borderRadius:12, padding:"10px 12px 10px 14px", margin:"16px 0 10px" }}>
+      <EqIcon name={icon} size={26} />
+      <div style={{ flex:1, minWidth:0, display:"flex", alignItems:"baseline", gap:8 }}>
+        <span style={{ fontSize:21, fontWeight:900, color:C.navy }}>{title}</span>
+        <span style={{ fontSize:15, fontWeight:700, color:"#5a6478" }}>（{count}）</span>
+      </div>
       <button onClick={onAdd} style={{ border:"none", background:C.navy, color:"#fff", borderRadius:18, padding:"7px 14px", fontSize:14, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>＋ 追加</button>
     </div>
   );
+  const card = { display:"block", width:"100%", textAlign:"left", background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:"13px 12px 12px 14px", marginBottom:10, cursor:"pointer", boxShadow:"0 1px 3px rgba(15,32,68,0.05)", fontFamily:"inherit" };
   const empty = { textAlign:"center", color:C.textSec, fontSize:14, padding:"20px 10px", background:C.white, border:`1px dashed ${C.border}`, borderRadius:12 };
   const personTitle = sheet?.type === "person"
     ? (sheet.kind === "eq" ? `${sheet.idxs.map(k => nameOf(items[k])).join("・")}を持ってくる人` : "場所取りの担当")
@@ -11393,7 +11408,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     <div style={{ position:"fixed", inset:0, zIndex:300, background:C.gray, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={tryClose} aria-label="戻る">←</button>
-        <span style={{ fontSize:18, fontWeight:800, color:C.white }}>🎒 備品・場所取り</span>
+        <span style={{ display:"flex", alignItems:"center", gap:8, fontSize:18, fontWeight:800, color:C.white }}><EqIcon name="bag" size={22} color="#fff" />備品・場所取り</span>
       </div>
       <div style={{ padding:"12px 14px 40px", maxWidth:640, margin:"0 auto" }}>
         <div style={{ fontSize:15, fontWeight:900, color:C.navy }}>{tournament.name}
@@ -11401,44 +11416,49 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
         {loading ? <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0" }}>読み込み中...</div> : (
           <>
             {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13, fontWeight:700, borderRadius:10, padding:"10px 12px", marginTop:10 }}>{loadError}</div>}
-            {secHead(`🎒 備品（${items.length}件）`, ()=>setSheet({ type:"items", sel:[] }))}
+            {secHead("bag", "備品", `${items.length}件`, ()=>setSheet({ type:"items", sel:[] }))}
             {items.length === 0 && <div style={empty}>まだ備品がありません。右上の「＋ 追加」から選んでください</div>}
             {items.map((it, i) => {
               const memo = memoOf(it);
               return (
-                <div key={it.item_id + "_" + i} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"11px 12px", marginBottom:9 }}>
+                <button key={it.item_id + "_" + i} style={card} onClick={()=>setSheet({ type:"person", kind:"eq", idxs:[i] })}>
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <div style={{ flex:1, minWidth:0, fontSize:16, fontWeight:900, color:C.text }}>{nameOf(it)}{qtyOf(it) > 1 && <span style={{ fontSize:13, fontWeight:800, color:"#1565c0", background:"#e3eefb", borderRadius:6, padding:"1px 7px", marginLeft:8 }}>数量 {qtyOf(it)}</span>}</div>
-                    <button style={xBtn} data-no-back="1" aria-label="この備品を外す" onClick={()=>setItems(prev => prev.filter((_, k) => k !== i))}>✕</button>
+                    <div style={{ flex:1, minWidth:0, fontSize:22, fontWeight:900, color:C.navy, wordBreak:"break-word" }}>{nameOf(it)}{qtyOf(it) > 1 && <span style={{ fontSize:14, fontWeight:800, color:"#5a6478", marginLeft:8 }}>×{qtyOf(it)}</span>}</div>
+                    <EqIcon name="chev" size={22} color="#7a8499" />
                   </div>
-                  {memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, margin:"6px 0 2px", lineHeight:1.5, wordBreak:"break-word" }}>📝 {memo}</div>}
-                  <div style={{ display:"flex", alignItems:"center", gap:8, borderRadius:9, padding:"9px 11px", marginTop:8,
-                    background: it.player ? "#e3eefb" : "#f1f3f6", border: it.player ? "none" : "1.5px dashed #c4cbd8" }}>
-                    <span style={{ fontSize:11.5, fontWeight:800, padding:"2px 7px", borderRadius:5, whiteSpace:"nowrap", color:"#fff", background: it.player ? "#1565c0" : "#9aa3b2" }}>持ってくる人</span>
-                    <span style={{ flex:1, minWidth:0, fontSize: it.player ? 17 : 15, fontWeight:900, color: it.player ? C.navy : "#9aa3b2", wordBreak:"break-word" }}>
-                      {it.player ? <>{it.player} <span style={{ color:"#1565c0" }}>{equipWhoLabel(it.who)}</span></> : "未定"}
+                  {memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, marginTop:5, lineHeight:1.5, wordBreak:"break-word" }}>📝 {memo}</div>}
+                  <div style={{ display:"flex", alignItems:"center", gap:10, borderRadius:10, padding:"10px 12px", marginTop:10,
+                    background: it.player ? "#eaf1fb" : "#f1f3f6", border: it.player ? "none" : "1.5px dashed #c4cbd8" }}>
+                    <EqIcon name="person" size={22} color={it.player ? "#5d6b85" : "#a0a8b8"} />
+                    <span style={{ fontSize:14, fontWeight:700, color:"#6b7487", whiteSpace:"nowrap" }}>持ってくる人</span>
+                    <span style={{ flex:1, minWidth:0, marginLeft:6, wordBreak:"break-word" }}>
+                      {it.player
+                        ? <><span style={{ fontSize:18, fontWeight:900, color:C.navy }}>{it.player}</span><span style={{ fontSize:14, fontWeight:700, color:"#6b7487", marginLeft:10 }}>{equipWhoLabel(it.who)}</span></>
+                        : <span style={{ fontSize:16, fontWeight:800, color:"#9aa3b2" }}>未定</span>}
                     </span>
-                    <button style={chip} onClick={()=>setSheet({ type:"person", kind:"eq", idxs:[i] })}>{it.player ? "変更" : "選ぶ"}</button>
                   </div>
-                </div>
+                </button>
               );
             })}
 
-            {secHead(`🚩 場所取り（${spots.length}人）`, ()=>setSheet({ type:"person", kind:"spot", i:-1 }))}
-            {spots.length === 0 ? <div style={empty}>まだ場所取りの担当がいません</div> : (
-              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
-                {spots.map((s, i) => (
-                  <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:12, borderTop: i ? "1px solid #eef1f5" : "none" }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:16, fontWeight:900, color:C.navy }}>{s.player} <span style={{ color:"#1565c0" }}>{equipWhoLabel(s.who)}</span></div>
-                      <div style={{ fontSize:13.5, color:"#5a6478", fontWeight:700, marginTop:3, wordBreak:"break-word" }}>🕖 {s.time || "時間未定"}{s.memo ? `　📝 ${s.memo}` : ""}</div>
-                    </div>
-                    <button style={chip} onClick={()=>setSheet({ type:"person", kind:"spot", i })}>変更</button>
-                    <button style={xBtn} data-no-back="1" aria-label="この担当を外す" onClick={()=>setSpots(prev => prev.filter((_, k) => k !== i))}>✕</button>
+            {secHead("flag", "場所取り", `${spots.length}人`, ()=>setSheet({ type:"person", kind:"spot", i:-1 }))}
+            {spots.length === 0 && <div style={empty}>まだ場所取りの担当がいません</div>}
+            {spots.map((s, i) => (
+              <button key={i} style={card} onClick={()=>setSheet({ type:"person", kind:"spot", i })}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <div style={{ flex:1, minWidth:0, wordBreak:"break-word" }}>
+                    <span style={{ fontSize:22, fontWeight:900, color:C.navy }}>{s.player}</span>
+                    <span style={{ fontSize:14, fontWeight:700, color:"#6b7487", marginLeft:10 }}>{equipWhoLabel(s.who)}</span>
                   </div>
-                ))}
-              </div>
-            )}
+                  <EqIcon name="chev" size={22} color="#7a8499" />
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:8 }}>
+                  <EqIcon name="clock" size={20} color="#6b7487" />
+                  <span style={{ fontSize:18, fontWeight:800, color:"#5a6478", fontVariantNumeric:"tabular-nums" }}>{s.time || "時間未定"}</span>
+                </div>
+                {s.memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, marginTop:6, lineHeight:1.5, wordBreak:"break-word" }}>📝 {s.memo}</div>}
+              </button>
+            ))}
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr", gap:8, marginTop:18 }}>
               <button onClick={tryClose} style={{ height:50, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15.5, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
@@ -11494,6 +11514,10 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
           initial={personInitial()}
           onClose={()=>setSheet(null)}
           onUndecided={()=>{ setItems(prev => prev.map((x, k) => sheet.idxs.includes(k) ? { ...x, player:"" } : x)); setSheet(null); }}
+          onRemove={sheet.kind === "eq"
+            ? (sheet.idxs.length === 1 ? ()=>{ setItems(prev => prev.filter((_, k) => k !== sheet.idxs[0])); setSheet(null); } : null)
+            : (sheet.i >= 0 ? ()=>{ setSpots(prev => prev.filter((_, k) => k !== sheet.i)); setSheet(null); } : null)}
+          removeLabel={sheet.kind === "eq" ? "この備品を外す" : "この担当を外す"}
           onDecide={(r)=>{
             if (sheet.kind === "eq") setItems(prev => prev.map((x, k) => sheet.idxs.includes(k) ? { ...x, player:r.player, who:r.who } : x));
             else if (sheet.i < 0) setSpots(prev => [...prev, r]);
