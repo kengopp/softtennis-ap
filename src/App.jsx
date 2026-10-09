@@ -338,7 +338,7 @@ function collectBackCandidates() {
   // ★一部の画面（AI分析など）は「←」をbuttonではなくspanで作っているため、文字が「←」だけのspanも対象にする
   const els = Array.from(document.querySelectorAll("button, span"))
     .filter(el => el.tagName === "BUTTON" || labelOf(el) === "←")
-    .filter(el => el.getClientRects().length > 0 && !el.disabled);
+    .filter(el => el.getClientRects().length > 0 && !el.disabled && !el.closest("[data-no-back]"));
   return { els, labelOf, inOverlay };
 }
 function findOverlayCloseButton() {
@@ -11319,6 +11319,13 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [sheet, setSheet] = useState(null); // {type:"items", sel:[]} | {type:"person", kind:"eq"|"spot", idxs?, i?}
+  // ★保存していない変更があるときは、戻る（スマホ本体の戻る・「←」・キャンセル）の前に確認する
+  const initialJson = useRef(JSON.stringify({ items: plan0.items || [], spots: plan0.spots || [] }));
+  const dirty = JSON.stringify({ items, spots }) !== initialJson.current;
+  const tryClose = () => {
+    if (dirty && !window.confirm("保存していない変更があります。\n変更を捨てて戻りますか？")) return;
+    onClose();
+  };
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -11385,7 +11392,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
   return (
     <div style={{ position:"fixed", inset:0, zIndex:300, background:C.gray, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
-        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onClose} aria-label="戻る">←</button>
+        <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={tryClose} aria-label="戻る">←</button>
         <span style={{ fontSize:18, fontWeight:800, color:C.white }}>🎒 備品・場所取り</span>
       </div>
       <div style={{ padding:"12px 14px 40px", maxWidth:640, margin:"0 auto" }}>
@@ -11402,7 +11409,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                 <div key={it.item_id + "_" + i} style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, padding:"11px 12px", marginBottom:9 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                     <div style={{ flex:1, minWidth:0, fontSize:16, fontWeight:900, color:C.text }}>{nameOf(it)}{qtyOf(it) > 1 && <span style={{ fontSize:13, fontWeight:800, color:"#1565c0", background:"#e3eefb", borderRadius:6, padding:"1px 7px", marginLeft:8 }}>数量 {qtyOf(it)}</span>}</div>
-                    <button style={xBtn} aria-label="この備品を外す" onClick={()=>setItems(prev => prev.filter((_, k) => k !== i))}>✕</button>
+                    <button style={xBtn} data-no-back="1" aria-label="この備品を外す" onClick={()=>setItems(prev => prev.filter((_, k) => k !== i))}>✕</button>
                   </div>
                   {memo && <div style={{ fontSize:15, color:"#3d4657", fontWeight:700, margin:"6px 0 2px", lineHeight:1.5, wordBreak:"break-word" }}>📝 {memo}</div>}
                   <div style={{ display:"flex", alignItems:"center", gap:8, borderRadius:9, padding:"9px 11px", marginTop:8,
@@ -11427,14 +11434,14 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
                       <div style={{ fontSize:13.5, color:"#5a6478", fontWeight:700, marginTop:3, wordBreak:"break-word" }}>🕖 {s.time || "時間未定"}{s.memo ? `　📝 ${s.memo}` : ""}</div>
                     </div>
                     <button style={chip} onClick={()=>setSheet({ type:"person", kind:"spot", i })}>変更</button>
-                    <button style={xBtn} aria-label="この担当を外す" onClick={()=>setSpots(prev => prev.filter((_, k) => k !== i))}>✕</button>
+                    <button style={xBtn} data-no-back="1" aria-label="この担当を外す" onClick={()=>setSpots(prev => prev.filter((_, k) => k !== i))}>✕</button>
                   </div>
                 ))}
               </div>
             )}
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr", gap:8, marginTop:18 }}>
-              <button onClick={onClose} style={{ height:50, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15.5, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
+              <button onClick={tryClose} style={{ height:50, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15.5, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
               <button onClick={save} disabled={saving} style={{ height:50, border:"none", borderRadius:12, background:C.accent, color:"#fff", fontSize:16, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "保存する"}</button>
             </div>
           </>
