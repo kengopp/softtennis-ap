@@ -21395,10 +21395,10 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
   function MiniBar({ label, count, max, total, color }) {
     const pct = total > 0 ? Math.round(count / total * 100) : 0;
     return (
-      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-        <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{label}</span>
-        <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0,width:52 }}>{count}回 {pct}%</span>
-        <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}>
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7 }}>
+        <span style={{ fontSize:13.5,color:C.textSec,width:84,flexShrink:0 }}>{label}</span>
+        <span style={{ fontSize:13.5,fontWeight:700,color:"#555",flexShrink:0,width:76 }}>{count}回 {pct}%</span>
+        <div style={{ flex:1,maxWidth:"50%",height:7,background:"#e8e8e8",borderRadius:3 }}>
           <div style={{ width:`${max>0?Math.round(count/max*100):0}%`,height:"100%",background:color,borderRadius:3 }}/>
         </div>
       </div>
@@ -21411,8 +21411,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
     const max = Math.max(...rows.map(r => r[1]));
     return (
       <>
-        <div style={{ borderTop:`1px dashed ${C.border}`,margin:"8px 0" }}/>
-        <div style={{ fontSize:10,fontWeight:700,color:C.textSec,marginBottom:6 }}>{title}</div>
+        <div style={{ borderTop:`1px dashed ${C.border}`,margin:"9px 0" }}/>
+        <div style={{ fontSize:13.5,fontWeight:700,color:C.textSec,marginBottom:6 }}>{title}</div>
         {rows.map(([label,n]) => <MiniBar key={label} label={label} count={n} max={max} total={total} color={color}/>)}
       </>
     );
@@ -21426,9 +21426,9 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       <div style={{ marginBottom:12 }}>
         {/* 数値ラベル行 */}
         <div style={{ display:"flex", alignItems:"center", marginBottom:4 }}>
-          <span style={{ fontSize:13, fontWeight:700, color:C.teamA, width:28, textAlign:"left" }}>{a}</span>
-          <span style={{ flex:1, fontSize:11, color:C.textSec, textAlign:"center" }}>{label}</span>
-          <span style={{ fontSize:13, fontWeight:700, color:C.teamB, width:28, textAlign:"right" }}>{b}</span>
+          <span style={{ fontSize:16, fontWeight:700, color:C.teamA, width:32, textAlign:"left" }}>{a}</span>
+          <span style={{ flex:1, fontSize:13.5, color:C.textSec, textAlign:"center" }}>{label}</span>
+          <span style={{ fontSize:16, fontWeight:700, color:C.teamB, width:32, textAlign:"right" }}>{b}</span>
         </div>
         {/* バー行：左=自チームA（右寄せ）、中央区切り、右=相手B（左寄せ） */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 2px 1fr", alignItems:"center", height:8, gap:2 }}>
@@ -21454,9 +21454,9 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       {/* チーム比較 */}
       <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,padding:14,marginBottom:12 }}>
         <div style={{ display:"flex",justifyContent:"space-between",marginBottom:12 }}>
-          <span style={{ fontSize:12,fontWeight:700,color:C.teamA }}>自チーム</span>
-          <span style={{ fontSize:11,color:C.textSec }}>チーム比較</span>
-          <span style={{ fontSize:12,fontWeight:700,color:C.teamB }}>相手チーム</span>
+          <span style={{ fontSize:14.5,fontWeight:700,color:C.teamA }}>自チーム</span>
+          <span style={{ fontSize:13.5,color:C.textSec }}>チーム比較</span>
+          <span style={{ fontSize:14.5,fontWeight:700,color:C.teamB }}>相手チーム</span>
         </div>
         <Bar a={totalA} b={totalB} label="総ポイント"/>
         <Bar a={winA}   b={winB}   label="決めた得点"/>
@@ -21467,7 +21467,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       {/* ★自チーム/相手チーム切替タブ */}
       <div style={{ display:"flex",background:"#f0f2f6",padding:3,borderRadius:10,marginBottom:12 }}>
         {[["A","自チーム"],["B","相手チーム"]].map(([t,l])=>(
-          <button key={t} style={{ flex:1,padding:7,border:"none",cursor:"pointer",borderRadius:8,fontSize:12,fontWeight:700,background:teamFilter===t?C.white:"transparent",color:teamFilter===t?C.navy:C.textSec,boxShadow:teamFilter===t?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTeamFilter(t)}>{l}</button>
+          <button key={t} style={{ flex:1,padding:9,border:"none",cursor:"pointer",borderRadius:8,fontSize:14.5,fontWeight:700,background:teamFilter===t?C.white:"transparent",color:teamFilter===t?C.navy:C.textSec,boxShadow:teamFilter===t?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTeamFilter(t)}>{l}</button>
         ))}
       </div>
 
@@ -21487,10 +21487,10 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         const diffGood = hasGoals && goals.goal_point_diff!=null ? pointDiff >= goals.goal_point_diff : pointDiff > 0;
         return (
           <div key={`${p.team}__${p.player_name}`} style={{ ...S.card,marginBottom:10 }}>
-            <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"8px 12px",display:"flex",alignItems:"center",gap:8 }}>
-              <div style={{ width:26,height:26,borderRadius:"50%",background:p.team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:C.white }}>{p.player_name[0]}</div>
-              <span style={{ fontSize:13,fontWeight:700,color:C.white,flex:1 }}>{p.player_name}</span>
-              <span style={{ fontSize:10,color:"#8099cc" }}>計 {p.total}pt</span>
+            <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"10px 14px",display:"flex",alignItems:"center",gap:8 }}>
+              <div style={{ width:32,height:32,borderRadius:"50%",background:p.team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.white }}>{p.player_name[0]}</div>
+              <span style={{ fontSize:16,fontWeight:700,color:C.white,flex:1 }}>{p.player_name}</span>
+              <span style={{ fontSize:13,color:"#8099cc" }}>計 {p.total}pt</span>
             </div>
             <div style={{ padding:12 }}>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10 }}>
@@ -21500,27 +21500,27 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   ["得点差", pointDiff>=0?`+${pointDiff}`:`${pointDiff}`, diffGood?C.accent:C.red],
                 ].map(([l,v,c])=>(
                   <div key={l} style={{ background:`${c}11`,borderRadius:8,padding:"8px 4px",textAlign:"center" }}>
-                    <div style={{ fontSize:18,fontWeight:700,color:c }}>{v}</div>
-                    <div style={{ fontSize:9,color:C.textSec,fontWeight:700 }}>{l}</div>
+                    <div style={{ fontSize:24,fontWeight:700,color:c }}>{v}</div>
+                    <div style={{ fontSize:12.5,color:C.textSec,fontWeight:700 }}>{l}</div>
                   </div>
                 ))}
               </div>
               {/* ★サーブ・レシーブ（2ポイントごとの交代を反映。関与があった選手のみ表示。目標比較で色分け） */}
               {(p.serveTotal>0||p.receiveTotal>0)&&(
                 <>
-                  <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>🎾 サーブ・レシーブ</div>
+                  <div style={{ fontSize:13.5,color:C.textSec,fontWeight:700,marginBottom:6 }}>🎾 サーブ・レシーブ</div>
                   {p.serveTotal>0&&(()=>{
                     const inCount=p.serveTotal-p.serveFault; const rate=Math.round(inCount/p.serveTotal*100);
                     const good = hasGoals && goals.goal_first_serve_pct!=null ? rate>=goals.goal_first_serve_pct : null;
                     const barColor = good===null?C.accent:(good?C.accent:C.red);
                     return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
-                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>1stサーブ確率</span>
-                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7,paddingLeft:10 }}>
+                        <span style={{ fontSize:13.5,color:C.textSec,width:104,flexShrink:0 }}>1stサーブ確率</span>
+                        <span style={{ fontSize:14,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {inCount}/{p.serveTotal}・{rate}%
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
+                          {good!==null&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
                         </span>
-                        <div style={{ flex:1,maxWidth:"50%",height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
+                        <div style={{ flex:1,maxWidth:"50%",height:8,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
                       </div>
                     );
                   })()}
@@ -21533,11 +21533,11 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     if (isOwn ? !(p.receiveTotal>0 || rMiss>0) : rMiss===0) return null;
                     const good = rMiss===0;
                     return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
-                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス</span>
-                        <span style={{ fontSize:11,fontWeight:700,color:good?C.accent:C.red,whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7,paddingLeft:10 }}>
+                        <span style={{ fontSize:13.5,color:C.textSec,width:104,flexShrink:0 }}>レシーブミス</span>
+                        <span style={{ fontSize:14,fontWeight:700,color:good?C.accent:C.red,whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {rMiss}回
-                          {isOwn&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
+                          {isOwn&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
                         </span>
                       </div>
                     );
@@ -21548,20 +21548,20 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
               {/* ★プレイ結果と内訳（決めた／ミスしたの2グループに分解。目標比較で色分け） */}
               {(winPlays.length>0||errPlays.length>0)&&(
                 <div style={{ marginTop:8 }}>
-                  <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ結果と内訳</div>
+                  <div style={{ fontSize:13.5,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ結果と内訳</div>
                   {winPlays.length>0&&(()=>{
                     const good = hasGoals && goals.goal_winner_count!=null ? p.winners>=goals.goal_winner_count : null;
                     return (
                       <div style={{ background:C.white,borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
-                        <div style={{ fontSize:10,fontWeight:700,color:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                        <div style={{ fontSize:14,fontWeight:700,color:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✓ 決めたプレイ（{p.winners}回）
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
+                          {good!==null&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
                         </div>
                         {winPlays.map(([k,n])=>(
-                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                            <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
-                            <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0 }}>{n}回</span>
-                            <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
+                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7 }}>
+                            <span style={{ fontSize:13.5,color:C.textSec,width:84,flexShrink:0 }}>{getPlayLabel(k)}</span>
+                            <span style={{ fontSize:13.5,fontWeight:700,color:"#555",flexShrink:0,minWidth:40 }}>{n}回</span>
+                            <div style={{ flex:1,maxWidth:"50%",height:7,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
                           </div>
                         ))}
                         {/* ★フォア/バック別の得点（記録はしていたが今まで集計していなかった項目） */}
@@ -21585,15 +21585,15 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     const good = hasGoals && goals.goal_error_count!=null ? p.errors<=goals.goal_error_count : null;
                     return (
                       <div style={{ background:C.white,borderRadius:8,padding:"8px 10px" }}>
-                        <div style={{ fontSize:10,fontWeight:700,color:C.red,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                        <div style={{ fontSize:14,fontWeight:700,color:C.red,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✕ ミスしたプレイ（{p.errors}回）
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
+                          {good!==null&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
                         </div>
                         {errPlays.map(([k,n])=>(
-                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                            <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
-                            <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0 }}>{n}回</span>
-                            <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
+                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7 }}>
+                            <span style={{ fontSize:13.5,color:C.textSec,width:84,flexShrink:0 }}>{getPlayLabel(k)}</span>
+                            <span style={{ fontSize:13.5,fontWeight:700,color:"#555",flexShrink:0,minWidth:40 }}>{n}回</span>
+                            <div style={{ flex:1,maxWidth:"50%",height:7,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
                           </div>
                         ))}
                         {/* ★ミスの種類（ネット／オーバー／チップ） */}
@@ -21619,7 +21619,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                         />
                         {/* ★ミスの種類は入力が任意なので、必ず母数を添える */}
                         {(p.missTyped ?? 0) > 0 && (
-                          <div style={{ fontSize:9.5,color:"#9aa1ad",marginTop:6 }}>※ミスの種類が入力された {p.missTyped}/{p.errors}件をもとに集計</div>
+                          <div style={{ fontSize:12,color:"#9aa1ad",marginTop:6 }}>※ミスの種類が入力された {p.missTyped}/{p.errors}件をもとに集計</div>
                         )}
                       </div>
                     );
