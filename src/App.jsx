@@ -4834,6 +4834,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
   const [tournaments, setTournaments] = useState([]);
   const [equipFor, setEquipFor] = useState(null); // ★「🎒 管理」で開いている大会（備品・場所取り）
+  const [equipMap, setEquipMap] = useState({});   // ★大会ID → 備品・場所取り（チームで共有）
+  const reloadEquipMap = useCallback(async () => {
+    const p = await getMyProfile().catch(() => null);
+    setEquipMap(await getTournamentEquipmentMap(p?.school_id));
+  }, []);
+  useEffect(() => { reloadEquipMap(); }, [reloadEquipMap, tournaments]);
+  const withEquip = (t) => equipMap[t.id] ? { ...t, equipment_plan: equipMap[t.id] } : t;
   const [tournamentSearch, setTournamentSearch] = useState("");
   const [tournamentDropdownOpen, setTournamentDropdownOpen] = useState(false);
   const [showTournamentModal, setShowTournamentModal] = useState(false);
@@ -5583,11 +5590,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.guideline_url ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
                     ><span style={{ color: isPast ? C.textSec : (t.guideline_url ? "#1976d2" : "#c3c9d4") }}>📄</span> 要項</button>
-                    {(() => { const hasEq = hasEquipmentPlan(t); return (
+                    {(() => { const hasEq = hasEquipmentPlan(withEquip(t)); return (
                     <button
                       disabled={!hasEq}
                       style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (hasEq ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: hasEq ? "pointer" : "default" }}
-                      onClick={e=>{ e.stopPropagation(); if (hasEq) setEquipFor(t); }}
+                      onClick={e=>{ e.stopPropagation(); if (hasEq) setEquipFor(withEquip(t)); }}
                     ><span style={{ filter: hasEq && !isPast ? "none" : "grayscale(1) opacity(0.45)" }}>🎒</span> 管理</button>
                     ); })()}
                     <button
@@ -5605,7 +5612,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         >✏️ 編集</button>
                         <button
                           style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
-                          onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setEquipFor(t); }}
+                          onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setEquipFor(withEquip(t)); }}
                         >🎒 備品・場所取り</button>
                         <button
                           style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
@@ -5640,7 +5647,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           {/* ★備品・場所取り（大会一覧の「🎒 管理」／「⋯ その他」から開く） */}
           {equipFor && (
             <TournamentEquipmentScreen tournament={equipFor} onClose={()=>setEquipFor(null)}
-              onSaved={(nt)=>{ setTournaments(prev => prev.map(x => x.id === nt.id ? { ...x, equipment_plan: nt.equipment_plan } : x)); setEquipFor(null); }} />
+              onSaved={(nt)=>{ setEquipMap(m => ({ ...m, [nt.id]: nt.equipment_plan })); setEquipFor(null); reloadEquipMap(); }} />
           )}
           {/* 大会FAB（★閲覧専用アカウントには出さない） */}
           {!isViewer && <button style={{ padding:0, position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>}
@@ -11187,10 +11194,31 @@ async function deleteEquipmentItem(id) {
   const { error } = await supabase.from("equipment_items").update({ deleted_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
 }
+// ★大会ごとの備品・場所取りは tournament_equipment テーブルに保存する（同じ学校のメンバー全員で共有）。
+//   以前は tournaments.equipment_plan に保存していたが、大会を作った人以外は大会を書き換えられないため、
+//   ほかの人が登録した内容が保存されず「登録した本人にしか見えない」状態になっていた。
+async function getTournamentEquipmentMap(schoolId) {
+  if (!schoolId) return {};
+  const { data, error } = await supabase.from("tournament_equipment").select("tournament_id, plan").eq("school_id", schoolId);
+  if (error) { console.error(error); return {}; }
+  const map = {};
+  (data || []).forEach(r => { map[r.tournament_id] = r.plan; });
+  return map;
+}
 async function saveTournamentEquipmentPlan(tournamentId, plan) {
   clearMatchListPrefetch();
-  const { error } = await supabase.from("tournaments").update({ equipment_plan: plan }).eq("id", tournamentId);
-  if (error) throw error;
+  const { data: { user } } = await supabase.auth.getUser();
+  const p = await getMyProfile();
+  if (!p?.school_id) throw new Error("学校情報が未設定のため保存できません");
+  const { data, error } = await supabase.from("tournament_equipment")
+    .upsert({ tournament_id: tournamentId, school_id: p.school_id, plan, updated_by: user?.id || null, updated_at: new Date().toISOString() })
+    .select("tournament_id");
+  if (error) {
+    if (/tournament_equipment/.test(error.message || "")) throw new Error("データベースに備品・場所取りの保存先がまだありません。追加のSQLを実行してください。");
+    throw error;
+  }
+  // ★権限の関係で1件も保存されなかったときは、保存できたように見せずにエラーにする
+  if (!data || data.length === 0) throw new Error("保存する権限がありませんでした");
 }
 // ★大会に備品か場所取りが1件でも入っているか（大会一覧の「管理」ボタンを押せるかどうか）
 function hasEquipmentPlan(t) {
