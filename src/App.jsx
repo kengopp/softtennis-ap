@@ -6768,8 +6768,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         const total = win + lose;
         return (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"10px 14px 0", background:"#f7f9fc", borderRadius:10, padding:"11px 14px" }}>
-            <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec, display:"inline-flex", alignItems:"center", gap:5 }}>{seg==="team" ? <><TeamIcon size={18}/>団体戦成績</> : <><SoloIcon size={18}/>個人戦成績</>}</span>
-            <span style={{ fontSize:17, fontWeight:800, color:C.text }}>{total>0 ? `${win}勝${lose}敗` : "ー"}</span>
+            <span style={{ fontSize:15, fontWeight:700, color:C.textSec, display:"inline-flex", alignItems:"center", gap:5 }}>{seg==="team" ? <><TeamIcon size={18}/>団体戦成績</> : <><SoloIcon size={18}/>個人戦成績</>}</span>
+            <span style={{ fontSize:20, fontWeight:800, color:C.text }}>{total>0 ? `${win}勝${lose}敗` : "ー"}</span>
           </div>
         );
       })()}
@@ -6997,7 +6997,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <button
                 onClick={()=>setIndividualResultFilter(v=>v==="win"?"all":"win")}
                 style={{
-                  padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer",
+                  padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
                   border:`1.5px solid ${individualResultFilter==="win"?C.teamA:C.border}`,
                   background:individualResultFilter==="win"?C.teamA:"#fff", color:individualResultFilter==="win"?"#fff":C.textSec,
                 }}
@@ -7005,7 +7005,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
               <button
                 onClick={()=>setIndividualResultFilter(v=>v==="lose"?"all":"lose")}
                 style={{
-                  padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer",
+                  padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
                   border:`1.5px solid ${individualResultFilter==="lose"?C.red:C.border}`,
                   background:individualResultFilter==="lose"?C.red:"#fff", color:individualResultFilter==="lose"?"#fff":C.textSec,
                 }}
@@ -7014,14 +7014,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 value={individualSearch}
                 onChange={e=>setIndividualSearch(e.target.value)}
                 placeholder="🔍 選手名・チーム名で検索"
-                style={{ flex:1, minWidth:0, padding:"7px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:12.5, color:C.text, boxSizing:"border-box" }}
+                style={{ flex:1, minWidth:0, padding:"8px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:14, color:C.text, boxSizing:"border-box" }}
               />
             </div>
             {individualMyPairs.length>1 && (
               <select
                 value={individualPairFilter}
                 onChange={e=>setIndividualPairFilter(e.target.value)}
-                style={{ width:"100%", marginTop:8, padding:"8px 10px", borderRadius:10, border:`1.5px solid ${individualPairFilter!=="all"?C.navy:C.border}`, background:"#fff", fontSize:12.5, fontWeight:700, color:individualPairFilter!=="all"?C.navy:C.textSec }}
+                style={{ width:"100%", marginTop:8, padding:"10px 12px", borderRadius:10, border:`1.5px solid ${individualPairFilter!=="all"?C.navy:C.border}`, background:"#fff", fontSize:14.5, fontWeight:700, color:individualPairFilter!=="all"?C.navy:C.textSec }}
               >
                 <option value="all">👥 自チームのペアで絞り込み（すべて）</option>
                 {individualMyPairs.map(name => (
@@ -7032,13 +7032,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             {individualRounds.length>0 && (
               <div style={{ display:"flex", gap:6, overflowX:"auto", marginTop:8, paddingBottom:2 }}>
                 <button onClick={()=>setIndividualRoundFilter("all")}
-                  style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, fontSize:11.5, fontWeight:700, cursor:"pointer",
+                  style={{ flexShrink:0, padding:"7px 16px", borderRadius:20, fontSize:15.5, fontWeight:700, cursor:"pointer",
                     border:`1.5px solid ${individualRoundFilter==="all"?C.navy:C.border}`,
                     background:individualRoundFilter==="all"?C.navy:"#fff", color:individualRoundFilter==="all"?"#fff":C.textSec }}
                 >すべて</button>
                 {individualRounds.map(r => (
                   <button key={r} onClick={()=>setIndividualRoundFilter(r)}
-                    style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, fontSize:11.5, fontWeight:700, cursor:"pointer",
+                    style={{ flexShrink:0, padding:"7px 16px", borderRadius:20, fontSize:15.5, fontWeight:700, cursor:"pointer",
                       border:`1.5px solid ${individualRoundFilter===r?C.navy:C.border}`,
                       background:individualRoundFilter===r?C.navy:"#fff", color:individualRoundFilter===r?"#fff":C.textSec }}
                   >{r}</button>
@@ -7075,12 +7075,12 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
               <div style={{ padding:"10px 14px", cursor:m.is_simple_draw_result?"default":"pointer" }} onClick={()=>{ if (!m.is_simple_draw_result) onOpenMatch(m.id); }}>
-                <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
-                  {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}{m.match_number ? `(${m.match_number}試合目)` : ""}{m.court_number ? `(${m.court_number})` : ""}
+                <div style={{ fontSize:13, color:C.textSec, marginBottom:6, display:"flex", alignItems:"center", gap:6 }}>
+                  <span>{fmtDate(m.match_date)}{m.round && <> · <span style={{ fontSize:16, fontWeight:800, color:C.navy }}>{m.round}</span></>}</span>{m.match_number ? `(${m.match_number}試合目)` : ""}{m.court_number ? `(${m.court_number})` : ""}
                   {m.is_simple_draw_result && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#f1efff", color:C.purple, border:"1px solid "+C.purple }}>簡易記録</span>}
                   {aiAnalyzedMatchIds.has(m.id) && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#eef0ff", color:C.purple, border:"1px solid #dcdffc" }}>🤖 AI</span>}
                   <span style={{
-                    marginLeft:"auto", fontSize:10.5, fontWeight:700, borderRadius:99, padding:"2px 9px", whiteSpace:"nowrap",
+                    marginLeft:"auto", fontSize:12.5, fontWeight:700, borderRadius:99, padding:"2px 10px", whiteSpace:"nowrap",
                     border:`1px solid ${m.status==="waiting"?C.purple:m.status==="active"?C.orange:C.border}`,
                     color:m.status==="waiting"?C.purple:m.status==="active"?C.orange:C.textSec,
                     background:m.status==="waiting"?"#eef0fe":m.status==="active"?"#fff3e0":"transparent",
@@ -7090,23 +7090,23 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:myWin?800:600, color:C.teamA }}>
-                      {myEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{myEntryNo}</span>}
-                      {myClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClub}</span>}{myNames}
+                    <div style={{ fontSize:15.5, fontWeight:myWin?800:600, color:C.teamA, lineHeight:1.45 }}>
+                      {myEntryNo && <span style={{ fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{myEntryNo}</span>}
+                      {myClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClub}</span>}{myNames}
                     </div>
-                    <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:2 }}>
-                      {oppEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{oppEntryNo}</span>}
-                      {oppClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
+                    <div style={{ fontSize:15.5, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:5, lineHeight:1.45 }}>
+                      {oppEntryNo && <span style={{ fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{oppEntryNo}</span>}
+                      {oppClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
                     </div>
                   </div>
-                  {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
+                  {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:26, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:52, textAlign:"right" }}>{myScore}-{oppScore}</div>}
                 </div>
               </div>
               {!m.is_simple_draw_result && (
                 <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                   {/* ★閲覧専用アカウントには削除・コピー（新規作成）は出さない */}
-                  {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>}
-                  {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>}
+                  {!isViewer && <button style={{ width:52, padding:"10px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:13.5, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>}
+                  {!isViewer && <button style={{ flex:1, padding:"10px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:13.5, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>}
                   {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
                   {m.memo && (
                     <button
