@@ -5267,6 +5267,16 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         && !(linkedPlayerId && (t.participant_player_ids || []).includes(linkedPlayerId))) return false;
     return true;
   });
+  // ★今日が開催期間に入っている大会（開催中）は、同日に複数あってもすべて一番上に表示する。
+  //   それ以外の並びは従来通り（開催中の大会どうしの順番も従来の並びのまま）。
+  {
+    const isTodayT = (t) => !!t.start_date && t.start_date <= todayStr && (t.end_date || t.start_date) >= todayStr;
+    const todayList = filteredTournaments.filter(isTodayT);
+    if (todayList.length > 0) {
+      const rest = filteredTournaments.filter(t => !isTodayT(t));
+      filteredTournaments.splice(0, filteredTournaments.length, ...todayList, ...rest);
+    }
+  }
 
   async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl) {
     const trimmed = name.trim();
@@ -12374,6 +12384,9 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
           .filter(t => (t.end_date || t.start_date) >= todayStr)
           .sort((a,b) => a.start_date.localeCompare(b.start_date));
         if (sorted.length === 0) return [];
+        // ★今日が開催期間に入っている大会（前日から続く複数日の大会も含む）があれば、それをすべて表示する
+        const ongoing = sorted.filter(t => t.start_date <= todayStr);
+        if (ongoing.length > 0) return ongoing;
         const nearestDate = sorted[0].start_date;
         return sorted.filter(t => t.start_date === nearestDate);
       })()
@@ -12428,7 +12441,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                 <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
                 {upcomingTournaments.map((t, idx) => {
                   const d = daysUntil(t.start_date);
-                  const countdownLabel = d >= 0 ? `あと${d}日` : "";
+                  const countdownLabel = d >= 0 ? `あと${d}日` : "開催中";
                   const participantCount = (t.participant_player_ids || []).length;
                   return (
                   <div key={t.id ?? idx} style={{ ...S.card, padding:16, marginBottom: idx===upcomingTournaments.length-1?0:10, borderLeft:`4px solid ${C.textSec}` }}>
