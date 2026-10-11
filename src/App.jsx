@@ -7600,13 +7600,13 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
           <div style={S.card}>
             {m.list.length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>データがありません</div>}
             {m.list.map((row,i)=>(
-              <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", borderBottom: i<m.list.length-1?`1px solid ${C.border}`:"none" }}>
-                <div style={{ width:24, textAlign:"center", fontSize:13, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
+              <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom: i<m.list.length-1?`1px solid ${C.border}`:"none" }}>
+                <div style={{ width:26, textAlign:"center", fontSize:15, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13.5, fontWeight:700 }}>{row.name}</div>
-                  {row.sub && <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                  <div style={{ fontSize:16, fontWeight:700 }}>{row.name}</div>
+                  {row.sub && <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
                 </div>
-                <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>{row.val}</div>
+                <div style={{ fontSize:17, fontWeight:800, color:C.navy }}>{row.val}</div>
               </div>
             ))}
           </div>
@@ -7637,18 +7637,18 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
         ) : (
           <>
             <div style={{ ...S.card, padding:14, marginBottom:14 }}>
-              <div style={{ fontSize:11, color:C.textSec, marginBottom:8, fontWeight:700 }}>日付を選択</div>
+              <div style={{ fontSize:13, color:C.textSec, marginBottom:8, fontWeight:700 }}>日付を選択</div>
               <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                 {availableDates.map(d=>(
-                  <button key={d} style={{ ...S.togBtn(selectedDate===d, C.navy), fontSize:12, padding:"7px 12px" }} onClick={()=>setSelectedDate(d)}>{fmtDate(d)}</button>
+                  <button key={d} style={{ ...S.togBtn(selectedDate===d, C.navy), fontSize:14.5, padding:"8px 14px" }} onClick={()=>setSelectedDate(d)}>{fmtDate(d)}</button>
                 ))}
               </div>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:10 }}>
-                <div style={{ fontSize:11, color:C.textSec }}>{matchesOfDay.length}試合</div>
+                <div style={{ fontSize:13, color:C.textSec }}>{matchesOfDay.length}試合</div>
                 <button
                   disabled={dateLoading || csvExporting}
                   onClick={openCsv}
-                  style={{ fontSize:12, fontWeight:800, color:C.navy, background:C.gray, border:`1px solid ${C.border}`, borderRadius:9, padding:"7px 12px", cursor:"pointer", opacity:(dateLoading||csvExporting)?0.5:1 }}
+                  style={{ fontSize:14, fontWeight:800, color:C.navy, background:C.gray, border:`1px solid ${C.border}`, borderRadius:9, padding:"8px 14px", cursor:"pointer", opacity:(dateLoading||csvExporting)?0.5:1 }}
                 >{csvExporting && !csvSheetOpen ? "作成中..." : "📄 CSVで保存"}</button>
               </div>
             </div>
@@ -7718,24 +7718,24 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
               <div style={{ textAlign:"center", color:C.textSec, marginTop:30, marginBottom:30 }}>この日の試合を読み込み中...</div>
             ) : metrics.map(m=>(
               <div key={m.key} style={{ ...S.card, padding:14, marginBottom:12 }}>
-                <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>{m.icon} {m.title}</div>
+                <div style={{ fontSize:16, fontWeight:800, marginBottom:10 }}>{m.icon} {m.title}</div>
                 {m.list.length===0 ? (
-                  <div style={{ textAlign:"center", color:C.textSec, fontSize:12, padding:"10px 0" }}>データがありません</div>
+                  <div style={{ textAlign:"center", color:C.textSec, fontSize:14, padding:"10px 0" }}>データがありません</div>
                 ) : (
                   <>
                     {m.list.slice(0,10).map((row,i)=>(
-                      <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderBottom: i<Math.min(m.list.length,10)-1?`1px solid ${C.border}`:"none" }}>
-                        <div style={{ width:20, textAlign:"center", fontSize:12, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
+                      <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderBottom: i<Math.min(m.list.length,10)-1?`1px solid ${C.border}`:"none" }}>
+                        <div style={{ width:26, textAlign:"center", fontSize:15, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
                         <div style={{ flex:1 }}>
-                          <div style={{ fontSize:13, fontWeight:700 }}>{row.name}</div>
-                          {row.sub && <div style={{ fontSize:10, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                          <div style={{ fontSize:16, fontWeight:700 }}>{row.name}</div>
+                          {row.sub && <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
                         </div>
-                        <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>{row.val}</div>
+                        <div style={{ fontSize:17, fontWeight:800, color:C.navy }}>{row.val}</div>
                       </div>
                     ))}
                     {m.list.length > 10 && (
                       <button
-                        style={{ width:"100%", textAlign:"center", padding:9, marginTop:8, borderRadius:9, background:C.gray, border:`1px solid ${C.border}`, fontSize:12, fontWeight:700, color:C.navy, cursor:"pointer" }}
+                        style={{ width:"100%", textAlign:"center", padding:11, marginTop:8, borderRadius:9, background:C.gray, border:`1px solid ${C.border}`, fontSize:14, fontWeight:700, color:C.navy, cursor:"pointer" }}
                         onClick={()=>setExpandedMetric(m.key)}
                       >11位以降を見る（全{m.list.length}人）→</button>
                     )}
