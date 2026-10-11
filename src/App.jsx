@@ -3944,7 +3944,18 @@ function calcPlayerStats(match) {
       rMiss.receiveMiss++;
     }
   }
-  return Object.values(result);
+  // ★表示順を固定する：チームA→B、各チーム内は試合作成時の選手の順番（選手1＝後衛、選手2＝前衛）。
+  //   以前は「その試合で先に得点・ミスが記録された選手」順になっており、試合ごとに順番がバラバラだった。
+  //   選手登録（match.players）に名前が無い選手は各チームの最後に回す。
+  const orderOf = {};
+  for (const p of matchPlayers) {
+    if (p?.player_name) orderOf[p.team + "__" + p.player_name] = p.order_num ?? 99;
+  }
+  const teamRank = t => (t === "A" ? 0 : t === "B" ? 1 : 2);
+  return Object.values(result).sort((a, b) =>
+    (teamRank(a.team) - teamRank(b.team)) ||
+    ((orderOf[a.team + "__" + a.player_name] ?? 999) - (orderOf[b.team + "__" + b.player_name] ?? 999))
+  );
 }
 
 // ============================================================
