@@ -7428,6 +7428,23 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   const [detailsByDate, setDetailsByDate] = useState({}); // { "YYYY-MM-DD": [match, match, ...] }（選択済みの日だけフル取得してキャッシュ）
   const [selectedDate, setSelectedDate] = useState(null);
   const [expandedMetric, setExpandedMetric] = useState(null); // 「11位以降を見る」で開く項目キー
+  // ★「11位以降を見る」から戻ったとき、一覧の元の位置（押したランキングのところ）に戻すため、
+  //   開く直前のスクロール位置を覚えておく。開いた一覧は1位から見られるよう一番上に移動する。
+  const rankingScrollYRef = useRef(0);
+  const openExpandedMetric = (key) => { rankingScrollYRef.current = window.scrollY; setExpandedMetric(key); };
+  const closeExpandedMetric = () => setExpandedMetric(null);
+  const expandedMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!expandedMountedRef.current) { expandedMountedRef.current = true; return; }
+    if (expandedMetric) {
+      window.scrollTo(0, 0);
+    } else {
+      const y = rankingScrollYRef.current;
+      window.scrollTo(0, y);
+      // 画像やフォントの読み込みで高さが変わった場合に備えて、描画後にもう一度合わせる
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+  }, [expandedMetric]);
   const [csvSheetOpen, setCsvSheetOpen] = useState(false);     // ★CSV保存の範囲選択シート
   const [csvRange, setCsvRange] = useState("day");             // "day"＝この日だけ ／ "all"＝大会の全日程
   const [csvExporting, setCsvExporting] = useState(false);
@@ -7593,7 +7610,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
     return (
       <div style={S.page}>
         <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
-          <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={()=>setExpandedMetric(null)}>←</button>
+          <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={closeExpandedMetric}>←</button>
           <span style={{ fontSize:16, fontWeight:800, color:C.white }}>{m.icon} {m.title}</span>
         </div>
         <div style={{ padding:14, paddingBottom:90 }}>
@@ -7736,7 +7753,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
                     {m.list.length > 10 && (
                       <button
                         style={{ width:"100%", textAlign:"center", padding:11, marginTop:8, borderRadius:9, background:C.gray, border:`1px solid ${C.border}`, fontSize:14, fontWeight:700, color:C.navy, cursor:"pointer" }}
-                        onClick={()=>setExpandedMetric(m.key)}
+                        onClick={()=>openExpandedMetric(m.key)}
                       >11位以降を見る（全{m.list.length}人）→</button>
                     )}
                   </>
