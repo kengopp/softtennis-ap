@@ -7090,13 +7090,19 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:15.5, fontWeight:myWin?800:600, color:C.teamA, lineHeight:1.45 }}>
-                      {myEntryNo && <span style={{ fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{myEntryNo}</span>}
-                      {myClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClub}</span>}{myNames}
+                    {/* ★名前が長くて折り返すときは、2行目を出場番号の右からそろえる（番号の下に文字を回り込ませない）。
+                         1人の名前は途中で切らず、「/」の位置で次の行に送る。 */}
+                    <div style={{ display:"flex", alignItems:"flex-start", fontSize:15.5, fontWeight:myWin?800:600, color:C.teamA, lineHeight:1.45 }}>
+                      {myEntryNo && <span style={{ flexShrink:0, marginTop:2, fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{myEntryNo}</span>}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        {myClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClub}</span>}{renderNoBreakNames(myPlayers.map(p=>p.player_name))}
+                      </div>
                     </div>
-                    <div style={{ fontSize:15.5, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:5, lineHeight:1.45 }}>
-                      {oppEntryNo && <span style={{ fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{oppEntryNo}</span>}
-                      {oppClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
+                    <div style={{ display:"flex", alignItems:"flex-start", fontSize:15.5, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:5, lineHeight:1.45 }}>
+                      {oppEntryNo && <span style={{ flexShrink:0, marginTop:2, fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{oppEntryNo}</span>}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        {oppClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClub}</span>}{oppNames ? renderNoBreakNames(oppPlayers.map(p=>p.player_name)) : "対戦相手未定"}
+                      </div>
                     </div>
                   </div>
                   {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:26, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:52, textAlign:"right" }}>{myScore}-{oppScore}</div>}
@@ -17514,6 +17520,14 @@ function VenueHistoryField({ value, onChange, onPick, history, placeholder }) {
 // ★学校名の誤入力防止用：入力しながら候補が絞り込まれるサジェスト式の入力欄
 // schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
 // prefFilter: 親から渡される都道府県絞り込み値（任意）
+// ★一覧の選手名表示用：1人の名前は途中で改行させず、「/」の位置で折り返す
+function renderNoBreakNames(names) {
+  const list = (names || []).filter(Boolean);
+  return list.map((n, i) => (
+    <span key={i} style={{ whiteSpace:"nowrap" }}>{n}{i < list.length - 1 ? "/" : ""}</span>
+  ));
+}
+
 function SchoolField({ value, onChange, onPick, schools, placeholder, prefFilter }) {
   const [open, setOpen] = useState(false);
   const safeValue = value || "";
