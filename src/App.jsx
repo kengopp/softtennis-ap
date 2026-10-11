@@ -3387,12 +3387,18 @@ async function enrichDrawMatches(matches) {
   entryResults.forEach(({ data, error }) => { if (error) console.error(error); (data ?? []).forEach(e => { entryMap[e.id] = e; }); });
   const matchInfoMap = {};
   matchResults.forEach(({ data, error }) => { if (error) console.error(error); (data ?? []).forEach(mi => { matchInfoMap[mi.id] = mi; }); });
-  return matches.map(m => ({
-    ...m,
-    sideA: m.side_a_entry_id ? entryMap[m.side_a_entry_id] : null,
-    sideB: m.side_b_entry_id ? entryMap[m.side_b_entry_id] : null,
-    matchInfo: m.match_id ? (matchInfoMap[m.match_id] || null) : null,
-  }));
+  return matches.map(m => {
+    const sideA = m.side_a_entry_id ? entryMap[m.side_a_entry_id] : null;
+    const sideB = m.side_b_entry_id ? entryMap[m.side_b_entry_id] : null;
+    let matchInfo = m.match_id ? (matchInfoMap[m.match_id] || null) : null;
+    // ★枠から作った試合は「自チーム＝チームA」で保存される（createMatchFromDrawSlot）。
+    //   自チームがドローの下側（B側）にいる場合は、試合のA/Bとドローの上下が逆になるため、
+    //   ドロー表示用にスコアの向きをドローの上下にそろえる（勝者・スコアが逆に表示されないように）。
+    if (matchInfo && sideB?.is_own_team && !sideA?.is_own_team) {
+      matchInfo = { ...matchInfo, match_score_a: matchInfo.match_score_b, match_score_b: matchInfo.match_score_a };
+    }
+    return { ...m, sideA, sideB, matchInfo };
+  });
 }
 
 // ★トーナメント表の表示に必要なものを一度に取得する。
@@ -9660,6 +9666,24 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     setSavingSimpleResult(true);
     try {
       await saveSimpleTeamResult(simpleResultFor.id, winner, scoreA, scoreB);
+      // ★個人戦で、この枠から試合（matches）を作成済みだが未開始のまま「結果だけ記録」した場合、
+      //   試合のほうも同じスコアで終了にする。以前はドロー表にだけ結果が入り、試合は「予定」のまま残って
+      //   大会の試合数の内訳や勝敗の集計に反映されなかった。
+      //   ※1点でも記録が始まっている試合（進行中・中断中）は、記録を消さないよう書き換えない。
+      const mi = simpleResultFor.matchInfo;
+      if (category !== "team" && simpleResultFor.match_id && mi && (mi.status === "scheduled" || mi.status === "waiting")) {
+        // 試合は「自チーム＝チームA」で保存されているため、自チームがドローの下側ならスコアを入れ替える
+        const ownIsB = simpleResultFor.sideB?.is_own_team && !simpleResultFor.sideA?.is_own_team;
+        const { error: mErr } = await supabase.from("matches").update({
+          status: "finished",
+          match_score_a: ownIsB ? scoreB : scoreA,
+          match_score_b: ownIsB ? scoreA : scoreB,
+          walkover_winner: null,
+          updated_at: new Date().toISOString(),
+        }).eq("id", simpleResultFor.match_id).in("status", ["scheduled", "waiting"]);
+        if (mErr) console.error("試合の終了反映に失敗:", mErr);
+        invalidateMatchCaches(simpleResultFor.match_id);
+      }
       if (prevWinnerEntry && newWinnerEntry && prevWinnerEntry.id !== newWinnerEntry.id) {
         await syncWinnerToNextMatch(simpleResultFor, prevWinnerEntry, newWinnerEntry);
       }
