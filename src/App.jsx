@@ -2685,22 +2685,75 @@ async function getTeamMatch(id) {
   return { ...m, games: games ?? [] };
 }
 
+// ★大会と試合の紐付け判定。試合・団体戦は大会名（文字列）だけで大会と結び付いているため、
+//   同じ名前の大会（例：毎年の「練習試合（文徳）」）を新しく作ると、過去の同名大会の試合まで
+//   新しい大会の試合として数えられてしまう不具合があった。
+//   同名の大会が複数ある場合も、試合日でどの大会の試合かを決める。
+//   ・試合日が大会期間内 → その大会
+//   ・期間外 → 期間が一番近い同名大会（ただし60日以内）。ドロー経由で作った試合は作成日が入るため少しずれることがある
+//   ・それ以外（遠く離れた過去の同名大会の試合など）→ どの大会にも入れない
+const TOURNAMENT_DATE_SLACK_DAYS = 60;
+function _dayNum(d) {
+  if (!d) return null;
+  const t = Date.parse(String(d).slice(0, 10) + "T00:00:00Z");
+  return Number.isNaN(t) ? null : Math.round(t / 86400000);
+}
+function buildTournamentResolver(tournamentList) {
+  const byName = {};
+  (tournamentList || []).forEach(t => {
+    const key = (t?.name || "").trim();
+    if (!key) return;
+    const start = _dayNum(t.start_date);
+    const end = _dayNum(t.end_date) ?? start;
+    (byName[key] ??= []).push({ id: t.id, start, end });
+  });
+  return (tournamentName, matchDate) => {
+    const cands = byName[(tournamentName || "").trim()];
+    if (!cands || cands.length === 0) return null;
+    const d = _dayNum(matchDate);
+    if (d == null) return cands.length === 1 ? cands[0].id : null;
+    let best = null, bestDist = Infinity;
+    cands.forEach(c => {
+      if (c.start == null) { if (bestDist > TOURNAMENT_DATE_SLACK_DAYS) { best = c; bestDist = TOURNAMENT_DATE_SLACK_DAYS; } return; }
+      const dist = d < c.start ? c.start - d : d > c.end ? d - c.end : 0;
+      if (dist < bestDist) { best = c; bestDist = dist; }
+    });
+    return best && bestDist <= TOURNAMENT_DATE_SLACK_DAYS ? best.id : null;
+  };
+}
+// 同名の大会一覧（削除済み以外）を取得。tournamentに渡した大会は（保存前の古い日付のまま）必ず含める
+async function getSameNameTournaments(name, tournament) {
+  const { data, error } = await supabase.from("tournaments").select("id, name, start_date, end_date").eq("name", name).is("deleted_at", null);
+  if (error) console.error(error);
+  const list = (data ?? []).filter(t => !tournament || t.id !== tournament.id);
+  if (tournament) list.push({ ...tournament, name });
+  return list;
+}
+
 // ★大会詳細画面専用：以前はgetMatches()/getTeamMatches()でチームの利用期間中の
 // 　全試合・全団体戦を取得してから大会名で絞り込んでいたため、利用期間が長くなる
 // 　ほど大会詳細を開くたびに表示が遅くなっていた。DB側で最初から対象大会だけに絞り込む。
-async function getTournamentMatchesAndTeamMatches(tournamentName) {
+async function getTournamentMatchesAndTeamMatches(tournament) {
+  const tournamentName = tournament?.name ?? "";
   // ★処理速度改善：
   //   ・以前は選手とゲームを60試合ずつ「順番に」取得し、そのあと番手、さらに動画リンクと順番待ちが続いていた。
   //     選手と番手は同時に取得し、待ちを2回（番手の試合が別の大会名のときだけ3回）にした。
   //   ・個人戦のゲームごとの得点（games）は大会詳細では使っていないため、取得しないようにした。
   //   ・1000件を超える大会でも取りこぼさないよう、分けて取得する。
   const [
-    { data: matchRows, error: mErr },
-    { data: teamRows, error: tErr },
+    { data: matchRowsAll, error: mErr },
+    { data: teamRowsAll, error: tErr },
+    sameNameList,
   ] = await Promise.all([
     fetchAllRows("matches", "*", q => q.eq("tournament_name", tournamentName).is("deleted_at", null).order("created_at", { ascending: false }).order("id")),
     fetchAllRows("team_matches", "*", q => q.eq("tournament_name", tournamentName).is("deleted_at", null).order("match_date", { ascending: false }).order("id")),
+    tournament?.id ? getSameNameTournaments(tournamentName, null) : Promise.resolve([]),
   ]);
+  // ★同名の別大会（過去の同名大会など）の試合は除く
+  const resolveT = tournament?.id ? buildTournamentResolver(sameNameList.some(t => t.id === tournament.id) ? sameNameList : [...sameNameList, tournament]) : null;
+  const belongs = (row) => !resolveT || resolveT(row.tournament_name, row.match_date) === tournament.id;
+  const matchRows = (matchRowsAll ?? []).filter(belongs);
+  const teamRows = (teamRowsAll ?? []).filter(belongs);
   if (mErr) console.error(mErr);
   if (tErr) console.error(tErr);
   const matchRowsSafe = matchRows ?? [];
@@ -3075,14 +3128,39 @@ async function saveTournament(t) {
 // ★大会名を変更した時、既に作成済みの個人戦・団体戦の tournament_name（文字列で紐付けている）が
 //   追従せず残ってしまい、見た目は同じでも文字として一致しなくなり大会と切り離されてしまう不具合があった。
 //   大会名編集時は必ずこれを呼び、旧名称の試合を新名称に一括で書き換える。
-async function renameTournamentCascade(oldName, newName) {
+// ★oldTournament（変更前の大会：id・開始日・終了日）を渡すと、同名の別大会の試合まで巻き込まないよう、
+//   その大会に属する試合だけを書き換える。
+async function renameTournamentCascade(oldName, newName, oldTournament) {
   const oldTrimmed = (oldName || "").trim();
   const newTrimmed = (newName || "").trim();
   if (!oldTrimmed || !newTrimmed || oldTrimmed === newTrimmed) return;
+  if (!oldTournament?.id) {
+    const [r1, r2, r3] = await Promise.all([
+      supabase.from("matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+      supabase.from("team_matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+      supabase.from("tournament_pairs").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+    ]);
+    if (r1.error) console.error("個人戦の大会名追従に失敗:", r1.error);
+    if (r2.error) console.error("団体戦の大会名追従に失敗:", r2.error);
+    if (r3.error) console.error("ペアマスターの大会名追従に失敗:", r3.error);
+    return;
+  }
+  const [{ data: mRows, error: e1 }, { data: tRows, error: e2 }, sameNameList] = await Promise.all([
+    fetchAllRows("matches", "id, tournament_name, match_date", q => q.eq("tournament_name", oldTrimmed).order("id")),
+    fetchAllRows("team_matches", "id, tournament_name, match_date", q => q.eq("tournament_name", oldTrimmed).order("id")),
+    getSameNameTournaments(oldTrimmed, oldTournament),
+  ]);
+  if (e1) console.error(e1);
+  if (e2) console.error(e2);
+  const resolveT = buildTournamentResolver(sameNameList);
+  const pick = (rows) => (rows ?? []).filter(r => resolveT(r.tournament_name, r.match_date) === oldTournament.id).map(r => r.id);
+  const chunk = (ids) => { const out = []; for (let i = 0; i < ids.length; i += 100) out.push(ids.slice(i, i + 100)); return out; };
+  const upd = (table, ids) => Promise.all(chunk(ids).map(ids2 => supabase.from(table).update({ tournament_name: newTrimmed }).in("id", ids2)))
+    .then(rs => rs.find(r => r.error) || { error: null });
   const [r1, r2, r3] = await Promise.all([
-    supabase.from("matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
-    supabase.from("team_matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
-    supabase.from("tournament_pairs").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+    upd("matches", pick(mRows)),
+    upd("team_matches", pick(tRows)),
+    supabase.from("tournament_pairs").update({ tournament_name: newTrimmed }).eq("tournament_id", oldTournament.id),
   ]);
   if (r1.error) console.error("個人戦の大会名追従に失敗:", r1.error);
   if (r2.error) console.error("団体戦の大会名追従に失敗:", r2.error);
@@ -5059,6 +5137,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // ★大会カードの集計（試合数・終了数・会場数・勝敗）を、全試合の1回の走査でまとめて作る。
   //   以前は大会1件ごとに全試合を走査し直していたため、
   //   「大会数 × 試合数」の計算量になり、スクロールや絞り込みのたびに重くなっていた。
+  // ★同名の大会が複数あっても混ざらないよう、試合日でどの大会の試合かを決めてから大会ID単位で集計する
+  const resolveTournamentId = useMemo(() => buildTournamentResolver(tournaments), [tournaments]);
   const tournamentAgg = useMemo(() => {
     const map = {};
     const ensure = (name) => (map[name] ??= {
@@ -5070,9 +5150,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     allMatchesRaw.forEach(m => { statusById[m.id] = m.status; });
 
     allMatches.forEach(m => {
-      const name = m.tournament_name;
-      if (!name) return;
-      const a = ensure(name);
+      const tid = resolveTournamentId(m.tournament_name, m.match_date);
+      if (tid == null) return;
+      const a = ensure(tid);
       a.totalMatches++;
       if (m.venue) a.venues.add(m.venue);
       if (isDoneStatus(m.status)) {
@@ -5086,9 +5166,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     });
 
     allTeamMatches.forEach(tm => {
-      const name = tm.tournament_name;
-      if (!name) return;
-      const a = ensure(name);
+      const tid = resolveTournamentId(tm.tournament_name, tm.match_date);
+      if (tid == null) return;
+      const a = ensure(tid);
       if (tm.venue) a.venues.add(tm.venue);
       // 団体戦のうち、実際に試合レコードが作成済みの番手のみ（枠だけの未着手番手は含めない）
       (tm.games || []).forEach(g => {
@@ -5103,7 +5183,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       if (linkedPlayerName && !a.hasLinkedPlayer && teamMatchHasPlayer(tm, linkedPlayerName)) a.hasLinkedPlayer = true;
     });
     return map;
-  }, [allMatches, allMatchesRaw, allTeamMatches, linkedPlayerName, teamMatchHasPlayer]);
+  }, [allMatches, allMatchesRaw, allTeamMatches, linkedPlayerName, teamMatchHasPlayer, resolveTournamentId]);
 
   // ★月指定カレンダーの「試合データあり」判定も、毎回の再描画で全試合を走査しないよう先に作っておく
   const monthsWithData = useMemo(() => {
@@ -5152,7 +5232,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // ★大会カードの統計行（参加選手・試合数・終了・会場数）
   // 新しいテーブルや列は使わず、既存の matches / team_match_games / players（選手マスター）だけで集計する。
   const statsForTournament = (t) => {
-    const a = tournamentAgg[t.name];
+    const a = tournamentAgg[t.id];
     // 参加選手：大会作成・編集時に選択した「出場選手」の人数（試合データからの逆算ではなく、選択リストそのもの）
     const participantCount = (t.participant_player_ids || []).length;
     // 会場数：大会自体の会場＋個人戦・団体戦それぞれの会場を重複なしで集計
@@ -5169,7 +5249,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // 個人戦はペアごとの勝敗）ため、まとめず別々に算出する。終了していない試合（予定・進行中・中断中）は
   // 数字に含めない。
   const recordForTournament = (t) => {
-    const a = tournamentAgg[t.name];
+    const a = tournamentAgg[t.id];
     return {
       teamRecord:       { win: a ? a.teamWin : 0, loss: a ? a.teamLoss : 0 },
       individualRecord: { win: a ? a.indWin  : 0, loss: a ? a.indLoss  : 0 },
@@ -5183,7 +5263,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     if (!tournamentMatchesDateFilter(t)) return false;
     // ★選手で絞り込むとき：試合に出ている大会に加えて、大会の「出場選手」に登録されている大会も表示する
     //   （以前は試合が1つも無い大会＝これからの大会が、出場選手に入っていても消えていた）
-    if (childOnly && linkedPlayerName && !tournamentAgg[t.name]?.hasLinkedPlayer
+    if (childOnly && linkedPlayerName && !tournamentAgg[t.id]?.hasLinkedPlayer
         && !(linkedPlayerId && (t.participant_player_ids || []).includes(linkedPlayerId))) return false;
     return true;
   });
@@ -5207,7 +5287,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       // ★既存の大会の名前を変更した場合、紐づく個人戦・団体戦の大会名も追従させる
       // （コピー作成時はeditingTournamentにidが無いため、誤って元の大会の試合まで巻き込んでリネームしないようにする）
       if (editingTournament?.id && editingTournament?.name && editingTournament.name.trim() !== trimmed) {
-        await renameTournamentCascade(editingTournament.name, trimmed);
+        await renameTournamentCascade(editingTournament.name, trimmed, editingTournament);
       }
       setShowTournamentModal(false);
       setEditingTournament(null);
@@ -5927,8 +6007,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {breakdownModalFor && (() => {
         const t = breakdownModalFor;
         const name = t.name;
-        const individualForT = allMatches.filter(m => m.tournament_name === name);
-        const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
+        const individualForT = allMatches.filter(m => m.tournament_name === name && resolveTournamentId(m.tournament_name, m.match_date) === t.id);
+        const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name && resolveTournamentId(tm.tournament_name, tm.match_date) === t.id);
         const statusLabel = (status) => ({
           finished: "✅ 終了", abandoned: "⛔ 途中終了", active: "🔴 進行中", waiting: "⏳ 待機中", scheduled: "📅 予定", suspended: "⏸ 中断中",
         }[status] || status || "―");
@@ -6163,7 +6243,13 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
       <input style={{ ...S.inp, marginBottom:14 }} placeholder="例：令和8年度 新人戦" value={name} onChange={e=>setName(e.target.value)}/>
       <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>開催期間</div>
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-        <input type="date" style={{ ...S.inp, flex:1 }} value={startDate} onChange={e=>setStartDate(e.target.value)}/>
+        <input type="date" style={{ ...S.inp, flex:1 }} value={startDate} onChange={e=>{
+          // ★開始日を入れたら終了日も同じ日にそろえる（1日だけの大会で2回入力しなくて済むように）。
+          //   ただし複数日の期間を入力済みの場合（終了日が開始日より後）は、終了日を残す。
+          const v = e.target.value;
+          if (v && (!endDate || endDate === startDate || endDate < v)) setEndDate(v);
+          setStartDate(v);
+        }}/>
         <span style={{ fontSize:12, color:C.textSec }}>〜</span>
         <input type="date" style={{ ...S.inp, flex:1 }} value={endDate} onChange={e=>setEndDate(e.target.value)}/>
       </div>
@@ -6430,7 +6516,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     const drawP = Promise.all([getDrawSummary(tournament.id, "team"), getDrawSummary(tournament.id, "individual")])
       .then(([teamCount, indivCount]) => ({ team: teamCount, individual: indivCount }))
       .catch(e => { console.error(e); return null; });
-    Promise.all([getTournamentMatchesAndTeamMatches(tournament.name), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id), drawP]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList, drawSummaryNow]) => {
+    Promise.all([getTournamentMatchesAndTeamMatches(tournament), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id), drawP]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList, drawSummaryNow]) => {
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
       let myName = "";
@@ -7191,7 +7277,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                 const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null, draw_url: drawUrl || null, participant_player_ids: participantIds || [] });
                 // ★大会名が変わった場合、既存の個人戦・団体戦の大会名も追従させる（見えない文字ズレによる紐付け解除を防ぐ）
                 if (tournament.name && tournament.name.trim() !== trimmed) {
-                  await renameTournamentCascade(tournament.name, trimmed);
+                  await renameTournamentCascade(tournament.name, trimmed, tournament);
                 }
                 setShowEditModal(false);
                 onSaved && onSaved(saved);
