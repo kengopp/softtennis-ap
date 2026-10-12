@@ -1727,7 +1727,9 @@ async function saveMatch(match, { isNew = false, incremental = false } = {}) {
   //   スコアや試合メモの保存まで丸ごと失敗してしまうため。
   //   （列が無い環境でも、動画リンクを使わない限り記録は普通に続けられる）
   const videoLinks = normalizeVideoLinks(match.video_links);
-  if (videoLinks.length > 0) matchRow.video_links = videoLinks;
+  // ★動画リンクを画面で編集した場合（_videoLinksEdited）は、0件でも空配列を送る。
+  //   そうしないと「全部削除」した時にDB側の古いリンクが残り、一覧の🎥バッジが消えない。
+  if (videoLinks.length > 0 || match._videoLinksEdited) matchRow.video_links = videoLinks;
 
   // ★差分保存：控えがあり、状態（進行中→終了など）が変わっておらず、選手・ゲームが空でないときだけ使う。
   //   状態が変わるとき（試合終了・中断など）や、いつもと違う形の保存は、念のため全部保存で確認し直す。
@@ -20081,7 +20083,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       onClick={async ()=>{
                         const cleaned = videoLinksDraft.map((v,i)=>({ ...v, title: v.title.trim() || `動画${i+1}` }));
                         setVideoLinksDraft(cleaned);
-                        const updated = { ...match, video_links: cleaned };
+                        const updated = { ...match, video_links: cleaned, _videoLinksEdited: true };
                         setVideoSaving(true);
                         try {
                           // ★通常の試合記録（persist）は保存完了を待たず即座に画面を返す作りだが、
