@@ -12272,7 +12272,7 @@ function EquipmentScreen({ onBack }) {
                             <span style={{ display:"block", fontSize:14.5, fontWeight:700, color:"#5a6478", marginTop:3, fontVariantNumeric:"tabular-nums" }}>{eqMd(sinceOf(it))} {lbl}</span>
                             {pl && <span style={{ display:"block", fontSize:14, fontWeight:800, color:C.navy, marginTop:4 }}>
                               <span style={{ display:"inline-block", fontSize:12, fontWeight:800, color:"#5a6478", border:"1px solid #b5bdca", borderRadius:5, padding:"0 5px", marginRight:6, verticalAlign:1 }}>予定</span>
-                              {eqMd(pl.move_date)} {pl.to_holder === EQ_BUSHITSU ? "部室に戻す" : `${pl.to_holder}へ引き継ぐ`}</span>}
+                              {eqMd(pl.move_date)} {pl.to_holder === EQ_BUSHITSU ? "部室に戻す" : `${pl.to_holder} 引き継ぎ`}</span>}
                           </span>
                         </button>
                         <button onClick={()=>openDetail(it.id)} aria-label={`${it.name}の履歴`}
@@ -12404,7 +12404,7 @@ function EquipmentScreen({ onBack }) {
               style={{ display:"block", width:"100%", height:52, marginTop:20, border:"none", borderRadius:12, background: sheet.to ? C.accent : "#b7e8d2", color:"#fff", fontSize:18, fontWeight:900, cursor: sheet.to ? "pointer" : "default", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "保存"}</button>
             <div style={{ fontSize:14, color:"#5a6478", textAlign:"center", marginTop:9, fontWeight:700, lineHeight:1.6 }}>
               {!sheet.to ? "名前を選ぶと「保存」が押せます"
-                : fut ? `それまでは今の持ち主のまま、「予定 ${eqMd(D)} ${ret ? "部室に戻す" : `${sheet.to}へ引き継ぐ`}」と表示されます`
+                : fut ? `それまでは今の持ち主のまま、「予定 ${eqMd(D)} ${ret ? "部室に戻す" : `${sheet.to} 引き継ぎ`}」と表示されます`
                 : D === today ? "今日の日付で記録します" : `${eqMdw(D)}の日付で記録します`}</div>
           </EquipSheet>
         );
