@@ -4931,7 +4931,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
   const [tournaments, setTournaments] = useState([]);
   const [equipFor, setEquipFor] = useState(null); // ★「🎒 管理」で開いている大会（備品・場所取り）
-  const [equipMap, setEquipMap] = useState({});   // ★大会ID → 備品・場所取り（チームで共有）
+  const [equipMap, setEquipMap] = useState({});   // ★大会ID → 場所取り・メモ（チームで共有）
+  const [memoFor, setMemoFor] = useState(null);    // ★「📝 メモ」で開いている大会
   const reloadEquipMap = useCallback(async () => {
     const p = await getMyProfile().catch(() => null);
     setEquipMap(await getTournamentEquipmentMap(p?.school_id));
@@ -5699,12 +5700,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                       style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.guideline_url ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
                     ><span style={{ color: isPast ? C.textSec : (t.guideline_url ? "#1976d2" : "#c3c9d4") }}>📄</span> 要項</button>
-                    {(() => { const hasEq = hasEquipmentPlan(withEquip(t)); return (
+                    {(() => { const memoText = (withEquip(t).equipment_plan?.memo || "").trim(); return (
                     <button
-                      disabled={!hasEq}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (hasEq ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: hasEq ? "pointer" : "default" }}
-                      onClick={e=>{ e.stopPropagation(); if (hasEq) setEquipFor(withEquip(t)); }}
-                    ><span style={{ filter: hasEq && !isPast ? "none" : "grayscale(1) opacity(0.45)" }}>🎒</span> 管理</button>
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:`1.5px solid ${memoText && !isPast ? C.navy : C.border}`, cursor:"pointer", position:"relative" }}
+                      onClick={e=>{ e.stopPropagation(); setMemoFor(withEquip(t)); }}
+                    ><span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📝</span> メモ{memoText && <span aria-label="メモあり" style={{ width:7, height:7, borderRadius:"50%", background: isPast ? C.textSec : "#e53935", marginLeft:1, alignSelf:"flex-start", marginTop:2 }} />}</button>
                     ); })()}
                     <button
                       style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
@@ -5722,7 +5722,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         <button
                           style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                           onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setEquipFor(withEquip(t)); }}
-                        >🎒 備品・場所取り</button>
+                        >🚩 場所取り</button>
                         <button
                           style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                           onClick={e=>{
@@ -5753,7 +5753,12 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             });
             })()}
           </div>
-          {/* ★備品・場所取り（大会一覧の「🎒 管理」／「⋯ その他」から開く） */}
+          {/* ★大会のメモ（「📝 メモ」から開くポップアップ） */}
+          {memoFor && (
+            <TournamentMemoModal tournament={memoFor} onClose={()=>setMemoFor(null)}
+              onSaved={(plan)=>{ setEquipMap(m => ({ ...m, [memoFor.id]: plan })); setMemoFor(t => t ? { ...t, equipment_plan: plan } : t); }} />
+          )}
+          {/* ★場所取り（大会一覧の「⋯ その他」から開く） */}
           {equipFor && (
             <TournamentEquipmentScreen tournament={equipFor} onClose={()=>setEquipFor(null)}
               onSaved={(nt)=>{ setEquipMap(m => ({ ...m, [nt.id]: nt.equipment_plan })); setEquipFor(null); reloadEquipMap(); }} />
@@ -11526,7 +11531,60 @@ function EquipPersonSheet({ title, kind, players, initial, days = [], onDecide, 
   );
 }
 
-// ---------- 大会の「備品・場所取り」画面（大会一覧の「🎒 管理」から開く） ----------
+// ---------- 大会のメモ（大会一覧の「📝 メモ」から開くポップアップ） ----------
+//   例：「氷を持ってきてください」「会費は18,000円です」。tournament_equipment.plan.memo に保存（同じ学校の全員で共有）
+function TournamentMemoModal({ tournament, onClose, onSaved }) {
+  const isViewer = useIsViewer();
+  const [memo0, setMemo0] = useState(tournament.equipment_plan?.memo || "");
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(memo0);
+  const [saving, setSaving] = useState(false);
+  const startEdit = () => { if (isViewer) { viewerAlert(); return; } setText(memo0); setEditing(true); };
+  const save = async () => {
+    setSaving(true);
+    try {
+      // ★場所取りを別の人が更新していることがあるため、最新の内容を読み直してからメモだけ差しかえる
+      const p = await getMyProfile().catch(() => null);
+      const latest = (await getTournamentEquipmentMap(p?.school_id))[tournament.id] || tournament.equipment_plan || {};
+      const plan = { ...latest, memo: text.trim() };
+      await saveTournamentEquipmentPlan(tournament.id, plan);
+      onSaved && onSaved(plan);
+      setMemo0(plan.memo);
+      setEditing(false);
+    } catch (e) {
+      alert("保存できませんでした：" + (e.message || e));
+    } finally { setSaving(false); }
+  };
+  return (
+    <Modal onClose={onClose}>
+      <h3 style={{ fontSize:16, fontWeight:800, marginBottom:2, textAlign:"center" }}>📝 {editing ? "メモを編集" : "メモ"}</h3>
+      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, textAlign:"center", marginBottom:14, wordBreak:"break-word" }}>{tournament.name}</div>
+      {editing ? (
+        <textarea value={text} autoFocus onChange={e=>setText(e.target.value)} placeholder={"例：氷を持ってきてください。\n会費は18,000円です。"}
+          style={{ width:"100%", boxSizing:"border-box", minHeight:170, border:`1.5px solid ${C.navy}`, borderRadius:12, padding:12, fontSize:16, fontWeight:600, lineHeight:1.7, color:C.text, outline:"none", resize:"vertical", fontFamily:"inherit" }} />
+      ) : memo0.trim() ? (
+        <div style={{ background:"#f7f8fa", borderRadius:12, padding:14, fontSize:16, fontWeight:700, lineHeight:1.75, color:C.text, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{memo0}</div>
+      ) : (
+        <div style={{ fontSize:14, color:C.textSec, textAlign:"center", padding:"14px 0", lineHeight:1.6 }}>まだメモがありません。{!isViewer && <><br/>「✏️ 書く」から追加できます。</>}</div>
+      )}
+      <div style={{ display:"grid", gridTemplateColumns: (editing || !isViewer) ? "1fr 1fr" : "1fr", gap:8, marginTop:16 }}>
+        {editing ? (
+          <>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text }} onClick={()=>{ setText(memo0); setEditing(false); }}>キャンセル</button>
+            <button style={{ ...S.btn(C.accent), opacity: saving ? 0.6 : 1 }} disabled={saving} onClick={save}>{saving ? "保存中..." : "保存"}</button>
+          </>
+        ) : (
+          <>
+            {!isViewer && <button style={{ ...S.btn(C.white), color:C.navy, border:`1.5px solid ${C.navy}` }} onClick={startEdit}>✏️ {memo0.trim() ? "編集" : "書く"}</button>}
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text }} onClick={onClose}>閉じる</button>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ---------- 大会の「場所取り」画面（大会一覧の「⋯ その他」から開く）※以前は備品もここで管理していた ----------
 function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
   const isViewer = useIsViewer();
   const plan0 = tournament.equipment_plan || {};
@@ -11581,7 +11639,11 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     if (isViewer) { viewerAlert(); return; }
     setSaving(true);
     try {
+      // ★メモは別の画面（📝 メモ）で書きかえられるため、保存の直前に最新の内容を読み直して引き継ぐ
+      const pp = await getMyProfile().catch(() => null);
+      const latest = (await getTournamentEquipmentMap(pp?.school_id))[tournament.id] || plan0;
       const plan = {
+        ...(latest.memo ? { memo: latest.memo } : {}),
         items: items.map(x => ({ item_id: x.item_id, name: nameOf(x), quantity: qtyOf(x), memo: (x.memo || "").trim(), player: x.player || "", who: x.who || "self" })),
         spots: spotOrder.map(x => x.s).filter(s => s.player).map(s => ({ player: s.player, who: s.who || "self", day: spotDay(s), time: s.time || "", memo: s.memo || "" })),
       };
@@ -11621,7 +11683,7 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
     <div style={{ position:"fixed", inset:0, zIndex:300, background:C.gray, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={tryClose} aria-label="戻る">←</button>
-        <span style={{ display:"flex", alignItems:"center", gap:8, fontSize:18, fontWeight:800, color:C.white }}><EqIcon name="bag" size={22} color="#fff" />備品・場所取り</span>
+        <span style={{ display:"flex", alignItems:"center", gap:8, fontSize:18, fontWeight:800, color:C.white }}><EqIcon name="flag" size={22} color="#fff" />場所取り</span>
       </div>
       <div style={{ padding:"12px 14px 40px", maxWidth:640, margin:"0 auto" }}>
         <div style={{ fontSize:15, fontWeight:900, color:C.navy }}>{tournament.name}
@@ -11629,9 +11691,8 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
         {loading ? <div style={{ textAlign:"center", color:C.textSec, padding:"40px 0" }}>読み込み中...</div> : (
           <>
             {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13, fontWeight:700, borderRadius:10, padding:"10px 12px", marginTop:10 }}>{loadError}</div>}
-            {secHead("bag", "備品", `${items.length}件`, ()=>setSheet({ type:"items", sel:[] }))}
-            {items.length === 0 && <div style={empty}>まだ備品がありません。右上の「＋ 追加」から選んでください</div>}
-            {items.map((it, i) => {
+            {/* ★備品は「マスター › 備品」で管理するようになったため、大会の画面には出さない（保存済みの内容は消さずに残す） */}
+            {false && items.map((it, i) => {
               const memo = it.memo || ""; // ★この大会だけのメモ（設定の備品メモは「備品を選ぶ」画面だけに出す）
               return (
                 <div key={it.item_id + "_" + i} role="button" tabIndex={0} style={card} onClick={()=>setSheet({ type:"person", kind:"eq", idxs:[i] })}>
@@ -11756,7 +11817,483 @@ function TournamentEquipmentScreen({ tournament, onClose, onSaved }) {
   );
 }
 
-// ---------- 設定 › 備品の登録（備品名とメモ） ----------
+// ============================================================
+// ★備品（いま誰が持っているか・引き継ぎ・予定・写真）
+//   ・備品そのものは equipment_items（名前・数量・メモ・写真 photo_url）
+//   ・引き継ぎの記録は equipment_moves に1件ずつ保存する
+//       { item_id, from_holder, to_holder, move_date }  holder は選手名 または "部室"
+//   ・move_date が今日より先のものは「予定」。その日になると自動で持ち主が変わる（ボタン操作は不要）
+//   ・予定は1つの備品につき1件まで（新しく保存すると前の予定と置きかわる）
+//   ・記録が1件もない備品は「部室」にある扱い
+// ============================================================
+const EQ_BUSHITSU = "部室";
+const eqIso = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const eqToday = () => eqIso(new Date());
+const eqAddDays = (v, n) => { const [y,m,d] = String(v).split("-").map(Number); return eqIso(new Date(y, m-1, d+n)); };
+const eqMd = (v) => { if (!v) return ""; const [, m, d] = String(v).slice(0,10).split("-").map(Number); return `${m}/${d}`; };
+const eqMdw = (v) => { const [y,m,d] = String(v).split("-").map(Number); return `${m}/${d}（${"日月火水木金土"[new Date(y,m-1,d).getDay()]}）`; };
+
+async function getEquipmentMoves(schoolId) {
+  if (!schoolId) return [];
+  const { data, error } = await supabase.from("equipment_moves").select("*").eq("school_id", schoolId)
+    .order("move_date", { ascending:true }).order("created_at", { ascending:true });
+  if (error) {
+    if (/equipment_moves/.test(error.message || "")) throw new Error("データベースに引き継ぎの保存先がまだありません。追加のSQLを実行してください。");
+    throw error;
+  }
+  return data ?? [];
+}
+// ★写真は端末で小さくしてから保存する（スマホの写真はそのままだと数MBあるため）
+function eqResizeImage(file, max = 1280) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(new Error("写真を読み込めませんでした"));
+    r.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("写真を読み込めませんでした"));
+      img.onload = () => {
+        const sc = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(b => b ? resolve(b) : reject(new Error("写真を変換できませんでした")), "image/jpeg", 0.82);
+      };
+      img.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+async function uploadEquipmentPhoto(file, schoolId, itemId) {
+  const blob = await eqResizeImage(file);
+  const path = `${schoolId}/${itemId}/${uid()}.jpg`;
+  const { error: upErr } = await supabase.storage.from("equipment").upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+  if (upErr) throw new Error(/bucket/i.test(upErr.message || "") ? "写真の保存場所がまだありません。追加のSQLを実行してください。" : upErr.message);
+  const { data } = supabase.storage.from("equipment").getPublicUrl(path);
+  const { error } = await supabase.from("equipment_items").update({ photo_url: data.publicUrl, updated_at: new Date().toISOString() }).eq("id", itemId);
+  if (error) throw new Error(/photo_url/.test(error.message || "") ? "データベースに写真の項目がまだありません。追加のSQLを実行してください。" : error.message);
+  return data.publicUrl;
+}
+
+// ---------- マスター › 備品 ----------
+function EquipmentScreen({ onBack }) {
+  const isViewer = useIsViewer();
+  const [schoolId, setSchoolId] = useState(null);
+  const [items, setItems] = useState([]);
+  const [moves, setMoves] = useState([]);
+  const [players, setPlayers] = useState([]);
+  const [me, setMe] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [sel, setSel] = useState(() => new Set());
+  const [q, setQ] = useState("");
+  const [sheet, setSheet] = useState(null);     // 引き継ぐ／部室に戻す {mode, to, q, open, date, editLast, ids}
+  const [detailId, setDetailId] = useState(null); // 履歴を開いている備品
+  const [photoId, setPhotoId] = useState(null);   // 大きく表示している写真
+  const [edit, setEdit] = useState(null);         // 備品の追加・編集 {id?, name, memo, quantity}
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [cancelArm, setCancelArm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [uploadingId, setUploadingId] = useState(null);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef(null);
+  const today = eqToday();
+
+  const showToast = (m) => { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 2400); };
+  const reload = async (sid = schoolId) => {
+    try {
+      const [list, mv] = await Promise.all([getEquipmentItems(sid), getEquipmentMoves(sid)]);
+      setItems(list); setMoves(mv); setLoadError("");
+    } catch (e) { setLoadError(e.message || String(e)); }
+  };
+  useEffect(() => {
+    (async () => {
+      try {
+        const [p, roster] = await Promise.all([getMyProfile(), getPlayerRoster().catch(() => [])]);
+        setSchoolId(p?.school_id || null);
+        setPlayers([...new Set((roster || []).filter(r => r.is_own_team !== false).map(r => r.player_name).filter(Boolean))]);
+        setMe(pickDefaultAnalysisPlayer(p, roster) || "");
+        if (p?.school_id) await reload(p.school_id);
+      } catch (e) { setLoadError(e.message || String(e)); }
+      setLoading(false);
+    })();
+    return () => clearTimeout(toastTimer.current);
+  }, []);
+
+  // ★備品ごとの記録（今日までが実際、先の日付は予定）
+  const movesOf = (id) => moves.filter(m => m.item_id === id);
+  const pastOf = (id) => movesOf(id).filter(m => m.move_date <= today);
+  const planOf = (id) => movesOf(id).find(m => m.move_date > today) || null;
+  const lastOf = (id) => { const p = pastOf(id); return p[p.length - 1] || null; };
+  const holderOf = (it) => lastOf(it.id)?.to_holder || EQ_BUSHITSU;
+  const sinceOf = (it) => { const m = lastOf(it.id); return m ? m.move_date : (it.created_at || "").slice(0, 10); };
+  const isMe = (h) => !!me && normalizePlayerName(h) === normalizePlayerName(me);
+
+  const norm = (t) => String(t || "").replace(/[\s　]/g, "");
+  const groups = (() => {
+    const qq = norm(q);
+    const list = items.filter(it => !qq || norm(it.name).includes(qq) || norm(holderOf(it)).includes(qq));
+    const map = new Map();
+    list.forEach(it => { const h = holderOf(it); if (!map.has(h)) map.set(h, []); map.get(h).push(it); });
+    const rank = (k) => k === EQ_BUSHITSU ? 0 : isMe(k) ? 1 : 2;
+    return [...map.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, "ja")).map(k => ({ who:k, items:map.get(k) }));
+  })();
+
+  const toggle = (id) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const chosen = items.filter(it => sel.has(it.id));
+
+  const openGive = (mode) => {
+    if (isViewer) { viewerAlert(); return; }
+    setSheet({ mode, to: mode === "return" ? EQ_BUSHITSU : "", q:"", open: mode !== "return", date: today, ids:[...sel] });
+  };
+  const openEditLast = (it) => {
+    if (isViewer) { viewerAlert(); return; }
+    const lm = lastOf(it.id); if (!lm) return;
+    setSheet({ mode: lm.to_holder === EQ_BUSHITSU ? "return" : "give", to: lm.to_holder, q:"", open:false, date: lm.move_date, ids:[it.id], editLast:true });
+  };
+  const openEditPlan = (it) => {
+    if (isViewer) { viewerAlert(); return; }
+    const pl = planOf(it.id); if (!pl) return;
+    setSheet({ mode: pl.to_holder === EQ_BUSHITSU ? "return" : "give", to: pl.to_holder, q:"", open:false, date: pl.move_date, ids:[it.id] });
+  };
+
+  const saveSheet = async () => {
+    const to = (sheet.to || "").trim(); const D = sheet.date || today;
+    if (!to) return;
+    setSaving(true);
+    const dels = [], ups = [], ins = [];
+    let added = 0, fixed = 0;
+    sheet.ids.forEach(id => {
+      const it = items.find(x => x.id === id); if (!it) return;
+      movesOf(id).filter(m => m.move_date > today).forEach(m => dels.push(m.id)); // 前の予定は置きかえる
+      const lm = lastOf(id);
+      const holder = lm?.to_holder || EQ_BUSHITSU;
+      // ★いちばん新しい引き継ぎを直す（履歴の「日付・相手を直す」から、または同じ相手をもう一度選んだとき）
+      if (lm && (sheet.editLast || lm.to_holder === to)) {
+        if (lm.from_holder === to) dels.push(lm.id);   // 元の人に戻した＝その引き継ぎはなかったことにする
+        else ups.push({ id: lm.id, to_holder: to, move_date: D });
+        fixed++; return;
+      }
+      if (holder === to) return;
+      ins.push({ id: uid(), school_id: schoolId, item_id: id, from_holder: holder, to_holder: to, move_date: D });
+      added++;
+    });
+    try {
+      if (dels.length) { const { error } = await supabase.from("equipment_moves").delete().in("id", dels); if (error) throw error; }
+      for (const u of ups) { const { error } = await supabase.from("equipment_moves").update({ to_holder: u.to_holder, move_date: u.move_date }).eq("id", u.id); if (error) throw error; }
+      if (ins.length) { const { error } = await supabase.from("equipment_moves").insert(ins); if (error) throw error; }
+      if (to !== EQ_BUSHITSU) pushEquipHistory(to);
+      const fut = D > today;
+      const tn = to === EQ_BUSHITSU ? "部室に戻す" : `${to}さんに引き継ぐ`;
+      showToast(added ? (fut ? `${eqMd(D)}に${tn}予定を${added}件登録しました` : (to === EQ_BUSHITSU ? `${added}件を部室に戻しました` : `${to}さんに${added}件を引き継ぎました`))
+        : fixed ? (fut ? `${eqMd(D)}の予定に直しました` : `${eqMd(D)}に直しました`) : "変更はありませんでした");
+      setSheet(null); setSel(new Set()); setCancelArm(null);
+      await reload();
+    } catch (e) {
+      alert("保存できませんでした：" + (/equipment_moves/.test(e.message || "") ? "データベースに引き継ぎの保存先がまだありません。追加のSQLを実行してください。" : (e.message || e)));
+    } finally { setSaving(false); }
+  };
+
+  const cancelPlan = async (it) => {
+    if (isViewer) { viewerAlert(); return; }
+    if (cancelArm !== it.id) { setCancelArm(it.id); return; }
+    const ids = movesOf(it.id).filter(m => m.move_date > today).map(m => m.id);
+    try {
+      if (ids.length) { const { error } = await supabase.from("equipment_moves").delete().in("id", ids); if (error) throw error; }
+      setCancelArm(null); showToast("予定を取り消しました"); await reload();
+    } catch (e) { alert("取り消せませんでした：" + (e.message || e)); }
+  };
+
+  const onPickPhoto = async (itemId, file) => {
+    if (!file) return;
+    if (isViewer) { viewerAlert(); return; }
+    setUploadingId(itemId);
+    try { await uploadEquipmentPhoto(file, schoolId, itemId); showToast("写真を登録しました"); await reload(); }
+    catch (e) { alert("写真を保存できませんでした：" + (e.message || e)); }
+    finally { setUploadingId(null); }
+  };
+
+  const openEdit = (e) => { if (isViewer) { viewerAlert(); return; } setConfirmDel(false); setEdit(e); };
+  const saveItem = async () => {
+    if (!edit.name.trim()) { alert("備品名を入れてください"); return; }
+    setSaving(true);
+    try {
+      await saveEquipmentItem({ id: edit.id, school_id: schoolId, name: edit.name, memo: edit.memo, quantity: edit.quantity, sort_order: edit.id ? undefined : items.length });
+      setEdit(null); showToast(edit.id ? "備品を直しました" : "備品を追加しました"); await reload();
+    } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
+  const removeItem = async () => {
+    setSaving(true);
+    try { await deleteEquipmentItem(edit.id); setEdit(null); setDetailId(null); setSel(s => { const n = new Set(s); n.delete(edit.id); return n; }); showToast("備品を削除しました"); await reload(); }
+    catch (e) { alert("削除できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  // ---------- 部品 ----------
+  const lk = { background:"none", border:"none", padding:"4px 0", fontSize:15, fontWeight:800, color:C.navy, textDecoration:"underline", textUnderlineOffset:4, textDecorationColor:"#c4cbd8", cursor:"pointer" };
+  const Thumb = ({ it, size = 56 }) => {
+    const box = { flexShrink:0, alignSelf:"center", width:size, height:size, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}`, background:"#eef1f5", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", boxSizing:"border-box" };
+    if (uploadingId === it.id) return <div style={{ ...box, fontSize:11.5, color:C.textSec, fontWeight:800 }}>保存中…</div>;
+    if (it.photo_url) return <button aria-label={`${it.name}の写真を大きく見る`} onClick={()=>setPhotoId(it.id)} style={box}><img src={it.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} /></button>;
+    if (isViewer) return <div style={{ ...box, cursor:"default" }} />;
+    return (
+      <label aria-label={`${it.name}の写真を撮る`} style={{ ...box, border:"1.5px dashed #b5bdca", background:C.white, color:"#7a8499", fontSize:12.5, fontWeight:800, lineHeight:1.25, textAlign:"center" }}>
+        <input type="file" accept="image/*" hidden onChange={e=>{ const f = e.target.files && e.target.files[0]; e.target.value = ""; onPickPhoto(it.id, f); }} />
+        <span>＋<br/>写真</span>
+      </label>
+    );
+  };
+
+  const detail = detailId ? items.find(x => x.id === detailId) : null;
+  const photoItem = photoId ? items.find(x => x.id === photoId) : null;
+
+  return (
+    <div style={{ ...S.page, background:C.white, minHeight:"100dvh" }}>
+      <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:20 }}>
+        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack} aria-label="戻る">←</button>
+        <span style={{ fontSize:18,fontWeight:800,color:C.white }}>🎒 備品</span>
+      </div>
+      <div style={{ padding:"12px 16px", paddingBottom: sel.size ? 190 : 40, maxWidth:640, margin:"0 auto" }}>
+        {loading ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>読み込み中...</div>
+        : !schoolId ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のため備品を表示できません</div>
+        : (
+          <>
+            {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13.5, fontWeight:700, borderRadius:10, padding:"10px 12px", marginBottom:10, lineHeight:1.5 }}>{loadError}</div>}
+            <div style={{ display:"flex", alignItems:"center", gap:16, margin:"2px 2px 10px" }}>
+              <div style={{ flex:1, fontSize:16, fontWeight:800, color:C.text }}>備品 {items.length}件</div>
+              <button style={lk} onClick={()=>setSel(new Set(items.map(x => x.id)))}>全選択</button>
+              <button style={lk} onClick={()=>setSel(new Set())}>すべてクリア</button>
+            </div>
+            <input type="search" value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 備品名・名前でさがす" autoComplete="off"
+              style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 12px", fontSize:16, color:C.text, background:C.white, outline:"none" }} />
+            {items.length === 0 && <div style={{ textAlign:"center", color:C.textSec, fontSize:14.5, padding:"26px 10px" }}>まだ備品が登録されていません。<br/>下の「＋ 備品を追加」から登録してください</div>}
+            {items.length > 0 && groups.length === 0 && <div style={{ textAlign:"center", color:C.textSec, fontSize:14.5, padding:"26px 10px" }}>見つかりませんでした</div>}
+            {groups.map(g => {
+              const allOn = g.items.every(it => sel.has(it.id));
+              return (
+                <div key={g.who} style={{ marginTop:16 }}>
+                  <div style={{ display:"flex", alignItems:"baseline", padding:"0 2px 6px", borderBottom:`2px solid ${C.navy}` }}>
+                    <div style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, color:C.navy, wordBreak:"break-word" }}>{g.who}
+                      {isMe(g.who) && <span style={{ fontSize:14, fontWeight:700, color:"#5a6478", marginLeft:4 }}>（自分）</span>}
+                      <span style={{ fontSize:14, fontWeight:700, color:"#7a8499", marginLeft:8 }}>{g.items.length}件</span></div>
+                    <button style={{ ...lk, fontSize:14.5 }} onClick={()=>setSel(s => { const n = new Set(s); g.items.forEach(it => allOn ? n.delete(it.id) : n.add(it.id)); return n; })}>{allOn ? "全部外す" : "全部選ぶ"}</button>
+                  </div>
+                  {g.items.map(it => {
+                    const on = sel.has(it.id);
+                    const pl = planOf(it.id);
+                    const h = holderOf(it);
+                    const lbl = lastOf(it.id) ? (h === EQ_BUSHITSU ? "戻し" : "受取") : "登録";
+                    return (
+                      <div key={it.id} style={{ display:"flex", alignItems:"stretch", gap:10, padding:"0 6px", margin:"0 -6px", borderRadius:10, borderBottom:`1px solid ${on ? "#f3e3a0" : "#eef1f5"}`, background: on ? "#fff3c4" : "transparent" }}>
+                        <Thumb it={it} />
+                        <button onClick={()=>toggle(it.id)} aria-pressed={on} aria-label={`${it.name}を選ぶ`}
+                          style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", background:"none", border:"none", padding:"12px 2px", textAlign:"left", color:C.text, cursor:"pointer" }}>
+                          <span style={{ flex:1, minWidth:0 }}>
+                            <span style={{ display:"block", fontSize:17, fontWeight:800, wordBreak:"break-word" }}>{it.name}{Number(it.quantity) > 1 && <span style={{ fontSize:14, fontWeight:800, color:"#5a6478", marginLeft:6 }}>×{it.quantity}</span>}</span>
+                            <span style={{ display:"block", fontSize:14.5, fontWeight:700, color:"#5a6478", marginTop:3, fontVariantNumeric:"tabular-nums" }}>{eqMd(sinceOf(it))} {lbl}</span>
+                            {pl && <span style={{ display:"block", fontSize:14, fontWeight:800, color:C.navy, marginTop:4 }}>
+                              <span style={{ display:"inline-block", fontSize:12, fontWeight:800, color:"#5a6478", border:"1px solid #b5bdca", borderRadius:5, padding:"0 5px", marginRight:6, verticalAlign:1 }}>予定</span>
+                              {eqMd(pl.move_date)} {pl.to_holder === EQ_BUSHITSU ? "部室に戻す" : `${pl.to_holder}へ引き継ぐ`}</span>}
+                          </span>
+                        </button>
+                        <button onClick={()=>{ setCancelArm(null); setDetailId(it.id); }} aria-label={`${it.name}の履歴`}
+                          style={{ flexShrink:0, alignSelf:"center", border:"1.5px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:9, padding:"8px 11px", fontSize:14.5, fontWeight:800, cursor:"pointer" }}>履歴</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {!isViewer && <button onClick={()=>openEdit({ name:"", memo:"", quantity:1 })}
+              style={{ display:"block", width:"100%", border:"1.5px dashed #c4cbd8", borderRadius:12, padding:13, textAlign:"center", fontSize:15, fontWeight:800, color:C.navy, background:C.white, marginTop:18, cursor:"pointer" }}>＋ 備品を追加</button>}
+          </>
+        )}
+      </div>
+
+      {/* ★選んだときだけ出るボタン */}
+      {sel.size > 0 && !sheet && !detail && (
+        <div style={{ position:"fixed", left:0, right:0, bottom:0, zIndex:30, background:"#f7f8fa", borderTop:`1px solid ${C.border}`, padding:"12px 16px calc(14px + env(safe-area-inset-bottom,0px))" }}>
+          <div style={{ maxWidth:640, margin:"0 auto" }}>
+            <button onClick={()=>openGive("give")} style={{ display:"block", width:"100%", background:C.accent, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:18, fontWeight:900, cursor:"pointer" }}>この{sel.size}件を引き継ぐ</button>
+            {chosen.some(it => holderOf(it) !== EQ_BUSHITSU) && (
+              <button onClick={()=>openGive("return")} style={{ display:"block", width:"100%", background:"linear-gradient(135deg,#6366f1,#4f52d1)", color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:18, fontWeight:900, marginTop:8, cursor:"pointer" }}>この{sel.size}件を部室に戻す</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ★履歴（備品をタップ → 「履歴」） */}
+      {detail && (() => {
+        const lm = lastOf(detail.id);
+        const pl = planOf(detail.id);
+        const evs = pastOf(detail.id).slice().reverse();
+        const h = holderOf(detail);
+        const armed = cancelArm === detail.id;
+        const pbtn = { border:"1.5px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:9, padding:"7px 14px", fontSize:14.5, fontWeight:800, cursor:"pointer" };
+        const ev = (m, i, isPlan) => (
+          <div key={m.id} style={{ display:"flex", gap:12, alignItems:"center", background: isPlan ? "#fafbfc" : C.white, border: isPlan ? "1.5px dashed #9aa5b8" : i === 0 ? `2px solid ${C.accent}` : `1px solid ${C.border}`, borderRadius:13, padding:"13px 12px", marginBottom:8 }}>
+            <div style={{ width:64, flexShrink:0, textAlign:"center", fontSize:18, fontWeight:900, lineHeight:1.15, color: !isPlan && i === 0 ? "#047857" : C.navy, background: isPlan ? C.white : i === 0 ? "#e6faf3" : "#eef1f5", border: isPlan ? `1px solid ${C.border}` : "none", borderRadius:10, padding:"10px 0", fontVariantNumeric:"tabular-nums" }}>
+              {isPlan && <span style={{ display:"block", fontSize:12, color:"#5a6478", fontWeight:800 }}>予定</span>}{eqMd(m.move_date)}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap", fontSize:17, fontWeight:900 }}>
+                <span>{m.from_holder}</span><span style={{ color:"#7a8499" }}>→</span><span style={{ color:"#047857" }}>{m.to_holder}</span></div>
+              {isPlan && <div style={{ display:"flex", gap:8, marginTop:9 }}>
+                <button style={pbtn} onClick={()=>openEditPlan(detail)}>変更</button>
+                <button style={{ ...pbtn, ...(armed ? { borderColor:C.red, color:C.red } : {}) }} onClick={()=>cancelPlan(detail)}>{armed ? "本当に取り消す" : "取り消す"}</button></div>}
+              {!isPlan && i === 0 && !pl && <div style={{ display:"flex", gap:8, marginTop:9 }}><button style={pbtn} onClick={()=>openEditLast(detail)}>日付・相手を直す</button></div>}
+            </div>
+          </div>
+        );
+        return (
+          <div style={{ position:"fixed", inset:0, zIndex:300, background:C.white, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+            <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:2 }}>
+              <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={()=>{ setDetailId(null); setCancelArm(null); }} aria-label="戻る">←</button>
+              <span style={{ flex:1, minWidth:0, fontSize:18,fontWeight:800,color:C.white, wordBreak:"break-word" }}>{detail.name}</span>
+              {!isViewer && <button onClick={()=>openEdit({ id:detail.id, name:detail.name, memo:detail.memo || "", quantity: detail.quantity || 1 })}
+                style={{ marginLeft:"auto", flexShrink:0, background:"rgba(255,255,255,0.14)", border:"1px solid rgba(255,255,255,0.4)", color:"#fff", borderRadius:8, padding:"6px 12px", fontSize:14, fontWeight:800, cursor:"pointer" }}>編集</button>}
+            </div>
+            <div style={{ padding:"12px 16px 40px", maxWidth:640, margin:"0 auto" }}>
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:16, textAlign:"center" }}>
+                {detail.photo_url && <div style={{ display:"flex", justifyContent:"center", marginBottom:10 }}><Thumb it={detail} size={96} /></div>}
+                <div style={{ fontSize:15, color:"#7a8499", fontWeight:800 }}>{h === EQ_BUSHITSU ? "いま置いてある場所" : "いま持っている人"}</div>
+                <div style={{ fontSize:22, fontWeight:900, marginTop:4, wordBreak:"break-word" }}>{h}</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#047857", marginTop:4 }}>{eqMd(sinceOf(detail))} {lm ? (h === EQ_BUSHITSU ? "戻し" : "受取") : "登録"}</div>
+                {(Number(detail.quantity) > 1 || detail.memo) && <div style={{ fontSize:14.5, color:"#5a6478", fontWeight:700, marginTop:10, lineHeight:1.55, wordBreak:"break-word", whiteSpace:"pre-wrap" }}>
+                  {Number(detail.quantity) > 1 ? `数量 ${detail.quantity}` : ""}{Number(detail.quantity) > 1 && detail.memo ? "・" : ""}{detail.memo || ""}</div>}
+              </div>
+              <div style={{ fontSize:16.5, fontWeight:900, color:C.navy, margin:"20px 2px 8px" }}>引き継ぎの記録</div>
+              {pl && ev(pl, -1, true)}
+              {evs.map((m, i) => ev(m, i, false))}
+              {!pl && !evs.length && <div style={{ textAlign:"center", color:C.textSec, fontSize:15, padding:"24px 0" }}>まだ引き継ぎの記録はありません</div>}
+              {(pl || evs.length > 0) && <div style={{ fontSize:14, color:"#7a8499", textAlign:"center", margin:"8px 0", fontWeight:700 }}>新しい順に並びます</div>}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ★引き継ぐ／部室に戻す */}
+      {sheet && (() => {
+        const ret = sheet.mode === "return";
+        const title = ret ? (sheet.editLast ? "部室に戻した日を直す" : "部室に戻す") : (sheet.editLast ? "引き継ぎを直す" : "だれに引き継ぎますか？");
+        const showInput = !sheet.to || sheet.open;
+        const qq = norm(sheet.q);
+        const hits = qq ? players.filter(p => norm(p).includes(qq)) : null;
+        const recent = loadEquipHistory().slice(0, 8);
+        const list = hits || recent;
+        const typed = (sheet.q || "").trim();
+        const D = sheet.date, fut = D > today;
+        const who = ret ? "部室" : (sheet.to ? `${sheet.to}さん` : "相手");
+        const side = (on) => ({ flexShrink:0, border:`1.5px solid ${on ? "#0b6e75" : "#cfd6e2"}`, background: on ? "#eef8f8" : C.white, color: on ? "#0b6e75" : "#5a6478", borderRadius:10, padding:"0 13px", fontSize:15, fontWeight:800, cursor:"pointer" });
+        const sg = { display:"block", width:"100%", textAlign:"left", background:C.white, border:"none", borderTop:"1px solid #eef1f5", padding:12, fontSize:17, fontWeight:800, color:C.text, cursor:"pointer" };
+        const pick = (n) => setSheet(s => ({ ...s, to:n, q:"", open:false }));
+        return (
+          <EquipSheet title={title} onClose={()=>setSheet(null)}>
+            {ret ? (
+              <div style={{ marginTop:14, fontSize:16, fontWeight:800, color:C.text, background:"#f4f6f9", borderRadius:10, padding:12 }}>
+                {sheet.editLast ? "部室に戻した日を直します" : `選んだ備品${sheet.ids.length}件を部室に戻します`}</div>
+            ) : (
+              <>
+                <div style={{ fontSize:16.5, fontWeight:900, color:C.navy, margin:"16px 0 8px" }}>名前を選ぶ</div>
+                {showInput ? (
+                  <input value={sheet.q} autoFocus autoComplete="off" placeholder="🔍 名前を入力"
+                    onChange={e=>{ const v = e.target.value; setSheet(s => ({ ...s, q:v, open:true })); }}
+                    style={{ width:"100%", boxSizing:"border-box", background:"#f4f6f9", border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 12px", fontSize:16, color:C.text, outline:"none" }} />
+                ) : (
+                  <div style={{ display:"flex", alignItems:"center", gap:10, border:"1.5px solid #0b6e75", background:"#eef8f8", borderRadius:12, padding:"9px 10px" }}>
+                    <span style={{ width:24, height:24, borderRadius:"50%", background:"#0b6e75", color:"#fff", fontSize:13, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✓</span>
+                    <span style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, wordBreak:"break-word" }}>{sheet.to}</span>
+                    <button onClick={()=>setSheet(s => ({ ...s, to:"", open:true }))} style={{ border:"1px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:8, padding:"6px 11px", fontSize:13, fontWeight:800, cursor:"pointer" }}>変更</button>
+                  </div>
+                )}
+                {showInput && (
+                  <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, maxHeight:"34vh", overflowY:"auto", boxShadow:"0 6px 16px rgba(0,0,0,0.10)" }}>
+                    <div style={{ fontSize:14, fontWeight:800, color:"#7a8499", padding:"8px 12px 4px", background:"#f8f9fb" }}>{hits ? `候補（${hits.length}人）` : "🕘 最近選んだ人"}</div>
+                    {list.map(n => <button key={n} style={sg} onClick={()=>pick(n)}>{n}</button>)}
+                    {typed && !players.some(p => norm(p) === norm(typed)) && <button style={{ ...sg, color:C.navy }} onClick={()=>pick(typed)}>「{typed}」で登録する</button>}
+                    {!list.length && !typed && <div style={{ padding:12, fontSize:14, color:"#7a8499" }}>名前を入力してください</div>}
+                  </div>
+                )}
+              </>
+            )}
+            <div style={{ fontSize:16.5, fontWeight:900, color:C.navy, margin:"16px 0 8px" }}>{ret ? "戻す日" : "引き継ぐ日"}</div>
+            <div style={{ display:"flex", gap:8, alignItems:"stretch" }}>
+              <input type="date" value={D} onChange={e=>{ const v = e.target.value; if (v) setSheet(s => ({ ...s, date:v })); }}
+                style={{ flex:1, minWidth:0, boxSizing:"border-box", background:"#f4f6f9", border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 12px", fontSize:16, color:C.text, outline:"none" }} />
+              <button style={side(D === today)} onClick={()=>setSheet(s => ({ ...s, date:today }))}>今日</button>
+              <button style={side(D === eqAddDays(today, 1))} onClick={()=>setSheet(s => ({ ...s, date:eqAddDays(today, 1) }))}>明日</button>
+            </div>
+            {fut && <div style={{ marginTop:10, background:"#f4f6f9", borderRadius:10, padding:"10px 12px", fontSize:14.5, fontWeight:700, color:C.text, lineHeight:1.6 }}>
+              {eqMdw(D)}は先の日なので<b>予定</b>として保存します。<br/>その日になると、自動で{who}{ret ? "に戻ります" : "の持ち物になります"}。</div>}
+            <button onClick={saveSheet} disabled={!sheet.to || saving}
+              style={{ display:"block", width:"100%", height:52, marginTop:20, border:"none", borderRadius:12, background: sheet.to ? C.accent : "#b7e8d2", color:"#fff", fontSize:18, fontWeight:900, cursor: sheet.to ? "pointer" : "default", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "保存"}</button>
+            <div style={{ fontSize:14, color:"#5a6478", textAlign:"center", marginTop:9, fontWeight:700, lineHeight:1.6 }}>
+              {!sheet.to ? "名前を選ぶと「保存」が押せます"
+                : fut ? `それまでは今の持ち主のまま、「予定 ${eqMd(D)} ${ret ? "部室に戻す" : `${sheet.to}へ引き継ぐ`}」と表示されます`
+                : D === today ? "今日の日付で記録します" : `${eqMdw(D)}の日付で記録します`}</div>
+          </EquipSheet>
+        );
+      })()}
+
+      {/* ★写真を大きく表示 */}
+      {photoItem && (
+        <div style={{ position:"fixed", inset:0, zIndex:500, background:"rgba(8,14,28,0.92)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, padding:"16px 16px calc(16px + env(safe-area-inset-bottom,0px))" }}>
+          <div style={{ color:"#fff", fontSize:19, fontWeight:900, textAlign:"center", wordBreak:"break-word" }}>{photoItem.name}</div>
+          {uploadingId === photoItem.id
+            ? <div style={{ color:"#fff", fontSize:15, fontWeight:800, padding:40 }}>写真を保存中…</div>
+            : <img src={photoItem.photo_url} alt={`${photoItem.name}の写真`} style={{ maxWidth:"100%", maxHeight:"68vh", borderRadius:12, background:"#fff", objectFit:"contain" }} />}
+          <div style={{ display:"flex", gap:10, width:"100%", maxWidth:420 }}>
+            {!isViewer && <label style={{ flex:1, textAlign:"center", borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"#fff", color:C.navy, cursor:"pointer" }}>
+              写真を変更<input type="file" accept="image/*" hidden onChange={e=>{ const f = e.target.files && e.target.files[0]; e.target.value = ""; onPickPhoto(photoItem.id, f); }} /></label>}
+            <button onClick={()=>setPhotoId(null)} style={{ flex:1, borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"transparent", color:"#fff", border:"1.5px solid rgba(255,255,255,0.5)", cursor:"pointer" }}>閉じる</button>
+          </div>
+        </div>
+      )}
+
+      {/* ★備品の追加・編集 */}
+      {edit && (
+        <EquipSheet title={edit.id ? "備品を編集" : "備品を追加"} onClose={()=>setEdit(null)}>
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>備品名<span style={{ fontSize:11.5, color:"#fff", background:C.red, borderRadius:5, padding:"1px 6px", marginLeft:6 }}>必須</span></div>
+          <input value={edit.name} onChange={e=>{ const v = e.target.value; setEdit(x => ({ ...x, name:v })); }} placeholder="例：テント3" style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%" }} />
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>数量</div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <button aria-label="1つ減らす" disabled={(edit.quantity||1)<=1} onClick={()=>setEdit(v => ({ ...v, quantity: Math.max(1, (Number(v.quantity)||1) - 1) }))}
+              style={{ width:48, height:48, borderRadius:12, border:"1.5px solid #cfd6e2", background:C.white, fontSize:22, fontWeight:800, color:(edit.quantity||1)<=1 ? "#c4cbd8" : C.navy, cursor:"pointer" }}>−</button>
+            <input inputMode="numeric" value={edit.quantity ?? 1}
+              onChange={e=>{ const v = e.target.value.replace(/[^0-9]/g, ""); setEdit(x => ({ ...x, quantity: v === "" ? "" : Math.min(99, Number(v)) })); }}
+              onBlur={()=>setEdit(x => ({ ...x, quantity: Math.max(1, Number(x.quantity) || 1) }))}
+              style={{ width:70, height:48, boxSizing:"border-box", textAlign:"center", border:"1.5px solid #cfd6e2", borderRadius:10, fontSize:18, fontWeight:800, color:C.text, outline:"none" }} />
+            <button aria-label="1つ増やす" onClick={()=>setEdit(v => ({ ...v, quantity: Math.min(99, (Number(v.quantity)||1) + 1) }))}
+              style={{ width:48, height:48, borderRadius:12, border:"1.5px solid #cfd6e2", background:C.white, fontSize:22, fontWeight:800, color:C.navy, cursor:"pointer" }}>＋</button>
+            <span style={{ fontSize:14, color:C.textSec, fontWeight:700 }}>個</span>
+          </div>
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>メモ<span style={{ fontSize:12, color:"#888", marginLeft:6, fontWeight:700 }}>任意</span></div>
+          <textarea value={edit.memo} onChange={e=>{ const v = e.target.value; setEdit(x => ({ ...x, memo:v })); }} placeholder="例：袋の色・中身・注意点など"
+            style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%", minHeight:76, resize:"vertical", lineHeight:1.5, fontFamily:"inherit" }} />
+          {!edit.id && <div style={{ fontSize:13, color:"#7a8499", fontWeight:700, marginTop:8, lineHeight:1.5 }}>※追加した備品は「部室」に入ります。写真は一覧の「＋写真」から撮れます。</div>}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr", gap:8, marginTop:16 }}>
+            <button onClick={()=>setEdit(null)} style={{ height:48, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
+            <button onClick={saveItem} disabled={saving} style={{ height:48, border:"none", borderRadius:12, background:C.accent, color:"#fff", fontSize:15.5, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "保存"}</button>
+          </div>
+          {edit.id && (confirmDel ? (
+            <div style={{ marginTop:14, textAlign:"center" }}>
+              <div style={{ fontSize:13.5, color:C.text, fontWeight:700, marginBottom:8 }}>「{edit.name}」を削除しますか？</div>
+              <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+                <button data-no-back="1" onClick={()=>setConfirmDel(false)} style={{ border:"1px solid #cfd6e2", background:C.white, borderRadius:10, padding:"8px 16px", fontSize:14, fontWeight:800, color:C.textSec, cursor:"pointer" }}>やめる</button>
+                <button data-no-back="1" onClick={removeItem} disabled={saving} style={{ border:"none", background:C.red, borderRadius:10, padding:"8px 16px", fontSize:14, fontWeight:800, color:"#fff", cursor:"pointer" }}>削除する</button>
+              </div>
+            </div>
+          ) : (
+            <button data-no-back="1" onClick={()=>setConfirmDel(true)} style={{ display:"block", margin:"14px auto 0", background:"none", border:"none", color:C.red, fontSize:14, fontWeight:800, cursor:"pointer" }}>🗑 この備品を削除</button>
+          ))}
+        </EquipSheet>
+      )}
+
+      {toast && <div role="status" style={{ position:"fixed", left:"50%", bottom:"calc(150px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:C.navy, color:"#fff", fontSize:15, fontWeight:800, padding:"11px 18px", borderRadius:24, zIndex:600, boxShadow:"0 6px 16px rgba(0,0,0,0.2)", maxWidth:"90vw", textAlign:"center" }}>{toast}</div>}
+    </div>
+  );
+}
+
+// ---------- 設定 › 備品の登録（備品名とメモ）※今は「マスター › 備品」（EquipmentScreen）に統合。未使用 ----------
 function EquipmentRegistryScreen({ onBack }) {
   const isViewer = useIsViewer();
   const [schoolId, setSchoolId] = useState(null);
@@ -11933,8 +12470,8 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           onClick={onEquipment}
         >
           <div>
-            <div style={{ fontSize:14,fontWeight:700 }}>🎒 備品の登録</div>
-            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>テント・ジャグなどチームの備品名とメモ<br/>（大会一覧の「管理」で持ってくる人を決めます）</div>
+            <div style={{ fontSize:14,fontWeight:700 }}>🎒 備品</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>テント・ジャグなどを、いま誰が持っているか<br/>引き継ぎの記録・予定・写真</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
@@ -25547,7 +26084,7 @@ export default function App() {
     return <SeasonSettingsScreen onBack={()=>setScreen("master")} />;
   }
   if (screen==="equipment") {
-    return <EquipmentRegistryScreen onBack={()=>setScreen("master")} />;
+    return <EquipmentScreen onBack={()=>setScreen("master")} />;
   }
   if (screen==="groupMembers") {
     return <GroupMembersScreen onBack={()=>setScreen("master")} />;
