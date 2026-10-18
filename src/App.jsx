@@ -11938,6 +11938,7 @@ function EquipmentScreen({ onBack }) {
   const [photoId, setPhotoId] = useState(null);   // 大きく表示している写真
   const [photoPick, setPhotoPick] = useState(null); // 写真の撮り方を選ぶ（備品ID）
   const [iconMode, setIconMode] = useState(false);  // 「イラストから選ぶ」の一覧を出しているか
+  const [order, setOrder] = useState(null);         // 並び替え中の順番（備品IDの配列）。null＝並び替えしていない
   const [edit, setEdit] = useState(null);         // 備品の追加・編集 {id?, name, memo, quantity}
   const [confirmDel, setConfirmDel] = useState(false);
   const [cancelArm, setCancelArm] = useState(null);
@@ -12061,6 +12062,20 @@ function EquipmentScreen({ onBack }) {
     finally { setUploadingId(null); }
   };
 
+  // ★並び替えの保存（変わった備品だけ sort_order を書きかえる）
+  const saveOrder = async () => {
+    if (isViewer) { viewerAlert(); return; }
+    setSaving(true);
+    try {
+      const changed = order.map((id, i) => ({ id, i })).filter(({ id, i }) => { const it = items.find(x => x.id === id); return it && Number(it.sort_order) !== i; });
+      for (const { id, i } of changed) {
+        const { error } = await supabase.from("equipment_items").update({ sort_order: i, updated_at: new Date().toISOString() }).eq("id", id);
+        if (error) throw error;
+      }
+      setOrder(null); showToast(changed.length ? "並び順を保存しました" : "並び順は変わっていません"); await reload();
+    } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
   const openEdit = (e) => { if (isViewer) { viewerAlert(); return; } setConfirmDel(false); setEdit(e); };
   const saveItem = async () => {
     if (!edit.name.trim()) { alert("備品名を入れてください"); return; }
@@ -12114,10 +12129,35 @@ function EquipmentScreen({ onBack }) {
         : (
           <>
             {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13.5, fontWeight:700, borderRadius:10, padding:"10px 12px", marginBottom:10, lineHeight:1.5 }}>{loadError}</div>}
-            <div style={{ display:"flex", alignItems:"center", gap:16, margin:"2px 2px 10px" }}>
+            {order ? (
+              <>
+                <div style={{ display:"flex", alignItems:"center", gap:8, margin:"2px 0 6px" }}>
+                  <div style={{ flex:1, fontSize:17, fontWeight:900, color:C.navy }}>並び替え</div>
+                  <button onClick={()=>setOrder(null)} style={{ border:"1.5px solid #cfd6e2", background:C.white, color:"#5a6478", borderRadius:10, padding:"9px 14px", fontSize:15, fontWeight:800, cursor:"pointer" }}>やめる</button>
+                  <button onClick={saveOrder} disabled={saving} style={{ border:"none", background:C.accent, color:"#fff", borderRadius:10, padding:"9px 18px", fontSize:15, fontWeight:900, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "完了"}</button>
+                </div>
+                <div style={{ fontSize:14, color:"#5a6478", fontWeight:700, margin:"0 2px 8px", lineHeight:1.5 }}>▲▼で動かして「完了」を押してください。この順番は、持ち主ごとのまとまりの中でも同じ順に並びます。</div>
+                {order.map((id, i) => {
+                  const it = items.find(x => x.id === id); if (!it) return null;
+                  const ab = (dis) => ({ flexShrink:0, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", border:"1.5px solid #cfd6e2", background:C.white, borderRadius:10, padding:0, fontSize:17, color: dis ? "#c4cbd8" : C.navy, cursor: dis ? "default" : "pointer" });
+                  const move = (d) => setOrder(o => { const n = o.slice(); const j = i + d; if (j < 0 || j >= n.length) return o; [n[i], n[j]] = [n[j], n[i]]; return n; });
+                  return (
+                    <div key={id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #eef1f5" }}>
+                      <span style={{ width:24, textAlign:"right", fontSize:14, fontWeight:800, color:"#7a8499", fontVariantNumeric:"tabular-nums", flexShrink:0 }}>{i + 1}</span>
+                      <img src={it.photo_url && !eqIsIcon(it.photo_url) ? it.photo_url : eqItemIllustration(it)} alt="" style={{ width:44, height:44, borderRadius:8, objectFit:"cover", border:`1px solid ${C.border}`, flexShrink:0 }} />
+                      <div style={{ flex:1, minWidth:0, fontSize:16.5, fontWeight:800, color:C.text, wordBreak:"break-word" }}>{it.name}</div>
+                      <button aria-label={`${it.name}を上へ`} disabled={i === 0} onClick={()=>move(-1)} style={ab(i === 0)}>▲</button>
+                      <button aria-label={`${it.name}を下へ`} disabled={i === order.length - 1} onClick={()=>move(1)} style={ab(i === order.length - 1)}>▼</button>
+                    </div>
+                  );
+                })}
+              </>
+            ) : (<>
+            <div style={{ display:"flex", alignItems:"center", gap:14, margin:"2px 2px 10px" }}>
               <div style={{ flex:1, fontSize:16, fontWeight:800, color:C.text }}>備品 {items.length}件</div>
               <button style={lk} onClick={()=>setSel(new Set(items.map(x => x.id)))}>全選択</button>
               <button style={lk} onClick={()=>setSel(new Set())}>すべてクリア</button>
+              {!isViewer && items.length > 1 && <button style={lk} onClick={()=>{ setSel(new Set()); setQ(""); setOrder(items.map(x => x.id)); }}>並び替え</button>}
             </div>
             <input type="search" value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 備品名・名前でさがす" autoComplete="off"
               style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 12px", fontSize:16, color:C.text, background:C.white, outline:"none" }} />
@@ -12163,6 +12203,7 @@ function EquipmentScreen({ onBack }) {
             })}
             {!isViewer && <button onClick={()=>openEdit({ name:"", memo:"", quantity:1 })}
               style={{ display:"block", width:"100%", border:"1.5px dashed #c4cbd8", borderRadius:12, padding:13, textAlign:"center", fontSize:15, fontWeight:800, color:C.navy, background:C.white, marginTop:18, cursor:"pointer" }}>＋ 備品を追加</button>}
+            </>)}
           </>
         )}
       </div>
