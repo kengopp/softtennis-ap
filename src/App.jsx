@@ -11495,7 +11495,7 @@ function TournamentMemoModal({ tournament, onClose, onSaved }) {
           </>
         ) : (
           <>
-            {!isViewer && <button style={{ ...S.btn(C.white), color:C.navy, border:`1.5px solid ${C.navy}` }} onClick={startEdit}>✏️ {memo0.trim() ? "編集" : "書く"}</button>}
+            {!isViewer && <button style={{ ...S.btn(C.white), color:C.navy, border:"1px solid #e5e7eb" }} onClick={startEdit}>✏️ {memo0.trim() ? "編集" : "書く"}</button>}
             <button style={{ ...S.btn("#f0f0f0"), color:C.text }} onClick={onClose}>閉じる</button>
           </>
         )}
