@@ -12076,11 +12076,57 @@ function EquipmentScreen({ onBack }) {
     } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
     finally { setSaving(false); }
   };
+  // ★コピーするときの名前：「日傘②」→「日傘③」、「テント3」→「テント4」、それ以外は後ろに「2」
+  const nextCopyName = (name) => {
+    const n = String(name || "").trim();
+    const circ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
+    const used = new Set(items.map(x => x.name));
+    const bump = (base, k, circled) => circled ? (k < circ.length ? base + circ[k] : `${base}${k + 1}`) : `${base}${k}`;
+    let base, k, circled = false;
+    const c = n.slice(-1);
+    if (circ.includes(c)) { base = n.slice(0, -1); k = circ.indexOf(c) + 1; circled = true; }
+    else { const m = n.match(/^(.*?)(\d+)$/); if (m) { base = m[1]; k = Number(m[2]) + 1; } else { base = n; k = 2; } }
+    let name2 = bump(base, k, circled);
+    for (let t = 0; t < 50 && used.has(name2); t++) { k++; name2 = bump(base, k, circled); }
+    return name2;
+  };
+  const startCopy = () => {
+    const src = items.find(x => x.id === edit.id); if (!src) return;
+    setConfirmDel(false);
+    setEdit({ copyOf: src.id, name: nextCopyName(src.name), memo: src.memo || "", quantity: src.quantity || 1, photo_url: src.photo_url || null, srcName: src.name });
+  };
   const openEdit = (e) => { if (isViewer) { viewerAlert(); return; } setConfirmDel(false); setEdit(e); };
-  const saveItem = async () => {
+  const saveItem = async (asCopy = false) => {
     if (!edit.name.trim()) { alert("備品名を入れてください"); return; }
     setSaving(true);
     try {
+      if (asCopy && edit.id) {
+        // ★「コピーして保存」：元の備品はそのままで、入力した内容で新しい備品を作る（元の備品のすぐ下に並べる）
+        const src = items.find(x => x.id === edit.id);
+        const pos = src ? items.indexOf(src) + 1 : items.length;
+        const name = items.some(x => x.name === edit.name.trim()) ? nextCopyName(edit.name.trim()) : edit.name.trim();
+        for (let k = items.length - 1; k >= pos; k--) {
+          const { error } = await supabase.from("equipment_items").update({ sort_order: k + 1 }).eq("id", items[k].id);
+          if (error) throw error;
+        }
+        const row = await saveEquipmentItem({ school_id: schoolId, name, memo: edit.memo, quantity: edit.quantity, sort_order: pos });
+        if (src?.photo_url) await supabase.from("equipment_items").update({ photo_url: src.photo_url }).eq("id", row.id);
+        setEdit(null); showToast(`「${name}」としてコピーしました`); await reload();
+        return;
+      }
+      if (edit.copyOf) {
+        // ★コピーは元の備品のすぐ下に入れる（後ろの備品を1つずつずらす）
+        const src = items.find(x => x.id === edit.copyOf);
+        const pos = src ? items.indexOf(src) + 1 : items.length;
+        for (let k = items.length - 1; k >= pos; k--) {
+          const { error } = await supabase.from("equipment_items").update({ sort_order: k + 1 }).eq("id", items[k].id);
+          if (error) throw error;
+        }
+        const row = await saveEquipmentItem({ school_id: schoolId, name: edit.name, memo: edit.memo, quantity: edit.quantity, sort_order: pos });
+        if (edit.photo_url) await supabase.from("equipment_items").update({ photo_url: edit.photo_url }).eq("id", row.id);
+        setEdit(null); showToast("備品をコピーしました"); await reload();
+        return;
+      }
       await saveEquipmentItem({ id: edit.id, school_id: schoolId, name: edit.name, memo: edit.memo, quantity: edit.quantity, sort_order: edit.id ? undefined : items.length });
       setEdit(null); showToast(edit.id ? "備品を直しました" : "備品を追加しました"); await reload();
     } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
@@ -12399,7 +12445,8 @@ function EquipmentScreen({ onBack }) {
 
       {/* ★備品の追加・編集 */}
       {edit && (
-        <EquipSheet title={edit.id ? "備品を編集" : "備品を追加"} onClose={()=>setEdit(null)}>
+        <EquipSheet title={edit.copyOf ? "備品をコピー" : edit.id ? "備品を編集" : "備品を追加"} onClose={()=>setEdit(null)}>
+          {edit.copyOf && <div style={{ marginTop:12, fontSize:14.5, fontWeight:700, color:"#3d4657", background:"#f4f6f9", borderRadius:10, padding:"10px 12px", lineHeight:1.5 }}>「{edit.srcName}」をコピーして新しい備品を作ります。名前を確かめて「保存」を押してください。</div>}
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>備品名<span style={{ fontSize:11.5, color:"#fff", background:C.red, borderRadius:5, padding:"1px 6px", marginLeft:6 }}>必須</span></div>
           <input value={edit.name} onChange={e=>{ const v = e.target.value; setEdit(x => ({ ...x, name:v })); }} placeholder="例：テント3" style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%" }} />
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>数量</div>
@@ -12417,11 +12464,15 @@ function EquipmentScreen({ onBack }) {
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>メモ<span style={{ fontSize:12, color:"#888", marginLeft:6, fontWeight:700 }}>任意</span></div>
           <textarea value={edit.memo} onChange={e=>{ const v = e.target.value; setEdit(x => ({ ...x, memo:v })); }} placeholder="例：袋の色・中身・注意点など"
             style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%", minHeight:76, resize:"vertical", lineHeight:1.5, fontFamily:"inherit" }} />
-          {!edit.id && <div style={{ fontSize:13, color:"#7a8499", fontWeight:700, marginTop:8, lineHeight:1.5 }}>※追加した備品は「部室」に入ります。写真は一覧の「＋写真」から撮れます。</div>}
+          {!edit.id && <div style={{ fontSize:13, color:"#7a8499", fontWeight:700, marginTop:8, lineHeight:1.5 }}>{edit.copyOf ? "※コピーした備品は「部室」に入り、元の備品のすぐ下に並びます。写真・イラストもコピーされます。" : "※追加した備品は「部室」に入ります。写真は一覧のイラストを押すと撮れます。"}</div>}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr", gap:8, marginTop:16 }}>
             <button onClick={()=>setEdit(null)} style={{ height:48, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
-            <button onClick={saveItem} disabled={saving} style={{ height:48, border:"none", borderRadius:12, background:C.accent, color:"#fff", fontSize:15.5, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "保存"}</button>
+            <button onClick={()=>saveItem(false)} disabled={saving} style={{ height:48, border:"none", borderRadius:12, background:C.accent, color:"#fff", fontSize:15.5, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : edit.id ? "上書き保存" : "保存"}</button>
           </div>
+          {edit.id && <button onClick={()=>saveItem(true)} disabled={saving} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, width:"100%", height:46, marginTop:10, border:"1.5px solid #cfd6e2", borderRadius:12, background:C.white, color:C.navy, fontSize:15, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>
+            コピーして保存</button>}
+          {edit.id && <div style={{ fontSize:12.5, color:"#7a8499", fontWeight:700, marginTop:6, lineHeight:1.5 }}>「コピーして保存」は、元の備品はそのままで、この内容の備品を新しく作ります（名前が同じなら自動で次の番号）。</div>}
           {edit.id && (confirmDel ? (
             <div style={{ marginTop:14, textAlign:"center" }}>
               <div style={{ fontSize:13.5, color:C.text, fontWeight:700, marginBottom:8 }}>「{edit.name}」を削除しますか？</div>
@@ -12441,120 +12492,6 @@ function EquipmentScreen({ onBack }) {
   );
 }
 
-// ---------- 設定 › 備品の登録（備品名とメモ）※今は「マスター › 備品」（EquipmentScreen）に統合。未使用 ----------
-function EquipmentRegistryScreen({ onBack }) {
-  const isViewer = useIsViewer();
-  const [schoolId, setSchoolId] = useState(null);
-  const [list, setList] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [edit, setEdit] = useState(null); // {id?, name, memo}
-  const [saving, setSaving] = useState(false);
-  const [confirmDel, setConfirmDel] = useState(false);
-  const reload = async (sid) => {
-    try { setList(await getEquipmentItems(sid)); setLoadError(""); }
-    catch (e) { setLoadError(e.message || String(e)); }
-  };
-  useEffect(() => {
-    (async () => {
-      const p = await getMyProfile();
-      setSchoolId(p?.school_id || null);
-      if (p?.school_id) await reload(p.school_id);
-      setLoading(false);
-    })();
-  }, []);
-  const open = (e) => { if (isViewer) { viewerAlert(); return; } setConfirmDel(false); setEdit(e); };
-  const save = async () => {
-    if (!edit.name.trim()) { alert("備品名を入れてください"); return; }
-    setSaving(true);
-    try {
-      await saveEquipmentItem({ id: edit.id, school_id: schoolId, name: edit.name, memo: edit.memo, quantity: edit.quantity, sort_order: edit.id ? undefined : list.length });
-      setEdit(null);
-      await reload(schoolId);
-    } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
-    finally { setSaving(false); }
-  };
-  const remove = async () => {
-    setSaving(true);
-    try { await deleteEquipmentItem(edit.id); setEdit(null); await reload(schoolId); }
-    catch (e) { alert("削除できませんでした：" + (e.message || e)); }
-    finally { setSaving(false); }
-  };
-  return (
-    <div style={S.page}>
-      <div style={S.hdr}>
-        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
-        <span style={{ fontSize:18,fontWeight:800,color:C.white }}>🎒 備品の登録</span>
-      </div>
-      <div style={{ padding:14, paddingBottom:90 }}>
-        {loading ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>読み込み中...</div>
-        : !schoolId ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のため備品を登録できません</div>
-        : (
-          <>
-            {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13, fontWeight:700, borderRadius:10, padding:"10px 12px", marginBottom:10 }}>{loadError}</div>}
-            <div style={{ fontSize:13.5, fontWeight:800, color:"#5a6478", margin:"2px 2px 7px" }}>チームの備品（{list.length}件）</div>
-            {list.length === 0 ? (
-              <div style={{ textAlign:"center", color:C.textSec, fontSize:14, padding:"22px 10px", background:C.white, border:`1px dashed ${C.border}`, borderRadius:12 }}>まだ備品が登録されていません</div>
-            ) : (
-              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
-                {list.map((it, i) => (
-                  <div key={it.id} style={{ display:"flex", alignItems:"center", gap:10, padding:12, borderTop: i ? "1px solid #eef1f5" : "none" }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:15.5, fontWeight:800, color:C.text }}>{it.name}<span style={{ fontSize:13, fontWeight:800, color:"#1565c0", background:"#e3eefb", borderRadius:6, padding:"1px 7px", marginLeft:8 }}>数量 {it.quantity || 1}</span></div>
-                      <div style={{ fontSize:13, color: it.memo ? "#5a6478" : "#aaa", fontWeight:600, marginTop:3, lineHeight:1.45, wordBreak:"break-word" }}>{it.memo || "メモなし"}</div>
-                    </div>
-                    <button onClick={()=>open({ id:it.id, name:it.name, memo:it.memo || "", quantity: it.quantity || 1 })}
-                      style={{ border:"1px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:8, padding:"6px 11px", fontSize:13, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>編集</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button onClick={()=>open({ name:"", memo:"", quantity:1 })}
-              style={{ display:"block", width:"100%", border:"1.5px dashed #c4cbd8", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:800, color:C.navy, background:C.white, marginTop:9, cursor:"pointer" }}>＋ 備品を追加</button>
-            <div style={{ fontSize:12.5, color:"#8a93a3", marginTop:8, lineHeight:1.5 }}>※ここで登録した備品が、大会一覧の「🎒 管理」で選べるようになります。</div>
-          </>
-        )}
-      </div>
-      {edit && (
-        <EquipSheet title={edit.id ? "備品を編集" : "備品を追加"} onClose={()=>setEdit(null)}>
-          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>備品名<span style={{ fontSize:11.5, color:"#fff", background:C.red, borderRadius:5, padding:"1px 6px", marginLeft:6 }}>必須</span></div>
-          <input value={edit.name} onChange={e=>setEdit(v => ({ ...v, name:e.target.value }))} placeholder="例：テント3" style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%" }} />
-          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>数量</div>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            {[["−",-1],["＋",1]].map(([l,d],k) => {
-              const btn = <button key={l} aria-label={d<0?"1つ減らす":"1つ増やす"} disabled={d<0 && (edit.quantity||1)<=1}
-                onClick={()=>setEdit(v => ({ ...v, quantity: Math.max(1, (Number(v.quantity)||1) + d) }))}
-                style={{ width:48, height:48, borderRadius:12, border:"1.5px solid #cfd6e2", background:C.white, fontSize:22, fontWeight:800, color: d<0 && (edit.quantity||1)<=1 ? "#c4cbd8" : C.navy, cursor:"pointer" }}>{l}</button>;
-              return k===0 ? [btn, <input key="q" inputMode="numeric" value={edit.quantity ?? 1}
-                onChange={e=>{ const v = e.target.value.replace(/[^0-9]/g, ""); setEdit(x => ({ ...x, quantity: v === "" ? "" : Math.min(99, Number(v)) })); }}
-                onBlur={()=>setEdit(x => ({ ...x, quantity: Math.max(1, Number(x.quantity) || 1) }))}
-                style={{ width:70, height:48, boxSizing:"border-box", textAlign:"center", border:"1.5px solid #cfd6e2", borderRadius:10, fontSize:18, fontWeight:800, color:C.text, outline:"none" }} />] : btn;
-            })}
-            <span style={{ fontSize:14, color:C.textSec, fontWeight:700 }}>個</span>
-          </div>
-          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>メモ<span style={{ fontSize:12, color:"#888", marginLeft:6, fontWeight:700 }}>任意</span></div>
-          <textarea value={edit.memo} onChange={e=>setEdit(v => ({ ...v, memo:e.target.value }))} placeholder="例：袋の色・中身・注意点など"
-            style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%", minHeight:76, resize:"vertical", lineHeight:1.5, fontFamily:"inherit" }} />
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr", gap:8, marginTop:16 }}>
-            <button onClick={()=>setEdit(null)} style={{ height:48, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
-            <button onClick={save} disabled={saving} style={{ height:48, border:"none", borderRadius:12, background:C.accent, color:"#fff", fontSize:15.5, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "保存する"}</button>
-          </div>
-          {edit.id && (confirmDel ? (
-            <div style={{ marginTop:14, textAlign:"center" }}>
-              <div style={{ fontSize:13.5, color:C.text, fontWeight:700, marginBottom:8 }}>「{edit.name}」を削除しますか？</div>
-              <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
-                <button onClick={()=>setConfirmDel(false)} style={{ border:"1px solid #cfd6e2", background:C.white, borderRadius:10, padding:"8px 16px", fontSize:14, fontWeight:800, color:C.textSec, cursor:"pointer" }}>やめる</button>
-                <button onClick={remove} disabled={saving} style={{ border:"none", background:C.red, borderRadius:10, padding:"8px 16px", fontSize:14, fontWeight:800, color:"#fff", cursor:"pointer" }}>削除する</button>
-              </div>
-            </div>
-          ) : (
-            <button onClick={()=>setConfirmDel(true)} style={{ display:"block", margin:"14px auto 0", background:"none", border:"none", color:C.red, fontSize:14, fontWeight:800, cursor:"pointer" }}>🗑 この備品を削除</button>
-          ))}
-        </EquipSheet>
-      )}
-    </div>
-  );
-}
 
 function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onEquipment, onTrash, onTerms, onGuide, termsAgreedAt, onProfile, onLogout, textScale, onChangeTextScale }) {
   const [isAdmin, setIsAdmin] = useState(false);
