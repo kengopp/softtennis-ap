@@ -12998,6 +12998,9 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [showNewModal, setShowNewModal] = useState(false);
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
   const [playerRoster, setPlayerRoster] = useState([]); // ★次の試合予定カードの参加選手表示用
+  const [homeEquipMap, setHomeEquipMap] = useState({}); // ★次の試合予定カードの「📝 メモ」用（大会ID → メモなど）
+  const [homeMemoFor, setHomeMemoFor] = useState(null);
+  useEffect(() => { (async () => { const p = await getMyProfile().catch(() => null); setHomeEquipMap(await getTournamentEquipmentMap(p?.school_id)); })(); }, []);
   const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
 
   // ★選手マスターは下の初期読み込みの中でも取得しているため、ここでの重複取得は廃止した。
@@ -13137,8 +13140,8 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                       </div>
                       <div style={{ fontSize:16,fontWeight:800,color:C.text }}>{t.name}</div>
                     </div>
-                    {/* ★参加選手・地図・要項を1行にまとめてスペースを節約 */}
-                    {(participantCount > 0 || t.venue_link || t.guideline_url) && (
+                    {/* ★参加選手・地図・メモを1行にまとめてスペースを節約（以前は要項。メモは大会一覧の「📝 メモ」と同じ内容） */}
+                    {(() => { const memoText = (homeEquipMap[t.id]?.memo || "").trim(); return (
                       <div style={{ display:"flex", gap:8, marginTop:12 }}>
                         {participantCount > 0 && (
                           <button
@@ -13146,26 +13149,28 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                             onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}
                           ><span>👥</span> {participantCount}人</button>
                         )}
-                        {(t.venue_link || t.guideline_url) && (<>
                         <button
                           disabled={!t.venue_link}
                           style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
                           onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
                         ><span style={{ color: t.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
                         <button
-                          disabled={!t.guideline_url}
-                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
-                          onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
-                        ><span style={{ color: t.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
-                        </>)}
+                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:`1px solid ${memoText ? C.navy : "#e5e7eb"}`, cursor:"pointer", position:"relative" }}
+                          onClick={e=>{ e.stopPropagation(); setHomeMemoFor({ ...t, equipment_plan: homeEquipMap[t.id] || {} }); }}
+                        ><span>📝</span> メモ{memoText && <span aria-label="メモあり" style={{ width:7, height:7, borderRadius:"50%", background:"#e53935", alignSelf:"flex-start", marginTop:2 }} />}</button>
                       </div>
-                    )}
+                    ); })()}
                   </div>
                   );
                 })}
               </div>
             )}
 
+            {/* ★大会のメモ（次の試合予定の「📝 メモ」） */}
+            {homeMemoFor && (
+              <TournamentMemoModal tournament={homeMemoFor} onClose={()=>setHomeMemoFor(null)}
+                onSaved={(plan)=>setHomeEquipMap(m => ({ ...m, [homeMemoFor.id]: plan }))} />
+            )}
             {/* 参加選手一覧ポップアップ */}
             {participantsModalFor && (
               <Modal onClose={()=>setParticipantsModalFor(null)}>
