@@ -5704,8 +5704,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     {(() => { const memoText = (withEquip(t).equipment_plan?.memo || "").trim(); return (
                     <button
                       style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer", position:"relative" }}
-                      onClick={e=>{ e.stopPropagation(); setMemoFor(withEquip(t)); }}
-                    ><span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📝</span> メモ{memoText && <span aria-label="メモあり" style={{ width:7, height:7, borderRadius:"50%", background: isPast ? C.textSec : "#e53935", marginLeft:1, alignSelf:"flex-start", marginTop:2 }} />}</button>
+                      onClick={e=>{ e.stopPropagation(); markMemoSeen(t.id, memoText); setMemoFor(withEquip(t)); }}
+                    ><span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📝</span> メモ{isMemoUnseen(t.id, memoText) && <span aria-label="まだ見ていないメモあり" style={{ width:7, height:7, borderRadius:"50%", background: isPast ? C.textSec : "#e53935", marginLeft:1, alignSelf:"flex-start", marginTop:2 }} />}</button>
                     ); })()}
                     <button
                       style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
@@ -11532,6 +11532,17 @@ function EquipPersonSheet({ title, kind, players, initial, days = [], onDecide, 
   );
 }
 
+// ★メモの「まだ見ていない」赤い印：この端末で開いたときのメモの内容を覚えておき、
+//   内容が同じなら印を消す。だれかがメモを書きかえたら、また印が出る。
+const MEMO_SEEN_KEY = "tournamentMemoSeen";
+const memoSig = (text) => { let h = 0; const t = String(text || ""); for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return `${t.length}:${h}`; };
+function loadMemoSeen() { try { return JSON.parse(localStorage.getItem(MEMO_SEEN_KEY) || "{}") || {}; } catch { return {}; } }
+function isMemoUnseen(tid, text) { const t = String(text || "").trim(); if (!t) return false; return loadMemoSeen()[tid] !== memoSig(t); }
+function markMemoSeen(tid, text) {
+  const t = String(text || "").trim();
+  try { const m = loadMemoSeen(); if (t) m[tid] = memoSig(t); else delete m[tid]; localStorage.setItem(MEMO_SEEN_KEY, JSON.stringify(m)); } catch {}
+}
+
 // ---------- 大会のメモ（大会一覧の「📝 メモ」から開くポップアップ） ----------
 //   例：「氷を持ってきてください」「会費は18,000円です」。tournament_equipment.plan.memo に保存（同じ学校の全員で共有）
 function TournamentMemoModal({ tournament, onClose, onSaved }) {
@@ -11549,6 +11560,7 @@ function TournamentMemoModal({ tournament, onClose, onSaved }) {
       const latest = (await getTournamentEquipmentMap(p?.school_id))[tournament.id] || tournament.equipment_plan || {};
       const plan = { ...latest, memo: text.trim() };
       await saveTournamentEquipmentPlan(tournament.id, plan);
+      markMemoSeen(tournament.id, plan.memo);
       onSaved && onSaved(plan);
       setMemo0(plan.memo);
       setEditing(false);
@@ -13156,8 +13168,8 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                         ><span style={{ color: t.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
                         <button
                           style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer", position:"relative" }}
-                          onClick={e=>{ e.stopPropagation(); setHomeMemoFor({ ...t, equipment_plan: homeEquipMap[t.id] || {} }); }}
-                        ><span>📝</span> メモ{memoText && <span aria-label="メモあり" style={{ width:7, height:7, borderRadius:"50%", background:"#e53935", alignSelf:"flex-start", marginTop:2 }} />}</button>
+                          onClick={e=>{ e.stopPropagation(); markMemoSeen(t.id, memoText); setHomeMemoFor({ ...t, equipment_plan: homeEquipMap[t.id] || {} }); }}
+                        ><span>📝</span> メモ{isMemoUnseen(t.id, memoText) && <span aria-label="まだ見ていないメモあり" style={{ width:7, height:7, borderRadius:"50%", background:"#e53935", alignSelf:"flex-start", marginTop:2 }} />}</button>
                       </div>
                     ); })()}
                   </div>
