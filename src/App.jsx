@@ -11833,6 +11833,53 @@ const eqAddDays = (v, n) => { const [y,m,d] = String(v).split("-").map(Number); 
 const eqMd = (v) => { if (!v) return ""; const [, m, d] = String(v).slice(0,10).split("-").map(Number); return `${m}/${d}`; };
 const eqMdw = (v) => { const [y,m,d] = String(v).split("-").map(Number); return `${m}/${d}（${"日月火水木金土"[new Date(y,m-1,d).getDay()]}）`; };
 
+// ★写真がない備品に出すイラスト
+//   ・何も選んでいないときは備品名から自動で選ぶ
+//   ・「イラストから選ぶ」で選んだときは photo_url に "icon:キー" の形で保存する（写真と同じ欄を使うので追加のSQLは不要）
+const EQ_ICON_LIST = [
+  ["tent_blue","テント（青）"],["tent_white","テント（白）"],["chair","椅子"],["jug_big","ジャグ（大）"],["jug","ジャグ（小）"],
+  ["basket","ボールかご"],["ballbox","ボール箱"],["brush","ブラシ"],["sheet","ブルーシート"],["parasol","日傘"],
+  ["net","ネット"],["firstaid","救急箱"],["bottle","水"],["bag","カバン"],
+];
+function eqIconKeyFromName(name) {
+  const n = String(name || "");
+  if (/テント/.test(n)) return /白/.test(n) ? "tent_white" : "tent_blue";
+  if (/椅子|いす|イス|チェア/.test(n)) return "chair";
+  if (/ジャグ|クーラー|タンク/.test(n)) return /小/.test(n) ? "jug" : "jug_big";
+  if (/かご|カゴ|籠/.test(n)) return "basket";
+  if (/ボール|球/.test(n)) return "ballbox";
+  if (/ブラシ|ほうき|トンボ/.test(n)) return "brush";
+  if (/シート|ござ|レジャー/.test(n)) return "sheet";
+  if (/傘|パラソル/.test(n)) return "parasol";
+  if (/ネット/.test(n)) return "net";
+  if (/救急|薬/.test(n)) return "firstaid";
+  if (/水|ドリンク|ペットボトル|水筒/.test(n)) return "bottle";
+  return "bag";
+}
+function eqIconSvg(key) {
+  const st = "#0f2044", bg = "#e9eef5";
+  let g = "";
+  if (key === "tent_blue" || key === "tent_white") { const c = key === "tent_white" ? "#f2f4f7" : "#3b6fd8"; g = `<polygon points="40,150 160,150 100,55" fill="${c}" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><line x1="100" y1="55" x2="100" y2="150" stroke="${st}" stroke-width="4"/><line x1="30" y1="150" x2="170" y2="150" stroke="${st}" stroke-width="5"/>`; }
+  else if (key === "chair") g = `<rect x="70" y="45" width="60" height="55" rx="6" fill="#7a8899" stroke="${st}" stroke-width="5"/><rect x="62" y="100" width="76" height="14" rx="4" fill="#7a8899" stroke="${st}" stroke-width="5"/><line x1="72" y1="114" x2="62" y2="160" stroke="${st}" stroke-width="5"/><line x1="128" y1="114" x2="138" y2="160" stroke="${st}" stroke-width="5"/>`;
+  else if (key === "jug_big" || key === "jug") { const h = key === "jug_big" ? 100 : 78; g = `<rect x="65" y="${150-h}" width="70" height="${h}" rx="10" fill="#e8463c" stroke="${st}" stroke-width="5"/><rect x="80" y="${140-h}" width="40" height="12" rx="3" fill="#fff" stroke="${st}" stroke-width="4"/><rect x="88" y="${130-h/2}" width="24" height="10" rx="2" fill="#fff"/>`; }
+  else if (key === "basket") g = `<path d="M50 85 L150 85 L138 155 L62 155 Z" fill="#c9a26b" stroke="${st}" stroke-width="5" stroke-linejoin="round"/>${[70,90,110,130].map(x => `<line x1="${x}" y1="88" x2="${x-4+(x-100)/10}" y2="152" stroke="${st}" stroke-width="2.5"/>`).join("")}<circle cx="80" cy="76" r="13" fill="#e9f26b" stroke="${st}" stroke-width="3"/><circle cx="108" cy="72" r="13" fill="#e9f26b" stroke="${st}" stroke-width="3"/><circle cx="125" cy="80" r="11" fill="#e9f26b" stroke="${st}" stroke-width="3"/>`;
+  else if (key === "ballbox") g = `<rect x="50" y="70" width="100" height="80" rx="6" fill="#d9c49a" stroke="${st}" stroke-width="5"/><line x1="50" y1="95" x2="150" y2="95" stroke="${st}" stroke-width="4"/><circle cx="100" cy="122" r="16" fill="#e9f26b" stroke="${st}" stroke-width="3"/>`;
+  else if (key === "brush") g = `<line x1="100" y1="35" x2="100" y2="125" stroke="#8a5a2b" stroke-width="8" stroke-linecap="round"/><rect x="50" y="122" width="100" height="18" rx="4" fill="#5a6478" stroke="${st}" stroke-width="4"/>${[60,72,84,96,108,120,132,144].map(x => `<line x1="${x}" y1="140" x2="${x}" y2="160" stroke="${st}" stroke-width="3"/>`).join("")}`;
+  else if (key === "sheet") g = `<path d="M40 70 L160 70 L160 140 L40 140 Z" fill="#3b82f6" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><path d="M40 70 L70 52 L190 52 L160 70" fill="#60a5fa" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><circle cx="50" cy="80" r="4" fill="#fff"/><circle cx="150" cy="80" r="4" fill="#fff"/><circle cx="50" cy="130" r="4" fill="#fff"/><circle cx="150" cy="130" r="4" fill="#fff"/>`;
+  else if (key === "parasol") g = `<path d="M35 100 Q100 20 165 100 Z" fill="#f59e0b" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><path d="M57 100 Q78 60 100 100 Q122 60 143 100" fill="none" stroke="${st}" stroke-width="3"/><line x1="100" y1="100" x2="100" y2="155" stroke="${st}" stroke-width="5"/><path d="M100 155 q0 12 -12 10" fill="none" stroke="${st}" stroke-width="5" stroke-linecap="round"/>`;
+  else if (key === "net") g = `<line x1="35" y1="60" x2="35" y2="160" stroke="${st}" stroke-width="6"/><line x1="165" y1="60" x2="165" y2="160" stroke="${st}" stroke-width="6"/><rect x="35" y="70" width="130" height="50" fill="#fff" stroke="${st}" stroke-width="4"/>${[56,78,100,122,144].map(x => `<line x1="${x}" y1="70" x2="${x}" y2="120" stroke="${st}" stroke-width="2"/>`).join("")}<line x1="35" y1="95" x2="165" y2="95" stroke="${st}" stroke-width="2"/>`;
+  else if (key === "firstaid") g = `<rect x="45" y="65" width="110" height="85" rx="10" fill="#fff" stroke="${st}" stroke-width="5"/><path d="M82 65V55h36v10" fill="none" stroke="${st}" stroke-width="5"/><rect x="92" y="85" width="16" height="46" fill="#e53935"/><rect x="77" y="100" width="46" height="16" fill="#e53935"/>`;
+  else if (key === "bottle") g = `<rect x="86" y="38" width="28" height="14" rx="3" fill="#2563eb" stroke="${st}" stroke-width="4"/><path d="M80 60 Q80 52 90 52 H110 Q120 52 120 60 V155 Q120 162 112 162 H88 Q80 162 80 155 Z" fill="#bfdbfe" stroke="${st}" stroke-width="5"/><rect x="80" y="95" width="40" height="30" fill="#60a5fa"/>`;
+  else g = `<path d="M78 70V58a12 12 0 0 1 12-12h20a12 12 0 0 1 12 12v12" fill="none" stroke="${st}" stroke-width="6"/><rect x="50" y="70" width="100" height="85" rx="16" fill="#e8734a" stroke="${st}" stroke-width="5"/><rect x="72" y="100" width="56" height="22" rx="4" fill="#fff" stroke="${st}" stroke-width="4"/>`;
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="${bg}"/>${g}</svg>`);
+}
+const eqIsIcon = (url) => String(url || "").startsWith("icon:");
+const eqItemIllustration = (it) => eqIconSvg(eqIsIcon(it.photo_url) ? it.photo_url.slice(5) : eqIconKeyFromName(it.name));
+async function setEquipmentIcon(itemId, key) {
+  const { error } = await supabase.from("equipment_items").update({ photo_url: key ? `icon:${key}` : null, updated_at: new Date().toISOString() }).eq("id", itemId);
+  if (error) throw new Error(/photo_url/.test(error.message || "") ? "データベースに写真の項目がまだありません。追加のSQLを実行してください。" : error.message);
+}
+
 async function getEquipmentMoves(schoolId) {
   if (!schoolId) return [];
   const { data, error } = await supabase.from("equipment_moves").select("*").eq("school_id", schoolId)
@@ -11889,6 +11936,8 @@ function EquipmentScreen({ onBack }) {
   const [sheet, setSheet] = useState(null);     // 引き継ぐ／部室に戻す {mode, to, q, open, date, editLast, ids}
   const [detailId, setDetailId] = useState(null); // 履歴を開いている備品
   const [photoId, setPhotoId] = useState(null);   // 大きく表示している写真
+  const [photoPick, setPhotoPick] = useState(null); // 写真の撮り方を選ぶ（備品ID）
+  const [iconMode, setIconMode] = useState(false);  // 「イラストから選ぶ」の一覧を出しているか
   const [edit, setEdit] = useState(null);         // 備品の追加・編集 {id?, name, memo, quantity}
   const [confirmDel, setConfirmDel] = useState(false);
   const [cancelArm, setCancelArm] = useState(null);
@@ -12032,18 +12081,24 @@ function EquipmentScreen({ onBack }) {
   // ---------- 部品 ----------
   const lk = { background:"none", border:"none", padding:"4px 0", fontSize:15, fontWeight:800, color:C.navy, textDecoration:"underline", textUnderlineOffset:4, textDecorationColor:"#c4cbd8", cursor:"pointer" };
   const Thumb = ({ it, size = 56 }) => {
-    const box = { flexShrink:0, alignSelf:"center", width:size, height:size, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}`, background:"#eef1f5", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", boxSizing:"border-box" };
+    const box = { flexShrink:0, alignSelf:"center", width:size, height:size, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}`, background:"#eef1f5", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", boxSizing:"border-box", position:"relative" };
     if (uploadingId === it.id) return <div style={{ ...box, fontSize:11.5, color:C.textSec, fontWeight:800 }}>保存中…</div>;
-    if (it.photo_url) return <button aria-label={`${it.name}の写真を大きく見る`} onClick={()=>setPhotoId(it.id)} style={box}><img src={it.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} /></button>;
-    if (isViewer) return <div style={{ ...box, cursor:"default" }} />;
+    if (it.photo_url && !eqIsIcon(it.photo_url)) return <button aria-label={`${it.name}の写真を大きく見る`} onClick={()=>setPhotoId(it.id)} style={box}><img src={it.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} /></button>;
+    // ★写真がないときは備品名に合ったイラスト。右下のカメラの印で「押すと写真を撮れる」ことを示す
+    const img = <img src={eqItemIllustration(it)} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />;
+    if (isViewer) return <div style={{ ...box, cursor:"default" }}>{img}</div>;
     return (
-      <label aria-label={`${it.name}の写真を撮る`} style={{ ...box, border:"1.5px dashed #b5bdca", background:C.white, color:"#7a8499", fontSize:12.5, fontWeight:800, lineHeight:1.25, textAlign:"center" }}>
-        <input type="file" accept="image/*" hidden onChange={e=>{ const f = e.target.files && e.target.files[0]; e.target.value = ""; onPickPhoto(it.id, f); }} />
-        <span>＋<br/>写真</span>
-      </label>
+      <button aria-label={`${it.name}の写真を登録する`} onClick={()=>setPhotoPick(it.id)} style={box}>
+        {img}
+        <span style={{ position:"absolute", right:2, bottom:2, width:20, height:20, borderRadius:"50%", background:C.navy, border:"1.5px solid #fff", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        </span>
+      </button>
     );
   };
 
+
+  const eqIconBtn = { flexShrink:0, alignSelf:"center", width:42, height:42, display:"flex", alignItems:"center", justifyContent:"center", border:"1.5px solid #cfd6e2", background:C.white, borderRadius:10, padding:0, cursor:"pointer" };
   const detail = detailId ? items.find(x => x.id === detailId) : null;
   const photoItem = photoId ? items.find(x => x.id === photoId) : null;
 
@@ -12097,7 +12152,9 @@ function EquipmentScreen({ onBack }) {
                           </span>
                         </button>
                         <button onClick={()=>{ setCancelArm(null); setDetailId(it.id); }} aria-label={`${it.name}の履歴`}
-                          style={{ flexShrink:0, alignSelf:"center", border:"1.5px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:9, padding:"8px 11px", fontSize:14.5, fontWeight:800, cursor:"pointer" }}>履歴</button>
+                          style={eqIconBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/></svg></button>
+                        {!isViewer && <button onClick={()=>openEdit({ id:it.id, name:it.name, memo:it.memo || "", quantity: it.quantity || 1 })} aria-label={`${it.name}を編集`}
+                          style={{ ...eqIconBtn, marginLeft:-4 }}><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>}
                       </div>
                     );
                   })}
@@ -12149,12 +12206,11 @@ function EquipmentScreen({ onBack }) {
             <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:2 }}>
               <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={()=>{ setDetailId(null); setCancelArm(null); }} aria-label="戻る">←</button>
               <span style={{ flex:1, minWidth:0, fontSize:18,fontWeight:800,color:C.white, wordBreak:"break-word" }}>{detail.name}</span>
-              {!isViewer && <button onClick={()=>openEdit({ id:detail.id, name:detail.name, memo:detail.memo || "", quantity: detail.quantity || 1 })}
-                style={{ marginLeft:"auto", flexShrink:0, background:"rgba(255,255,255,0.14)", border:"1px solid rgba(255,255,255,0.4)", color:"#fff", borderRadius:8, padding:"6px 12px", fontSize:14, fontWeight:800, cursor:"pointer" }}>編集</button>}
+
             </div>
             <div style={{ padding:"12px 16px 40px", maxWidth:640, margin:"0 auto" }}>
               <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:16, textAlign:"center" }}>
-                {detail.photo_url && <div style={{ display:"flex", justifyContent:"center", marginBottom:10 }}><Thumb it={detail} size={96} /></div>}
+                <div style={{ display:"flex", justifyContent:"center", marginBottom:10 }}><Thumb it={detail} size={96} /></div>
                 <div style={{ fontSize:15, color:"#7a8499", fontWeight:800 }}>{h === EQ_BUSHITSU ? "いま置いてある場所" : "いま持っている人"}</div>
                 <div style={{ fontSize:22, fontWeight:900, marginTop:4, wordBreak:"break-word" }}>{h}</div>
                 <div style={{ fontSize:16, fontWeight:800, color:"#047857", marginTop:4 }}>{eqMd(sinceOf(detail))} {lm ? (h === EQ_BUSHITSU ? "戻し" : "受取") : "登録"}</div>
@@ -12242,12 +12298,63 @@ function EquipmentScreen({ onBack }) {
             ? <div style={{ color:"#fff", fontSize:15, fontWeight:800, padding:40 }}>写真を保存中…</div>
             : <img src={photoItem.photo_url} alt={`${photoItem.name}の写真`} style={{ maxWidth:"100%", maxHeight:"68vh", borderRadius:12, background:"#fff", objectFit:"contain" }} />}
           <div style={{ display:"flex", gap:10, width:"100%", maxWidth:420 }}>
-            {!isViewer && <label style={{ flex:1, textAlign:"center", borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"#fff", color:C.navy, cursor:"pointer" }}>
-              写真を変更<input type="file" accept="image/*" hidden onChange={e=>{ const f = e.target.files && e.target.files[0]; e.target.value = ""; onPickPhoto(photoItem.id, f); }} /></label>}
+            {!isViewer && <button onClick={()=>setPhotoPick(photoItem.id)} style={{ flex:1, textAlign:"center", borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"#fff", color:C.navy, border:"none", cursor:"pointer" }}>写真を変更</button>}
             <button onClick={()=>setPhotoId(null)} style={{ flex:1, borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"transparent", color:"#fff", border:"1.5px solid rgba(255,255,255,0.5)", cursor:"pointer" }}>閉じる</button>
           </div>
         </div>
       )}
+
+      {/* ★写真の撮り方を選ぶ（カメラですぐ撮る／撮ってある写真から選ぶ） */}
+      {photoPick && (() => {
+        const it = items.find(x => x.id === photoPick);
+        const opt = { display:"flex", alignItems:"center", gap:12, width:"100%", boxSizing:"border-box", border:`1.5px solid #cfd6e2`, background:C.white, borderRadius:12, padding:"14px 14px", fontSize:17, fontWeight:800, color:C.navy, cursor:"pointer", marginTop:10 };
+        const done = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; const id = photoPick; setPhotoPick(null); setIconMode(false); onPickPhoto(id, f); };
+        const pickIcon = async (key) => {
+          const id = photoPick; setPhotoPick(null); setIconMode(false); setPhotoId(null);
+          try { await setEquipmentIcon(id, key); showToast(key ? "イラストを設定しました" : "名前に合わせたイラストに戻しました"); await reload(); }
+          catch (e) { alert("保存できませんでした：" + (e.message || e)); }
+        };
+        const close = () => { setPhotoPick(null); setIconMode(false); };
+        if (iconMode) {
+          const cur = it && eqIsIcon(it.photo_url) ? it.photo_url.slice(5) : null;
+          const tile = (on) => ({ display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:C.white, border:`2px solid ${on ? C.accent : "#e1e5ec"}`, borderRadius:12, padding:"6px 2px 7px", cursor:"pointer", fontSize:12, fontWeight:800, color:C.text });
+          return (
+            <div style={{ position:"relative", zIndex:600 }}>
+            <EquipSheet title="イラストから選ぶ" onClose={close}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8, marginTop:12 }}>
+                {EQ_ICON_LIST.map(([k, l]) => (
+                  <button key={k} style={tile(cur === k)} onClick={()=>pickIcon(k)} aria-label={`${l}のイラスト`}>
+                    <img src={eqIconSvg(k)} alt="" style={{ width:"100%", aspectRatio:"1 / 1", maxWidth:72, borderRadius:8, display:"block" }} />{l}</button>
+                ))}
+              </div>
+              <button onClick={()=>pickIcon(null)} style={{ display:"block", width:"100%", marginTop:12, border:`1.5px solid #cfd6e2`, background:C.white, borderRadius:12, padding:12, fontSize:15, fontWeight:800, color:C.navy, cursor:"pointer" }}>名前に合わせて自動で選ぶ</button>
+              <button onClick={()=>setIconMode(false)} style={{ display:"block", width:"100%", height:48, marginTop:10, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>← もどる</button>
+            </EquipSheet>
+            </div>
+          );
+        }
+        return (
+          <div style={{ position:"relative", zIndex:600 }}>
+          <EquipSheet title={`${it ? it.name : ""}の写真`} onClose={close}>
+            <label style={opt}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+              カメラで撮る
+              <input type="file" accept="image/*" capture="environment" hidden onChange={done} />
+            </label>
+            <label style={opt}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/></svg>
+              ギャラリーから選ぶ
+              <input type="file" accept="image/*" hidden onChange={done} />
+            </label>
+            <button style={opt} onClick={()=>setIconMode(true)}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><circle cx="17.25" cy="17.25" r="3.75"/></svg>
+              イラストから選ぶ
+            </button>
+            <button onClick={close} style={{ display:"block", width:"100%", height:48, marginTop:14, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
+          </EquipSheet>
+          </div>
+        );
+      })()}
 
       {/* ★備品の追加・編集 */}
       {edit && (
