@@ -12566,6 +12566,16 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         </div>
         <div
           style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onEquipment}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>🎒 備品</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>テント・ジャグなどを、いま誰が持っているか<br/>引き継ぎの記録・予定・写真</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
+        </div>
+        <div
+          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
           onClick={onGoalSettings}
         >
           <div>
@@ -12581,16 +12591,6 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
           <div>
             <div style={{ fontSize:14,fontWeight:700 }}>📌 シーズン設定</div>
             <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>世代交代の起点日。分析で「◯◯以降」として使えます<br/>（編集は管理者専用）</div>
-          </div>
-          <span style={{ fontSize:16,color:C.textSec }}>→</span>
-        </div>
-        <div
-          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
-          onClick={onEquipment}
-        >
-          <div>
-            <div style={{ fontSize:14,fontWeight:700 }}>🎒 備品</div>
-            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>テント・ジャグなどを、いま誰が持っているか<br/>引き継ぎの記録・予定・写真</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
