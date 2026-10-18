@@ -5703,7 +5703,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     ><span style={{ color: isPast ? C.textSec : (t.guideline_url ? "#1976d2" : "#c3c9d4") }}>📄</span> 要項</button>
                     {(() => { const memoText = (withEquip(t).equipment_plan?.memo || "").trim(); return (
                     <button
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:`1.5px solid ${memoText && !isPast ? C.navy : C.border}`, cursor:"pointer", position:"relative" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer", position:"relative" }}
                       onClick={e=>{ e.stopPropagation(); setMemoFor(withEquip(t)); }}
                     ><span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📝</span> メモ{memoText && <span aria-label="メモあり" style={{ width:7, height:7, borderRadius:"50%", background: isPast ? C.textSec : "#e53935", marginLeft:1, alignSelf:"flex-start", marginTop:2 }} />}</button>
                     ); })()}
@@ -13155,7 +13155,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                           onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
                         ><span style={{ color: t.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
                         <button
-                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:`1px solid ${memoText ? C.navy : "#e5e7eb"}`, cursor:"pointer", position:"relative" }}
+                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer", position:"relative" }}
                           onClick={e=>{ e.stopPropagation(); setHomeMemoFor({ ...t, equipment_plan: homeEquipMap[t.id] || {} }); }}
                         ><span>📝</span> メモ{memoText && <span aria-label="メモあり" style={{ width:7, height:7, borderRadius:"50%", background:"#e53935", alignSelf:"flex-start", marginTop:2 }} />}</button>
                       </div>
