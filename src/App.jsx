@@ -361,6 +361,7 @@ async function performLogout() {
   if (!window.confirm("ログアウトしますか？")) return;
   skipUnloadConfirm = true;
   clearScreenCache(); // ★別のアカウントのデータが残らないように破棄する
+  try { localStorage.removeItem("equipmentCacheV1"); } catch (e) {} // ★備品の一覧も端末に残さない
   _isViewerCache = null; // ★閲覧専用かどうかの判定も、次のアカウントに引き継がないよう破棄する
   await supabase.auth.signOut();
   window.location.reload();
@@ -11921,15 +11922,39 @@ async function uploadEquipmentPhoto(file, schoolId, itemId) {
   return data.publicUrl;
 }
 
+// ★備品画面を開くのを速くするため、前回読んだ内容を覚えておき、まず画面に出してから裏で最新に入れかえる。
+//   マスター画面を開いた時点で先に読み始めておく（prefetchEquipment）。
+// ★アプリを開き直した直後でもすぐ出せるよう、端末にも保存しておく（中身は備品名と引き継ぎだけで小さい）
+const EQ_CACHE_KEY = "equipmentCacheV1";
+let _eqCache = (() => { try { const v = JSON.parse(localStorage.getItem(EQ_CACHE_KEY) || "null"); return v && Array.isArray(v.items) ? { ...v, at: 0 } : null; } catch { return null; } })(); // { schoolId, items, moves, at }
+let _eqPrefetch = null;
+function storeEqCache(c) {
+  _eqCache = c;
+  try { localStorage.setItem(EQ_CACHE_KEY, JSON.stringify({ schoolId: c.schoolId, items: c.items, moves: c.moves })); } catch {}
+}
+async function loadEquipmentData() {
+  const p = await getMyProfile();
+  const sid = p?.school_id || null;
+  if (!sid) return { schoolId:null, items:[], moves:[] };
+  const [items, moves] = await Promise.all([getEquipmentItems(sid), getEquipmentMoves(sid)]);
+  storeEqCache({ schoolId: sid, items, moves, at: Date.now() });
+  return _eqCache;
+}
+function prefetchEquipment() {
+  if (_eqCache && Date.now() - _eqCache.at < 60000) return;
+  if (_eqPrefetch) return;
+  _eqPrefetch = loadEquipmentData().catch(() => null).finally(() => { setTimeout(() => { _eqPrefetch = null; }, 0); });
+}
+
 // ---------- マスター › 備品 ----------
 function EquipmentScreen({ onBack }) {
   const isViewer = useIsViewer();
-  const [schoolId, setSchoolId] = useState(null);
-  const [items, setItems] = useState([]);
-  const [moves, setMoves] = useState([]);
+  const [schoolId, setSchoolId] = useState(() => _eqCache?.schoolId || null);
+  const [items, setItems] = useState(() => _eqCache?.items || []);
+  const [moves, setMoves] = useState(() => _eqCache?.moves || []);
   const [players, setPlayers] = useState([]);
   const [me, setMe] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !_eqCache);
   const [loadError, setLoadError] = useState("");
   const [sel, setSel] = useState(() => new Set());
   const [q, setQ] = useState("");
@@ -11953,20 +11978,29 @@ function EquipmentScreen({ onBack }) {
     try {
       const [list, mv] = await Promise.all([getEquipmentItems(sid), getEquipmentMoves(sid)]);
       setItems(list); setMoves(mv); setLoadError("");
+      storeEqCache({ schoolId: sid, items: list, moves: mv, at: Date.now() });
     } catch (e) { setLoadError(e.message || String(e)); }
   };
   useEffect(() => {
+    let alive = true;
+    // ★一覧（備品と引き継ぎ）を先に出す。選手名簿は「引き継ぐ」の名前候補と「自分」の判定にだけ使うので、裏で読む
+    (async () => {
+      try {
+        const d = _eqPrefetch ? ((await _eqPrefetch) || await loadEquipmentData()) : await loadEquipmentData();
+        if (!alive) return;
+        setSchoolId(d.schoolId); setItems(d.items); setMoves(d.moves); setLoadError("");
+      } catch (e) { if (alive) setLoadError(e.message || String(e)); }
+      if (alive) setLoading(false);
+    })();
     (async () => {
       try {
         const [p, roster] = await Promise.all([getMyProfile(), getPlayerRoster().catch(() => [])]);
-        setSchoolId(p?.school_id || null);
+        if (!alive) return;
         setPlayers([...new Set((roster || []).filter(r => r.is_own_team !== false).map(r => r.player_name).filter(Boolean))]);
         setMe(pickDefaultAnalysisPlayer(p, roster) || "");
-        if (p?.school_id) await reload(p.school_id);
-      } catch (e) { setLoadError(e.message || String(e)); }
-      setLoading(false);
+      } catch (e) { console.error(e); }
     })();
-    return () => clearTimeout(toastTimer.current);
+    return () => { alive = false; clearTimeout(toastTimer.current); };
   }, []);
 
   // ★備品ごとの記録（今日までが実際、先の日付は予定）
@@ -12159,17 +12193,21 @@ function EquipmentScreen({ onBack }) {
   };
 
 
+  const listScrollRef = useRef(0);
+  const openDetail = (id) => { listScrollRef.current = window.scrollY || 0; setCancelArm(null); setDetailId(id); window.scrollTo(0, 0); };
+  const closeDetail = () => { setDetailId(null); setCancelArm(null); requestAnimationFrame(() => window.scrollTo(0, listScrollRef.current)); };
   const eqIconBtn = { flexShrink:0, alignSelf:"center", width:42, height:42, display:"flex", alignItems:"center", justifyContent:"center", border:"1.5px solid #cfd6e2", background:C.white, borderRadius:10, padding:0, cursor:"pointer" };
   const detail = detailId ? items.find(x => x.id === detailId) : null;
   const photoItem = photoId ? items.find(x => x.id === photoId) : null;
 
   return (
     <div style={{ ...S.page, background:C.white, minHeight:"100dvh" }}>
+      {/* ★履歴を開いているときも、ほかの画面と同じヘッダーを使う（以前は全画面の重ね表示で、ヘッダーの幅が違っていた） */}
       <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:20 }}>
-        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack} aria-label="戻る">←</button>
-        <span style={{ fontSize:18,fontWeight:800,color:C.white }}>🎒 備品</span>
+        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={detail ? closeDetail : onBack} aria-label="戻る">←</button>
+        <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{detail ? detail.name : "🎒 備品"}</span>
       </div>
-      <div style={{ padding:"12px 16px", paddingBottom: sel.size ? 190 : 40, maxWidth:640, margin:"0 auto" }}>
+      <div style={{ display: detail ? "none" : "block", padding:"12px 16px", paddingBottom: sel.size ? 190 : 40, maxWidth:640, margin:"0 auto" }}>
         {loading ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>読み込み中...</div>
         : !schoolId ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のため備品を表示できません</div>
         : (
@@ -12237,7 +12275,7 @@ function EquipmentScreen({ onBack }) {
                               {eqMd(pl.move_date)} {pl.to_holder === EQ_BUSHITSU ? "部室に戻す" : `${pl.to_holder}へ引き継ぐ`}</span>}
                           </span>
                         </button>
-                        <button onClick={()=>{ setCancelArm(null); setDetailId(it.id); }} aria-label={`${it.name}の履歴`}
+                        <button onClick={()=>openDetail(it.id)} aria-label={`${it.name}の履歴`}
                           style={eqIconBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/></svg></button>
                         {!isViewer && <button onClick={()=>openEdit({ id:it.id, name:it.name, memo:it.memo || "", quantity: it.quantity || 1 })} aria-label={`${it.name}を編集`}
                           style={{ ...eqIconBtn, marginLeft:-4 }}><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>}
@@ -12289,12 +12327,7 @@ function EquipmentScreen({ onBack }) {
           </div>
         );
         return (
-          <div style={{ position:"fixed", inset:0, zIndex:300, background:C.white, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
-            <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:2 }}>
-              <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={()=>{ setDetailId(null); setCancelArm(null); }} aria-label="戻る">←</button>
-              <span style={{ flex:1, minWidth:0, fontSize:18,fontWeight:800,color:C.white, wordBreak:"break-word" }}>{detail.name}</span>
-
-            </div>
+          <div>
             <div style={{ padding:"12px 16px 40px", maxWidth:640, margin:"0 auto" }}>
               <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:16, textAlign:"center" }}>
                 <div style={{ display:"flex", justifyContent:"center", marginBottom:10 }}><Thumb it={detail} size={96} /></div>
@@ -12494,6 +12527,7 @@ function EquipmentScreen({ onBack }) {
 
 
 function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onEquipment, onTrash, onTerms, onGuide, termsAgreedAt, onProfile, onLogout, textScale, onChangeTextScale }) {
+  useEffect(() => { const t = setTimeout(prefetchEquipment, 300); return () => clearTimeout(t); }, []); // ★備品画面を開く前に先読み
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
