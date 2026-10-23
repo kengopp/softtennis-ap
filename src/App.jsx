@@ -4416,6 +4416,31 @@ function Modal({ children, onClose }) {
   );
 }
 
+// ★更新ボタン（各画面のヘッダーなど）。絵文字🔄をやめて、落ち着いた青のボタン＋回転マークにそろえた。
+//   spinning=true の間は矢印が回る（読み込み中）。label があればマークの横に文字を出す。
+const REFRESH_BG = "linear-gradient(145deg,#3c5f96,#2b4a7c)";
+function RefreshIcon({ size = 20, spinning = false }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      style={{ display:"block", flexShrink:0, animation: spinning ? "st-refresh-spin 0.9s linear infinite" : "none" }}>
+      <path d="M20 11.5A8 8 0 0 0 6.2 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 13.8 5.2L20 15.5"/><path d="M20 20v-4.5h-4.5"/>
+    </svg>
+  );
+}
+function RefreshButton({ onClick, spinning = false, label = "", size = 36, onLight = false, title = "最新データに更新", style }) {
+  return (
+    <button onClick={()=>{ if (!spinning && onClick) onClick(); }} disabled={spinning} title={title} aria-label={label || title}
+      style={{ flexShrink:0, height:size, minWidth:size, padding: label ? "0 13px 0 10px" : 0, display:"inline-flex", alignItems:"center", justifyContent:"center", gap:6,
+        background:REFRESH_BG, color:"#fff", border: onLight ? "none" : "1px solid rgba(255,255,255,0.18)", borderRadius:Math.round(size * 0.32),
+        boxShadow: onLight ? "0 2px 6px rgba(43,74,124,0.25)" : "0 2px 8px rgba(5,15,40,0.35), inset 0 1px 0 rgba(255,255,255,0.18)",
+        fontSize: label ? 13.5 : 0, fontWeight:800, whiteSpace:"nowrap", cursor: spinning ? "default" : "pointer", opacity: spinning ? 0.85 : 1, ...style }}>
+      <style>{"@keyframes st-refresh-spin{to{transform:rotate(360deg);}}"}</style>
+      <RefreshIcon size={label ? Math.round(size * 0.47) : Math.round(size * 0.55)} spinning={spinning} />
+      {label}
+    </button>
+  );
+}
+
 // ★サーブ/レシーブの「1人目・2人目のどちらが先か」を選ぶ小さなセグメントボタン
 function OrderSegBtn({ active, color, children, onClick }) {
   return (
@@ -5391,7 +5416,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           {mySchoolName && timeTab==="team" && (
             <button onClick={()=>setTmMySchoolOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(tmMySchoolOnly?"#fff":"rgba(255,255,255,0.4)"), background:tmMySchoolOnly?"#fff":"transparent", color:tmMySchoolOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>{mySchoolName}</button>
           )}
-          <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }} onClick={reload}>🔄 更新</button>
+          <RefreshButton onClick={reload} spinning={loading} label="更新" size={36} />
         </div>
       </div>
       {toast && <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast}</div>}
@@ -6777,16 +6802,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>📅 {fmtDateRange(tournament.start_date, tournament.end_date)}</div>
         </div>
-        <button
-          style={{ padding:0, background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:15, width:32, height:32, cursor: refreshing ? "default" : "pointer", lineHeight:1, flexShrink:0 }}
-          onClick={()=>{ if (!refreshing) reload(true); }}
-          disabled={refreshing}
-          title="最新データに更新"
-        ><span style={{ display:"inline-block", animation: refreshing ? "td-refresh-spin 0.8s linear infinite" : "none" }}>🔄</span></button>
+        <RefreshButton onClick={()=>reload(true)} spinning={refreshing} size={36} />
         <style>{"@keyframes td-refresh-spin{to{transform:rotate(360deg);}}"}</style>
         <div style={{ position:"relative" }}>
           <button
-            style={{ padding:0, background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, width:32, height:32, cursor:"pointer", lineHeight:1 }}
+            style={{ padding:0, background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.18)", borderRadius:12, color:C.white, fontSize:18, fontWeight:900, width:36, height:36, cursor:"pointer", lineHeight:1 }}
             onClick={()=>setShowMoreMenu(v=>!v)}
           >⋯</button>
           {showMoreMenu && (
@@ -19858,12 +19878,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           </div>
           <div style={{ display:"flex", gap:6, flex:"none" }}>
             {match.status==="active" && (
-              <button
-                style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
-                onClick={onRefresh}
-                disabled={refreshing}
-                title="最新データに更新"
-              >{refreshing ? "..." : "🔄"}</button>
+              <RefreshButton onClick={onRefresh} spinning={refreshing} size={32} />
             )}
             {/* ★記録中はLINE共有を「⋯」（その他の操作）に入れたので、ヘッダーには出さない（観戦中・試合前後は従来通り） */}
             {(match.status==="active" || match.status==="finished") && (viewOnly || !currentGame || match.status==="finished") && (
@@ -19984,10 +19999,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           )}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>{isViewer ? "👀 閲覧専用（記録・編集はできません）" : "👁 観戦モード（スコア閲覧のみ）"}</span>
-            <button
-              style={{ background:C.navy, border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
-              onClick={onRefresh} disabled={refreshing}
-            >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
+            <RefreshButton onClick={onRefresh} spinning={refreshing} label={refreshing ? "更新中..." : "最新に更新"} size={34} onLight />
           </div>
           {/* ★試合が終了していなければ、いつでも自分が記録者としてロックを引き継げるようにする
                 （記録者ロックが自分以外・または不整合になっていても、これで即座に復帰できる） */}
