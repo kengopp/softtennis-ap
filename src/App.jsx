@@ -7136,28 +7136,29 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && (
           <div style={{ margin:"0 14px 12px" }}>
-            <div style={{ display:"flex", gap:8 }}>
+            {/* ★ボタンは短い言葉にして、入りきらないときは横にスライドできるようにした */}
+            <div style={{ display:"flex", gap:8, overflowX:"auto", WebkitOverflowScrolling:"touch", paddingBottom:2, scrollbarWidth:"none" }}>
               <button
                 onClick={()=>setIndividualResultFilter(v=>v==="win"?"all":"win")}
                 style={{
-                  padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
+                  flexShrink:0, whiteSpace:"nowrap", padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
                   border:`1.5px solid ${individualResultFilter==="win"?C.teamA:C.border}`,
                   background:individualResultFilter==="win"?C.teamA:"#fff", color:individualResultFilter==="win"?"#fff":C.textSec,
                 }}
-              >🏆 勝ち残りのみ</button>
+              >🏆 勝ち残り</button>
               <button
                 onClick={()=>setIndividualResultFilter(v=>v==="lose"?"all":"lose")}
                 style={{
-                  padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
+                  flexShrink:0, whiteSpace:"nowrap", padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
                   border:`1.5px solid ${individualResultFilter==="lose"?C.red:C.border}`,
                   background:individualResultFilter==="lose"?C.red:"#fff", color:individualResultFilter==="lose"?"#fff":C.textSec,
                 }}
-              >💔 敗退ペアのみ</button>
+              >💔 敗退</button>
               <input
                 value={individualSearch}
                 onChange={e=>setIndividualSearch(e.target.value)}
-                placeholder="🔍 選手名・チーム名で検索"
-                style={{ flex:1, minWidth:0, padding:"8px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:14, color:C.text, boxSizing:"border-box" }}
+                placeholder="🔍 選手名・チーム名"
+                style={{ flex:"1 0 190px", minWidth:190, padding:"8px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:14, color:C.text, boxSizing:"border-box" }}
               />
             </div>
             {individualMyPairs.length>1 && (
