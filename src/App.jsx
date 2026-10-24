@@ -11912,13 +11912,13 @@ function EquipmentScreen({ onBack }) {
   const photoItem = photoId ? items.find(x => x.id === photoId) : null;
 
   return (
-    <div style={{ ...S.page, background:C.white, minHeight:"100dvh" }}>
+    <div style={{ ...S.page, background:C.white, minHeight:"100dvh", paddingBottom:0, display:"flex", flexDirection:"column" }}>
       {/* ★履歴を開いているときも、ほかの画面と同じヘッダーを使う（以前は全画面の重ね表示で、ヘッダーの幅が違っていた） */}
       <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:20 }}>
         <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={detail ? closeDetail : onBack} aria-label="戻る">←</button>
         <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{detail ? detail.name : "🎒 備品"}</span>
       </div>
-      <div style={{ display: detail ? "none" : "block", padding:"12px 16px", paddingBottom: sel.size ? 190 : 40, maxWidth:640, margin:"0 auto" }}>
+      <div style={{ display: detail ? "none" : "block", flex:"1 0 auto", width:"100%", boxSizing:"border-box", padding:"12px 16px", paddingBottom:40, maxWidth:640, margin:"0 auto" }}>
         {loading ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>読み込み中...</div>
         : !schoolId ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のため備品を表示できません</div>
         : (
@@ -12005,7 +12005,7 @@ function EquipmentScreen({ onBack }) {
 
       {/* ★選んだときだけ出るボタン */}
       {sel.size > 0 && !sheet && !detail && (
-        <div style={{ position:"fixed", left:0, right:0, bottom:0, zIndex:30, background:"#f7f8fa", borderTop:`1px solid ${C.border}`, padding:"12px 16px calc(14px + env(safe-area-inset-bottom,0px))" }}>
+        <div style={{ position:"sticky", bottom:0, zIndex:30, background:"#f7f8fa", borderTop:`1px solid ${C.border}`, padding:"12px 16px calc(14px + env(safe-area-inset-bottom,0px))" }}>
           <div style={{ maxWidth:640, margin:"0 auto" }}>
             <button onClick={()=>openGive("give")} style={{ display:"block", width:"100%", background:C.accent, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:18, fontWeight:900, cursor:"pointer" }}>この{sel.size}件を引き継ぐ</button>
             {chosen.some(it => holderOf(it) !== EQ_BUSHITSU) && (
@@ -19846,7 +19846,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   }
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(osRecording ? { paddingBottom:0 } : {}) }}>
       {restoredNotice && (
         <div style={{ background:"#fff3e0", borderBottom:"1px solid #ffd9b3", padding:"8px 14px", fontSize:11.5, color:"#8a5a00", display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ flex:1 }}>⚠️ 前回、同期できないまま終了した記録を復元しました。保存できる状態になり次第、自動で保存されます。</span>
@@ -20080,7 +20080,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
       {/* 記録タブ */}
       {tab==="record"&&(
-        <div style={{ padding:"10px 12px 20px" }}>
+        <div style={{ padding: osRecording ? "10px 12px 0" : "10px 12px 20px" }}>
           {match.games.length>0 && !viewOnly && !osRecording && (
             <div style={{ textAlign:"right", marginBottom:8 }}>
               <button
@@ -20868,7 +20868,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <button onClick={onClick} style={{ ...btnBase, ...selStyle(on), flex:1, padding:"10px 2px", fontSize:14, ...extra }}>{label}</button>
             );
             return (
-              <div style={{ paddingBottom:"60vh" }}>
+              <div>
                 {/* 1点前に戻す／選択をクリア */}
                 <div style={{ display:"flex", gap:8, marginBottom:8 }}>
                   <button style={{ flex:1, padding:"10px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:"#b4433c", cursor:"pointer" }}
@@ -21024,8 +21024,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
                 {/* ★中断・途中終了などは「記録する」ボタンの近くに置くと押し間違えるため、上の「⋯ その他」にまとめた */}
 
-                {/* 記録するボタン（画面の一番下に固定） */}
-                <div style={{ position:"fixed", left:0, right:0, bottom:0, display:"flex", justifyContent:"center", padding:"0 10px calc(10px + env(safe-area-inset-bottom))", pointerEvents:"none", zIndex:50 }}>
+                {/* ★下の選択肢を「記録する」ボタンより上までスクロールできるようにする余白（以前はpaddingBottomで確保） */}
+                <div aria-hidden="true" style={{ height:"60vh" }} />
+                {/* 記録するボタン（画面の一番下に貼りつく）
+                    ★以前は position:fixed で画面に固定していたが、文字を大きくしている人（アプリの「文字の大きさ」＝画面全体のzoom、
+                      またはスマホ本体の文字サイズ設定）だと、ブラウザによっては「一番下」の位置を拡大前の大きさで計算してしまい、
+                      ボタンが画面の真ん中に浮いて止まっていた。ページの流れの中に置く sticky に変えて、拡大の影響を受けないようにした。 */}
+                <div style={{ position:"sticky", bottom:0, display:"flex", justifyContent:"center", padding:"8px 0 calc(10px + env(safe-area-inset-bottom))", pointerEvents:"none", zIndex:50 }}>
                   <button disabled={!osReady} onClick={osRecord} style={{ pointerEvents:"auto", maxWidth:520, width:"100%", border:"none", borderRadius:14, padding:"13px 10px", background: osReady ? "#ffd23f" : "#e6e8ee", color: osReady ? C.navy : "#a6adbd", fontWeight:900, fontSize:18, boxShadow: osReady ? "0 4px 14px rgba(0,0,0,.18)" : "none", cursor: osReady ? "pointer" : "default" }}>
                     記録する
                     <span style={{ display:"block", fontSize:12, fontWeight:700, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{summary}</span>
