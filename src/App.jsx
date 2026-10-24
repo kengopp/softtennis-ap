@@ -3178,6 +3178,13 @@ async function renameTournamentCascade(oldName, newName, oldTournament) {
   if (r3.error) console.error("ペアマスターの大会名追従に失敗:", r3.error);
 }
 
+// ★大会の「中止」の切り替え（データは消さない。canceled 列が true のとき「中止」と表示する）
+async function setTournamentCanceled(id, canceled) {
+  clearMatchListPrefetch();
+  const { error } = await supabase.from("tournaments").update({ canceled: !!canceled }).eq("id", id);
+  if (error) throw error;
+}
+
 // ★大会の削除は誤操作対策のため即時完全削除ではなくゴミ箱行き（論理削除）にする
 async function deleteTournament(id) {
   const { error } = await supabase.from("tournaments").update({ deleted_at: new Date().toISOString() }).eq("id", id);
@@ -4985,6 +4992,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [showTournamentModal, setShowTournamentModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
   const [confirmDeleteTournament, setConfirmDeleteTournament] = useState(null);
+  const [confirmCancelTournament, setConfirmCancelTournament] = useState(null); // ★「中止にする」の確認（大会の行データ）
   const [openTournamentMenuId, setOpenTournamentMenuId] = useState(null); // ★カード下部「その他」メニューの開閉
   const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
   const [breakdownModalFor, setBreakdownModalFor] = useState(null); // ★「試合数」タップ時のポップアップ（大会オブジェクト）
@@ -5308,8 +5316,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   const filteredTournaments = tournaments.filter(t => {
     if (tournamentSearch.trim() && !t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())) return false;
-    if (filterStatus === "upcoming" && !isUpcomingTournament(t)) return false;
-    if (filterStatus === "finished" && isUpcomingTournament(t)) return false;
+    // ★中止の大会は「これから」には出さず、「終了」側に入れる
+    if (filterStatus === "upcoming" && (t.canceled || !isUpcomingTournament(t))) return false;
+    if (filterStatus === "finished" && !t.canceled && isUpcomingTournament(t)) return false;
     if (!tournamentMatchesDateFilter(t)) return false;
     // ★選手で絞り込むとき：試合に出ている大会に加えて、大会の「出場選手」に登録されている大会も表示する
     //   （以前は試合が1つも無い大会＝これからの大会が、出場選手に入っていても消えていた）
@@ -5320,7 +5329,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // ★今日が開催期間に入っている大会（開催中）は、同日に複数あってもすべて一番上に表示する。
   //   それ以外の並びは従来通り（開催中の大会どうしの順番も従来の並びのまま）。
   {
-    const isTodayT = (t) => !!t.start_date && t.start_date <= todayStr && (t.end_date || t.start_date) >= todayStr;
+    const isTodayT = (t) => !t.canceled && !!t.start_date && t.start_date <= todayStr && (t.end_date || t.start_date) >= todayStr;
     const todayList = filteredTournaments.filter(isTodayT);
     if (todayList.length > 0) {
       const rest = filteredTournaments.filter(t => !isTodayT(t));
@@ -5355,6 +5364,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     } catch(e) {
       alert("保存エラー: " + (e.message || e));
     }
+  }
+
+  // ★大会の「中止」⇔「取り消し」。待たずに画面を切り替えてから裏で保存する
+  async function handleSetTournamentCanceled(t, canceled) {
+    setConfirmCancelTournament(null);
+    setTournaments(prev => prev.map(x => x.id === t.id ? { ...x, canceled } : x));
+    try {
+      await setTournamentCanceled(t.id, canceled);
+    } catch (e) {
+      console.error(e);
+      setTournaments(prev => prev.map(x => x.id === t.id ? { ...x, canceled: !canceled } : x));
+      alert(/canceled/.test(e?.message || "")
+        ? "中止の設定を保存できませんでした（データベースに「中止」の項目がまだありません）。"
+        : "保存に失敗しました。通信状況を確認して、もう一度お試しください。");
+    }
+    reload({ silent: true });
   }
 
   async function handleDeleteTournament(id) {
@@ -5676,9 +5701,11 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const stats = statsForTournament(t);
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
-              // ★大会の状態：予定（まだ始まっていない）／開催中（今日が開催期間）／終了
-              const tStatus = isPast ? "終了" : (t.start_date && t.start_date <= todayStr ? "開催中" : "予定");
-              const statusStyle = tStatus === "開催中" ? { background:"#f97316", color:"#fff", border:"1.5px solid #f97316" }
+              // ★大会の状態：中止／予定（まだ始まっていない）／開催中（今日が開催期間）／終了
+              //   中止はバッジの文字だけ赤にし、カードのほかの見た目は変えない
+              const tStatus = t.canceled ? "中止" : isPast ? "終了" : (t.start_date && t.start_date <= todayStr ? "開催中" : "予定");
+              const statusStyle = tStatus === "中止" ? { background:"#c62828", color:"#fff", border:"1.5px solid #c62828" }
+                : tStatus === "開催中" ? { background:"#f97316", color:"#fff", border:"1.5px solid #f97316" }
                 : tStatus === "予定" ? { background:"#fff", color:"#1b4fa8", border:"1.5px solid #1b4fa8" }
                 : { background:C.border, color:C.textSec, border:`1.5px solid ${C.text}` };
               return (
@@ -5778,6 +5805,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                             setShowTournamentModal(true);
                           }}
                         >📄 コピー</button>
+                        {t.canceled ? (
+                          <button
+                            style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                            onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); handleSetTournamentCanceled(t, false); }}
+                          >↩ 中止を取り消す</button>
+                        ) : (
+                          <button
+                            style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.red }}
+                            onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setConfirmCancelTournament(t); }}
+                          >🚫 中止にする</button>
+                        )}
                         <button
                           style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.red }}
                           onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setConfirmDeleteTournament(t.id); }}
@@ -6136,6 +6174,20 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </FullScreenSheet>
         );
       })()}
+      {confirmCancelTournament && (
+        <Modal onClose={()=>setConfirmCancelTournament(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40,marginBottom:8 }}>🚫</div>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:6 }}>この大会を中止にしますか？</h3>
+            <div style={{ fontSize:14,fontWeight:800,color:C.text,marginBottom:8 }}>{confirmCancelTournament.name}</div>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20,lineHeight:1.7 }}>大会や試合のデータは消えません。<br/>あとから「中止を取り消す」で元に戻せます。</p>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <button style={{ padding:"11px",background:"#c62828",color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>handleSetTournamentCanceled(confirmCancelTournament, true)}>中止にする</button>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmCancelTournament(null)}>やめる</button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {confirmDeleteTournament && (
         <Modal onClose={()=>setConfirmDeleteTournament(null)}>
           <div style={{ textAlign:"center" }}>
@@ -12790,7 +12842,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const upcomingTournaments = !liveMatch
     ? (() => {
         const sorted = tournaments
-          .filter(t => (t.end_date || t.start_date) >= todayStr)
+          .filter(t => !t.canceled && (t.end_date || t.start_date) >= todayStr) // ★中止の大会は「次の試合予定」に出さない
           .sort((a,b) => a.start_date.localeCompare(b.start_date));
         if (sorted.length === 0) return [];
         // ★今日が開催期間に入っている大会（前日から続く複数日の大会も含む）があれば、それをすべて表示する
