@@ -210,6 +210,10 @@ const _primedMatches = new Map(); // matchId -> { at, data }
 const _autoStartMatchIds = new Set();
 function markAutoStart(id) { if (id) _autoStartMatchIds.add(id); }
 function takeAutoStart(id) { const hit = _autoStartMatchIds.has(id); _autoStartMatchIds.delete(id); return hit; }
+// ★試合作成画面の「結果のみ登録する」で作った試合：記録画面を開いたら、すぐ「結果だけ記録」の小窓を出す
+const _autoSimpleMatchIds = new Set();
+function markAutoSimple(id) { if (id) _autoSimpleMatchIds.add(id); }
+function takeAutoSimple(id) { const hit = _autoSimpleMatchIds.has(id); _autoSimpleMatchIds.delete(id); return hit; }
 // ★個人戦の試合ID（団体戦の番手ではないと分かっている試合）。試合を開く前の問い合わせを省くために使う
 let _knownIndividualMatchIds = new Set();
 // ★団体戦の番手として登録されている試合ID（分析の「個人戦のみ／団体戦のみ」に使う）。試合一覧の取得時にも作る
@@ -18476,7 +18480,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     setServeSelectForSave({ aLabel, bLabel });
   }
 
-  async function handleSave(selectedServer) {
+  async function handleSave(selectedServer, opts = {}) {
     setSaving(true);
     try {
       if (editing) {
@@ -18562,6 +18566,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       // ★記録画面を開くときにサーバーから取り直さなくて済むよう、今保存した内容を渡しておく
       primeMatch(rowToMatchFull({ ...match, ...savedRow }, match.players, [], [], []));
       if (selectedServer) markAutoStart(mid); // ★サーブを選んで開始したので、記録画面ですぐ第1ゲームを始める
+      if (opts.simpleResult) markAutoSimple(mid); // ★「結果のみ登録する」：記録画面ですぐ結果の入力を出す
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
       // ★完了を待たずに記録画面へ進む（以前は4人分の登録が終わるまで画面が切り替わらなかった）
       autoRegisterPlayersToRoster([
@@ -18884,6 +18889,17 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           >
             {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
           </button>
+        )}
+        {/* ★ポイントは記録せず、試合の結果（ゲーム数）だけを登録する */}
+        {!editing && !isTeamMatchGame && (
+          <button
+            style={{ ...S.btn(canSave && !saving ? "#fff" : C.border, canSave && !saving ? C.navy : C.textSec), border:`1.5px solid ${canSave && !saving ? C.navy : C.border}`, marginTop:8 }}
+            disabled={!canSave || saving}
+            onClick={()=>{
+              if (isYounger === null || isYounger === undefined) { alert("若番／遅番を選択してください"); return; }
+              handleSave(null, { simpleResult: true });
+            }}
+          >{saving ? "保存中..." : "📝 結果のみ登録する"}</button>
         )}
         {/* ★画面の一番下まで入力したあと、上まで戻らずに抜けられるようにする（大会詳細の「← 戻る」と同じ見た目） */}
         {onCancel && (
@@ -19345,6 +19361,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
   // ★サーブを選んで「試合開始」した直後は、「第1ゲームの準備」画面を出さずにそのまま第1ゲームを始める
   //   （準備画面にあった順番の変更などは、記録画面の「⋯」→「サーブレシーブの順番変更」でできる）
+  // ★試合作成画面の「結果のみ登録する」から来たときは、すぐ「結果だけ記録」の小窓を出す
+  useEffect(() => {
+    if (!takeAutoSimple(initialMatch.id)) return;
+    if (viewOnly || match.status === "finished" || match.games.length > 0) return;
+    setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (!takeAutoStart(initialMatch.id)) return;
     if (viewOnly || match.status === "finished" || match.games.length > 0) return;
