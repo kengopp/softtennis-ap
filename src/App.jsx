@@ -5329,8 +5329,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // ★今日が開催期間に入っている大会（開催中）は、同日に複数あってもすべて一番上に表示する。
   //   それ以外の並びは従来通り（開催中の大会どうしの順番も従来の並びのまま）。
   {
-    const isTodayT = (t) => !t.canceled && !!t.start_date && t.start_date <= todayStr && (t.end_date || t.start_date) >= todayStr;
-    const todayList = filteredTournaments.filter(isTodayT);
+    const isTodayT = (t) => !!t.start_date && t.start_date <= todayStr && (t.end_date || t.start_date) >= todayStr;
+    // ★中止の大会も当日は上に並べるが、同じ日の大会の中では最後にする
+    const todayList = [...filteredTournaments.filter(t => isTodayT(t) && !t.canceled), ...filteredTournaments.filter(t => isTodayT(t) && t.canceled)];
     if (todayList.length > 0) {
       const rest = filteredTournaments.filter(t => !isTodayT(t));
       filteredTournaments.splice(0, filteredTournaments.length, ...todayList, ...rest);
@@ -5704,7 +5705,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               // ★大会の状態：中止／予定（まだ始まっていない）／開催中（今日が開催期間）／終了
               //   中止はバッジの文字だけ赤にし、カードのほかの見た目は変えない
               const tStatus = t.canceled ? "中止" : isPast ? "終了" : (t.start_date && t.start_date <= todayStr ? "開催中" : "予定");
-              const statusStyle = tStatus === "中止" ? { background:"#c62828", color:"#fff", border:"1.5px solid #c62828" }
+              //   過去になった中止の大会は「中止」のまま、カード全体（バッジも）を終了と同じグレーにする
+              const statusStyle = tStatus === "中止" ? (isPast ? { background:C.border, color:C.textSec, border:`1.5px solid ${C.text}` } : { background:"#c62828", color:"#fff", border:"1.5px solid #c62828" })
                 : tStatus === "開催中" ? { background:"#f97316", color:"#fff", border:"1.5px solid #f97316" }
                 : tStatus === "予定" ? { background:"#fff", color:"#1b4fa8", border:"1.5px solid #1b4fa8" }
                 : { background:C.border, color:C.textSec, border:`1.5px solid ${C.text}` };
