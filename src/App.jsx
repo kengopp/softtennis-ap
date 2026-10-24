@@ -18386,6 +18386,15 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   }, [bothEntryNosNumeric, aEntryNoNum, bEntryNoNum]);
 
   // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
+  // ★試合をコピーして作るときなど、学校名を別の学校に変えたら、その側の選手名（と番号）を消す
+  //   （前の学校の選手が残ったまま保存してしまうのを防ぐ）。既存の試合の編集では消さない。
+  const changeClub = (side, v) => {
+    const cur = side === "A" ? aClub : bClub;
+    if (side === "A") setAClub(v); else setBClub(v);
+    if (editing || String(v).trim() === String(cur).trim()) return;
+    if (side === "A") { setAP1(""); setAP2(""); setAEntryNo(""); }
+    else { setBP1(""); setBP2(""); setBEntryNo(""); }
+  };
   const [aClubPref, setAClubPref] = useState("");
   const [bClubPref, setBClubPref] = useState("");
 
@@ -18710,7 +18719,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{aClub || "（自チーム）"}</div>
             ) : (
-              <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
+              <SchoolField value={aClub} onChange={v=>changeClub("A", v)} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
             )}
           </FormRow>
           <FormRow label={isDoubles ? "選手1（必須）" : "選手名（必須）"} required>
@@ -18751,7 +18760,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{bClub || prefillOpponent || "（相手チーム）"}</div>
             ) : (
-              <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
+              <SchoolField value={bClub} onChange={v=>changeClub("B", v)} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
             )}
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
