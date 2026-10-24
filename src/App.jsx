@@ -2339,10 +2339,14 @@ let __schoolsCache = null;
 // ★招待コードの列は管理者以外に見せないため、学校の取得では列を明示する（select("*") は使わない）
 const SCHOOL_COLS = "id, name, prefecture, category, gender_restriction, admin_user_id, goal_first_serve_pct, goal_receive_miss_pct, goal_winner_count, goal_error_count, goal_point_diff, season_start_date, season_start_label";
 let __schoolsRequestVersion = 0; // ★通信競合対策：古いリクエストの結果でキャッシュを上書きしないようにする
+// ★学校マスターは1000校を超えることがあるため、全件を分けて取得する（以前は1回の取得で1000校までしか来ず、
+//   名前順で後ろの学校（佐賀県の学校など）が選手マスター等の候補に出ないことがあった）。
+//   ほかの人が学校を追加しても反映されるよう、覚えておくのは5分まで。
+let __schoolsCacheAt = 0;
 async function getSchools(force=false) {
-  if (__schoolsCache && !force) return __schoolsCache;
+  if (__schoolsCache && !force && Date.now() - __schoolsCacheAt < 5 * 60 * 1000) return __schoolsCache;
   const requestVersion = ++__schoolsRequestVersion;
-  const { data, error } = await supabase.from("schools").select(SCHOOL_COLS).order("name");
+  const { data, error } = await fetchAllRows("schools", SCHOOL_COLS, q => q.order("name").order("id"));
   if (error) {
     console.error("学校一覧の取得に失敗しました:", error);
     // ★管理画面（force=true）は「今のDBの正しい状態」を見る場所なので、
@@ -2354,7 +2358,7 @@ async function getSchools(force=false) {
   const list = data || [];
   // 途中で別のgetSchools呼び出しが走っていた場合、後から返ってきた古いリクエストの結果で
   // 新しいキャッシュを上書きしてしまわないようにする
-  if (requestVersion === __schoolsRequestVersion) __schoolsCache = list;
+  if (requestVersion === __schoolsRequestVersion) { __schoolsCache = list; __schoolsCacheAt = Date.now(); }
   return list;
 }
 function invalidateSchoolsCache() { __schoolsCache = null; __schoolsRequestVersion += 1; }
@@ -23440,7 +23444,7 @@ function PlayerRosterScreen({ onBack }) {
 
   useEffect(() => {
     reload();
-    getSchools().then(list => {
+    getSchools(true).catch(() => getSchools()).then(list => {
       setSchools(list);
       getMyProfile().then(p => {
         if (p?.school_id) {
@@ -23465,8 +23469,13 @@ function PlayerRosterScreen({ onBack }) {
       ? otherPlayers.filter(p => schoolPrefByName[p.team_name] === schoolPrefFilter)
       : otherPlayers;
   const availablePrefs = [...new Set(schools.map(s => s.prefecture).filter(Boolean))].sort();
+  // ★都道府県を選んだときは、選手がまだ登録されていない学校も学校マスターから出す
+  //   （以前は選手登録済みの学校だけだったため、学校マスターにある佐賀県の学校が出てこなかった）
   const filteredOtherSchoolNames = schoolPrefFilter
-    ? otherSchoolNames.filter(n => schoolPrefByName[n] === schoolPrefFilter)
+    ? [...new Set([
+        ...otherSchoolNames.filter(n => schoolPrefByName[n] === schoolPrefFilter),
+        ...schools.filter(s => s.prefecture === schoolPrefFilter && s.name && s.name !== mySchoolName).map(s => s.name),
+      ])].sort((a, b) => a.localeCompare(b, "ja"))
     : otherSchoolNames;
 
   const handLabel = (k) => k==="right" ? "右利き" : k==="left" ? "左利き" : "";
