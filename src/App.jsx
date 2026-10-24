@@ -4234,7 +4234,7 @@ function downloadCsv(match) {
 // スタイル共通
 // ============================================================
 const S = {
-  page:   { background: C.gray, minHeight:"100vh", paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" },
+  page:   { background: C.gray, minHeight:"calc(100vh / var(--app-zoom, 1))", paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" },
   hdr:    { background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, padding:"12px 16px", position:"sticky", top:0, zIndex:10 },
   card:   { background:C.white, borderRadius:12, border:`1px solid ${C.border}`, overflow:"hidden", marginBottom:10 },
   inp:    { width:"100%", padding:"8px 0", background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`, fontSize:16, color:C.text, outline:"none", boxSizing:"border-box" },
@@ -4413,9 +4413,17 @@ function TypeLabel({ v, label, size = 20 }) {
 
 function Modal({ children, onClose }) {
   useBodyScrollLock(true);
+  // ★文字を大きくしている人でも下の「閉じる」まで届くよう、高さは --app-zoom で打ち消す（App の文字の大きさ設定を参照）。
+  //   念のため右上にも ✕ を置く（onClose がある小窓だけ）。
   return (
-    <div style={{ position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
-      <div style={{ background:C.white,borderRadius:20,padding:"28px 20px calc(28px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:340,maxHeight:"80dvh",overflowY:"auto",WebkitOverflowScrolling:"touch" }} onClick={e=>e.stopPropagation()}>{children}</div>
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
+      <div style={{ position:"relative", width:"100%", maxWidth:340 }} onClick={e=>e.stopPropagation()}>
+        <div style={{ background:C.white,borderRadius:20,padding:"28px 20px calc(28px + env(safe-area-inset-bottom,0px))",width:"100%",boxSizing:"border-box",maxHeight:"calc(85dvh / var(--app-zoom, 1))",overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain" }}>{children}</div>
+        {onClose && (
+          <button aria-label="閉じる" onClick={onClose}
+            style={{ position:"absolute", top:8, right:8, width:34, height:34, padding:0, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, lineHeight:1, cursor:"pointer", zIndex:2, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+        )}
+      </div>
     </div>
   );
 }
@@ -4689,7 +4697,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   };
   return (
     <Modal onClose={onClose}>
-      <div style={{ maxHeight:"74vh", overflowY:"auto", textAlign:"left" }}>
+      <div style={{ maxHeight:"calc(74vh / var(--app-zoom, 1))", overflowY:"auto", textAlign:"left" }}>
         <div style={{ position:"sticky",top:0,zIndex:2,background:"#fff",marginBottom:14,paddingBottom:2 }}>
           <h3 style={{ fontSize:17,fontWeight:800,textAlign:"center",margin:0,padding:"4px 40px" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
           <button aria-label="閉じる" onClick={onClose} style={{ padding:0, position:"absolute",top:-2,right:0,width:36,height:36,border:"none",background:"#f0f2f5",borderRadius:"50%",fontSize:18,fontWeight:700,color:C.textSec,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>✕</button>
@@ -8748,7 +8756,7 @@ function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
             value={tournamentSearch}
             onChange={e => setTournamentSearch(e.target.value)}
           />
-          <div style={{ maxHeight:"46dvh", overflowY:"auto" }}>
+          <div style={{ maxHeight:"calc(46dvh / var(--app-zoom, 1))", overflowY:"auto" }}>
             {filteredTournaments.length === 0 ? (
               <div style={{ fontSize:12, color:C.textSec, textAlign:"center", padding:"20px 0" }}>該当する大会がありません</div>
             ) : filteredTournaments.map(t => (
@@ -9538,7 +9546,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 
   return (
     <Modal onClose={handleClose}>
-      <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+      <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{matchLabel}の対戦情報を入力</div>
           <button
@@ -10309,7 +10317,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         const nextSlots = (rounds[advancingFrom.round_no + 1] || []).slice().sort((a, b) => a.slot_no - b.slot_no);
         return (
           <Modal onClose={() => setAdvancingFrom(null)}>
-            <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+            <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>どの試合に進出させますか？</div>
                 <button
@@ -10354,7 +10362,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
       {bulkImportOpen && (
         <Modal onClose={() => !bulkImporting && closeBulkImport()}>
-          <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+          <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
               <div style={{ fontSize: 15, fontWeight: 800 }}>📋 ドローにデータ登録</div>
               <button
@@ -10438,7 +10446,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         ).sort((a, b) => a.round_no - b.round_no || a.slot_no - b.slot_no);
         return (
           <Modal onClose={() => setCopySourceMatch(null)}>
-            <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+            <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>コピー先の枠を選んでください</div>
                 <button
@@ -11056,7 +11064,7 @@ function PracticeScreen({ onNavigate }) {
   }
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:"#fff", padding:"18px 16px 14px", fontSize:20, fontWeight:800 }}>練習</div>
       <div style={{ padding:14 }}>
         <div style={{ display:"flex", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12 }}>
@@ -11444,7 +11452,7 @@ function EquipSheet({ title, onClose, children }) {
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()}
-        style={{ width:"100%", maxWidth:520, maxHeight:"88vh", overflowY:"auto", background:C.white, borderRadius:"18px 18px 0 0", padding:"10px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))", WebkitOverflowScrolling:"touch" }}>
+        style={{ width:"100%", maxWidth:520, maxHeight:"calc(88vh / var(--app-zoom, 1))", overflowY:"auto", background:C.white, borderRadius:"18px 18px 0 0", padding:"10px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))", WebkitOverflowScrolling:"touch" }}>
         <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <div style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, color:C.navy, wordBreak:"break-word" }}>{title}</div>
@@ -11912,7 +11920,7 @@ function EquipmentScreen({ onBack }) {
   const photoItem = photoId ? items.find(x => x.id === photoId) : null;
 
   return (
-    <div style={{ ...S.page, background:C.white, minHeight:"100dvh", paddingBottom:0, display:"flex", flexDirection:"column" }}>
+    <div style={{ ...S.page, background:C.white, minHeight:"calc(100dvh / var(--app-zoom, 1))", paddingBottom:0, display:"flex", flexDirection:"column" }}>
       {/* ★履歴を開いているときも、ほかの画面と同じヘッダーを使う（以前は全画面の重ね表示で、ヘッダーの幅が違っていた） */}
       <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:20 }}>
         <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={detail ? closeDetail : onBack} aria-label="戻る">←</button>
@@ -12093,7 +12101,7 @@ function EquipmentScreen({ onBack }) {
                   </div>
                 )}
                 {showInput && (
-                  <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, maxHeight:"34vh", overflowY:"auto", boxShadow:"0 6px 16px rgba(0,0,0,0.10)" }}>
+                  <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, maxHeight:"calc(34vh / var(--app-zoom, 1))", overflowY:"auto", boxShadow:"0 6px 16px rgba(0,0,0,0.10)" }}>
                     <div style={{ fontSize:14, fontWeight:800, color:"#7a8499", padding:"8px 12px 4px", background:"#f8f9fb" }}>{hits ? `候補（${hits.length}人）` : "🕘 最近選んだ人"}</div>
                     {list.map(n => <button key={n} style={sg} onClick={()=>pick(n)}>{n}</button>)}
                     {typed && !players.some(p => norm(p) === norm(typed)) && <button style={{ ...sg, color:C.navy }} onClick={()=>pick(typed)}>「{typed}」で登録する</button>}
@@ -12127,7 +12135,7 @@ function EquipmentScreen({ onBack }) {
           <div style={{ color:"#fff", fontSize:19, fontWeight:900, textAlign:"center", wordBreak:"break-word" }}>{photoItem.name}</div>
           {uploadingId === photoItem.id
             ? <div style={{ color:"#fff", fontSize:15, fontWeight:800, padding:40 }}>写真を保存中…</div>
-            : <img src={photoItem.photo_url} alt={`${photoItem.name}の写真`} style={{ maxWidth:"100%", maxHeight:"68vh", borderRadius:12, background:"#fff", objectFit:"contain" }} />}
+            : <img src={photoItem.photo_url} alt={`${photoItem.name}の写真`} style={{ maxWidth:"100%", maxHeight:"calc(68vh / var(--app-zoom, 1))", borderRadius:12, background:"#fff", objectFit:"contain" }} />}
           <div style={{ display:"flex", gap:10, width:"100%", maxWidth:420 }}>
             {!isViewer && <button onClick={()=>setPhotoPick(photoItem.id)} style={{ flex:1, textAlign:"center", borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"#fff", color:C.navy, border:"none", cursor:"pointer" }}>写真を変更</button>}
             <button onClick={()=>setPhotoId(null)} style={{ flex:1, borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"transparent", color:"#fff", border:"1.5px solid rgba(255,255,255,0.5)", cursor:"pointer" }}>閉じる</button>
@@ -14171,7 +14179,7 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
     const sorted = [...matches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date));
     const picked = new Set(draft.pickedIds ?? []);
     return (
-      <div style={{ minHeight:"100vh", background:C.white }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.white }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"15px 16px", borderBottom:`1px solid ${C.border}` }}>
           <div style={{ fontSize:17, fontWeight:800 }}>✓ 試合を個別に選ぶ</div>
           <div onClick={()=>setPickOpen(false)} style={{ color:C.textSec, fontSize:19, cursor:"pointer" }}>✕</div>
@@ -14215,7 +14223,7 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
   }
 
   return (
-    <div style={{ minHeight:"100vh", background:C.white }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.white }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"15px 16px", borderBottom:`1px solid ${C.border}` }}>
         <div style={{ fontSize:17, fontWeight:800 }}>🎚️ 集計対象の設定</div>
         <div onClick={onClose} style={{ color:C.textSec, fontSize:19, cursor:"pointer" }}>✕</div>
@@ -14590,7 +14598,7 @@ function PairPickerSheet({ pairs, selectedKey, onSelect, onClose, allowAll }) {
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()}
-        style={{ width:"100%", maxWidth:520, maxHeight:"85vh", background:C.white, borderRadius:"18px 18px 0 0", display:"flex", flexDirection:"column", paddingBottom:"env(safe-area-inset-bottom)" }}>
+        style={{ width:"100%", maxWidth:520, maxHeight:"calc(85vh / var(--app-zoom, 1))", background:C.white, borderRadius:"18px 18px 0 0", display:"flex", flexDirection:"column", paddingBottom:"env(safe-area-inset-bottom)" }}>
         <div style={{ padding:"8px 14px 0" }}>
           <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
           <div style={{ display:"flex", alignItems:"center", marginBottom:10 }}>
@@ -14683,7 +14691,7 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
           <span style={{ fontSize:12, color: disabled ? "#c4cbd8" : C.text }}>{open ? "▲" : "▼"}</span>
         </div>
         {open && (
-          <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:4, maxHeight:"38vh", overflowY:"auto", boxShadow:"0 4px 12px rgba(0,0,0,0.12)", WebkitOverflowScrolling:"touch" }}>
+          <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:4, maxHeight:"calc(38vh / var(--app-zoom, 1))", overflowY:"auto", boxShadow:"0 4px 12px rgba(0,0,0,0.12)", WebkitOverflowScrolling:"touch" }}>
             {[{ value:"", label:placeholder }, ...items].map((it, i) => {
               const on = it.value === value;
               return (
@@ -14708,7 +14716,7 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()}
-        style={{ width:"100%", maxWidth:520, maxHeight:"85vh", overflowY:"auto", background:C.white, borderRadius:"18px 18px 0 0", padding:"8px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))" }}>
+        style={{ width:"100%", maxWidth:520, maxHeight:"calc(85vh / var(--app-zoom, 1))", overflowY:"auto", background:C.white, borderRadius:"18px 18px 0 0", padding:"8px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))" }}>
         <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
         <div style={{ display:"flex", alignItems:"center" }}>
           <div style={{ flex:1, fontSize:17, fontWeight:900, color:C.navy }}>相手を選択</div>
@@ -15108,7 +15116,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     background:C.white, fontSize:14.5, fontWeight:700, color:C.text, marginBottom:10, fontFamily:"inherit" };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
@@ -15854,7 +15862,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   useEffect(() => { setUnitPage(0); }, [resultMatchesAll]);
   if (loading) {
     return (
-      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
         </div>
@@ -15872,7 +15880,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     if (schoolPickerOpen) {
       const filteredSchools = knownSchoolNames.filter(n => !schoolSearch.trim() || n.toLowerCase().includes(schoolSearch.trim().toLowerCase()));
       return (
-        <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+        <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
           <div style={{ ...S.hdr, color:C.white }}>
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setSchoolPickerOpen(false)}>←</span>
@@ -15907,7 +15915,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
     const filteredRoster = rosterForSchool.filter(p => !teamSearch.trim() || p.player_name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
     return (
-      <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={cancelWizard}>←</span>
@@ -16007,7 +16015,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     };
 
     return (
-      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("wizardPlayer")}>←</span>
@@ -16382,7 +16390,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const metricLabel = { serveRate:"1stサーブ成功率", decisionRate:"決定率" };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
@@ -17338,7 +17346,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
       {showBreakdown && (
         <Modal onClose={()=>setShowBreakdown(false)}>
-          <div style={{ maxHeight:"75vh", overflowY:"auto" }}>
+          <div style={{ maxHeight:"calc(75vh / var(--app-zoom, 1))", overflowY:"auto" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:2 }}>
               <div style={{ fontSize:15, fontWeight:800 }}>総合成績の内訳</div>
               <button
@@ -20382,7 +20390,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               {/* ★動画リンクの追加・編集モーダル。「動画リンクを追加する」ボタンを押したときだけ開く。 */}
               {showVideoModal && (
                 <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center" }} onClick={()=>setShowVideoModal(false)}>
-                  <div style={{ background:C.white,borderRadius:"16px 16px 0 0",padding:16,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+                  <div style={{ background:C.white,borderRadius:"16px 16px 0 0",padding:16,width:"100%",maxWidth:480,maxHeight:"calc(85vh / var(--app-zoom, 1))",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
                       <div style={{ fontSize:14,fontWeight:800,color:C.navy }}>🎥 動画リンク</div>
                       <div style={{ color:C.textSec,fontSize:18,cursor:"pointer",padding:4 }} onClick={()=>setShowVideoModal(false)}>✕</div>
@@ -21025,7 +21033,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 {/* ★中断・途中終了などは「記録する」ボタンの近くに置くと押し間違えるため、上の「⋯ その他」にまとめた */}
 
                 {/* ★下の選択肢を「記録する」ボタンより上までスクロールできるようにする余白（以前はpaddingBottomで確保） */}
-                <div aria-hidden="true" style={{ height:"60vh" }} />
+                <div aria-hidden="true" style={{ height:"calc(60vh / var(--app-zoom, 1))" }} />
                 {/* 記録するボタン（画面の一番下に貼りつく）
                     ★以前は position:fixed で画面に固定していたが、文字を大きくしている人（アプリの「文字の大きさ」＝画面全体のzoom、
                       またはスマホ本体の文字サイズ設定）だと、ブラウザによっては「一番下」の位置を拡大前の大きさで計算してしまい、
@@ -24412,7 +24420,7 @@ function AuthScreen({ onAuthed }) {
   // 一瞬でもステップ1が見えてから飛び直す、という見た目のガタつきを避けるため簡易ローディングを表示する
   if (!sessionRestoreChecked) {
     return (
-      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#f4f6f9", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", display:"flex", alignItems:"center", justifyContent:"center", background:"#f4f6f9", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ textAlign:"center", color:C.textSec }}>
           <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
           読み込み中...
@@ -24805,7 +24813,7 @@ function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
   };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white, display:"flex", alignItems:"center", gap:10 }}>
         <span style={{ cursor:"pointer", fontSize:18 }} onClick={onCancel}>←</span>
         <div style={{ fontSize:18, fontWeight:800 }}>{existing ? "AI動画分析を編集" : "AI動画分析を追加"}</div>
@@ -24868,7 +24876,7 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
   const isViewer = useIsViewer(); // ★閲覧専用アカウントは見るだけ（編集・削除は不可）
   const label = aiMatchLabel(match).text;
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
@@ -24952,7 +24960,7 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
   }, [effectivePlayer, period]);
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         {/* ★ホーム・試合一覧とヘッダーの高さをそろえるため、説明の小さい文字は出さない */}
         <div style={{ fontSize:20, fontWeight:800 }}>🤖 AI動画分析</div>
@@ -25068,7 +25076,7 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
   const filtered = candidates.filter(r => !search.trim() || r.player_name.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
@@ -25142,6 +25150,9 @@ export default function App() {
   });
   useEffect(() => {
     document.documentElement.style.zoom = `${textScale}%`;
+    // ★画面全体をzoomで拡大すると、vh（画面の高さ）を使った大きさも一緒に拡大されて画面からはみ出す
+    //   （小窓の「閉じる」が画面の外に出て押せなくなっていた）。高さの指定はこの値で割って打ち消す。
+    document.documentElement.style.setProperty("--app-zoom", String(Number(textScale) / 100 || 1));
     try { localStorage.setItem("textScale", textScale); } catch(e) {}
   }, [textScale]);
 
