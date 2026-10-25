@@ -4919,14 +4919,28 @@ async function prefetchAnalysisBase() {
   }
 }
 function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; _teamBoutIdsCache = null; }
+// ★試合一覧から試合・団体戦・大会を開いて「←」（スマホの戻るも）で戻ったとき、さっき見ていた位置に戻すための控え。
+//   以前は戻るたびに試合一覧を作り直していたため、スクロール位置・絞り込み・「もっと見る」が消えて一番上に戻っていた。
+//   ・試合一覧を表示している間は、今の状態（スクロール位置・絞り込みなど）をここに書き続ける。
+//   ・「戻る」で試合一覧に戻ったときだけ（App側で markMatchListReturn を呼ぶ）、少しの間この控えで表示し直す。
+//     下のタブの「試合」を押して開いたときなどは、これまで通り一番上から表示する。
+let _matchListViewState = null;
+let _matchListRestoreUntil = 0;
+function markMatchListReturn() { if (_matchListViewState) _matchListRestoreUntil = Date.now() + 3000; }
 
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis, onModeChange }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
+  // ★「戻る」で戻ってきたときは、前に見ていた状態（同じタブのときだけ）で表示する
+  const restoreViewRef = useRef(
+    Date.now() < _matchListRestoreUntil && _matchListViewState && _matchListViewState.mode === (initialMatchMode || "tournament")
+      ? _matchListViewState : null
+  );
+  const rv = restoreViewRef.current;
   // ★スマホでは一度に何百枚もカードを描画するだけで表示が重くなるため、
   //   まず30件だけ描画し、「もっと見る」で追加していく（絞り込み結果の件数自体は変わらない）
   const PAGE_SIZE = 30;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [childOnly, setChildOnly] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(() => rv?.visibleCount || PAGE_SIZE);
+  const [childOnly, setChildOnly] = useState(() => !!rv?.childOnly);
   const [allMatches, setAllMatches] = useState([]);
   const [allMatchesRaw, setAllMatchesRaw] = useState([]); // ★団体戦の番手も含む「全試合」。個人戦一覧(allMatches)からは除外されるため別途保持
   const [allTeamMatches, setAllTeamMatches] = useState([]);
@@ -4948,22 +4962,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [linkedPlayerId, setLinkedPlayerId] = useState(null); // ★大会の「出場選手」に入っているかの判定用
   const [mySchoolName, setMySchoolName] = useState("");
   const [mySchoolId, setMySchoolId] = useState(null);
-  const [tmMySchoolOnly, setTmMySchoolOnly] = useState(false); // 自校のみ絞り込み
+  const [tmMySchoolOnly, setTmMySchoolOnly] = useState(() => !!rv?.tmMySchoolOnly); // 自校のみ絞り込み
   const [toast, setToast] = useState(initialToast || null);
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
   // 共通絞り込み（個人戦・団体戦で共有）
-  const [filterSearch, setFilterSearch] = useState("");       // フリーワード（入力欄の値）
+  const [filterSearch, setFilterSearch] = useState(() => rv?.filterSearch || "");       // フリーワード（入力欄の値）
   // ★1文字打つたびに全試合を絞り込み直すと、試合数が多いほど入力がカクついていた。
   //   入力が落ち着いてから（0.25秒後）実際の絞り込みを走らせる。
-  const [searchQuery, setSearchQuery] = useState("");        // 実際に絞り込みに使う語
+  const [searchQuery, setSearchQuery] = useState(() => (rv?.filterSearch || "").trim().toLowerCase()); // 実際に絞り込みに使う語
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(filterSearch.trim().toLowerCase()), 250);
     return () => clearTimeout(t);
   }, [filterSearch]);
-  const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
+  const [filterStatus, setFilterStatus] = useState(() => rv?.filterStatus || "all");   // all | upcoming | finished
   // ★個人戦一覧の絞り込み：動画リンクがある試合だけ／AI分析がある試合だけ（それぞれ独立してON/OFF、両方ONならAND）
-  const [filterHasVideo, setFilterHasVideo] = useState(false);
-  const [filterHasAi, setFilterHasAi] = useState(false);
+  const [filterHasVideo, setFilterHasVideo] = useState(() => !!rv?.filterHasVideo);
+  const [filterHasAi, setFilterHasAi] = useState(() => !!rv?.filterHasAi);
   // 日付フィルタ
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
   const [dateFilterMode, setDateFilterMode] = useState("day"); // day | range | month
@@ -4971,7 +4985,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [dateFilterRangeStart, setDateFilterRangeStart] = useState(null);
   const [dateFilterRangeEnd, setDateFilterRangeEnd] = useState(null);
   const [dateFilterMonth, setDateFilterMonth] = useState(null); // "YYYY-MM"
-  const [dateFilterApplied, setDateFilterApplied] = useState(null);
+  const [dateFilterApplied, setDateFilterApplied] = useState(() => rv?.dateFilterApplied || null);
   const [calViewYear, setCalViewYear] = useState(new Date().getFullYear());
   const [calViewMonth, setCalViewMonth] = useState(new Date().getMonth()); // 0-11
   const [rangeStep, setRangeStep] = useState("start"); // "start" | "end"
@@ -4987,7 +5001,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }, []);
   useEffect(() => { reloadEquipMap(); }, [reloadEquipMap, tournaments]);
   const withEquip = (t) => equipMap[t.id] ? { ...t, equipment_plan: equipMap[t.id] } : t;
-  const [tournamentSearch, setTournamentSearch] = useState("");
+  const [tournamentSearch, setTournamentSearch] = useState(() => rv?.tournamentSearch || "");
   const [tournamentDropdownOpen, setTournamentDropdownOpen] = useState(false);
   const [showTournamentModal, setShowTournamentModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
@@ -5082,7 +5096,53 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     })();
   }, []);
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [timeTab, searchQuery, filterStatus, dateFilterApplied, childOnly, tmMySchoolOnly, filterHasVideo, filterHasAi]);
+  // ★最初の表示では戻さない（「戻る」で戻ってきたとき、「もっと見る」で広げた件数を残すため）
+  const visibleResetReadyRef = useRef(false);
+  useEffect(() => {
+    if (!visibleResetReadyRef.current) { visibleResetReadyRef.current = true; return; }
+    setVisibleCount(PAGE_SIZE);
+  }, [timeTab, searchQuery, filterStatus, dateFilterApplied, childOnly, tmMySchoolOnly, filterHasVideo, filterHasAi]);
+
+  // ★今の表示の状態を控えに書き続ける（試合を開いて「←」で戻ったときに、同じ位置へ戻すため）
+  const listRootRef = useRef(null);
+  const liveScrollYRef = useRef(rv ? rv.scrollY : 0);
+  const scrollRestoringRef = useRef(!!rv); // 位置を戻し終わるまでは、途中のスクロール（一番上に戻る動きなど）を控えに書かない
+  useEffect(() => {
+    _matchListViewState = {
+      mode: timeTab, scrollY: liveScrollYRef.current, visibleCount, filterSearch, filterStatus,
+      filterHasVideo, filterHasAi, childOnly, tmMySchoolOnly, dateFilterApplied, tournamentSearch,
+    };
+  }, [timeTab, visibleCount, filterSearch, filterStatus, filterHasVideo, filterHasAi, childOnly, tmMySchoolOnly, dateFilterApplied, tournamentSearch]);
+  useEffect(() => {
+    const onScroll = () => {
+      // 画面が切り替わって一覧が消えた後のスクロール（短い画面に縮んだぶん等）は記録しない
+      if (scrollRestoringRef.current || !listRootRef.current || !listRootRef.current.isConnected) return;
+      liveScrollYRef.current = window.scrollY;
+      if (_matchListViewState) _matchListViewState.scrollY = window.scrollY;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  // ★一覧の中身が表示されてから、前に見ていた位置へスクロールする
+  //   （App側の「画面が変わったら一番上へ」より後に動くよう、次の描画のタイミングで行う）
+  useEffect(() => {
+    if (loading || !restoreViewRef.current) return;
+    const y = restoreViewRef.current.scrollY || 0;
+    restoreViewRef.current = null;
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      window.scrollTo(0, y);
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        window.scrollTo(0, y);
+        scrollRestoringRef.current = false;
+        liveScrollYRef.current = window.scrollY;
+        if (_matchListViewState) _matchListViewState.scrollY = window.scrollY;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [loading]);
 
   const todayStr = today();
 
@@ -5444,7 +5504,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }
 
   return (
-    <div style={S.page}>
+    <div ref={listRootRef} style={S.page}>
       <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -25464,6 +25524,12 @@ export default function App() {
   };
   const lastSnapRef = useRef(null);   // 今の画面（最新の状態）
   const restoringRef = useRef(false); // 履歴から戻している最中は、履歴に積まない
+  // ★試合一覧へ「戻る」で戻ってきたとき（履歴の一個前が試合一覧だったとき）は、さっき見ていた位置で表示する
+  //   （下のタブなどで新しく開いたときは、これまで通り一番上から）。判定は画面を描く前に行う。
+  if (screen === "list" && lastSnapRef.current && lastSnapRef.current.screen !== "list") {
+    const hist = navHistoryRef.current;
+    if (restoringRef.current || (hist.length && navKeyOf(hist[hist.length - 1]) === "list")) markMatchListReturn();
+  }
   useEffect(() => {
     const prev = lastSnapRef.current;
     const curKey = navKeyOf(navSnap);
