@@ -143,8 +143,8 @@ const C = {
   red:     "#e53935",
   redL:    "#fdecea",
   purple:  "#6366f1",
-  live:    "#1e40af", // ★試合中（進行中）の色。勝ち＝緑・負け＝オレンジと見分けるため濃い青
-  liveL:   "#dbeafe",
+  live:    "#dc2626", // ★試合中（進行中）の色。勝ち＝緑・負け＝オレンジ・待機中＝紫と見分けるため赤
+  liveL:   "#fee2e2",
   gray:    "#f4f6f9",
   border:  "#dde2ea",
   text:    "#1a2236",
@@ -13856,7 +13856,7 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           const boutBWin = finishedNow && match && winnerSideOf(match)==="B";
           const myClubLabel = ((tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム") + (tm.my_team_division || "");
           const oppClubLabel = (tm.opponent_name || "相手") + (tm.opponent_division || "");
-          // ★個人戦一覧のカードと同じ「勝ち＝緑／負け＝オレンジ／進行中＝濃い青／待機中～予定＝緑／中断・途中終了＝グレー」の色帯
+          // ★個人戦一覧のカードと同じ「勝ち＝緑／負け＝オレンジ／進行中＝赤／待機中～予定＝緑／中断・途中終了＝グレー」の色帯
           const stripeColor = isRecording ? C.live
             : isSuspended ? C.textSec
             : isAbandoned ? C.textSec
