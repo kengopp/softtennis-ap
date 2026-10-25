@@ -14706,6 +14706,48 @@ function PairPickerSheet({ pairs, selectedKey, onSelect, onClose, allowAll }) {
   );
 }
 
+// ★相手分析のシートで使う選択欄（名前と「◯試合 ◯勝◯敗」を2行にして揃えるため自前の一覧で選ぶ）
+function OppPicker({ id, open, onToggle, onCloseList, value, placeholder, disabled, items, onPick }) {
+  const listRef = useRef(null);
+  // ★一覧を開いたとき、下が隠れていればシートを少しスクロールして一覧全体が見えるようにする
+  useEffect(() => {
+    if (open && listRef.current) {
+      try { listRef.current.scrollIntoView({ block:"nearest", behavior:"smooth" }); } catch { /* 古い端末は無視 */ }
+    }
+  }, [open]);
+  const cur = items.find(it => it.value === value);
+  const wl = (it) => it.w != null && <span style={{ color: it.w > it.l ? C.accent : it.w < it.l ? C.red : C.textSec, fontWeight:800 }}>{it.w}勝{it.l}敗</span>;
+  const on0 = !!value;
+  return (
+    <>
+      <div onClick={()=>{ if (!disabled) onToggle(id); }}
+        style={{ width:"100%", boxSizing:"border-box", fontSize:16, padding:"11px 12px", borderRadius:10,
+          border:`1.5px solid ${open ? C.navy : on0 ? C.accent : C.border}`, background: disabled ? "#f4f6f9" : C.white, color: disabled ? "#a0a8b8" : C.text,
+          display:"flex", alignItems:"center", gap:8, cursor: disabled ? "default" : "pointer", touchAction:"manipulation", WebkitTapHighlightColor:"transparent" }}>
+        <span style={{ flex:1, minWidth:0, wordBreak:"break-word" }}>{cur ? cur.label : placeholder}</span>
+        <span style={{ fontSize:12, color: disabled ? "#c4cbd8" : C.text }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && (
+        <div ref={listRef} style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:4, maxHeight:"calc(38vh / var(--app-zoom, 1))", overflowY:"auto", overscrollBehavior:"contain", boxShadow:"0 4px 12px rgba(0,0,0,0.12)", WebkitOverflowScrolling:"touch", scrollMarginBottom:12 }}>
+          {[{ value:"", label:placeholder }, ...items].map((it, i) => {
+            const on = it.value === value;
+            return (
+              <div key={it.value || "__all"} onClick={()=>{ onPick(it.value); onCloseList(); }}
+                style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderTop: i ? `1px solid ${C.border}` : "none", background: on ? "#eef8f8" : C.white, cursor:"pointer", touchAction:"manipulation" }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:16, fontWeight: on || !it.value ? 800 : 600, color: !it.value ? "#1d4fa8" : C.text, wordBreak:"break-word" }}>{it.label}</div>
+                  {it.sub && <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginTop:2 }}>{it.sub}{it.w != null && <>　{wl(it)}</>}</div>}
+                </div>
+                {on && <span style={{ color:"#0b6e75", fontSize:16, fontWeight:900 }}>✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ★相手分析：都道府県・学校・ペアをプルダウンで選ぶシート（前回の条件が入った状態で開く）
 const OPP_NO_PREF = "__none";
 function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onApply, onClose }) {
@@ -14737,52 +14779,22 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
     : `全${schools.length}校`;
   const nothing = !pref && !club && !pairKey;
   const [listOpen, setListOpen] = useState(null); // ★開いている一覧（"club" | "pair" | null）
-  // ★学校・ペアは自前の一覧で選ぶ（名前と「◯試合 ◯勝◯敗」を2行にして揃えるため）
-  const Picker = ({ id, value, placeholder, disabled, items, onPick }) => {
-    const open = listOpen === id;
-    const cur = items.find(it => it.value === value);
-    const wl = (it) => it.w != null && <span style={{ color: it.w > it.l ? C.accent : it.w < it.l ? C.red : C.textSec, fontWeight:800 }}>{it.w}勝{it.l}敗</span>;
-    return (
-      <>
-        <div onClick={()=>{ if (!disabled) setListOpen(open ? null : id); }}
-          style={{ ...selStyle(!!value, disabled), display:"flex", alignItems:"center", gap:8, cursor: disabled ? "default" : "pointer", ...(open ? { borderColor:C.navy } : {}) }}>
-          <span style={{ flex:1, minWidth:0, wordBreak:"break-word" }}>{cur ? cur.label : placeholder}</span>
-          <span style={{ fontSize:12, color: disabled ? "#c4cbd8" : C.text }}>{open ? "▲" : "▼"}</span>
-        </div>
-        {open && (
-          <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:4, maxHeight:"calc(38vh / var(--app-zoom, 1))", overflowY:"auto", boxShadow:"0 4px 12px rgba(0,0,0,0.12)", WebkitOverflowScrolling:"touch" }}>
-            {[{ value:"", label:placeholder }, ...items].map((it, i) => {
-              const on = it.value === value;
-              return (
-                <div key={it.value || "__all"} onClick={()=>{ onPick(it.value); setListOpen(null); }}
-                  style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderTop: i ? `1px solid ${C.border}` : "none", background: on ? "#eef8f8" : C.white, cursor:"pointer" }}>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:16, fontWeight: on || !it.value ? 800 : 600, color: !it.value ? "#1d4fa8" : C.text, wordBreak:"break-word" }}>{it.label}</div>
-                    {it.sub && <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginTop:2 }}>{it.sub}{it.w != null && <>　{wl(it)}</>}</div>}
-                  </div>
-                  {on && <span style={{ color:"#0b6e75", fontSize:16, fontWeight:900 }}>✓</span>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </>
-    );
-  };
   const lbl = (t) => <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"12px 0 6px" }}>{t}</div>;
-  const selStyle = (on, disabled) => ({ width:"100%", boxSizing:"border-box", fontSize:16, padding:"11px 12px", borderRadius:10,
-    border:`1.5px solid ${on ? C.accent : C.border}`, background: disabled ? "#f4f6f9" : C.white, color: disabled ? "#a0a8b8" : C.text, appearance:"auto" });
+  // ★選択欄の部品（OppPicker）は画面の外で定義する。以前はこの中で定義していたため、
+  //   押すたびに3つの選択欄が丸ごと作り直され、スマホでタップが空振りしたり動きが重くなっていた
+  const toggleList = (id) => setListOpen(o => o === id ? null : id);
+  const closeList = () => setListOpen(null);
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()}
-        style={{ width:"100%", maxWidth:520, maxHeight:"calc(85vh / var(--app-zoom, 1))", overflowY:"auto", background:C.white, borderRadius:"18px 18px 0 0", padding:"8px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))" }}>
+        style={{ width:"100%", maxWidth:520, maxHeight:"calc(85vh / var(--app-zoom, 1))", overflowY:"auto", overscrollBehavior:"contain", WebkitOverflowScrolling:"touch", background:C.white, borderRadius:"18px 18px 0 0", padding:"8px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))" }}>
         <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
         <div style={{ display:"flex", alignItems:"center" }}>
           <div style={{ flex:1, fontSize:17, fontWeight:900, color:C.navy }}>相手を選択</div>
           <button aria-label="閉じる" onClick={onClose} style={{ padding:0, width:32, height:32, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
         </div>
         {lbl("都道府県")}
-        <Picker id="pref" value={pref} placeholder="すべての県"
+        <OppPicker id="pref" open={listOpen==="pref"} onToggle={toggleList} onCloseList={closeList} value={pref} placeholder="すべての県"
           items={[...prefs.map(p => ({ value:p, label:p, n:schools.filter(sc=>sc.pref===p).length })),
                   ...(hasNoPref ? [{ value:OPP_NO_PREF, label:"県の登録なし", n:schools.filter(sc=>!sc.pref).length }] : [])]
                  .map(it => ({ ...it, sub:`${it.n}校` }))}
@@ -14790,11 +14802,11 @@ function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onA
             const sc = schools.find(x => x.name === club);
             if (sc && v && !(v === OPP_NO_PREF ? !sc.pref : sc.pref === v)) { setClub(""); setPairKey(""); } }} />
         {lbl("チーム名（学校名）")}
-        <Picker id="club" value={club} placeholder="すべての学校"
+        <OppPicker id="club" open={listOpen==="club"} onToggle={toggleList} onCloseList={closeList} value={club} placeholder="すべての学校"
           items={prefSchools.map(sc => ({ value:sc.name, label:sc.name, sub:`${sc.pref ? sc.pref+"・" : ""}${sc.pairs.length}ペア・${sc.n}試合`, w:sc.pairs.reduce((t,p)=>t+p.w,0), l:sc.pairs.reduce((t,p)=>t+p.l,0) }))}
           onPick={v=>{ setClub(v); setPairKey(""); }} />
         {lbl("ペア名")}
-        <Picker id="pair" value={pairKey} placeholder={curSchool ? "すべてのペア" : "先に学校を選んでください"} disabled={!curSchool}
+        <OppPicker id="pair" open={listOpen==="pair"} onToggle={toggleList} onCloseList={closeList} value={pairKey} placeholder={curSchool ? "すべてのペア" : "先に学校を選んでください"} disabled={!curSchool}
           items={clubPairs.map(p => ({ value:p.key, label:p.label, sub:`${p.matches.length}試合`, w:p.w, l:p.l }))}
           onPick={v=>setPairKey(v)} />
         {!curSchool && <div style={{ fontSize:12.5, color:C.textSec, marginTop:6 }}>※学校を選ぶと、その学校のペアが選べます</div>}
