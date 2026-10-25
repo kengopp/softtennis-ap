@@ -6592,6 +6592,13 @@ function saveTournamentFilterPrefs(tournamentName, prefs) {
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
 const _teamListModeMemo = {}; // ★大会詳細・団体戦タブの表示モードを大会ごとに記憶
+const _drawViewModeMemo = {}; // ★大会詳細・個人戦の「ドロー表／ペア別対戦」を大会ごとに記憶
+// ★大会詳細のスクロール位置の控え。試合などを開いて戻ってきたときだけ、この位置に戻す
+let _tournamentDetailView = null;        // { id, scrollY }
+let _tournamentDetailRestoreUntil = 0;
+function markTournamentDetailReturn(id) {
+  if (_tournamentDetailView && _tournamentDetailView.id === id) _tournamentDetailRestoreUntil = Date.now() + 3000;
+}
 function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, onOpenPairMaster, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport, onOpenAiAnalysis, onOpenPairMatch }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
@@ -6612,7 +6619,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [videoView, setVideoView] = useState(null);
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
-  const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
+  const [drawViewMode, _setDrawViewMode] = useState(() => _drawViewModeMemo[tournament?.id] || "draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
+  const setDrawViewMode = (v) => { if (tournament?.id) _drawViewModeMemo[tournament.id] = v; _setDrawViewMode(v); };
   // ★前回この大会で使っていた絞り込みを復元する（試合を見て戻ってきても選び直さなくていいように）
   const savedFilterPrefs = useMemo(() => loadTournamentFilterPrefs(tournament?.name || ""), [tournament?.name]);
   const [individualResultFilter, setIndividualResultFilter] = useState(savedFilterPrefs.result || "all"); // "all" | "win" | "lose"（勝ち残り／敗退の絞り込み）
@@ -6737,6 +6745,42 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload]);
+
+  // ★試合などを開いて戻ってきたときは、さっき見ていた位置で表示する
+  const rootRef = useRef(null);
+  const restoreYRef = useRef(
+    Date.now() < _tournamentDetailRestoreUntil && _tournamentDetailView?.id === tournament.id ? _tournamentDetailView.scrollY : null
+  );
+  const restoringScrollRef = useRef(restoreYRef.current != null);
+  useEffect(() => {
+    _tournamentDetailRestoreUntil = 0;
+    if (restoreYRef.current == null) _tournamentDetailView = { id: tournament.id, scrollY: 0 };
+    const onScroll = () => {
+      // 位置を戻している途中や、画面が切り替わった後のスクロールは記録しない
+      if (restoringScrollRef.current || !rootRef.current || !rootRef.current.isConnected) return;
+      _tournamentDetailView = { id: tournament.id, scrollY: window.scrollY };
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [tournament.id]);
+  useEffect(() => {
+    if (loading || restoreYRef.current == null) return;
+    const y = restoreYRef.current;
+    restoreYRef.current = null;
+    let cancelled = false, tries = 0;
+    const go = () => {
+      if (cancelled) return;
+      window.scrollTo(0, y);
+      // 中身があとから表示されて高さが足りなかったときは、少し待ってやり直す
+      if (Math.abs(window.scrollY - y) > 2 && tries++ < 10) { setTimeout(go, 100); return; }
+      restoringScrollRef.current = false;
+      _tournamentDetailView = { id: tournament.id, scrollY: window.scrollY };
+    };
+    // アプリ全体の「画面が変わったら一番上へ」より後に動くよう、描画の後で行う
+    requestAnimationFrame(() => requestAnimationFrame(go));
+    return () => { cancelled = true; restoringScrollRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   // ★団体戦にドローが無い場合は「ドロー表」ボタン自体を出さないため、
   //   デフォルトの表示を自動で「試合カード」に切り替える
@@ -6925,7 +6969,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   }, [loading, tournament.id, teamMatches.length, individualMatches.length]);
 
   return (
-    <div style={S.page}>
+    <div ref={rootRef} style={S.page}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
         <div style={{ flex:1, minWidth:0 }}>
@@ -25529,6 +25573,12 @@ export default function App() {
   if (screen === "list" && lastSnapRef.current && lastSnapRef.current.screen !== "list") {
     const hist = navHistoryRef.current;
     if (restoringRef.current || (hist.length && navKeyOf(hist[hist.length - 1]) === "list")) markMatchListReturn();
+  }
+  // ★大会の中から開いた画面（試合・団体戦・ランキングなど）から大会詳細へ戻ったときは、さっきの位置で表示する
+  //   （試合一覧・ホーム・分析などのタブから新しく開いたときは、これまで通り一番上から）
+  const TOURNAMENT_FRESH_FROM = new Set(["list","home","personalAnalysis","pairAnalysis","stats","master","aiAnalysisList","tournamentDetail"]);
+  if (screen === "tournamentDetail" && tournamentContext && lastSnapRef.current && !TOURNAMENT_FRESH_FROM.has(lastSnapRef.current.screen)) {
+    markTournamentDetailReturn(tournamentContext.id);
   }
   useEffect(() => {
     const prev = lastSnapRef.current;
