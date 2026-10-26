@@ -12457,7 +12457,7 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
         >
           <div>
             <div style={{ fontSize:14,fontWeight:700 }}>🎒 備品</div>
-            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>テント・ジャグなどを、いま誰が持っているか<br/>引き継ぎの記録・予定・写真</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>テント・椅子・救急セットなどを、いま誰が持っているか<br/>引き継ぎの記録・予定・写真</div>
           </div>
           <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
