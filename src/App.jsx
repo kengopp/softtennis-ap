@@ -6474,12 +6474,13 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
           guidelineUrl ? (
             <div style={{ display:"flex", alignItems:"center", gap:8, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
               <span style={{ fontSize:18 }}>📄</span>
-              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{guidelineFileName || "添付済みファイル"}</span>
+              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}><span style={{ color:"#1976d2" }}>要項：</span>{guidelineFileName || "添付済みファイル"}</span>
               <span style={{ color:C.textSec, fontSize:12, cursor:"pointer" }} onClick={()=>{ setGuidelineUrl(""); setGuidelineFileName(""); }}>✕</span>
             </div>
           ) : (
-            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, color:C.textSec, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
-              {uploadingGuideline ? "アップロード中..." : "📎 PDFを選択"}
+            // ★要項と対戦表の「選択」ボタンを文字と色で区別する（隣り合っていて押し間違えやすかったため）
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, color:"#1976d2", background:"#eef5fd", borderRadius:8, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
+              {uploadingGuideline ? "⏳ 要項をアップロード中…" : <>📄 <b>要項</b>のPDFを選択</>}
               <input type="file" accept="application/pdf" style={{ display:"none" }} disabled={uploadingGuideline} onChange={handleGuidelineFileChange}/>
             </label>
           )
@@ -6511,13 +6512,13 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
           drawUrl ? (
             <div style={{ display:"flex", alignItems:"center", gap:8, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
               <span style={{ fontSize:18 }}>📋</span>
-              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{drawFileName || "添付済みファイル"}</span>
+              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}><span style={{ color:"#7a5a00" }}>対戦表：</span>{drawFileName || "添付済みファイル"}</span>
               <span style={{ color:C.textSec, fontSize:12, cursor:"pointer" }} onClick={()=>{ setDrawUrl(""); setDrawFileName(""); }}>✕</span>
             </div>
           ) : (
-            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, color:C.textSec, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
-              {uploadingDraw ? "アップロード中..." : "📎 PDF・画像を選択"}
-              <input type="file" accept="application/pdf,image/*" style={{ display:"none" }} disabled={uploadingDraw} onChange={handleDrawFileChange}/>
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, color:"#7a5a00", background:"#fdf6e3", borderRadius:8, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
+              {uploadingDraw ? "⏳ 対戦表をアップロード中…" : <>📋 <b>対戦表</b>のPDF・画像を選択</>}
+              <input type="file" accept=".pdf,application/pdf,image/*" style={{ display:"none" }} disabled={uploadingDraw} onChange={handleDrawFileChange}/>
             </label>
           )
         ) : (
@@ -6565,11 +6566,13 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
 
       <div style={{ display:"flex", gap:8, position:"sticky", bottom:0, background:C.white, padding:"12px 0 18px", marginTop:16, borderTop:`1px solid ${C.border}` }}>
         <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:"#f0f2f6", color:C.textSec, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
+        {/* ★要項・対戦表のアップロード中は保存できないようにする。
+             以前は対戦表のアップロード中でも押せてしまい、終わる前に保存すると対戦表が空のまま保存されていた */}
         <button
-          style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
-          disabled={saving || uploadingGuideline}
-          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl); setSaving(false); }}
-        >{initial ? "保存する" : "作成する"}</button>
+          style={{ flex:1, padding:11, borderRadius:10, border:"none", background:(uploadingGuideline || uploadingDraw) ? "#cfd5de" : `linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:(saving || uploadingGuideline || uploadingDraw)?"default":"pointer" }}
+          disabled={saving || uploadingGuideline || uploadingDraw}
+          onClick={async ()=>{ if (uploadingGuideline || uploadingDraw) return; setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl); setSaving(false); }}
+        >{(uploadingGuideline || uploadingDraw) ? "アップロード中…" : saving ? "保存中…" : initial ? "保存する" : "作成する"}</button>
       </div>
     </div>
   );
