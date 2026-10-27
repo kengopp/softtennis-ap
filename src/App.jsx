@@ -332,6 +332,12 @@ async function getAuthUserFast() {
   return user ?? null;
 }
 
+// ★スマホ本体の「戻る」で読み込み直されたときに、一個前の画面を開き直すための控え（App 内の「読み込み直し対策」参照）
+const NAV_BOUNCE_KEY = "stNavBounceV1";
+const NAV_DOC_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`; // このページ（読み込み）ごとに別の値
+// 読み込んだ直後の控え（画面を表示すると今の画面で上書きされるため、最初に読んでおく）
+const NAV_BOUNCE_AT_LOAD = (() => { try { return sessionStorage.getItem(NAV_BOUNCE_KEY); } catch (e) { return null; } })();
+
 // ★スマホ本体の「戻る」用：画面に出ているボタンを探すヘルパー
 //   ・findOverlayCloseButton：画面に重なって表示されている小窓・シートの ✕／閉じる／キャンセル／←（一番手前のもの）
 //   ・findPageBackButton：画面左上の「←」（無ければ画面内の「← 戻る」）
@@ -17590,11 +17596,13 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 // ============================================================
 // 特定選手の戦績画面（保護者の「お子さんの戦績」/選手本人の「自分の戦績」）
 // ============================================================
-function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
+function PlayerStatsScreen({ onBack, onOpen, initialPlayerName, restoredPlayerName, onPlayerChange }) {
   const [loading, setLoading] = useState(true);
   const [roster, setRoster] = useState([]);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
-  const [playerName, setPlayerName] = useState(initialPlayerName || null); // 現在表示中の選手（未選択ならnull＝選択画面）
+  const [playerName, setPlayerName] = useState(initialPlayerName || restoredPlayerName || null); // 現在表示中の選手（未選択ならnull＝選択画面）
+  // ★選んでいる選手を親（画面の履歴）にも伝える。試合を開いて戻ったときに、同じ選手の戦績を開き直すため
+  useEffect(() => { if (onPlayerChange) onPlayerChange(playerName); }, [playerName]);
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState("rate");
@@ -25436,6 +25444,9 @@ export default function App() {
   const [statsPlayerName,   setStatsPlayerName]   = useState(null); // 直接開く選手名（統計画面から遷移時）
   const [statsOpponentName, setStatsOpponentName] = useState(null); // 直接開く対戦相手校名
   const [playerStatsFrom,   setPlayerStatsFrom]   = useState("home"); // 選手戦績画面の戻り先（home/stats）
+  // ★選手戦績の画面の中で選んだ選手（「選手を選ぶ」から選んだ人）。画面の履歴に残しておき、
+  //   その選手の試合を開いてから戻ったときに「選手を選ぶ」ではなく、その選手の戦績に戻れるようにする
+  const [statsSelectedPlayer, setStatsSelectedPlayer] = useState(null);
   // 団体戦関連
   const [teamMatchId,  setTeamMatchId]  = useState(null);
   const [teamMatchEditId, setTeamMatchEditId] = useState(null);
@@ -25542,7 +25553,7 @@ export default function App() {
   const NO_HISTORY_SCREENS = new Set(["setup", "teamMatchSetup", "teamMatchGameSetup", "teamMatchGameEdit", "aiAnalysisAdd"]);
   const navSnap = {
     screen, prevScreen, recordInitialTab, initMatchType, listFilter, matchId, copySourceId, editTargetId,
-    statsPlayerName, statsOpponentName, playerStatsFrom,
+    statsPlayerName, statsOpponentName, playerStatsFrom, statsSelectedPlayer,
     teamMatchId, teamMatchEditId, teamMatchOrderNum, teamMatchGameEditMatchId, teamMatchCopyId, listMatchMode,
     tournamentContext, creatingFromTournament, tournamentSeg,
     aiAnalysisPlayer, aiAnalysisTargetMatch, aiAnalysisEditRow, aiAnalysisReturnScreen, aiAnalysisEditReturnScreen,
@@ -25604,7 +25615,22 @@ export default function App() {
       }
     }
     lastSnapRef.current = navSnap; // 同じ画面の中での変化（大会詳細のタブなど）も、最新の状態として覚えておく
+    saveNavForBounce();
   });
+
+  // ★保険：今の画面と画面の履歴を、このタブの中だけ（sessionStorage）に控えておく。
+  //   万一ブラウザが戻るでアプリの履歴を飛ばしてページを読み込み直しても（下の「読み込み直し対策」）、
+  //   ホームではなく、本来戻りたかった一個前の画面を開き直せるようにする。
+  const savedNavSigRef = useRef("");
+  function saveNavForBounce() {
+    try {
+      const hist = navHistoryRef.current;
+      const sig = `${navKeyOf(navSnap)}#${hist.length}#${hist.length ? navKeyOf(hist[hist.length - 1]) : ""}#${navSnap.statsSelectedPlayer ?? ""}`;
+      if (sig === savedNavSigRef.current) return; // 画面の種類・履歴に変化が無ければ書き込まない
+      savedNavSigRef.current = sig;
+      sessionStorage.setItem(NAV_BOUNCE_KEY, JSON.stringify({ doc: NAV_DOC_ID, at: Date.now(), cur: navSnap, hist: hist.slice(-30) }));
+    } catch (e) {}
+  }
 
   // ★削除された試合・団体戦・大会を開いていた画面を、履歴から取り除く
   //   （戻るで削除済みの試合の記録画面などが開いてしまわないように）
@@ -25637,7 +25663,7 @@ export default function App() {
     const apply = () => {
       setPrevScreen(snap.prevScreen); setRecordInitialTab(snap.recordInitialTab); setInitMatchType(snap.initMatchType);
       setListFilter(snap.listFilter); setMatchId(snap.matchId); setCopySourceId(snap.copySourceId); setEditTargetId(snap.editTargetId);
-      setStatsPlayerName(snap.statsPlayerName); setStatsOpponentName(snap.statsOpponentName); setPlayerStatsFrom(snap.playerStatsFrom);
+      setStatsPlayerName(snap.statsPlayerName); setStatsOpponentName(snap.statsOpponentName); setPlayerStatsFrom(snap.playerStatsFrom); setStatsSelectedPlayer(snap.statsSelectedPlayer ?? null);
       setTeamMatchId(snap.teamMatchId); setTeamMatchEditId(snap.teamMatchEditId); setTeamMatchOrderNum(snap.teamMatchOrderNum);
       setTeamMatchGameEditMatchId(snap.teamMatchGameEditMatchId); setTeamMatchCopyId(snap.teamMatchCopyId); setListMatchMode(snap.listMatchMode);
       setTournamentContext(snap.tournamentContext); setCreatingFromTournament(snap.creatingFromTournament); setTournamentSeg(snap.tournamentSeg);
@@ -25727,18 +25753,64 @@ export default function App() {
     };
     // ★本体の戻るの直後に画面をタップした場合（確認ダイアログのボタン・下部ナビなど）は、
     //   そのタップの操作を優先する（一個前の画面への差し替えはしない）
-    //   あわせて、見張りの位置にいなければ（forward に失敗したときなど）ここで積み直す
     const onPointerDown = () => {
       backIntentRef.current = null;
-      if (!window.__stAtTrap && !isTrap(window.history.state)) armTrap();
+    };
+    // ★見張りの位置にいなければ（forward に失敗したときなど）ここで積み直す。
+    //   2026-10 修正：以前は pointerdown（指が触れた瞬間）で積み直していたが、スマホでは指が触れた瞬間は
+    //   まだ「ユーザーの操作」と見なされない（指を離してタップが確定した時点で操作扱いになる）。
+    //   スクロールで触れただけでも見張りを積んでしまい、Android の Chrome に「勝手に積まれた履歴」と判定されて、
+    //   次の戻るでアプリ内の履歴がまとめて飛ばされ、ページが読み込み直されて（＝ホームに戻って）いた。
+    //   → タップが確定した click / キー入力のときだけ、操作として認められている場合に限って積み直す。
+    const onActivated = () => {
+      if (window.__stAtTrap || isTrap(window.history.state)) return;
+      try { if (navigator.userActivation && !navigator.userActivation.isActive) return; } catch (e) {}
+      armTrap();
     };
     window.addEventListener("popstate", onPop);
     document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("click", onActivated, true);
+    document.addEventListener("keydown", onActivated, true);
     return () => {
       clearTimeout(fallbackTimer);
       window.removeEventListener("popstate", onPop);
       document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("click", onActivated, true);
+      document.removeEventListener("keydown", onActivated, true);
     };
+  }, []);
+
+  // ★読み込み直し対策（2026-10）
+  //   Android の Chrome は、戻るのときに「操作なしで積まれた履歴」を飛ばすことがあり、その場合は
+  //   アプリの履歴がまとめて飛ばされて、ページが読み込み直される（＝アプリが最初のホーム画面から始まる）。
+  //   アプリはホーム以外の画面から自分でページを離れることは無いので、
+  //   「戻るで読み込み直された」＋「直前に控えた画面がホーム以外」なら、戻るが押されたとみなして
+  //   控えておいた画面の履歴から一個前の画面を開き直す。
+  //   （戻る先の古いページが Chrome に保存されたまま表示された場合＝pageshow の persisted も同じように扱う）
+  useEffect(() => {
+    const tryRestore = (raw) => {
+      try {
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (!saved || saved.doc === NAV_DOC_ID) return;              // このページ自身が控えたもの＝読み込み直しではない
+        if (Date.now() - (saved.at || 0) > 30 * 60 * 1000) return;   // 古すぎる控えは使わない
+        if (!saved.cur || saved.cur.screen === "home") return;       // ホームから離れた（終了した）ときは何もしない
+        const hist = Array.isArray(saved.hist) ? saved.hist.filter(sn => sn && sn.screen) : [];
+        if (hist.length === 0) return;
+        navHistoryRef.current = hist;
+        restorePrevRef.current && restorePrevRef.current();
+      } catch (e) { console.error(e); }
+    };
+    let navType = "";
+    try { navType = performance.getEntriesByType("navigation")[0]?.type || ""; } catch (e) {}
+    if (navType === "back_forward") tryRestore(NAV_BOUNCE_AT_LOAD);
+    const onShow = (e) => {
+      if (!e.persisted) return;
+      let raw = null; try { raw = sessionStorage.getItem(NAV_BOUNCE_KEY); } catch (err) {}
+      tryRestore(raw);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
   }, []);
 
   // プロフィール（学校・男女区分が未設定だと試合・選手マスターを共有できないため、設定完了をチェック）
@@ -25891,6 +25963,8 @@ export default function App() {
         onBack={()=>{ setStatsPlayerName(null); setScreen(playerStatsFrom); }}
         onOpen={id=>openMatchSmart(id, { prevScreen:"home" })}
         initialPlayerName={statsPlayerName}
+        restoredPlayerName={statsSelectedPlayer}
+        onPlayerChange={setStatsSelectedPlayer}
       />
     );
   }
@@ -26054,7 +26128,7 @@ export default function App() {
         onNewTeamMatch={()=>{ setTournamentContext(null); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
         onOpen={id=>openMatchSmart(id, { prevScreen:"home", listMatchMode:"individual" })}
         onNavigate={goNav}
-        onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
+        onGoPlayerStats={()=>{ setStatsPlayerName(null); setStatsSelectedPlayer(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
         onProfile={()=>setScreen("profile")}
         onGoToTournaments={()=>{ setTournamentContext(null); setListMatchMode("tournament"); setScreen("list"); }}
         onOpenTournament={t=>{ setTournamentContext(t); setListMatchMode("tournament"); setScreen("tournamentDetail"); }}
@@ -26184,7 +26258,7 @@ export default function App() {
     return (
       <StatsScreen
         onNavigate={key=>{ if (key==="stats") { setScreen("personalAnalysis"); return; } goNav(key); }}
-        onOpenPlayer={name=>{ setStatsPlayerName(name); setPlayerStatsFrom("stats"); setScreen("playerStats"); }}
+        onOpenPlayer={name=>{ setStatsPlayerName(name); setStatsSelectedPlayer(null); setPlayerStatsFrom("stats"); setScreen("playerStats"); }}
         onOpenOpponent={name=>{ setStatsOpponentName(name); setScreen("opponentStats"); }}
         onOpenMatch={id=>{ setMatchId(id); setPrevScreen("stats"); setRecordInitialTab(null); setScreen("record"); }}
       />
