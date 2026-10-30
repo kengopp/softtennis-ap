@@ -143,6 +143,11 @@ const C = {
   red:     "#e53935",
   redL:    "#fdecea",
   purple:  "#6366f1",
+  live:    "#2563eb", // ★試合中（進行中）の色。勝ち＝緑・負け＝オレンジと見分けるため青
+  liveL:   "#dbeafe",
+  waitBar: "#c8b89a", // ★待機中はベージュ（砂色）で控えめに（試合中の青を目立たせるため）
+  wait:    "#8a7653",
+  waitL:   "#f7f2e9",
   gray:    "#f4f6f9",
   border:  "#dde2ea",
   text:    "#1a2236",
@@ -210,6 +215,10 @@ const _primedMatches = new Map(); // matchId -> { at, data }
 const _autoStartMatchIds = new Set();
 function markAutoStart(id) { if (id) _autoStartMatchIds.add(id); }
 function takeAutoStart(id) { const hit = _autoStartMatchIds.has(id); _autoStartMatchIds.delete(id); return hit; }
+// ★試合作成画面の「結果のみ登録する」で作った試合：記録画面を開いたら、すぐ「結果だけ記録」の小窓を出す
+const _autoSimpleMatchIds = new Set();
+function markAutoSimple(id) { if (id) _autoSimpleMatchIds.add(id); }
+function takeAutoSimple(id) { const hit = _autoSimpleMatchIds.has(id); _autoSimpleMatchIds.delete(id); return hit; }
 // ★個人戦の試合ID（団体戦の番手ではないと分かっている試合）。試合を開く前の問い合わせを省くために使う
 let _knownIndividualMatchIds = new Set();
 // ★団体戦の番手として登録されている試合ID（分析の「個人戦のみ／団体戦のみ」に使う）。試合一覧の取得時にも作る
@@ -323,6 +332,12 @@ async function getAuthUserFast() {
   return user ?? null;
 }
 
+// ★スマホ本体の「戻る」で読み込み直されたときに、一個前の画面を開き直すための控え（App 内の「読み込み直し対策」参照）
+const NAV_BOUNCE_KEY = "stNavBounceV1";
+const NAV_DOC_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`; // このページ（読み込み）ごとに別の値
+// 読み込んだ直後の控え（画面を表示すると今の画面で上書きされるため、最初に読んでおく）
+const NAV_BOUNCE_AT_LOAD = (() => { try { return sessionStorage.getItem(NAV_BOUNCE_KEY); } catch (e) { return null; } })();
+
 // ★スマホ本体の「戻る」用：画面に出ているボタンを探すヘルパー
 //   ・findOverlayCloseButton：画面に重なって表示されている小窓・シートの ✕／閉じる／キャンセル／←（一番手前のもの）
 //   ・findPageBackButton：画面左上の「←」（無ければ画面内の「← 戻る」）
@@ -338,7 +353,7 @@ function collectBackCandidates() {
   // ★一部の画面（AI分析など）は「←」をbuttonではなくspanで作っているため、文字が「←」だけのspanも対象にする
   const els = Array.from(document.querySelectorAll("button, span"))
     .filter(el => el.tagName === "BUTTON" || labelOf(el) === "←")
-    .filter(el => el.getClientRects().length > 0 && !el.disabled);
+    .filter(el => el.getClientRects().length > 0 && !el.disabled && !el.closest("[data-no-back]"));
   return { els, labelOf, inOverlay };
 }
 function findOverlayCloseButton() {
@@ -361,6 +376,7 @@ async function performLogout() {
   if (!window.confirm("ログアウトしますか？")) return;
   skipUnloadConfirm = true;
   clearScreenCache(); // ★別のアカウントのデータが残らないように破棄する
+  try { localStorage.removeItem("equipmentCacheV1"); } catch (e) {} // ★備品の一覧も端末に残さない
   _isViewerCache = null; // ★閲覧専用かどうかの判定も、次のアカウントに引き継がないよう破棄する
   await supabase.auth.signOut();
   window.location.reload();
@@ -408,16 +424,19 @@ const mySideOf = (m, mySchoolName) => {
 //   通常はゲームカウントの大小で決まるが、「棄権による試合終了」ではゲームカウントの数字だけでは
 //   勝敗が決まらない（棄権した側の方が数字上多いこともある）ため、その場合はmatch.walkover_winnerを
 //   最優先で使う。勝敗が関わるすべての箇所は、直接スコアを比較せず必ずこの関数を使うこと。
+// ★並び順のボタン（勝率は高い順・低い順の両方）
+const SORT_RECORD_OPTIONS = [["rate","勝率高"],["rateLow","勝率低"],["win","勝数順"],["lose","負数順"],["count","試合数順"]];
 const sortByRecord = (sort) => (a,b) => {
-  // ★勝率順：丸めた%ではなく勝数÷試合数で比べる。同じ勝率なら試合数が多い方（＝より確かな数字）を上にする
-  if (sort === "rate") {
-    const ra = a.total > 0 ? a.wins / a.total : -1;
-    const rb = b.total > 0 ? b.wins / b.total : -1;
-    return (rb - ra) || (b.total - a.total) || (b.wins - a.wins);
-  }
-  if (sort === "lose")  return (b.losses - a.losses) || (b.total - a.total);
-  if (sort === "count") return (b.total - a.total) || (b.wins - a.wins);
-  return (b.wins - a.wins) || (b.total - a.total);
+  const rate = (x, empty) => x.total > 0 ? x.wins / x.total : empty;
+  // ★勝率高：勝数÷試合数で比べる（丸めた%ではなく）。同じ勝率なら試合数が多い方を上にする
+  if (sort === "rate")    return (rate(b,-1) - rate(a,-1)) || (b.total - a.total) || (b.wins - a.wins);
+  // ★勝率低：勝率が低い順。同じ勝率なら試合数が多い方を上にする
+  if (sort === "rateLow") return (rate(a,2) - rate(b,2)) || (b.total - a.total) || (b.losses - a.losses);
+  // ★負数：同じ負数なら勝率が低い方を上に（それも同じなら試合数が多い方）
+  if (sort === "lose")    return (b.losses - a.losses) || (rate(a,2) - rate(b,2)) || (b.total - a.total);
+  if (sort === "count")   return (b.total - a.total) || (b.wins - a.wins);
+  // ★勝数：同じ勝数なら勝率が高い方を上に（それも同じなら試合数が多い方）
+  return (b.wins - a.wins) || (rate(b,-1) - rate(a,-1)) || (b.total - a.total);
 };
 
 const winnerSideOf = (m) => {
@@ -511,7 +530,7 @@ function PeriodSortBar({ period, setPeriod, sort, setSort }) {
       </div>
       <div style={lbl}>並び順</div>
       <div style={seg}>
-        {[["rate","勝率"],["win","勝数"],["lose","負数"],["count","試合数"]].map(([k,l]) => (
+        {[["rate","勝率高"],["rateLow","勝率低"],["win","勝数"],["lose","負数"],["count","試合数"]].map(([k,l]) => (
           <button key={k} style={btn(sort===k, C.accent)} onClick={()=>setSort(k)}>{l}</button>
         ))}
       </div>
@@ -1724,7 +1743,9 @@ async function saveMatch(match, { isNew = false, incremental = false } = {}) {
   //   スコアや試合メモの保存まで丸ごと失敗してしまうため。
   //   （列が無い環境でも、動画リンクを使わない限り記録は普通に続けられる）
   const videoLinks = normalizeVideoLinks(match.video_links);
-  if (videoLinks.length > 0) matchRow.video_links = videoLinks;
+  // ★動画リンクを画面で編集した場合（_videoLinksEdited）は、0件でも空配列を送る。
+  //   そうしないと「全部削除」した時にDB側の古いリンクが残り、一覧の🎥バッジが消えない。
+  if (videoLinks.length > 0 || match._videoLinksEdited) matchRow.video_links = videoLinks;
 
   // ★差分保存：控えがあり、状態（進行中→終了など）が変わっておらず、選手・ゲームが空でないときだけ使う。
   //   状態が変わるとき（試合終了・中断など）や、いつもと違う形の保存は、念のため全部保存で確認し直す。
@@ -2161,6 +2182,7 @@ async function uploadTournamentGuideline(file) {
   if (!user) throw new Error("ログインしていません");
   const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
   const path = `${user.id}/${uid()}.${ext}`;
+  // ★対戦表は写真（画像）も添付できるため、ファイルの種類はそのまま使う
   const { error: upErr } = await supabase.storage.from("guidelines").upload(path, file, { upsert: true, contentType: file.type || "application/pdf" });
   if (upErr) throw upErr;
   const { data } = supabase.storage.from("guidelines").getPublicUrl(path);
@@ -2332,10 +2354,14 @@ let __schoolsCache = null;
 // ★招待コードの列は管理者以外に見せないため、学校の取得では列を明示する（select("*") は使わない）
 const SCHOOL_COLS = "id, name, prefecture, category, gender_restriction, admin_user_id, goal_first_serve_pct, goal_receive_miss_pct, goal_winner_count, goal_error_count, goal_point_diff, season_start_date, season_start_label";
 let __schoolsRequestVersion = 0; // ★通信競合対策：古いリクエストの結果でキャッシュを上書きしないようにする
+// ★学校マスターは1000校を超えることがあるため、全件を分けて取得する（以前は1回の取得で1000校までしか来ず、
+//   名前順で後ろの学校（佐賀県の学校など）が選手マスター等の候補に出ないことがあった）。
+//   ほかの人が学校を追加しても反映されるよう、覚えておくのは5分まで。
+let __schoolsCacheAt = 0;
 async function getSchools(force=false) {
-  if (__schoolsCache && !force) return __schoolsCache;
+  if (__schoolsCache && !force && Date.now() - __schoolsCacheAt < 5 * 60 * 1000) return __schoolsCache;
   const requestVersion = ++__schoolsRequestVersion;
-  const { data, error } = await supabase.from("schools").select(SCHOOL_COLS).order("name");
+  const { data, error } = await fetchAllRows("schools", SCHOOL_COLS, q => q.order("name").order("id"));
   if (error) {
     console.error("学校一覧の取得に失敗しました:", error);
     // ★管理画面（force=true）は「今のDBの正しい状態」を見る場所なので、
@@ -2347,7 +2373,7 @@ async function getSchools(force=false) {
   const list = data || [];
   // 途中で別のgetSchools呼び出しが走っていた場合、後から返ってきた古いリクエストの結果で
   // 新しいキャッシュを上書きしてしまわないようにする
-  if (requestVersion === __schoolsRequestVersion) __schoolsCache = list;
+  if (requestVersion === __schoolsRequestVersion) { __schoolsCache = list; __schoolsCacheAt = Date.now(); }
   return list;
 }
 function invalidateSchoolsCache() { __schoolsCache = null; __schoolsRequestVersion += 1; }
@@ -2681,22 +2707,75 @@ async function getTeamMatch(id) {
   return { ...m, games: games ?? [] };
 }
 
+// ★大会と試合の紐付け判定。試合・団体戦は大会名（文字列）だけで大会と結び付いているため、
+//   同じ名前の大会（例：毎年の「練習試合（文徳）」）を新しく作ると、過去の同名大会の試合まで
+//   新しい大会の試合として数えられてしまう不具合があった。
+//   同名の大会が複数ある場合も、試合日でどの大会の試合かを決める。
+//   ・試合日が大会期間内 → その大会
+//   ・期間外 → 期間が一番近い同名大会（ただし60日以内）。ドロー経由で作った試合は作成日が入るため少しずれることがある
+//   ・それ以外（遠く離れた過去の同名大会の試合など）→ どの大会にも入れない
+const TOURNAMENT_DATE_SLACK_DAYS = 60;
+function _dayNum(d) {
+  if (!d) return null;
+  const t = Date.parse(String(d).slice(0, 10) + "T00:00:00Z");
+  return Number.isNaN(t) ? null : Math.round(t / 86400000);
+}
+function buildTournamentResolver(tournamentList) {
+  const byName = {};
+  (tournamentList || []).forEach(t => {
+    const key = (t?.name || "").trim();
+    if (!key) return;
+    const start = _dayNum(t.start_date);
+    const end = _dayNum(t.end_date) ?? start;
+    (byName[key] ??= []).push({ id: t.id, start, end });
+  });
+  return (tournamentName, matchDate) => {
+    const cands = byName[(tournamentName || "").trim()];
+    if (!cands || cands.length === 0) return null;
+    const d = _dayNum(matchDate);
+    if (d == null) return cands.length === 1 ? cands[0].id : null;
+    let best = null, bestDist = Infinity;
+    cands.forEach(c => {
+      if (c.start == null) { if (bestDist > TOURNAMENT_DATE_SLACK_DAYS) { best = c; bestDist = TOURNAMENT_DATE_SLACK_DAYS; } return; }
+      const dist = d < c.start ? c.start - d : d > c.end ? d - c.end : 0;
+      if (dist < bestDist) { best = c; bestDist = dist; }
+    });
+    return best && bestDist <= TOURNAMENT_DATE_SLACK_DAYS ? best.id : null;
+  };
+}
+// 同名の大会一覧（削除済み以外）を取得。tournamentに渡した大会は（保存前の古い日付のまま）必ず含める
+async function getSameNameTournaments(name, tournament) {
+  const { data, error } = await supabase.from("tournaments").select("id, name, start_date, end_date").eq("name", name).is("deleted_at", null);
+  if (error) console.error(error);
+  const list = (data ?? []).filter(t => !tournament || t.id !== tournament.id);
+  if (tournament) list.push({ ...tournament, name });
+  return list;
+}
+
 // ★大会詳細画面専用：以前はgetMatches()/getTeamMatches()でチームの利用期間中の
 // 　全試合・全団体戦を取得してから大会名で絞り込んでいたため、利用期間が長くなる
 // 　ほど大会詳細を開くたびに表示が遅くなっていた。DB側で最初から対象大会だけに絞り込む。
-async function getTournamentMatchesAndTeamMatches(tournamentName) {
+async function getTournamentMatchesAndTeamMatches(tournament) {
+  const tournamentName = tournament?.name ?? "";
   // ★処理速度改善：
   //   ・以前は選手とゲームを60試合ずつ「順番に」取得し、そのあと番手、さらに動画リンクと順番待ちが続いていた。
   //     選手と番手は同時に取得し、待ちを2回（番手の試合が別の大会名のときだけ3回）にした。
   //   ・個人戦のゲームごとの得点（games）は大会詳細では使っていないため、取得しないようにした。
   //   ・1000件を超える大会でも取りこぼさないよう、分けて取得する。
   const [
-    { data: matchRows, error: mErr },
-    { data: teamRows, error: tErr },
+    { data: matchRowsAll, error: mErr },
+    { data: teamRowsAll, error: tErr },
+    sameNameList,
   ] = await Promise.all([
     fetchAllRows("matches", "*", q => q.eq("tournament_name", tournamentName).is("deleted_at", null).order("created_at", { ascending: false }).order("id")),
     fetchAllRows("team_matches", "*", q => q.eq("tournament_name", tournamentName).is("deleted_at", null).order("match_date", { ascending: false }).order("id")),
+    tournament?.id ? getSameNameTournaments(tournamentName, null) : Promise.resolve([]),
   ]);
+  // ★同名の別大会（過去の同名大会など）の試合は除く
+  const resolveT = tournament?.id ? buildTournamentResolver(sameNameList.some(t => t.id === tournament.id) ? sameNameList : [...sameNameList, tournament]) : null;
+  const belongs = (row) => !resolveT || resolveT(row.tournament_name, row.match_date) === tournament.id;
+  const matchRows = (matchRowsAll ?? []).filter(belongs);
+  const teamRows = (teamRowsAll ?? []).filter(belongs);
   if (mErr) console.error(mErr);
   if (tErr) console.error(tErr);
   const matchRowsSafe = matchRows ?? [];
@@ -3054,9 +3133,16 @@ async function saveTournament(t) {
     venue: t.venue || null,
     venue_link: t.venue_link || null,
     guideline_url: t.guideline_url || null,
+    draw_url: t.draw_url || null, // ★対戦表（PDF・画像のファイル、またはリンク）
     participant_player_ids: t.participant_player_ids || [],
   };
-  const { error } = await supabase.from("tournaments").upsert(row);
+  let { error } = await supabase.from("tournaments").upsert(row);
+  // ★Supabaseに draw_url 列をまだ追加していない場合でも、大会の保存自体はできるようにする
+  if (error && /draw_url/.test(error.message || "")) {
+    const { draw_url, ...rest } = row;
+    ({ error } = await supabase.from("tournaments").upsert(rest));
+    if (!error && draw_url) alert("対戦表は保存できませんでした（データベースに対戦表の項目がまだありません）。大会のほかの内容は保存しました。");
+  }
   if (error) throw error;
   return row;
 }
@@ -3064,18 +3150,50 @@ async function saveTournament(t) {
 // ★大会名を変更した時、既に作成済みの個人戦・団体戦の tournament_name（文字列で紐付けている）が
 //   追従せず残ってしまい、見た目は同じでも文字として一致しなくなり大会と切り離されてしまう不具合があった。
 //   大会名編集時は必ずこれを呼び、旧名称の試合を新名称に一括で書き換える。
-async function renameTournamentCascade(oldName, newName) {
+// ★oldTournament（変更前の大会：id・開始日・終了日）を渡すと、同名の別大会の試合まで巻き込まないよう、
+//   その大会に属する試合だけを書き換える。
+async function renameTournamentCascade(oldName, newName, oldTournament) {
   const oldTrimmed = (oldName || "").trim();
   const newTrimmed = (newName || "").trim();
   if (!oldTrimmed || !newTrimmed || oldTrimmed === newTrimmed) return;
+  if (!oldTournament?.id) {
+    const [r1, r2, r3] = await Promise.all([
+      supabase.from("matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+      supabase.from("team_matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+      supabase.from("tournament_pairs").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+    ]);
+    if (r1.error) console.error("個人戦の大会名追従に失敗:", r1.error);
+    if (r2.error) console.error("団体戦の大会名追従に失敗:", r2.error);
+    if (r3.error) console.error("ペアマスターの大会名追従に失敗:", r3.error);
+    return;
+  }
+  const [{ data: mRows, error: e1 }, { data: tRows, error: e2 }, sameNameList] = await Promise.all([
+    fetchAllRows("matches", "id, tournament_name, match_date", q => q.eq("tournament_name", oldTrimmed).order("id")),
+    fetchAllRows("team_matches", "id, tournament_name, match_date", q => q.eq("tournament_name", oldTrimmed).order("id")),
+    getSameNameTournaments(oldTrimmed, oldTournament),
+  ]);
+  if (e1) console.error(e1);
+  if (e2) console.error(e2);
+  const resolveT = buildTournamentResolver(sameNameList);
+  const pick = (rows) => (rows ?? []).filter(r => resolveT(r.tournament_name, r.match_date) === oldTournament.id).map(r => r.id);
+  const chunk = (ids) => { const out = []; for (let i = 0; i < ids.length; i += 100) out.push(ids.slice(i, i + 100)); return out; };
+  const upd = (table, ids) => Promise.all(chunk(ids).map(ids2 => supabase.from(table).update({ tournament_name: newTrimmed }).in("id", ids2)))
+    .then(rs => rs.find(r => r.error) || { error: null });
   const [r1, r2, r3] = await Promise.all([
-    supabase.from("matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
-    supabase.from("team_matches").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
-    supabase.from("tournament_pairs").update({ tournament_name: newTrimmed }).eq("tournament_name", oldTrimmed),
+    upd("matches", pick(mRows)),
+    upd("team_matches", pick(tRows)),
+    supabase.from("tournament_pairs").update({ tournament_name: newTrimmed }).eq("tournament_id", oldTournament.id),
   ]);
   if (r1.error) console.error("個人戦の大会名追従に失敗:", r1.error);
   if (r2.error) console.error("団体戦の大会名追従に失敗:", r2.error);
   if (r3.error) console.error("ペアマスターの大会名追従に失敗:", r3.error);
+}
+
+// ★大会の「中止」の切り替え（データは消さない。canceled 列が true のとき「中止」と表示する）
+async function setTournamentCanceled(id, canceled) {
+  clearMatchListPrefetch();
+  const { error } = await supabase.from("tournaments").update({ canceled: !!canceled }).eq("id", id);
+  if (error) throw error;
 }
 
 // ★大会の削除は誤操作対策のため即時完全削除ではなくゴミ箱行き（論理削除）にする
@@ -3298,12 +3416,18 @@ async function enrichDrawMatches(matches) {
   entryResults.forEach(({ data, error }) => { if (error) console.error(error); (data ?? []).forEach(e => { entryMap[e.id] = e; }); });
   const matchInfoMap = {};
   matchResults.forEach(({ data, error }) => { if (error) console.error(error); (data ?? []).forEach(mi => { matchInfoMap[mi.id] = mi; }); });
-  return matches.map(m => ({
-    ...m,
-    sideA: m.side_a_entry_id ? entryMap[m.side_a_entry_id] : null,
-    sideB: m.side_b_entry_id ? entryMap[m.side_b_entry_id] : null,
-    matchInfo: m.match_id ? (matchInfoMap[m.match_id] || null) : null,
-  }));
+  return matches.map(m => {
+    const sideA = m.side_a_entry_id ? entryMap[m.side_a_entry_id] : null;
+    const sideB = m.side_b_entry_id ? entryMap[m.side_b_entry_id] : null;
+    let matchInfo = m.match_id ? (matchInfoMap[m.match_id] || null) : null;
+    // ★枠から作った試合は「自チーム＝チームA」で保存される（createMatchFromDrawSlot）。
+    //   自チームがドローの下側（B側）にいる場合は、試合のA/Bとドローの上下が逆になるため、
+    //   ドロー表示用にスコアの向きをドローの上下にそろえる（勝者・スコアが逆に表示されないように）。
+    if (matchInfo && sideB?.is_own_team && !sideA?.is_own_team) {
+      matchInfo = { ...matchInfo, match_score_a: matchInfo.match_score_b, match_score_b: matchInfo.match_score_a };
+    }
+    return { ...m, sideA, sideB, matchInfo };
+  });
 }
 
 // ★トーナメント表の表示に必要なものを一度に取得する。
@@ -3933,7 +4057,18 @@ function calcPlayerStats(match) {
       rMiss.receiveMiss++;
     }
   }
-  return Object.values(result);
+  // ★表示順を固定する：チームA→B、各チーム内は試合作成時の選手の順番（選手1＝後衛、選手2＝前衛）。
+  //   以前は「その試合で先に得点・ミスが記録された選手」順になっており、試合ごとに順番がバラバラだった。
+  //   選手登録（match.players）に名前が無い選手は各チームの最後に回す。
+  const orderOf = {};
+  for (const p of matchPlayers) {
+    if (p?.player_name) orderOf[p.team + "__" + p.player_name] = p.order_num ?? 99;
+  }
+  const teamRank = t => (t === "A" ? 0 : t === "B" ? 1 : 2);
+  return Object.values(result).sort((a, b) =>
+    (teamRank(a.team) - teamRank(b.team)) ||
+    ((orderOf[a.team + "__" + a.player_name] ?? 999) - (orderOf[b.team + "__" + b.player_name] ?? 999))
+  );
 }
 
 // ============================================================
@@ -4121,7 +4256,7 @@ function downloadCsv(match) {
 // スタイル共通
 // ============================================================
 const S = {
-  page:   { background: C.gray, minHeight:"100vh", paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" },
+  page:   { background: C.gray, minHeight:"calc(100vh / var(--app-zoom, 1))", paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" },
   hdr:    { background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, padding:"12px 16px", position:"sticky", top:0, zIndex:10 },
   card:   { background:C.white, borderRadius:12, border:`1px solid ${C.border}`, overflow:"hidden", marginBottom:10 },
   inp:    { width:"100%", padding:"8px 0", background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`, fontSize:16, color:C.text, outline:"none", boxSizing:"border-box" },
@@ -4300,10 +4435,43 @@ function TypeLabel({ v, label, size = 20 }) {
 
 function Modal({ children, onClose }) {
   useBodyScrollLock(true);
+  // ★文字を大きくしている人でも下の「閉じる」まで届くよう、高さは --app-zoom で打ち消す（App の文字の大きさ設定を参照）。
+  //   念のため右上にも ✕ を置く（onClose がある小窓だけ）。
   return (
-    <div style={{ position:"fixed",inset:0,height:"100dvh",background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
-      <div style={{ background:C.white,borderRadius:20,padding:"28px 20px calc(28px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:340,maxHeight:"80dvh",overflowY:"auto",WebkitOverflowScrolling:"touch" }} onClick={e=>e.stopPropagation()}>{children}</div>
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:20 }}>
+      <div style={{ position:"relative", width:"100%", maxWidth:340 }} onClick={e=>e.stopPropagation()}>
+        <div style={{ background:C.white,borderRadius:20,padding:"28px 20px calc(28px + env(safe-area-inset-bottom,0px))",width:"100%",boxSizing:"border-box",maxHeight:"calc(85dvh / var(--app-zoom, 1))",overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain" }}>{children}</div>
+        {onClose && (
+          <button aria-label="閉じる" onClick={onClose}
+            style={{ position:"absolute", top:8, right:8, width:34, height:34, padding:0, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, lineHeight:1, cursor:"pointer", zIndex:2, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+        )}
+      </div>
     </div>
+  );
+}
+
+// ★更新ボタン（各画面のヘッダーなど）。絵文字🔄をやめて、落ち着いた青のボタン＋回転マークにそろえた。
+//   spinning=true の間は矢印が回る（読み込み中）。label があればマークの横に文字を出す。
+const REFRESH_BG = "linear-gradient(145deg,#3c5f96,#2b4a7c)";
+function RefreshIcon({ size = 20, spinning = false }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      style={{ display:"block", flexShrink:0, animation: spinning ? "st-refresh-spin 0.9s linear infinite" : "none" }}>
+      <path d="M20 11.5A8 8 0 0 0 6.2 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 13.8 5.2L20 15.5"/><path d="M20 20v-4.5h-4.5"/>
+    </svg>
+  );
+}
+function RefreshButton({ onClick, spinning = false, label = "", size = 36, onLight = false, title = "最新データに更新", style }) {
+  return (
+    <button onClick={()=>{ if (!spinning && onClick) onClick(); }} disabled={spinning} title={title} aria-label={label || title}
+      style={{ flexShrink:0, height:size, minWidth:size, padding: label ? "0 13px 0 10px" : 0, display:"inline-flex", alignItems:"center", justifyContent:"center", gap:6,
+        background:REFRESH_BG, color:"#fff", border: onLight ? "none" : "1px solid rgba(255,255,255,0.18)", borderRadius:Math.round(size * 0.32),
+        boxShadow: onLight ? "0 2px 6px rgba(43,74,124,0.25)" : "0 2px 8px rgba(5,15,40,0.35), inset 0 1px 0 rgba(255,255,255,0.18)",
+        fontSize: label ? 13.5 : 0, fontWeight:800, whiteSpace:"nowrap", cursor: spinning ? "default" : "pointer", opacity: spinning ? 0.85 : 1, ...style }}>
+      <style>{"@keyframes st-refresh-spin{to{transform:rotate(360deg);}}"}</style>
+      <RefreshIcon size={label ? Math.round(size * 0.47) : Math.round(size * 0.55)} spinning={spinning} />
+      {label}
+    </button>
   );
 }
 
@@ -4551,7 +4719,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
   };
   return (
     <Modal onClose={onClose}>
-      <div style={{ maxHeight:"74vh", overflowY:"auto", textAlign:"left" }}>
+      <div style={{ maxHeight:"calc(74vh / var(--app-zoom, 1))", overflowY:"auto", textAlign:"left" }}>
         <div style={{ position:"sticky",top:0,zIndex:2,background:"#fff",marginBottom:14,paddingBottom:2 }}>
           <h3 style={{ fontSize:17,fontWeight:800,textAlign:"center",margin:0,padding:"4px 40px" }}>{mode==="add"?"ポイントを追加":"ポイントを修正"}</h3>
           <button aria-label="閉じる" onClick={onClose} style={{ padding:0, position:"absolute",top:-2,right:0,width:36,height:36,border:"none",background:"#f0f2f5",borderRadius:"50%",fontSize:18,fontWeight:700,color:C.textSec,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>✕</button>
@@ -4762,14 +4930,28 @@ async function prefetchAnalysisBase() {
   }
 }
 function clearMatchListPrefetch() { _matchListPrefetchedAt = 0; _teamBoutIdsCache = null; }
+// ★試合一覧から試合・団体戦・大会を開いて「←」（スマホの戻るも）で戻ったとき、さっき見ていた位置に戻すための控え。
+//   以前は戻るたびに試合一覧を作り直していたため、スクロール位置・絞り込み・「もっと見る」が消えて一番上に戻っていた。
+//   ・試合一覧を表示している間は、今の状態（スクロール位置・絞り込みなど）をここに書き続ける。
+//   ・「戻る」で試合一覧に戻ったときだけ（App側で markMatchListReturn を呼ぶ）、少しの間この控えで表示し直す。
+//     下のタブの「試合」を押して開いたときなどは、これまで通り一番上から表示する。
+let _matchListViewState = null;
+let _matchListRestoreUntil = 0;
+function markMatchListReturn() { if (_matchListViewState) _matchListRestoreUntil = Date.now() + 3000; }
 
 function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis, onModeChange }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
+  // ★「戻る」で戻ってきたときは、前に見ていた状態（同じタブのときだけ）で表示する
+  const restoreViewRef = useRef(
+    Date.now() < _matchListRestoreUntil && _matchListViewState && _matchListViewState.mode === (initialMatchMode || "tournament")
+      ? _matchListViewState : null
+  );
+  const rv = restoreViewRef.current;
   // ★スマホでは一度に何百枚もカードを描画するだけで表示が重くなるため、
   //   まず30件だけ描画し、「もっと見る」で追加していく（絞り込み結果の件数自体は変わらない）
   const PAGE_SIZE = 30;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [childOnly, setChildOnly] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(() => rv?.visibleCount || PAGE_SIZE);
+  const [childOnly, setChildOnly] = useState(() => !!rv?.childOnly);
   const [allMatches, setAllMatches] = useState([]);
   const [allMatchesRaw, setAllMatchesRaw] = useState([]); // ★団体戦の番手も含む「全試合」。個人戦一覧(allMatches)からは除外されるため別途保持
   const [allTeamMatches, setAllTeamMatches] = useState([]);
@@ -4791,22 +4973,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [linkedPlayerId, setLinkedPlayerId] = useState(null); // ★大会の「出場選手」に入っているかの判定用
   const [mySchoolName, setMySchoolName] = useState("");
   const [mySchoolId, setMySchoolId] = useState(null);
-  const [tmMySchoolOnly, setTmMySchoolOnly] = useState(false); // 自校のみ絞り込み
+  const [tmMySchoolOnly, setTmMySchoolOnly] = useState(() => !!rv?.tmMySchoolOnly); // 自校のみ絞り込み
   const [toast, setToast] = useState(initialToast || null);
   useEffect(() => { if (toast) { const t = setTimeout(()=>setToast(null), 3000); return ()=>clearTimeout(t); } }, [toast]);
   // 共通絞り込み（個人戦・団体戦で共有）
-  const [filterSearch, setFilterSearch] = useState("");       // フリーワード（入力欄の値）
+  const [filterSearch, setFilterSearch] = useState(() => rv?.filterSearch || "");       // フリーワード（入力欄の値）
   // ★1文字打つたびに全試合を絞り込み直すと、試合数が多いほど入力がカクついていた。
   //   入力が落ち着いてから（0.25秒後）実際の絞り込みを走らせる。
-  const [searchQuery, setSearchQuery] = useState("");        // 実際に絞り込みに使う語
+  const [searchQuery, setSearchQuery] = useState(() => (rv?.filterSearch || "").trim().toLowerCase()); // 実際に絞り込みに使う語
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(filterSearch.trim().toLowerCase()), 250);
     return () => clearTimeout(t);
   }, [filterSearch]);
-  const [filterStatus, setFilterStatus] = useState("all");   // all | upcoming | finished
+  const [filterStatus, setFilterStatus] = useState(() => rv?.filterStatus || "all");   // all | upcoming | finished
   // ★個人戦一覧の絞り込み：動画リンクがある試合だけ／AI分析がある試合だけ（それぞれ独立してON/OFF、両方ONならAND）
-  const [filterHasVideo, setFilterHasVideo] = useState(false);
-  const [filterHasAi, setFilterHasAi] = useState(false);
+  const [filterHasVideo, setFilterHasVideo] = useState(() => !!rv?.filterHasVideo);
+  const [filterHasAi, setFilterHasAi] = useState(() => !!rv?.filterHasAi);
   // 日付フィルタ
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
   const [dateFilterMode, setDateFilterMode] = useState("day"); // day | range | month
@@ -4814,7 +4996,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   const [dateFilterRangeStart, setDateFilterRangeStart] = useState(null);
   const [dateFilterRangeEnd, setDateFilterRangeEnd] = useState(null);
   const [dateFilterMonth, setDateFilterMonth] = useState(null); // "YYYY-MM"
-  const [dateFilterApplied, setDateFilterApplied] = useState(null);
+  const [dateFilterApplied, setDateFilterApplied] = useState(() => rv?.dateFilterApplied || null);
   const [calViewYear, setCalViewYear] = useState(new Date().getFullYear());
   const [calViewMonth, setCalViewMonth] = useState(new Date().getMonth()); // 0-11
   const [rangeStep, setRangeStep] = useState("start"); // "start" | "end"
@@ -4822,11 +5004,20 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   const [schoolMap, setSchoolMap] = useState({}); // school_id -> name
   const [tournaments, setTournaments] = useState([]);
-  const [tournamentSearch, setTournamentSearch] = useState("");
+  const [equipMap, setEquipMap] = useState({});   // ★大会ID → 場所取り・メモ（チームで共有）
+  const [memoFor, setMemoFor] = useState(null);    // ★「📝 メモ」で開いている大会
+  const reloadEquipMap = useCallback(async () => {
+    const p = await getMyProfile().catch(() => null);
+    setEquipMap(await getTournamentEquipmentMap(p?.school_id));
+  }, []);
+  useEffect(() => { reloadEquipMap(); }, [reloadEquipMap, tournaments]);
+  const withEquip = (t) => equipMap[t.id] ? { ...t, equipment_plan: equipMap[t.id] } : t;
+  const [tournamentSearch, setTournamentSearch] = useState(() => rv?.tournamentSearch || "");
   const [tournamentDropdownOpen, setTournamentDropdownOpen] = useState(false);
   const [showTournamentModal, setShowTournamentModal] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null); // null=新規作成 / オブジェクト=編集
   const [confirmDeleteTournament, setConfirmDeleteTournament] = useState(null);
+  const [confirmCancelTournament, setConfirmCancelTournament] = useState(null); // ★「中止にする」の確認（大会の行データ）
   const [openTournamentMenuId, setOpenTournamentMenuId] = useState(null); // ★カード下部「その他」メニューの開閉
   const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
   const [breakdownModalFor, setBreakdownModalFor] = useState(null); // ★「試合数」タップ時のポップアップ（大会オブジェクト）
@@ -4916,7 +5107,53 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     })();
   }, []);
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [timeTab, searchQuery, filterStatus, dateFilterApplied, childOnly, tmMySchoolOnly, filterHasVideo, filterHasAi]);
+  // ★最初の表示では戻さない（「戻る」で戻ってきたとき、「もっと見る」で広げた件数を残すため）
+  const visibleResetReadyRef = useRef(false);
+  useEffect(() => {
+    if (!visibleResetReadyRef.current) { visibleResetReadyRef.current = true; return; }
+    setVisibleCount(PAGE_SIZE);
+  }, [timeTab, searchQuery, filterStatus, dateFilterApplied, childOnly, tmMySchoolOnly, filterHasVideo, filterHasAi]);
+
+  // ★今の表示の状態を控えに書き続ける（試合を開いて「←」で戻ったときに、同じ位置へ戻すため）
+  const listRootRef = useRef(null);
+  const liveScrollYRef = useRef(rv ? rv.scrollY : 0);
+  const scrollRestoringRef = useRef(!!rv); // 位置を戻し終わるまでは、途中のスクロール（一番上に戻る動きなど）を控えに書かない
+  useEffect(() => {
+    _matchListViewState = {
+      mode: timeTab, scrollY: liveScrollYRef.current, visibleCount, filterSearch, filterStatus,
+      filterHasVideo, filterHasAi, childOnly, tmMySchoolOnly, dateFilterApplied, tournamentSearch,
+    };
+  }, [timeTab, visibleCount, filterSearch, filterStatus, filterHasVideo, filterHasAi, childOnly, tmMySchoolOnly, dateFilterApplied, tournamentSearch]);
+  useEffect(() => {
+    const onScroll = () => {
+      // 画面が切り替わって一覧が消えた後のスクロール（短い画面に縮んだぶん等）は記録しない
+      if (scrollRestoringRef.current || !listRootRef.current || !listRootRef.current.isConnected) return;
+      liveScrollYRef.current = window.scrollY;
+      if (_matchListViewState) _matchListViewState.scrollY = window.scrollY;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  // ★一覧の中身が表示されてから、前に見ていた位置へスクロールする
+  //   （App側の「画面が変わったら一番上へ」より後に動くよう、次の描画のタイミングで行う）
+  useEffect(() => {
+    if (loading || !restoreViewRef.current) return;
+    const y = restoreViewRef.current.scrollY || 0;
+    restoreViewRef.current = null;
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      window.scrollTo(0, y);
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        window.scrollTo(0, y);
+        scrollRestoringRef.current = false;
+        liveScrollYRef.current = window.scrollY;
+        if (_matchListViewState) _matchListViewState.scrollY = window.scrollY;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [loading]);
 
   const todayStr = today();
 
@@ -5029,6 +5266,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // ★大会カードの集計（試合数・終了数・会場数・勝敗）を、全試合の1回の走査でまとめて作る。
   //   以前は大会1件ごとに全試合を走査し直していたため、
   //   「大会数 × 試合数」の計算量になり、スクロールや絞り込みのたびに重くなっていた。
+  // ★同名の大会が複数あっても混ざらないよう、試合日でどの大会の試合かを決めてから大会ID単位で集計する
+  const resolveTournamentId = useMemo(() => buildTournamentResolver(tournaments), [tournaments]);
   const tournamentAgg = useMemo(() => {
     const map = {};
     const ensure = (name) => (map[name] ??= {
@@ -5040,9 +5279,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     allMatchesRaw.forEach(m => { statusById[m.id] = m.status; });
 
     allMatches.forEach(m => {
-      const name = m.tournament_name;
-      if (!name) return;
-      const a = ensure(name);
+      const tid = resolveTournamentId(m.tournament_name, m.match_date);
+      if (tid == null) return;
+      const a = ensure(tid);
       a.totalMatches++;
       if (m.venue) a.venues.add(m.venue);
       if (isDoneStatus(m.status)) {
@@ -5056,9 +5295,9 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     });
 
     allTeamMatches.forEach(tm => {
-      const name = tm.tournament_name;
-      if (!name) return;
-      const a = ensure(name);
+      const tid = resolveTournamentId(tm.tournament_name, tm.match_date);
+      if (tid == null) return;
+      const a = ensure(tid);
       if (tm.venue) a.venues.add(tm.venue);
       // 団体戦のうち、実際に試合レコードが作成済みの番手のみ（枠だけの未着手番手は含めない）
       (tm.games || []).forEach(g => {
@@ -5073,7 +5312,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       if (linkedPlayerName && !a.hasLinkedPlayer && teamMatchHasPlayer(tm, linkedPlayerName)) a.hasLinkedPlayer = true;
     });
     return map;
-  }, [allMatches, allMatchesRaw, allTeamMatches, linkedPlayerName, teamMatchHasPlayer]);
+  }, [allMatches, allMatchesRaw, allTeamMatches, linkedPlayerName, teamMatchHasPlayer, resolveTournamentId]);
 
   // ★月指定カレンダーの「試合データあり」判定も、毎回の再描画で全試合を走査しないよう先に作っておく
   const monthsWithData = useMemo(() => {
@@ -5122,7 +5361,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // ★大会カードの統計行（参加選手・試合数・終了・会場数）
   // 新しいテーブルや列は使わず、既存の matches / team_match_games / players（選手マスター）だけで集計する。
   const statsForTournament = (t) => {
-    const a = tournamentAgg[t.name];
+    const a = tournamentAgg[t.id];
     // 参加選手：大会作成・編集時に選択した「出場選手」の人数（試合データからの逆算ではなく、選択リストそのもの）
     const participantCount = (t.participant_player_ids || []).length;
     // 会場数：大会自体の会場＋個人戦・団体戦それぞれの会場を重複なしで集計
@@ -5139,7 +5378,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   // 個人戦はペアごとの勝敗）ため、まとめず別々に算出する。終了していない試合（予定・進行中・中断中）は
   // 数字に含めない。
   const recordForTournament = (t) => {
-    const a = tournamentAgg[t.name];
+    const a = tournamentAgg[t.id];
     return {
       teamRecord:       { win: a ? a.teamWin : 0, loss: a ? a.teamLoss : 0 },
       individualRecord: { win: a ? a.indWin  : 0, loss: a ? a.indLoss  : 0 },
@@ -5148,17 +5387,29 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
 
   const filteredTournaments = tournaments.filter(t => {
     if (tournamentSearch.trim() && !t.name.toLowerCase().includes(tournamentSearch.trim().toLowerCase())) return false;
-    if (filterStatus === "upcoming" && !isUpcomingTournament(t)) return false;
-    if (filterStatus === "finished" && isUpcomingTournament(t)) return false;
+    // ★中止の大会は「これから」には出さず、「終了」側に入れる
+    if (filterStatus === "upcoming" && (t.canceled || !isUpcomingTournament(t))) return false;
+    if (filterStatus === "finished" && !t.canceled && isUpcomingTournament(t)) return false;
     if (!tournamentMatchesDateFilter(t)) return false;
     // ★選手で絞り込むとき：試合に出ている大会に加えて、大会の「出場選手」に登録されている大会も表示する
     //   （以前は試合が1つも無い大会＝これからの大会が、出場選手に入っていても消えていた）
-    if (childOnly && linkedPlayerName && !tournamentAgg[t.name]?.hasLinkedPlayer
+    if (childOnly && linkedPlayerName && !tournamentAgg[t.id]?.hasLinkedPlayer
         && !(linkedPlayerId && (t.participant_player_ids || []).includes(linkedPlayerId))) return false;
     return true;
   });
+  // ★今日が開催期間に入っている大会（開催中）は、同日に複数あってもすべて一番上に表示する。
+  //   それ以外の並びは従来通り（開催中の大会どうしの順番も従来の並びのまま）。
+  {
+    const isTodayT = (t) => !!t.start_date && t.start_date <= todayStr && (t.end_date || t.start_date) >= todayStr;
+    // ★中止の大会も当日は上に並べるが、同じ日の大会の中では最後にする
+    const todayList = [...filteredTournaments.filter(t => isTodayT(t) && !t.canceled), ...filteredTournaments.filter(t => isTodayT(t) && t.canceled)];
+    if (todayList.length > 0) {
+      const rest = filteredTournaments.filter(t => !isTodayT(t));
+      filteredTournaments.splice(0, filteredTournaments.length, ...todayList, ...rest);
+    }
+  }
 
-  async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds) {
+  async function handleSaveTournament(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl) {
     const trimmed = name.trim();
     if (!trimmed) { alert("大会名を入力してください"); return; }
     if (!startDate) { alert("開始日を選択してください"); return; }
@@ -5171,12 +5422,13 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
         venue: venue || null,
         venue_link: venueLink || null,
         guideline_url: guidelineUrl || null,
+        draw_url: drawUrl || null,
         participant_player_ids: participantIds || [],
       });
       // ★既存の大会の名前を変更した場合、紐づく個人戦・団体戦の大会名も追従させる
       // （コピー作成時はeditingTournamentにidが無いため、誤って元の大会の試合まで巻き込んでリネームしないようにする）
       if (editingTournament?.id && editingTournament?.name && editingTournament.name.trim() !== trimmed) {
-        await renameTournamentCascade(editingTournament.name, trimmed);
+        await renameTournamentCascade(editingTournament.name, trimmed, editingTournament);
       }
       setShowTournamentModal(false);
       setEditingTournament(null);
@@ -5184,6 +5436,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
     } catch(e) {
       alert("保存エラー: " + (e.message || e));
     }
+  }
+
+  // ★大会の「中止」⇔「取り消し」。待たずに画面を切り替えてから裏で保存する
+  async function handleSetTournamentCanceled(t, canceled) {
+    setConfirmCancelTournament(null);
+    setTournaments(prev => prev.map(x => x.id === t.id ? { ...x, canceled } : x));
+    try {
+      await setTournamentCanceled(t.id, canceled);
+    } catch (e) {
+      console.error(e);
+      setTournaments(prev => prev.map(x => x.id === t.id ? { ...x, canceled: !canceled } : x));
+      alert(/canceled/.test(e?.message || "")
+        ? "中止の設定を保存できませんでした（データベースに「中止」の項目がまだありません）。"
+        : "保存に失敗しました。通信状況を確認して、もう一度お試しください。");
+    }
+    reload({ silent: true });
   }
 
   async function handleDeleteTournament(id) {
@@ -5247,7 +5515,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
   }
 
   return (
-    <div style={S.page}>
+    <div ref={listRootRef} style={S.page}>
       <div style={{ ...S.hdr, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:20,fontWeight:800,color:C.white }}>試合一覧</span>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -5261,7 +5529,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           {mySchoolName && timeTab==="team" && (
             <button onClick={()=>setTmMySchoolOnly(v=>!v)} style={{ padding:"4px 10px", borderRadius:20, border:"1px solid "+(tmMySchoolOnly?"#fff":"rgba(255,255,255,0.4)"), background:tmMySchoolOnly?"#fff":"transparent", color:tmMySchoolOnly?C.navy:"#fff", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>{mySchoolName}</button>
           )}
-          <button style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:13, padding:"6px 10px", cursor:"pointer" }} onClick={reload}>🔄 更新</button>
+          <RefreshButton onClick={reload} spinning={loading} label="更新" size={36} />
         </div>
       </div>
       {toast && <div style={{ position:"fixed", top:60, left:"50%", transform:"translateX(-50%)", background:"#1b5e20", color:"#fff", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:700, zIndex:9999, boxShadow:"0 4px 12px rgba(0,0,0,0.2)", whiteSpace:"nowrap" }}>{toast}</div>}
@@ -5450,7 +5718,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             const pick = (name) => { setTournamentSearch(name); setTournamentDropdownOpen(false); };
             return (
           <div style={{ position:"relative", margin:"10px 14px 8px" }}>
-            <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
+            <div style={{ position:"relative", zIndex:21, display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
               <span style={{ fontSize:14, color:C.textSec }}>🔍</span>
               <input
                 value={tournamentSearch}
@@ -5462,10 +5730,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               {tournamentSearch && (
                 <button onClick={()=>{ setTournamentSearch(""); setTournamentDropdownOpen(false); }} style={{ border:"none", background:"none", color:C.textSec, fontSize:16, cursor:"pointer", padding:"2px 6px" }} title="絞り込みをクリア">✕</button>
               )}
-              <button onClick={()=>setTournamentDropdownOpen(v=>!v)} style={{ border:"none", background:"none", color:C.textSec, fontSize:14, cursor:"pointer", padding:"2px 4px" }}>{tournamentDropdownOpen ? "▲" : "▼"}</button>
+              <button aria-label={tournamentDropdownOpen ? "一覧を閉じる" : "大会一覧を開く"} onClick={()=>setTournamentDropdownOpen(v=>!v)} style={{ border:"none", background:"none", color:C.textSec, fontSize:15, cursor:"pointer", padding:"8px 10px", margin:"-6px -8px -6px 0", minWidth:40, minHeight:40 }}>{tournamentDropdownOpen ? "▲" : "▼"}</button>
             </div>
+            {/* ★一覧の外を押したら、何も選ばずに閉じる */}
+            {tournamentDropdownOpen && <div onClick={()=>setTournamentDropdownOpen(false)} style={{ position:"fixed", inset:0, zIndex:19 }} />}
             {tournamentDropdownOpen && (
               <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0, right:0, background:C.white, border:"1px solid "+C.border, borderRadius:10, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:20, maxHeight:300, overflowY:"auto" }}>
+                {/* ★いちばん上に「✕ 閉じる」（スクロールしても上に残る） */}
+                <div style={{ position:"sticky", top:0, zIndex:1, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 10px 8px 14px", background:"#f7f9fc", borderBottom:"1px solid "+C.border }}>
+                  <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec }}>大会を選ぶ</span>
+                  <button onClick={()=>setTournamentDropdownOpen(false)} style={{ border:"1px solid "+C.border, background:C.white, color:C.navy, fontSize:13.5, fontWeight:800, borderRadius:8, padding:"6px 12px", cursor:"pointer" }}>✕ 閉じる</button>
+                </div>
                 {tournaments.length===0 ? (
                   <div style={{ padding:"12px 14px", fontSize:14, color:C.textSec }}>大会がまだありません</div>
                 ) : (<>
@@ -5493,22 +5768,34 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {loading && !tournamentsReady && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>}
             {(!loading || tournamentsReady) && tournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}><div style={{ fontSize:40,marginBottom:12 }}>📋</div>大会がまだありません</div>}
             {(!loading || tournamentsReady) && tournaments.length>0 && filteredTournaments.length===0 && <div style={{ textAlign:"center",color:C.textSec,marginTop:40 }}><div style={{ fontSize:32,marginBottom:8 }}>🔍</div>条件に合う大会がありません</div>}
-            {(!loading || tournamentsReady) && filteredTournaments.map(t => {
+            {(!loading || tournamentsReady) && (() => {
+              return filteredTournaments.map(t => {
               const stats = statsForTournament(t);
               const { teamRecord, individualRecord } = recordForTournament(t);
               const isPast = !isUpcomingTournament(t); // ★過去（終了済み）の大会は少しグレーにする
+              // ★大会の状態：中止／予定（まだ始まっていない）／開催中（今日が開催期間）／終了
+              //   中止はバッジの文字だけ赤にし、カードのほかの見た目は変えない
+              const tStatus = t.canceled ? "中止" : isPast ? "終了" : (t.start_date && t.start_date <= todayStr ? "開催中" : "予定");
+              //   過去になった中止の大会は「中止」のまま、カード全体（バッジも）を終了と同じグレーにする
+              const statusStyle = tStatus === "中止" ? (isPast ? { background:C.border, color:C.textSec, border:`1.5px solid ${C.text}` } : { background:"#c62828", color:"#fff", border:"1.5px solid #c62828" })
+                : tStatus === "開催中" ? { background:"#f97316", color:"#fff", border:"1.5px solid #f97316" }
+                : tStatus === "予定" ? { background:"#fff", color:"#1b4fa8", border:"1.5px solid #1b4fa8" }
+                : { background:C.border, color:C.textSec, border:`1.5px solid ${C.text}` };
               return (
-                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: isPast ? `6px solid ${C.textSec}` : `1px solid ${C.border}` }}>
-                  <div style={{ height:4, background: isPast ? "transparent" : C.navy }}/>
-                  <div style={{ padding:"10px 14px", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                <div key={t.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)", position:"relative", borderLeft: `6px solid ${isPast ? C.textSec : C.navy}` }}>
+                  <div style={{ padding:"12px 14px 0", cursor:"pointer" }} onClick={()=>onOpenTournament && onOpenTournament(t)}>
+                    {/* ★大会名の欄全体が「試合作成／一覧」へのボタン。右の丸い › で押せることを示す */}
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <div style={{ flex:1, minWidth:0 }}>
                     {/* ★文字が見えにくいという声への対応：日付は大会名の上に、大会名と同じ大きさ・曜日付きで表示する */}
-                    {t.start_date && <div style={{ fontSize:16, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:2 }}>{fmtDateRangeDow(t.start_date, t.end_date)}</div>}
+                    {t.start_date && <div style={{ fontSize:17, fontWeight:700, color: isPast ? C.textSec : "#5a6478", marginBottom:10 }}>
+                      <span style={{ ...statusStyle, display:"inline-block", fontSize:13, fontWeight:800, borderRadius:20, padding:"1px 10px", marginRight:8, verticalAlign:2 }}>{tStatus==="開催中" ? "● " : ""}{tStatus}</span>
+                      {fmtDateRangeDow(t.start_date, t.end_date)}</div>}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
-                      <div style={{ fontSize:16, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
-                      {isPast && <span style={{ flexShrink:0, fontSize:11, fontWeight:800, color:C.textSec, background:C.border, borderRadius:20, padding:"3px 10px" }}>終了</span>}
+                      <div style={{ fontSize:18, fontWeight:800, color: isPast ? C.textSec : C.text }}>{t.name}</div>
                     </div>
                     {t.venue && (
-                      <div style={{ marginTop:6, fontSize:13, lineHeight:1.5, color: isPast ? C.textSec : "#5a6478" }}>
+                      <div style={{ marginTop:13, fontSize:17, fontWeight:700, lineHeight:1.5, color: isPast ? C.textSec : "#3d4457" }}>
                         <span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</span> {t.venue}
                       </div>
                     )}
@@ -5518,48 +5805,50 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                         {individualRecord.win+individualRecord.loss>0 && <span style={{ fontSize:11.5, fontWeight:700, color: isPast ? C.textSec : C.text }}><SoloIcon size={16} style={{ marginRight:3 }}/>個人戦：{individualRecord.win}勝{individualRecord.loss}敗</span>}
                       </div>
                     )}
+                    </div>
+                    <div style={{ flexShrink:0, width:40, height:40, borderRadius:"50%", background: isPast ? C.textSec : C.navy, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      {/* ★文字の「›」はフォントで位置がずれるため、図形で丸の真ん中に描く */}
+                      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3 L11 8 L6 13" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </div>
+                    </div>
                     <div
-                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:10, padding:"9px 8px", background: isPast ? "#f0f1f4" : "#f7f9fc", borderRadius:10 }}
+                      style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:4, marginTop:22, padding:"14px 0 8px", borderTop:`1px solid ${C.border}` }}
                     >
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>👥</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{stats.participantCount}人</div>
-                        <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>参加選手</div>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>👥</span>{stats.participantCount}人</div>
                       </div>
                       <div style={{ textAlign:"center", cursor:"pointer" }} onClick={e=>{ e.stopPropagation(); setBreakdownModalFor(t); }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>🎾</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.totalMatches}試合`}</div>
-                        <div style={{ fontSize:9.5, color:C.textSec, textDecoration:"underline" }}>試合数</div>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>🎾</span>{loading ? "…" : `${stats.totalMatches}試合`}</div>
                       </div>
                       <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>✅</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.registeredMatches}試合`}</div>
-                        <div style={{ fontSize:9.5, color:C.textSec }}>終了</div>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>✅</span>{loading ? "…" : `${stats.registeredMatches}試合`}</div>
                       </div>
-                      <div style={{ textAlign:"center" }}>
-                        <div style={{ fontSize:12, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📍</div>
-                        <div style={{ fontSize:13, fontWeight:800, color: isPast ? C.textSec : C.text }}>{loading ? "…" : `${stats.venueCount}か所`}</div>
-                        <div style={{ fontSize:9.5, color:C.textSec }}>会場数</div>
+                      {/* ★対戦表（登録されていれば開く。未登録はうすいグレー） */}
+                      <div style={{ textAlign:"center", cursor: t.draw_url ? "pointer" : "default", opacity: t.draw_url ? 1 : 0.4 }}
+                        onClick={e=>{ e.stopPropagation(); if (t.draw_url) window.open(t.draw_url, "_blank", "noopener,noreferrer"); }}>
+                        <div style={{ fontSize:14, fontWeight:800, color: isPast ? C.textSec : C.text, whiteSpace:"nowrap" }}><span style={{ fontSize:12, marginRight:2, filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📋</span>対戦表</div>
                       </div>
                     </div>
-                    <button
-                      style={{ width:"100%", marginTop:10, padding:"13px 10px", border: isPast ? `1px solid ${C.border}` : "1px solid #BFD5FF", borderRadius:14, background: isPast ? "#f0f1f4" : "#EEF4FF", color: isPast ? C.textSec : "#1E3A8A", fontSize:15, fontWeight:700, cursor:"pointer" }}
-                      onClick={e=>{ e.stopPropagation(); onOpenTournament && onOpenTournament(t); }}
-                    >▶ 試合作成／一覧へ</button>
                   </div>
-                  <div style={{ display:"flex", gap:8, padding:"10px 14px 14px" }}>
+                  <div style={{ display:"flex", gap:8, padding:"6px 14px 14px" }}>
                     <button
                       disabled={!t.venue_link}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.venue_link ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.venue_link ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
                     ><span style={{ color: isPast ? C.textSec : (t.venue_link ? "#e53935" : "#c3c9d4") }}>📍</span> 地図</button>
                     <button
                       disabled={!t.guideline_url}
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.guideline_url ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : (t.guideline_url ? "#1e2a44" : "#c3c9d4"), border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
                       onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
                     ><span style={{ color: isPast ? C.textSec : (t.guideline_url ? "#1976d2" : "#c3c9d4") }}>📄</span> 要項</button>
+                    {(() => { const memoText = (withEquip(t).equipment_plan?.memo || "").trim(); return (
                     <button
-                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"10px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer", position:"relative" }}
+                      onClick={e=>{ e.stopPropagation(); markMemoSeen(t.id, memoText); setMemoFor(withEquip(t)); }}
+                    ><span style={{ filter: isPast ? "grayscale(1) opacity(0.6)" : "none" }}>📝</span> メモ{isMemoUnseen(t.id, memoText) && <span aria-label="まだ見ていないメモあり" style={{ width:7, height:7, borderRadius:"50%", background: isPast ? C.textSec : "#e53935", marginLeft:1, alignSelf:"flex-start", marginTop:2 }} />}</button>
+                    ); })()}
+                    <button
+                      style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"8px 6px", fontSize:12, fontWeight:700, background: isPast ? "#f7f8fa" : "#fff", color: isPast ? C.textSec : "#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer" }}
                       onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(v => v===t.id ? null : t.id); }}
                     >⋯ その他</button>
                   </div>
@@ -5584,10 +5873,22 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                               venue: t.venue,
                               venue_link: t.venue_link,
                               guideline_url: t.guideline_url,
+                              draw_url: t.draw_url,
                             });
                             setShowTournamentModal(true);
                           }}
                         >📄 コピー</button>
+                        {t.canceled ? (
+                          <button
+                            style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
+                            onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); handleSetTournamentCanceled(t, false); }}
+                          >↩ 中止を取り消す</button>
+                        ) : (
+                          <button
+                            style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.red }}
+                            onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setConfirmCancelTournament(t); }}
+                          >🚫 中止にする</button>
+                        )}
                         <button
                           style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.red }}
                           onClick={e=>{ e.stopPropagation(); setOpenTournamentMenuId(null); setConfirmDeleteTournament(t.id); }}
@@ -5597,8 +5898,14 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                   )}
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
+          {/* ★大会のメモ（「📝 メモ」から開くポップアップ） */}
+          {memoFor && (
+            <TournamentMemoModal tournament={memoFor} onClose={()=>setMemoFor(null)}
+              onSaved={(plan)=>{ setEquipMap(m => ({ ...m, [memoFor.id]: plan })); setMemoFor(t => t ? { ...t, equipment_plan: plan } : t); }} />
+          )}
           {/* 大会FAB（★閲覧専用アカウントには出さない） */}
           {!isViewer && <button style={{ padding:0, position:"fixed",bottom:80,right:20,width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.navy},${C.navyMid})`,color:C.white,fontSize:28,border:"none",cursor:"pointer",boxShadow:"0 4px 16px rgba(15,32,68,0.4)",display:"flex",alignItems:"center",justifyContent:"center" }} onClick={()=>{ setEditingTournament(null); setShowTournamentModal(true); }}>＋</button>}
         </>
@@ -5620,7 +5927,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
               const bNames = bPlayers.map(p=>p.player_name).join("/");
               const aClub = aPlayers[0]?.club_name || "";
               const bClub = bPlayers[0]?.club_name || "";
-              const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
+              const borderColor = m.status==="active" ? C.live : m.status==="waiting" ? C.waitBar : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : aWin ? C.teamA : bWin ? C.teamB : C.border;
               const isMyMatch = m.created_by === myId;
               return (
                 <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
@@ -5629,8 +5936,8 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4, gap:8 }}>
                       <span style={{ fontSize:11, color:C.textSec, flex:1, minWidth:0 }}>{fmtDate(m.match_date)}{m.tournament_name ? ` · ${m.tournament_name}` : ""}</span>
                       <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                        {m.status==="active" && <span style={{ fontSize:10, color:C.orange, fontWeight:700, background:"#fff3e0", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>🔴 進行中</span>}
-                        {m.status==="waiting" && <span style={{ fontSize:10, color:C.purple, fontWeight:700, background:"#eef0fe", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏳ 待機中</span>}
+                        {m.status==="active" && <span style={{ fontSize:10, color:C.live, fontWeight:700, background:C.liveL, padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>🔵 進行中</span>}
+                        {m.status==="waiting" && <span style={{ fontSize:10, color:C.wait, fontWeight:700, background:C.waitL, padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>⏳ 待機中</span>}
                         {m.status==="scheduled" && <span style={{ fontSize:10, color:C.accent, fontWeight:700, background:"#e8f5e9", padding:"1px 8px", borderRadius:10, whiteSpace:"nowrap" }}>予定</span>}
                         {m.status==="suspended" && <span style={{ fontSize:10, color:C.textSec, fontWeight:700, whiteSpace:"nowrap" }}>中断 {m.match_score_a}-{m.match_score_b}</span>}
                         {m.status==="abandoned" && <span style={{ fontSize:10, color:C.textSec, fontWeight:700, whiteSpace:"nowrap" }}>途中終了 {m.match_score_a}-{m.match_score_b}</span>}
@@ -5703,7 +6010,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             {!loading && filteredTeamMatches.slice(0, visibleCount).map(tm => {
               const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
               const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
-              const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : (tm.status === "suspended" || tm.status === "abandoned") ? C.textSec : C.accent;
+              const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.live : (tm.status === "suspended" || tm.status === "abandoned") ? C.textSec : C.accent;
               const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : tm.status === "suspended" ? "⏸ 中断中" : tm.status === "abandoned" ? "⛔ 途中終了" : "📅 予定";
               const hasVideo = (tm.video_links || []).length > 0;
               const hasAi = (tm.games || []).some(g => g.match_id && aiAnalysesMap[g.match_id]);
@@ -5866,10 +6173,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {breakdownModalFor && (() => {
         const t = breakdownModalFor;
         const name = t.name;
-        const individualForT = allMatches.filter(m => m.tournament_name === name);
-        const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name);
+        const individualForT = allMatches.filter(m => m.tournament_name === name && resolveTournamentId(m.tournament_name, m.match_date) === t.id);
+        const teamMatchesForT = allTeamMatches.filter(tm => tm.tournament_name === name && resolveTournamentId(tm.tournament_name, tm.match_date) === t.id);
         const statusLabel = (status) => ({
-          finished: "✅ 終了", abandoned: "⛔ 途中終了", active: "🔴 進行中", waiting: "⏳ 待機中", scheduled: "📅 予定", suspended: "⏸ 中断中",
+          finished: "✅ 終了", abandoned: "⛔ 途中終了", active: "🔵 進行中", waiting: "⏳ 待機中", scheduled: "📅 予定", suspended: "⏸ 中断中",
         }[status] || status || "―");
         return (
           <FullScreenSheet title={`🎾 ${t.name} の試合数の内訳`} onClose={()=>setBreakdownModalFor(null)}>
@@ -5940,6 +6247,20 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           </FullScreenSheet>
         );
       })()}
+      {confirmCancelTournament && (
+        <Modal onClose={()=>setConfirmCancelTournament(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:40,marginBottom:8 }}>🚫</div>
+            <h3 style={{ fontSize:16,fontWeight:800,marginBottom:6 }}>この大会を中止にしますか？</h3>
+            <div style={{ fontSize:14,fontWeight:800,color:C.text,marginBottom:8 }}>{confirmCancelTournament.name}</div>
+            <p style={{ fontSize:12,color:C.textSec,marginBottom:20,lineHeight:1.7 }}>大会や試合のデータは消えません。<br/>あとから「中止を取り消す」で元に戻せます。</p>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <button style={{ padding:"11px",background:"#c62828",color:C.white,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>handleSetTournamentCanceled(confirmCancelTournament, true)}>中止にする</button>
+              <button style={{ padding:"11px",background:"#f0f0f0",color:C.text,border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer" }} onClick={()=>setConfirmCancelTournament(null)}>やめる</button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {confirmDeleteTournament && (
         <Modal onClose={()=>setConfirmDeleteTournament(null)}>
           <div style={{ textAlign:"center" }}>
@@ -6047,6 +6368,11 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
     initial?.guideline_url ? decodeURIComponent(initial.guideline_url.split("/").pop() || "") : ""
   );
   const [uploadingGuideline, setUploadingGuideline] = useState(false);
+  // ★対戦表（要項と同じく、ファイル添付かリンク）
+  const [drawMode, setDrawMode] = useState("file");
+  const [drawUrl, setDrawUrl] = useState(initial?.draw_url || "");
+  const [drawFileName, setDrawFileName] = useState(initial?.draw_url ? decodeURIComponent(initial.draw_url.split("/").pop() || "") : "");
+  const [uploadingDraw, setUploadingDraw] = useState(false);
   const [saving, setSaving] = useState(false);
   // ★出場選手（選手マスターの自チーム選手から複数選択）
   const [participantIds, setParticipantIds] = useState(initial?.participant_player_ids || []);
@@ -6076,24 +6402,45 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
     e.target.value = "";
   }
 
+  async function handleDrawFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDraw(true);
+    try {
+      const url = await uploadTournamentGuideline(file);
+      setDrawUrl(url);
+      setDrawFileName(file.name);
+    } catch(err) {
+      alert("アップロードに失敗しました: " + (err.message || err));
+    }
+    setUploadingDraw(false);
+    e.target.value = "";
+  }
+
   return (
     <div>
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>大会名</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>大会名</div>
       <input style={{ ...S.inp, marginBottom:14 }} placeholder="例：令和8年度 新人戦" value={name} onChange={e=>setName(e.target.value)}/>
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>開催期間</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>開催期間</div>
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-        <input type="date" style={{ ...S.inp, flex:1 }} value={startDate} onChange={e=>setStartDate(e.target.value)}/>
+        <input type="date" style={{ ...S.inp, flex:1 }} value={startDate} onChange={e=>{
+          // ★開始日を入れたら終了日も同じ日にそろえる（1日だけの大会で2回入力しなくて済むように）。
+          //   ただし複数日の期間を入力済みの場合（終了日が開始日より後）は、終了日を残す。
+          const v = e.target.value;
+          if (v && (!endDate || endDate === startDate || endDate < v)) setEndDate(v);
+          setStartDate(v);
+        }}/>
         <span style={{ fontSize:12, color:C.textSec }}>〜</span>
         <input type="date" style={{ ...S.inp, flex:1 }} value={endDate} onChange={e=>setEndDate(e.target.value)}/>
       </div>
-      <div style={{ fontSize:11, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>場所 / 会場名（任意）</div>
+      <div style={{ fontSize:13, color:C.textSec, marginBottom:16 }}>※単日開催の場合は同じ日付を選択してください</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>場所 / 会場名（任意）</div>
       <div style={{ marginBottom:16 }}>
         <VenueHistoryField value={venue} onChange={v=>{ setVenue(v); }} history={venues} placeholder="例：○○市民コート"
           onPick={item=>{ setVenue(item.name); if (item.link) { setVenueLink(item.link); setAutoLinkFrom(item.name); } else { setAutoLinkFrom(null); } }}/>
       </div>
 
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>会場リンク（任意）</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>会場リンク（任意）</div>
       <div style={{ display:"flex", alignItems:"center", gap:8, borderBottom:"1px solid "+C.border, paddingBottom:8, marginBottom:16 }}>
         <span style={{ fontSize:14, color:C.textSec }}>🔗</span>
         <input
@@ -6112,7 +6459,7 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         </div>
       )}
 
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>試合要項（任意）</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>試合要項（任意）</div>
       <div style={{ border:"1px dashed "+C.border, borderRadius:10, padding:12, marginBottom:16 }}>
         <div style={{ display:"flex", gap:6, marginBottom:10 }}>
           <button
@@ -6133,12 +6480,13 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
           guidelineUrl ? (
             <div style={{ display:"flex", alignItems:"center", gap:8, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
               <span style={{ fontSize:18 }}>📄</span>
-              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{guidelineFileName || "添付済みファイル"}</span>
+              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}><span style={{ color:"#1976d2" }}>要項：</span>{guidelineFileName || "添付済みファイル"}</span>
               <span style={{ color:C.textSec, fontSize:12, cursor:"pointer" }} onClick={()=>{ setGuidelineUrl(""); setGuidelineFileName(""); }}>✕</span>
             </div>
           ) : (
-            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, color:C.textSec, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
-              {uploadingGuideline ? "アップロード中..." : "📎 PDFを選択"}
+            // ★要項と対戦表の「選択」ボタンを文字と色で区別する（隣り合っていて押し間違えやすかったため）
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, color:"#1976d2", background:"#eef5fd", borderRadius:8, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
+              {uploadingGuideline ? "⏳ 要項をアップロード中…" : <>📄 <b>要項</b>のPDFを選択</>}
               <input type="file" accept="application/pdf" style={{ display:"none" }} disabled={uploadingGuideline} onChange={handleGuidelineFileChange}/>
             </label>
           )
@@ -6155,7 +6503,44 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
         )}
       </div>
 
-      <div style={{ fontSize:12, color:C.textSec, fontWeight:700, marginBottom:6 }}>出場選手（任意・複数選択可）</div>
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>対戦表（任意）</div>
+      <div style={{ border:"1px dashed "+C.border, borderRadius:10, padding:12, marginBottom:16 }}>
+        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+          {[["file","📎 ファイル添付"],["link","🔗 リンクを貼る"]].map(([k,l]) => (
+            <button key={k} type="button"
+              style={{ flex:1, textAlign:"center", padding:"6px", borderRadius:8, fontSize:12, fontWeight:700, cursor:"pointer",
+                border:"1px solid "+(drawMode===k?C.navy:C.border), background:drawMode===k?C.navy:"#fff", color:drawMode===k?"#fff":C.textSec }}
+              onClick={()=>setDrawMode(k)}
+            >{l}</button>
+          ))}
+        </div>
+        {drawMode==="file" ? (
+          drawUrl ? (
+            <div style={{ display:"flex", alignItems:"center", gap:8, background:C.gray, borderRadius:8, padding:"8px 10px" }}>
+              <span style={{ fontSize:18 }}>📋</span>
+              <span style={{ flex:1, fontSize:12, fontWeight:700, color:C.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}><span style={{ color:"#7a5a00" }}>対戦表：</span>{drawFileName || "添付済みファイル"}</span>
+              <span style={{ color:C.textSec, fontSize:12, cursor:"pointer" }} onClick={()=>{ setDrawUrl(""); setDrawFileName(""); }}>✕</span>
+            </div>
+          ) : (
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, color:"#7a5a00", background:"#fdf6e3", borderRadius:8, fontSize:13, padding:"10px 0", cursor:"pointer" }}>
+              {uploadingDraw ? "⏳ 対戦表をアップロード中…" : <>📋 <b>対戦表</b>のPDF・画像を選択</>}
+              <input type="file" accept=".pdf,application/pdf,image/*" style={{ display:"none" }} disabled={uploadingDraw} onChange={handleDrawFileChange}/>
+            </label>
+          )
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:14, color:C.textSec }}>🔗</span>
+            <input
+              style={{ flex:1, border:"none", outline:"none", fontSize:13, color:C.text, background:"transparent" }}
+              placeholder="対戦表が載っているURLを貼り付け"
+              value={drawUrl}
+              onChange={e=>{ setDrawUrl(e.target.value); setDrawFileName(""); }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize:15, color:C.navy, fontWeight:800, marginBottom:6 }}>出場選手（任意・複数選択可）</div>
       <div style={{ border:"1px solid "+C.border, borderRadius:10, padding:10, marginBottom:16 }}>
         <input
           style={{ ...S.inp, marginBottom:8 }}
@@ -6182,16 +6567,18 @@ function TournamentFormFields({ initial, onCancel, onSave }) {
             <span key={p.id} style={S.chip(participantIds.includes(p.id))} onClick={()=>toggleParticipant(p.id)}>{p.player_name}</span>
           ))}
         </div>
-        <div style={{ fontSize:11, color:C.textSec, marginTop:8 }}>{participantIds.length}人選択中</div>
+        <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginTop:8 }}>{participantIds.length}人選択中</div>
       </div>
 
       <div style={{ display:"flex", gap:8, position:"sticky", bottom:0, background:C.white, padding:"12px 0 18px", marginTop:16, borderTop:`1px solid ${C.border}` }}>
         <button style={{ flex:1, padding:11, borderRadius:10, border:"none", background:"#f0f2f6", color:C.textSec, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={onCancel}>キャンセル</button>
+        {/* ★要項・対戦表のアップロード中は保存できないようにする。
+             以前は対戦表のアップロード中でも押せてしまい、終わる前に保存すると対戦表が空のまま保存されていた */}
         <button
-          style={{ flex:1, padding:11, borderRadius:10, border:"none", background:`linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:saving?"default":"pointer" }}
-          disabled={saving || uploadingGuideline}
-          onClick={async ()=>{ setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds); setSaving(false); }}
-        >{initial ? "保存する" : "作成する"}</button>
+          style={{ flex:1, padding:11, borderRadius:10, border:"none", background:(uploadingGuideline || uploadingDraw) ? "#cfd5de" : `linear-gradient(135deg,${C.accent},#00a066)`, color:C.white, fontSize:14, fontWeight:800, cursor:(saving || uploadingGuideline || uploadingDraw)?"default":"pointer" }}
+          disabled={saving || uploadingGuideline || uploadingDraw}
+          onClick={async ()=>{ if (uploadingGuideline || uploadingDraw) return; setSaving(true); await onSave(name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl); setSaving(false); }}
+        >{(uploadingGuideline || uploadingDraw) ? "アップロード中…" : saving ? "保存中…" : initial ? "保存する" : "作成する"}</button>
       </div>
     </div>
   );
@@ -6219,6 +6606,13 @@ function saveTournamentFilterPrefs(tournamentName, prefs) {
 // 大会 詳細画面（大会に紐づく試合一覧）
 // ============================================================
 const _teamListModeMemo = {}; // ★大会詳細・団体戦タブの表示モードを大会ごとに記憶
+const _drawViewModeMemo = {}; // ★大会詳細・個人戦の「ドロー表／ペア別対戦」を大会ごとに記憶
+// ★大会詳細のスクロール位置の控え。試合などを開いて戻ってきたときだけ、この位置に戻す
+let _tournamentDetailView = null;        // { id, scrollY }
+let _tournamentDetailRestoreUntil = 0;
+function markTournamentDetailReturn(id) {
+  if (_tournamentDetailView && _tournamentDetailView.id === id) _tournamentDetailRestoreUntil = Date.now() + 3000;
+}
 function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeamMatch, onNewIndividual, onNewTeam, onCopyMatch, onCopyTeamMatch, initialSeg, onSegChange, onOpenDrawSetup, onOpenDailyRanking, onOpenPairMaster, autoOpenBulkImport, onAutoOpenBulkImportHandled, onRequestBulkImport, onOpenAiAnalysis, onOpenPairMatch }) {
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
@@ -6239,7 +6633,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [videoView, setVideoView] = useState(null);
   const [confirmDeleteTeamMatch, setConfirmDeleteTeamMatch] = useState(null);
   const [drawSummary, setDrawSummary] = useState({ team: 0, individual: 0 });
-  const [drawViewMode, setDrawViewMode] = useState("draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
+  const [drawViewMode, _setDrawViewMode] = useState(() => _drawViewModeMemo[tournament?.id] || "draw"); // draw | list（ドロー表 or 試合一覧の切り替え）
+  const setDrawViewMode = (v) => { if (tournament?.id) _drawViewModeMemo[tournament.id] = v; _setDrawViewMode(v); };
   // ★前回この大会で使っていた絞り込みを復元する（試合を見て戻ってきても選び直さなくていいように）
   const savedFilterPrefs = useMemo(() => loadTournamentFilterPrefs(tournament?.name || ""), [tournament?.name]);
   const [individualResultFilter, setIndividualResultFilter] = useState(savedFilterPrefs.result || "all"); // "all" | "win" | "lose"（勝ち残り／敗退の絞り込み）
@@ -6312,7 +6707,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     const drawP = Promise.all([getDrawSummary(tournament.id, "team"), getDrawSummary(tournament.id, "individual")])
       .then(([teamCount, indivCount]) => ({ team: teamCount, individual: indivCount }))
       .catch(e => { console.error(e); return null; });
-    Promise.all([getTournamentMatchesAndTeamMatches(tournament.name), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id), drawP]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList, drawSummaryNow]) => {
+    Promise.all([getTournamentMatchesAndTeamMatches(tournament), getSchools(), getMyProfile(), getSimpleRecordedDrawMatches(tournament.id), drawP]).then(([{ matches: list, teamMatches: tList }, schools, profile, simpleList, drawSummaryNow]) => {
       const smap = {};
       (schools || []).forEach(s => { smap[s.id] = s.name; });
       let myName = "";
@@ -6364,6 +6759,42 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload]);
+
+  // ★試合などを開いて戻ってきたときは、さっき見ていた位置で表示する
+  const rootRef = useRef(null);
+  const restoreYRef = useRef(
+    Date.now() < _tournamentDetailRestoreUntil && _tournamentDetailView?.id === tournament.id ? _tournamentDetailView.scrollY : null
+  );
+  const restoringScrollRef = useRef(restoreYRef.current != null);
+  useEffect(() => {
+    _tournamentDetailRestoreUntil = 0;
+    if (restoreYRef.current == null) _tournamentDetailView = { id: tournament.id, scrollY: 0 };
+    const onScroll = () => {
+      // 位置を戻している途中や、画面が切り替わった後のスクロールは記録しない
+      if (restoringScrollRef.current || !rootRef.current || !rootRef.current.isConnected) return;
+      _tournamentDetailView = { id: tournament.id, scrollY: window.scrollY };
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [tournament.id]);
+  useEffect(() => {
+    if (loading || restoreYRef.current == null) return;
+    const y = restoreYRef.current;
+    restoreYRef.current = null;
+    let cancelled = false, tries = 0;
+    const go = () => {
+      if (cancelled) return;
+      window.scrollTo(0, y);
+      // 中身があとから表示されて高さが足りなかったときは、少し待ってやり直す
+      if (Math.abs(window.scrollY - y) > 2 && tries++ < 10) { setTimeout(go, 100); return; }
+      restoringScrollRef.current = false;
+      _tournamentDetailView = { id: tournament.id, scrollY: window.scrollY };
+    };
+    // アプリ全体の「画面が変わったら一番上へ」より後に動くよう、描画の後で行う
+    requestAnimationFrame(() => requestAnimationFrame(go));
+    return () => { cancelled = true; restoringScrollRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   // ★団体戦にドローが無い場合は「ドロー表」ボタン自体を出さないため、
   //   デフォルトの表示を自動で「試合カード」に切り替える
@@ -6552,23 +6983,18 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   }, [loading, tournament.id, teamMatches.length, individualMatches.length]);
 
   return (
-    <div style={S.page}>
+    <div ref={rootRef} style={S.page}>
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:16, fontWeight:800, color:C.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{tournament.name}</div>
           <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)", marginTop:2 }}>📅 {fmtDateRange(tournament.start_date, tournament.end_date)}</div>
         </div>
-        <button
-          style={{ padding:0, background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:15, width:32, height:32, cursor: refreshing ? "default" : "pointer", lineHeight:1, flexShrink:0 }}
-          onClick={()=>{ if (!refreshing) reload(true); }}
-          disabled={refreshing}
-          title="最新データに更新"
-        ><span style={{ display:"inline-block", animation: refreshing ? "td-refresh-spin 0.8s linear infinite" : "none" }}>🔄</span></button>
+        <RefreshButton onClick={()=>reload(true)} spinning={refreshing} size={36} />
         <style>{"@keyframes td-refresh-spin{to{transform:rotate(360deg);}}"}</style>
         <div style={{ position:"relative" }}>
           <button
-            style={{ padding:0, background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, color:C.white, fontSize:16, width:32, height:32, cursor:"pointer", lineHeight:1 }}
+            style={{ padding:0, background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.18)", borderRadius:12, color:C.white, fontSize:18, fontWeight:900, width:36, height:36, cursor:"pointer", lineHeight:1 }}
             onClick={()=>setShowMoreMenu(v=>!v)}
           >⋯</button>
           {showMoreMenu && (
@@ -6661,8 +7087,8 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         const total = win + lose;
         return (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", margin:"10px 14px 0", background:"#f7f9fc", borderRadius:10, padding:"11px 14px" }}>
-            <span style={{ fontSize:12.5, fontWeight:700, color:C.textSec, display:"inline-flex", alignItems:"center", gap:5 }}>{seg==="team" ? <><TeamIcon size={18}/>団体戦成績</> : <><SoloIcon size={18}/>個人戦成績</>}</span>
-            <span style={{ fontSize:17, fontWeight:800, color:C.text }}>{total>0 ? `${win}勝${lose}敗` : "ー"}</span>
+            <span style={{ fontSize:15, fontWeight:700, color:C.textSec, display:"inline-flex", alignItems:"center", gap:5 }}>{seg==="team" ? <><TeamIcon size={18}/>団体戦成績</> : <><SoloIcon size={18}/>個人戦成績</>}</span>
+            <span style={{ fontSize:20, fontWeight:800, color:C.text }}>{total>0 ? `${win}勝${lose}敗` : "ー"}</span>
           </div>
         );
       })()}
@@ -6819,7 +7245,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
         {!loading && seg==="team" && teamListMode==="card" && sortedTeamMatches.map(tm => {
           const myFullLabel = [(tm.my_school_id ? schoolMap[tm.my_school_id] : null) || mySchoolName || "自チーム", tm.my_team_division].filter(Boolean).join("");
           const oppLabel = [tm.opponent_name, tm.opponent_division].filter(Boolean).join("");
-          const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.orange : (tm.status === "suspended" || tm.status === "abandoned") ? C.textSec : C.accent;
+          const statusColor = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? C.teamA : C.teamB) : tm.status === "active" ? C.live : (tm.status === "suspended" || tm.status === "abandoned") ? C.textSec : C.accent;
           const statusLabel = tm.status === "finished" ? (tm.my_score > tm.opponent_score ? "勝利" : tm.my_score < tm.opponent_score ? "敗北" : "全試合終了") : tm.status === "active" ? "⏳ 進行中" : tm.status === "suspended" ? "⏸ 中断中" : tm.status === "abandoned" ? "⛔ 途中終了" : "予定";
           const notStarted = tm.status !== "finished" && tm.status !== "active" && tm.status !== "suspended" && tm.status !== "abandoned";
           return (
@@ -6886,35 +7312,36 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
         {!loading && seg==="individual" && (drawSummary[seg]===0 || drawViewMode==="list") && individualMatches.length>0 && (
           <div style={{ margin:"0 14px 12px" }}>
-            <div style={{ display:"flex", gap:8 }}>
+            {/* ★ボタンは短い言葉にして、入りきらないときは横にスライドできるようにした */}
+            <div style={{ display:"flex", gap:8, overflowX:"auto", WebkitOverflowScrolling:"touch", paddingBottom:2, scrollbarWidth:"none" }}>
               <button
                 onClick={()=>setIndividualResultFilter(v=>v==="win"?"all":"win")}
                 style={{
-                  padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer",
+                  flexShrink:0, whiteSpace:"nowrap", padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
                   border:`1.5px solid ${individualResultFilter==="win"?C.teamA:C.border}`,
                   background:individualResultFilter==="win"?C.teamA:"#fff", color:individualResultFilter==="win"?"#fff":C.textSec,
                 }}
-              >🏆 勝ち残りのみ</button>
+              >🏆 勝ち残り</button>
               <button
                 onClick={()=>setIndividualResultFilter(v=>v==="lose"?"all":"lose")}
                 style={{
-                  padding:"7px 12px", borderRadius:20, fontSize:12, fontWeight:700, cursor:"pointer",
+                  flexShrink:0, whiteSpace:"nowrap", padding:"8px 12px", borderRadius:20, fontSize:13.5, fontWeight:700, cursor:"pointer",
                   border:`1.5px solid ${individualResultFilter==="lose"?C.red:C.border}`,
                   background:individualResultFilter==="lose"?C.red:"#fff", color:individualResultFilter==="lose"?"#fff":C.textSec,
                 }}
-              >💔 敗退ペアのみ</button>
+              >💔 敗退</button>
               <input
                 value={individualSearch}
                 onChange={e=>setIndividualSearch(e.target.value)}
-                placeholder="🔍 選手名・チーム名で検索"
-                style={{ flex:1, minWidth:0, padding:"7px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:12.5, color:C.text, boxSizing:"border-box" }}
+                placeholder="🔍 選手名・チーム名"
+                style={{ flex:"1 0 190px", minWidth:190, padding:"8px 12px", borderRadius:20, border:`1px solid ${C.border}`, background:"#fff", fontSize:14, color:C.text, boxSizing:"border-box" }}
               />
             </div>
             {individualMyPairs.length>1 && (
               <select
                 value={individualPairFilter}
                 onChange={e=>setIndividualPairFilter(e.target.value)}
-                style={{ width:"100%", marginTop:8, padding:"8px 10px", borderRadius:10, border:`1.5px solid ${individualPairFilter!=="all"?C.navy:C.border}`, background:"#fff", fontSize:12.5, fontWeight:700, color:individualPairFilter!=="all"?C.navy:C.textSec }}
+                style={{ width:"100%", marginTop:8, padding:"10px 12px", borderRadius:10, border:`1.5px solid ${individualPairFilter!=="all"?C.navy:C.border}`, background:"#fff", fontSize:14.5, fontWeight:700, color:individualPairFilter!=="all"?C.navy:C.textSec }}
               >
                 <option value="all">👥 自チームのペアで絞り込み（すべて）</option>
                 {individualMyPairs.map(name => (
@@ -6925,13 +7352,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
             {individualRounds.length>0 && (
               <div style={{ display:"flex", gap:6, overflowX:"auto", marginTop:8, paddingBottom:2 }}>
                 <button onClick={()=>setIndividualRoundFilter("all")}
-                  style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, fontSize:11.5, fontWeight:700, cursor:"pointer",
+                  style={{ flexShrink:0, padding:"7px 16px", borderRadius:20, fontSize:15.5, fontWeight:700, cursor:"pointer",
                     border:`1.5px solid ${individualRoundFilter==="all"?C.navy:C.border}`,
                     background:individualRoundFilter==="all"?C.navy:"#fff", color:individualRoundFilter==="all"?"#fff":C.textSec }}
                 >すべて</button>
                 {individualRounds.map(r => (
                   <button key={r} onClick={()=>setIndividualRoundFilter(r)}
-                    style={{ flexShrink:0, padding:"6px 12px", borderRadius:20, fontSize:11.5, fontWeight:700, cursor:"pointer",
+                    style={{ flexShrink:0, padding:"7px 16px", borderRadius:20, fontSize:15.5, fontWeight:700, cursor:"pointer",
                       border:`1.5px solid ${individualRoundFilter===r?C.navy:C.border}`,
                       background:individualRoundFilter===r?C.navy:"#fff", color:individualRoundFilter===r?"#fff":C.textSec }}
                   >{r}</button>
@@ -6963,43 +7390,49 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           const oppClub = oppPlayers[0]?.club_name || "";
           const myEntryNo = myPlayers[0]?.entry_no || "";
           const oppEntryNo = oppPlayers[0]?.entry_no || "";
-          const borderColor = m.status==="active" ? C.orange : m.status==="waiting" ? C.purple : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : myWin ? C.teamA : oppWin ? C.teamB : C.border;
+          const borderColor = m.status==="active" ? C.live : m.status==="waiting" ? C.waitBar : m.status==="scheduled" ? C.accent : m.status==="abandoned" ? C.textSec : m.status==="suspended" ? C.textSec : myWin ? C.teamA : oppWin ? C.teamB : C.border;
           return (
             <div key={m.id} style={{ ...S.card, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.08)" }}>
               <div style={{ height:4, background:borderColor }}/>
               <div style={{ padding:"10px 14px", cursor:m.is_simple_draw_result?"default":"pointer" }} onClick={()=>{ if (!m.is_simple_draw_result) onOpenMatch(m.id); }}>
-                <div style={{ fontSize:11, color:C.textSec, marginBottom:4, display:"flex", alignItems:"center", gap:6 }}>
-                  {fmtDate(m.match_date)}{m.round ? ` · ${m.round}` : ""}{m.match_number ? `(${m.match_number}試合目)` : ""}{m.court_number ? `(${m.court_number})` : ""}
+                <div style={{ fontSize:13, color:C.textSec, marginBottom:6, display:"flex", alignItems:"center", gap:6 }}>
+                  <span>{fmtDate(m.match_date)}{m.round && <> · <span style={{ fontSize:16, fontWeight:800, color:C.navy }}>{m.round}</span></>}</span>{m.match_number ? `(${m.match_number}試合目)` : ""}{m.court_number ? `(${m.court_number})` : ""}
                   {m.is_simple_draw_result && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#f1efff", color:C.purple, border:"1px solid "+C.purple }}>簡易記録</span>}
                   {aiAnalyzedMatchIds.has(m.id) && <span style={{ fontSize:8.5, fontWeight:700, padding:"2px 7px", borderRadius:99, background:"#eef0ff", color:C.purple, border:"1px solid #dcdffc" }}>🤖 AI</span>}
                   <span style={{
-                    marginLeft:"auto", fontSize:10.5, fontWeight:700, borderRadius:99, padding:"2px 9px", whiteSpace:"nowrap",
-                    border:`1px solid ${m.status==="waiting"?C.purple:m.status==="active"?C.orange:C.border}`,
-                    color:m.status==="waiting"?C.purple:m.status==="active"?C.orange:C.textSec,
-                    background:m.status==="waiting"?"#eef0fe":m.status==="active"?"#fff3e0":"transparent",
+                    marginLeft:"auto", fontSize:12.5, fontWeight:700, borderRadius:99, padding:"2px 10px", whiteSpace:"nowrap",
+                    border:`1px solid ${m.status==="waiting"?C.waitBar:m.status==="active"?C.live:C.border}`,
+                    color:m.status==="waiting"?C.wait:m.status==="active"?C.live:C.textSec,
+                    background:m.status==="waiting"?C.waitL:m.status==="active"?C.liveL:"transparent",
                   }}>
                     {m.status==="waiting" ? "待機中" : m.status==="scheduled" ? "予定" : m.status==="active" ? "試合中" : m.status==="finished" ? "終了" : m.status==="abandoned" ? "途中終了" : m.status==="suspended" ? "中断" : m.status}
                   </span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:myWin?800:600, color:C.teamA }}>
-                      {myEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{myEntryNo}</span>}
-                      {myClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClub}</span>}{myNames}
+                    {/* ★名前が長くて折り返すときは、2行目を出場番号の右からそろえる（番号の下に文字を回り込ませない）。
+                         1人の名前は途中で切らず、「/」の位置で次の行に送る。 */}
+                    <div style={{ display:"flex", alignItems:"flex-start", fontSize:15.5, fontWeight:myWin?800:600, color:C.teamA, lineHeight:1.45 }}>
+                      {myEntryNo && <span style={{ flexShrink:0, marginTop:2, fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{myEntryNo}</span>}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        {myClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{myClub}</span>}{renderNoBreakNames(myPlayers.map(p=>p.player_name))}
+                      </div>
                     </div>
-                    <div style={{ fontSize:13, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:2 }}>
-                      {oppEntryNo && <span style={{ fontSize:10.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 5px", marginRight:6 }}>{oppEntryNo}</span>}
-                      {oppClub && <span style={{ fontSize:13, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClub}</span>}{oppNames || "対戦相手未定"}
+                    <div style={{ display:"flex", alignItems:"flex-start", fontSize:15.5, fontWeight:oppWin?800:600, color:oppNames?(oppWin?C.teamB:C.text):C.textSec, marginTop:5, lineHeight:1.45 }}>
+                      {oppEntryNo && <span style={{ flexShrink:0, marginTop:2, fontSize:12.5, fontWeight:800, color:C.textSec, border:`1px solid ${C.border}`, borderRadius:5, padding:"1px 6px", marginRight:6 }}>{oppEntryNo}</span>}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        {oppClub && <span style={{ fontSize:15, fontWeight:700, color:"#5a6478", marginRight:6 }}>{oppClub}</span>}{oppNames ? renderNoBreakNames(oppPlayers.map(p=>p.player_name)) : "対戦相手未定"}
+                      </div>
                     </div>
                   </div>
-                  {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:22, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:48, textAlign:"right" }}>{myScore}-{oppScore}</div>}
+                  {m.status!=="scheduled" && m.status!=="waiting" && <div style={{ fontSize:26, fontWeight:900, color:myWin?C.teamA:oppWin?C.teamB:C.textSec, minWidth:52, textAlign:"right" }}>{myScore}-{oppScore}</div>}
                 </div>
               </div>
               {!m.is_simple_draw_result && (
                 <div style={{ display:"flex", borderTop:"1px solid "+C.border }}>
                   {/* ★閲覧専用アカウントには削除・コピー（新規作成）は出さない */}
-                  {!isViewer && <button style={{ width:52, padding:"8px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>}
-                  {!isViewer && <button style={{ flex:1, padding:"8px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>}
+                  {!isViewer && <button style={{ width:52, padding:"10px", background:"#fdecea", color:C.red, border:"none", borderRight:"1px solid "+C.border, fontSize:13.5, fontWeight:700, cursor:"pointer" }} onClick={()=>setConfirmDeleteMatch(m.id)}>🗑</button>}
+                  {!isViewer && <button style={{ flex:1, padding:"10px 12px", textAlign:"left", background:"#f5f5f5", color:C.navy, border:"none", fontSize:13.5, fontWeight:700, cursor:"pointer" }} onClick={()=>onCopyMatch(m.id)}>📋 コピーして新規作成</button>}
                   {/* ★メモ・動画は内容を一覧に出さず、同じ行のマークだけにする。タップで内容を確認できる。 */}
                   {m.memo && (
                     <button
@@ -7059,15 +7492,15 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
           <TournamentFormFields
             initial={tournament}
             onCancel={()=>setShowEditModal(false)}
-            onSave={async (name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds)=>{
+            onSave={async (name, startDate, endDate, venue, venueLink, guidelineUrl, participantIds, drawUrl)=>{
               const trimmed = name.trim();
               if (!trimmed) { alert("大会名を入力してください"); return; }
               if (!startDate) { alert("開始日を選択してください"); return; }
               try {
-                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null, participant_player_ids: participantIds || [] });
+                const saved = await saveTournament({ id: tournament.id, name: trimmed, start_date: startDate, end_date: endDate || startDate, venue: venue || null, venue_link: venueLink || null, guideline_url: guidelineUrl || null, draw_url: drawUrl || null, participant_player_ids: participantIds || [] });
                 // ★大会名が変わった場合、既存の個人戦・団体戦の大会名も追従させる（見えない文字ズレによる紐付け解除を防ぐ）
                 if (tournament.name && tournament.name.trim() !== trimmed) {
-                  await renameTournamentCascade(tournament.name, trimmed);
+                  await renameTournamentCascade(tournament.name, trimmed, tournament);
                 }
                 setShowEditModal(false);
                 onSaved && onSaved(saved);
@@ -7304,6 +7737,23 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   const [detailsByDate, setDetailsByDate] = useState({}); // { "YYYY-MM-DD": [match, match, ...] }（選択済みの日だけフル取得してキャッシュ）
   const [selectedDate, setSelectedDate] = useState(null);
   const [expandedMetric, setExpandedMetric] = useState(null); // 「11位以降を見る」で開く項目キー
+  // ★「11位以降を見る」から戻ったとき、一覧の元の位置（押したランキングのところ）に戻すため、
+  //   開く直前のスクロール位置を覚えておく。開いた一覧は1位から見られるよう一番上に移動する。
+  const rankingScrollYRef = useRef(0);
+  const openExpandedMetric = (key) => { rankingScrollYRef.current = window.scrollY; setExpandedMetric(key); };
+  const closeExpandedMetric = () => setExpandedMetric(null);
+  const expandedMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!expandedMountedRef.current) { expandedMountedRef.current = true; return; }
+    if (expandedMetric) {
+      window.scrollTo(0, 0);
+    } else {
+      const y = rankingScrollYRef.current;
+      window.scrollTo(0, y);
+      // 画像やフォントの読み込みで高さが変わった場合に備えて、描画後にもう一度合わせる
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+  }, [expandedMetric]);
   const [csvSheetOpen, setCsvSheetOpen] = useState(false);     // ★CSV保存の範囲選択シート
   const [csvRange, setCsvRange] = useState("day");             // "day"＝この日だけ ／ "all"＝大会の全日程
   const [csvExporting, setCsvExporting] = useState(false);
@@ -7469,20 +7919,20 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
     return (
       <div style={S.page}>
         <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
-          <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={()=>setExpandedMetric(null)}>←</button>
+          <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={closeExpandedMetric}>←</button>
           <span style={{ fontSize:16, fontWeight:800, color:C.white }}>{m.icon} {m.title}</span>
         </div>
         <div style={{ padding:14, paddingBottom:90 }}>
           <div style={S.card}>
             {m.list.length===0 && <div style={{ textAlign:"center", color:C.textSec, padding:"20px 0" }}>データがありません</div>}
             {m.list.map((row,i)=>(
-              <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 14px", borderBottom: i<m.list.length-1?`1px solid ${C.border}`:"none" }}>
-                <div style={{ width:24, textAlign:"center", fontSize:13, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
+              <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderBottom: i<m.list.length-1?`1px solid ${C.border}`:"none" }}>
+                <div style={{ width:26, textAlign:"center", fontSize:15, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13.5, fontWeight:700 }}>{row.name}</div>
-                  {row.sub && <div style={{ fontSize:10.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                  <div style={{ fontSize:16, fontWeight:700 }}>{row.name}</div>
+                  {row.sub && <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
                 </div>
-                <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>{row.val}</div>
+                <div style={{ fontSize:17, fontWeight:800, color:C.navy }}>{row.val}</div>
               </div>
             ))}
           </div>
@@ -7513,18 +7963,18 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
         ) : (
           <>
             <div style={{ ...S.card, padding:14, marginBottom:14 }}>
-              <div style={{ fontSize:11, color:C.textSec, marginBottom:8, fontWeight:700 }}>日付を選択</div>
+              <div style={{ fontSize:13, color:C.textSec, marginBottom:8, fontWeight:700 }}>日付を選択</div>
               <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                 {availableDates.map(d=>(
-                  <button key={d} style={{ ...S.togBtn(selectedDate===d, C.navy), fontSize:12, padding:"7px 12px" }} onClick={()=>setSelectedDate(d)}>{fmtDate(d)}</button>
+                  <button key={d} style={{ ...S.togBtn(selectedDate===d, C.navy), fontSize:14.5, padding:"8px 14px" }} onClick={()=>setSelectedDate(d)}>{fmtDate(d)}</button>
                 ))}
               </div>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:10 }}>
-                <div style={{ fontSize:11, color:C.textSec }}>{matchesOfDay.length}試合</div>
+                <div style={{ fontSize:13, color:C.textSec }}>{matchesOfDay.length}試合</div>
                 <button
                   disabled={dateLoading || csvExporting}
                   onClick={openCsv}
-                  style={{ fontSize:12, fontWeight:800, color:C.navy, background:C.gray, border:`1px solid ${C.border}`, borderRadius:9, padding:"7px 12px", cursor:"pointer", opacity:(dateLoading||csvExporting)?0.5:1 }}
+                  style={{ fontSize:14, fontWeight:800, color:C.navy, background:C.gray, border:`1px solid ${C.border}`, borderRadius:9, padding:"8px 14px", cursor:"pointer", opacity:(dateLoading||csvExporting)?0.5:1 }}
                 >{csvExporting && !csvSheetOpen ? "作成中..." : "📄 CSVで保存"}</button>
               </div>
             </div>
@@ -7594,25 +8044,25 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
               <div style={{ textAlign:"center", color:C.textSec, marginTop:30, marginBottom:30 }}>この日の試合を読み込み中...</div>
             ) : metrics.map(m=>(
               <div key={m.key} style={{ ...S.card, padding:14, marginBottom:12 }}>
-                <div style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>{m.icon} {m.title}</div>
+                <div style={{ fontSize:16, fontWeight:800, marginBottom:10 }}>{m.icon} {m.title}</div>
                 {m.list.length===0 ? (
-                  <div style={{ textAlign:"center", color:C.textSec, fontSize:12, padding:"10px 0" }}>データがありません</div>
+                  <div style={{ textAlign:"center", color:C.textSec, fontSize:14, padding:"10px 0" }}>データがありません</div>
                 ) : (
                   <>
                     {m.list.slice(0,10).map((row,i)=>(
-                      <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderBottom: i<Math.min(m.list.length,10)-1?`1px solid ${C.border}`:"none" }}>
-                        <div style={{ width:20, textAlign:"center", fontSize:12, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
+                      <div key={row.name} style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderBottom: i<Math.min(m.list.length,10)-1?`1px solid ${C.border}`:"none" }}>
+                        <div style={{ width:26, textAlign:"center", fontSize:15, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
                         <div style={{ flex:1 }}>
-                          <div style={{ fontSize:13, fontWeight:700 }}>{row.name}</div>
-                          {row.sub && <div style={{ fontSize:10, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                          <div style={{ fontSize:16, fontWeight:700 }}>{row.name}</div>
+                          {row.sub && <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
                         </div>
-                        <div style={{ fontSize:14, fontWeight:800, color:C.navy }}>{row.val}</div>
+                        <div style={{ fontSize:17, fontWeight:800, color:C.navy }}>{row.val}</div>
                       </div>
                     ))}
                     {m.list.length > 10 && (
                       <button
-                        style={{ width:"100%", textAlign:"center", padding:9, marginTop:8, borderRadius:9, background:C.gray, border:`1px solid ${C.border}`, fontSize:12, fontWeight:700, color:C.navy, cursor:"pointer" }}
-                        onClick={()=>setExpandedMetric(m.key)}
+                        style={{ width:"100%", textAlign:"center", padding:11, marginTop:8, borderRadius:9, background:C.gray, border:`1px solid ${C.border}`, fontSize:14, fontWeight:700, color:C.navy, cursor:"pointer" }}
+                        onClick={()=>openExpandedMetric(m.key)}
                       >11位以降を見る（全{m.list.length}人）→</button>
                     )}
                   </>
@@ -8483,7 +8933,7 @@ function TournamentPairPlayerSyncScreen({ tournament, pairs, onBack }) {
             value={tournamentSearch}
             onChange={e => setTournamentSearch(e.target.value)}
           />
-          <div style={{ maxHeight:"46dvh", overflowY:"auto" }}>
+          <div style={{ maxHeight:"calc(46dvh / var(--app-zoom, 1))", overflowY:"auto" }}>
             {filteredTournaments.length === 0 ? (
               <div style={{ fontSize:12, color:C.textSec, textAlign:"center", padding:"20px 0" }}>該当する大会がありません</div>
             ) : filteredTournaments.map(t => (
@@ -9273,7 +9723,7 @@ function DrawEntrySheet({ drawMatch, tournament, category, blockLabel, roundLabe
 
   return (
     <Modal onClose={handleClose}>
-      <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+      <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>{matchLabel}の対戦情報を入力</div>
           <button
@@ -9423,6 +9873,24 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
     setSavingSimpleResult(true);
     try {
       await saveSimpleTeamResult(simpleResultFor.id, winner, scoreA, scoreB);
+      // ★個人戦で、この枠から試合（matches）を作成済みだが未開始のまま「結果だけ記録」した場合、
+      //   試合のほうも同じスコアで終了にする。以前はドロー表にだけ結果が入り、試合は「予定」のまま残って
+      //   大会の試合数の内訳や勝敗の集計に反映されなかった。
+      //   ※1点でも記録が始まっている試合（進行中・中断中）は、記録を消さないよう書き換えない。
+      const mi = simpleResultFor.matchInfo;
+      if (category !== "team" && simpleResultFor.match_id && mi && (mi.status === "scheduled" || mi.status === "waiting")) {
+        // 試合は「自チーム＝チームA」で保存されているため、自チームがドローの下側ならスコアを入れ替える
+        const ownIsB = simpleResultFor.sideB?.is_own_team && !simpleResultFor.sideA?.is_own_team;
+        const { error: mErr } = await supabase.from("matches").update({
+          status: "finished",
+          match_score_a: ownIsB ? scoreB : scoreA,
+          match_score_b: ownIsB ? scoreA : scoreB,
+          walkover_winner: null,
+          updated_at: new Date().toISOString(),
+        }).eq("id", simpleResultFor.match_id).in("status", ["scheduled", "waiting"]);
+        if (mErr) console.error("試合の終了反映に失敗:", mErr);
+        invalidateMatchCaches(simpleResultFor.match_id);
+      }
       if (prevWinnerEntry && newWinnerEntry && prevWinnerEntry.id !== newWinnerEntry.id) {
         await syncWinnerToNextMatch(simpleResultFor, prevWinnerEntry, newWinnerEntry);
       }
@@ -9784,7 +10252,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                 const winnerSide = realFinished ? winnerSideOf(mi)
                   : hasSimpleResult ? dm.simple_result_winner
                   : null;
-                const borderColor = mi && mi.status === "active" ? C.orange : mi && mi.status === "waiting" ? C.purple : C.border;
+                const borderColor = mi && mi.status === "active" ? C.live : mi && mi.status === "waiting" ? C.waitBar : C.border;
                 const winnerEntry = winnerSide ? (winnerSide === "A" ? dm.sideA : dm.sideB) : null;
                 const alreadyAdvanced = winnerSide ? isAlreadyAdvanced(dm, winnerEntry) : false;
 
@@ -9799,7 +10267,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                     : mi.status === "active" ? (side === "A" ? mi.match_score_a : mi.match_score_b)
                     : mi.status === "finished" ? (isWalkover ? (isWinner ? "R" : "-") : (side === "A" ? mi.match_score_a : mi.match_score_b))
                     : null;
-                  const scoreColor = mi && mi.status === "active" ? C.orange : nameColor;
+                  const scoreColor = mi && mi.status === "active" ? C.live : nameColor;
                   return (
                     <div style={{ padding: "7px 9px", borderBottom: isFirstRow ? "1px solid " + C.border : "none", fontSize: 11.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
@@ -9875,8 +10343,8 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
                       {sideRow(topSide, true)}
                       {sideRow(bottomSide, false)}
                       {mi && mi.status !== "scheduled" && (
-                        <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.orange : mi.status === "waiting" ? C.purple : C.textSec, fontWeight: (mi.status === "active" || mi.status === "waiting") ? 700 : 400 }}>
-                          {mi.status === "active" ? "🔴 進行中" : mi.status === "waiting" ? "⏳ 待機中" : mi.status === "abandoned" ? "途中終了" : mi.status === "suspended" ? "中断" : isWalkover ? "不戦勝で終了" : "試合終了"}
+                        <div style={{ padding: "5px 9px", fontSize: 10, color: mi.status === "active" ? C.live : mi.status === "waiting" ? C.wait : C.textSec, fontWeight: (mi.status === "active" || mi.status === "waiting") ? 700 : 400 }}>
+                          {mi.status === "active" ? "🔵 進行中" : mi.status === "waiting" ? "⏳ 待機中" : mi.status === "abandoned" ? "途中終了" : mi.status === "suspended" ? "中断" : isWalkover ? "不戦勝で終了" : "試合終了"}
                         </div>
                       )}
                       {winnerSide && !alreadyAdvanced && !!rounds[rn + 1] && (
@@ -10026,7 +10494,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         const nextSlots = (rounds[advancingFrom.round_no + 1] || []).slice().sort((a, b) => a.slot_no - b.slot_no);
         return (
           <Modal onClose={() => setAdvancingFrom(null)}>
-            <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+            <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>どの試合に進出させますか？</div>
                 <button
@@ -10071,7 +10539,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
 
       {bulkImportOpen && (
         <Modal onClose={() => !bulkImporting && closeBulkImport()}>
-          <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+          <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
               <div style={{ fontSize: 15, fontWeight: 800 }}>📋 ドローにデータ登録</div>
               <button
@@ -10155,7 +10623,7 @@ function DrawBracket({ tournament, category, mySchoolName, onOpenMatch, onCopyMa
         ).sort((a, b) => a.round_no - b.round_no || a.slot_no - b.slot_no);
         return (
           <Modal onClose={() => setCopySourceMatch(null)}>
-            <div style={{ maxHeight: "75vh", overflowY: "auto" }}>
+            <div style={{ maxHeight: "calc(75vh / var(--app-zoom, 1))", overflowY: "auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>コピー先の枠を選んでください</div>
                 <button
@@ -10773,7 +11241,7 @@ function PracticeScreen({ onNavigate }) {
   }
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ background:C.navy, color:"#fff", padding:"18px 16px 14px", fontSize:20, fontWeight:800 }}>練習</div>
       <div style={{ padding:14 }}>
         <div style={{ display:"flex", background:"#fff", border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12 }}>
@@ -11054,7 +11522,947 @@ function GuideScreen({ onBack }) {
   );
 }
 
-function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onTrash, onTerms, onGuide, termsAgreedAt, onProfile, onLogout, textScale, onChangeTextScale }) {
+// ============================================================
+// ★備品・場所取り
+//   ・備品の名前とメモは「設定 › 備品の登録」でチーム共通に登録する（equipment_items テーブル）
+//   ・大会ごとの「どの備品を誰が持ってくるか」「場所取りは誰が何時か」は
+//     tournaments.equipment_plan（jsonb）に保存する
+//     形：{ items:[{ item_id, name, player, who }], spots:[{ player, who, time, memo }] }
+//     who は "self"（本人）| "parent"（保護者）。player が空なら「未定」
+// ============================================================
+async function getEquipmentItems(schoolId) {
+  if (!schoolId) return [];
+  const { data, error } = await supabase.from("equipment_items")
+    .select("*").eq("school_id", schoolId).is("deleted_at", null)
+    .order("sort_order", { ascending:true }).order("created_at", { ascending:true });
+  if (error) { console.error(error); throw new Error("備品の一覧を読み込めませんでした: " + error.message); }
+  return data ?? [];
+}
+async function saveEquipmentItem({ id, school_id, name, memo, quantity, sort_order }) {
+  const row = { id: id || uid(), school_id, name: (name || "").trim(), memo: (memo || "").trim() || null, quantity: Math.max(1, Number(quantity) || 1), updated_at: new Date().toISOString() };
+  if (sort_order != null) row.sort_order = sort_order;
+  let { error } = await supabase.from("equipment_items").upsert(row);
+  // ★データベースに数量の項目をまだ追加していない場合は、数量なしで保存する
+  if (error && /quantity/.test(error.message || "")) {
+    const { quantity: _q, ...rest } = row;
+    ({ error } = await supabase.from("equipment_items").upsert(rest));
+    if (!error) alert("数量は保存できませんでした（データベースに数量の項目がまだありません）。名前とメモは保存しました。");
+  }
+  if (error) throw error;
+  return row;
+}
+async function deleteEquipmentItem(id) {
+  const { error } = await supabase.from("equipment_items").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+// ★大会ごとの備品・場所取りは tournament_equipment テーブルに保存する（同じ学校のメンバー全員で共有）。
+//   以前は tournaments.equipment_plan に保存していたが、大会を作った人以外は大会を書き換えられないため、
+//   ほかの人が登録した内容が保存されず「登録した本人にしか見えない」状態になっていた。
+async function getTournamentEquipmentMap(schoolId) {
+  if (!schoolId) return {};
+  const { data, error } = await supabase.from("tournament_equipment").select("tournament_id, plan").eq("school_id", schoolId);
+  if (error) { console.error(error); return {}; }
+  const map = {};
+  (data || []).forEach(r => { map[r.tournament_id] = r.plan; });
+  return map;
+}
+async function saveTournamentEquipmentPlan(tournamentId, plan) {
+  clearMatchListPrefetch();
+  const { data: { user } } = await supabase.auth.getUser();
+  const p = await getMyProfile();
+  if (!p?.school_id) throw new Error("学校情報が未設定のため保存できません");
+  const { data, error } = await supabase.from("tournament_equipment")
+    .upsert({ tournament_id: tournamentId, school_id: p.school_id, plan, updated_by: user?.id || null, updated_at: new Date().toISOString() })
+    .select("tournament_id");
+  if (error) {
+    if (/tournament_equipment/.test(error.message || "")) throw new Error("データベースに備品・場所取りの保存先がまだありません。追加のSQLを実行してください。");
+    throw error;
+  }
+  // ★権限の関係で1件も保存されなかったときは、保存できたように見せずにエラーにする
+  if (!data || data.length === 0) throw new Error("保存する権限がありませんでした");
+}
+// ★大会に備品か場所取りが1件でも入っているか（大会一覧の「管理」ボタンを押せるかどうか）
+function hasEquipmentPlan(t) {
+  const p = t?.equipment_plan;
+  return !!p && ((p.items || []).length > 0 || (p.spots || []).length > 0);
+}
+// ★「清見 祐吾 保護者」「井上 蒼介 本人」のような表示
+const equipWhoLabel = (who) => who === "parent" ? "保護者" : "本人";
+// ★持ってくる人を選ぶときの「最近選んだ人」（この端末に最大10人まで覚える）
+const EQUIP_HISTORY_KEY = "equipPersonHistory";
+function loadEquipHistory() {
+  try { const v = JSON.parse(localStorage.getItem(EQUIP_HISTORY_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+function pushEquipHistory(name) {
+  if (!name) return;
+  try { localStorage.setItem(EQUIP_HISTORY_KEY, JSON.stringify([name, ...loadEquipHistory().filter(n => n !== name)].slice(0, 10))); } catch {}
+}
+
+// ★大会の日にち一覧（"YYYY-MM-DD" の配列）。最大14日まで
+function tournamentDays(t) {
+  const s = t?.start_date, e = t?.end_date || t?.start_date;
+  if (!s) return [];
+  const out = [];
+  const d = new Date(`${s}T00:00:00`), end = new Date(`${e}T00:00:00`);
+  while (d <= end && out.length < 14) {
+    out.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+// ★「10/18（日）」の形
+const eqDayLabel = (iso) => { const f = fmtDateDow(iso); return f.slice(5).replace(/^0/, "").replace("/0", "/"); };
+
+// ---------- 備品・場所取りの線画アイコン ----------
+const EqIcon = ({ name, size=22, color="#1f3466" }) => {
+  const p = { width:size, height:size, viewBox:"0 0 24 24", fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round", style:{ flexShrink:0, display:"block" } };
+  if (name === "bag") return <svg {...p}><path d="M8 7V5.5A2.5 2.5 0 0 1 10.5 3h3A2.5 2.5 0 0 1 16 5.5V7"/><rect x="4.5" y="7" width="15" height="14" rx="3.5"/><path d="M8.5 13.5h7v3h-7z"/></svg>;
+  if (name === "flag") return <svg {...p}><path d="M5 21V4"/><path d="M5 4h11l-2.5 4L16 12H5" fill={color}/></svg>;
+  if (name === "clock") return <svg {...p}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
+  if (name === "person") return <svg {...p} stroke="none" fill={color}><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg>;
+  if (name === "chev") return <svg {...p} strokeWidth={2.2}><path d="M9 5l7 7-7 7"/></svg>;
+  return null;
+};
+
+// ---------- 下から出るシートの外枠 ----------
+function EquipSheet({ title, onClose, children }) {
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:400, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{ width:"100%", maxWidth:520, maxHeight:"calc(88vh / var(--app-zoom, 1))", overflowY:"auto", background:C.white, borderRadius:"18px 18px 0 0", padding:"10px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))", WebkitOverflowScrolling:"touch" }}>
+        <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, color:C.navy, wordBreak:"break-word" }}>{title}</div>
+          <button aria-label="閉じる" onClick={onClose} style={{ padding:0, width:32, height:32, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, cursor:"pointer", flexShrink:0 }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+const equipStepNo = { width:24, height:24, borderRadius:"50%", background:C.navy, color:"#fff", fontSize:13, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 };
+const EquipStep = ({ no, children }) => (
+  <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:15, fontWeight:900, color:C.navy, margin:"16px 0 8px" }}>
+    <span style={equipStepNo}>{no}</span>{children}
+  </div>
+);
+
+
+// ★メモの「まだ見ていない」赤い印：この端末で開いたときのメモの内容を覚えておき、
+//   内容が同じなら印を消す。だれかがメモを書きかえたら、また印が出る。
+const MEMO_SEEN_KEY = "tournamentMemoSeen";
+const memoSig = (text) => { let h = 0; const t = String(text || ""); for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return `${t.length}:${h}`; };
+function loadMemoSeen() { try { return JSON.parse(localStorage.getItem(MEMO_SEEN_KEY) || "{}") || {}; } catch { return {}; } }
+function isMemoUnseen(tid, text) { const t = String(text || "").trim(); if (!t) return false; return loadMemoSeen()[tid] !== memoSig(t); }
+function markMemoSeen(tid, text) {
+  const t = String(text || "").trim();
+  try { const m = loadMemoSeen(); if (t) m[tid] = memoSig(t); else delete m[tid]; localStorage.setItem(MEMO_SEEN_KEY, JSON.stringify(m)); } catch {}
+}
+
+// ---------- 大会のメモ（大会一覧の「📝 メモ」から開くポップアップ） ----------
+//   例：「氷を持ってきてください」「会費は18,000円です」。tournament_equipment.plan.memo に保存（同じ学校の全員で共有）
+function TournamentMemoModal({ tournament, onClose, onSaved }) {
+  const isViewer = useIsViewer();
+  const [memo0, setMemo0] = useState(tournament.equipment_plan?.memo || "");
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(memo0);
+  const [saving, setSaving] = useState(false);
+  const startEdit = () => { if (isViewer) { viewerAlert(); return; } setText(memo0); setEditing(true); };
+  const save = async () => {
+    setSaving(true);
+    try {
+      // ★場所取りを別の人が更新していることがあるため、最新の内容を読み直してからメモだけ差しかえる
+      const p = await getMyProfile().catch(() => null);
+      const latest = (await getTournamentEquipmentMap(p?.school_id))[tournament.id] || tournament.equipment_plan || {};
+      const plan = { ...latest, memo: text.trim() };
+      await saveTournamentEquipmentPlan(tournament.id, plan);
+      markMemoSeen(tournament.id, plan.memo);
+      onSaved && onSaved(plan);
+      setMemo0(plan.memo);
+      setEditing(false);
+    } catch (e) {
+      alert("保存できませんでした：" + (e.message || e));
+    } finally { setSaving(false); }
+  };
+  return (
+    <Modal onClose={onClose}>
+      <h3 style={{ fontSize:16, fontWeight:800, marginBottom:2, textAlign:"center" }}>📝 {editing ? "メモを編集" : "メモ"}</h3>
+      <div style={{ fontSize:13, color:C.textSec, fontWeight:700, textAlign:"center", marginBottom:14, wordBreak:"break-word" }}>{tournament.name}</div>
+      {editing ? (
+        <textarea value={text} autoFocus onChange={e=>setText(e.target.value)} placeholder={"例：氷を持ってきてください。\n会費は18,000円です。"}
+          style={{ width:"100%", boxSizing:"border-box", minHeight:170, border:`1.5px solid ${C.navy}`, borderRadius:12, padding:12, fontSize:16, fontWeight:600, lineHeight:1.7, color:C.text, outline:"none", resize:"vertical", fontFamily:"inherit" }} />
+      ) : memo0.trim() ? (
+        <div style={{ background:"#f7f8fa", borderRadius:12, padding:14, fontSize:16, fontWeight:700, lineHeight:1.75, color:C.text, whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{memo0}</div>
+      ) : (
+        <div style={{ fontSize:14, color:C.textSec, textAlign:"center", padding:"14px 0", lineHeight:1.6 }}>まだメモがありません。{!isViewer && <><br/>「✏️ 書く」から追加できます。</>}</div>
+      )}
+      <div style={{ display:"grid", gridTemplateColumns: (editing || !isViewer) ? "1fr 1fr" : "1fr", gap:8, marginTop:16 }}>
+        {editing ? (
+          <>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text }} onClick={()=>{ setText(memo0); setEditing(false); }}>キャンセル</button>
+            <button style={{ ...S.btn(C.accent), opacity: saving ? 0.6 : 1 }} disabled={saving} onClick={save}>{saving ? "保存中..." : "保存"}</button>
+          </>
+        ) : (
+          <>
+            {!isViewer && <button style={{ ...S.btn(C.white), color:C.navy, border:"1px solid #e5e7eb" }} onClick={startEdit}>✏️ {memo0.trim() ? "編集" : "書く"}</button>}
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text }} onClick={onClose}>閉じる</button>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+
+// ============================================================
+// ★備品（いま誰が持っているか・引き継ぎ・予定・写真）
+//   ・備品そのものは equipment_items（名前・数量・メモ・写真 photo_url）
+//   ・引き継ぎの記録は equipment_moves に1件ずつ保存する
+//       { item_id, from_holder, to_holder, move_date }  holder は選手名 または "部室"
+//   ・move_date が今日より先のものは「予定」。その日になると自動で持ち主が変わる（ボタン操作は不要）
+//   ・予定は1つの備品につき1件まで（新しく保存すると前の予定と置きかわる）
+//   ・記録が1件もない備品は「部室」にある扱い
+// ============================================================
+const EQ_BUSHITSU = "部室";
+const eqIso = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const eqToday = () => eqIso(new Date());
+const eqAddDays = (v, n) => { const [y,m,d] = String(v).split("-").map(Number); return eqIso(new Date(y, m-1, d+n)); };
+const eqMd = (v) => { if (!v) return ""; const [, m, d] = String(v).slice(0,10).split("-").map(Number); return `${m}/${d}`; };
+const eqMdw = (v) => { const [y,m,d] = String(v).split("-").map(Number); return `${m}/${d}（${"日月火水木金土"[new Date(y,m-1,d).getDay()]}）`; };
+
+// ★写真がない備品に出すイラスト
+//   ・何も選んでいないときは備品名から自動で選ぶ
+//   ・「イラストから選ぶ」で選んだときは photo_url に "icon:キー" の形で保存する（写真と同じ欄を使うので追加のSQLは不要）
+const EQ_ICON_LIST = [
+  ["tent_blue","テント（青）"],["tent_white","テント（白）"],["chair","椅子"],["jug_big","ジャグ（大）"],["jug","ジャグ（小）"],
+  ["basket","ボールかご"],["ballbox","ボール箱"],["brush","ブラシ"],["sheet","ブルーシート"],["parasol","日傘"],
+  ["net","ネット"],["firstaid","救急箱"],["bottle","水"],["bag","カバン"],
+];
+function eqIconKeyFromName(name) {
+  const n = String(name || "");
+  if (/テント/.test(n)) return /白/.test(n) ? "tent_white" : "tent_blue";
+  if (/椅子|いす|イス|チェア/.test(n)) return "chair";
+  if (/ジャグ|クーラー|タンク/.test(n)) return /小/.test(n) ? "jug" : "jug_big";
+  if (/かご|カゴ|籠/.test(n)) return "basket";
+  if (/ボール|球/.test(n)) return "ballbox";
+  if (/ブラシ|ほうき|トンボ/.test(n)) return "brush";
+  if (/シート|ござ|レジャー/.test(n)) return "sheet";
+  if (/傘|パラソル/.test(n)) return "parasol";
+  if (/ネット/.test(n)) return "net";
+  if (/救急|薬/.test(n)) return "firstaid";
+  if (/水|ドリンク|ペットボトル|水筒/.test(n)) return "bottle";
+  return "bag";
+}
+function eqIconSvg(key) {
+  const st = "#0f2044", bg = "#e9eef5";
+  let g = "";
+  if (key === "tent_blue" || key === "tent_white") { const c = key === "tent_white" ? "#f2f4f7" : "#3b6fd8"; g = `<polygon points="40,150 160,150 100,55" fill="${c}" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><line x1="100" y1="55" x2="100" y2="150" stroke="${st}" stroke-width="4"/><line x1="30" y1="150" x2="170" y2="150" stroke="${st}" stroke-width="5"/>`; }
+  else if (key === "chair") g = `<rect x="70" y="45" width="60" height="55" rx="6" fill="#7a8899" stroke="${st}" stroke-width="5"/><rect x="62" y="100" width="76" height="14" rx="4" fill="#7a8899" stroke="${st}" stroke-width="5"/><line x1="72" y1="114" x2="62" y2="160" stroke="${st}" stroke-width="5"/><line x1="128" y1="114" x2="138" y2="160" stroke="${st}" stroke-width="5"/>`;
+  else if (key === "jug_big" || key === "jug") { const h = key === "jug_big" ? 100 : 78; g = `<rect x="65" y="${150-h}" width="70" height="${h}" rx="10" fill="#e8463c" stroke="${st}" stroke-width="5"/><rect x="80" y="${140-h}" width="40" height="12" rx="3" fill="#fff" stroke="${st}" stroke-width="4"/><rect x="88" y="${130-h/2}" width="24" height="10" rx="2" fill="#fff"/>`; }
+  else if (key === "basket") g = `<path d="M50 85 L150 85 L138 155 L62 155 Z" fill="#c9a26b" stroke="${st}" stroke-width="5" stroke-linejoin="round"/>${[70,90,110,130].map(x => `<line x1="${x}" y1="88" x2="${x-4+(x-100)/10}" y2="152" stroke="${st}" stroke-width="2.5"/>`).join("")}<circle cx="80" cy="76" r="13" fill="#e9f26b" stroke="${st}" stroke-width="3"/><circle cx="108" cy="72" r="13" fill="#e9f26b" stroke="${st}" stroke-width="3"/><circle cx="125" cy="80" r="11" fill="#e9f26b" stroke="${st}" stroke-width="3"/>`;
+  else if (key === "ballbox") g = `<rect x="50" y="70" width="100" height="80" rx="6" fill="#d9c49a" stroke="${st}" stroke-width="5"/><line x1="50" y1="95" x2="150" y2="95" stroke="${st}" stroke-width="4"/><circle cx="100" cy="122" r="16" fill="#e9f26b" stroke="${st}" stroke-width="3"/>`;
+  else if (key === "brush") g = `<line x1="100" y1="35" x2="100" y2="125" stroke="#8a5a2b" stroke-width="8" stroke-linecap="round"/><rect x="50" y="122" width="100" height="18" rx="4" fill="#5a6478" stroke="${st}" stroke-width="4"/>${[60,72,84,96,108,120,132,144].map(x => `<line x1="${x}" y1="140" x2="${x}" y2="160" stroke="${st}" stroke-width="3"/>`).join("")}`;
+  else if (key === "sheet") g = `<path d="M40 70 L160 70 L160 140 L40 140 Z" fill="#3b82f6" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><path d="M40 70 L70 52 L190 52 L160 70" fill="#60a5fa" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><circle cx="50" cy="80" r="4" fill="#fff"/><circle cx="150" cy="80" r="4" fill="#fff"/><circle cx="50" cy="130" r="4" fill="#fff"/><circle cx="150" cy="130" r="4" fill="#fff"/>`;
+  else if (key === "parasol") g = `<path d="M35 100 Q100 20 165 100 Z" fill="#f59e0b" stroke="${st}" stroke-width="5" stroke-linejoin="round"/><path d="M57 100 Q78 60 100 100 Q122 60 143 100" fill="none" stroke="${st}" stroke-width="3"/><line x1="100" y1="100" x2="100" y2="155" stroke="${st}" stroke-width="5"/><path d="M100 155 q0 12 -12 10" fill="none" stroke="${st}" stroke-width="5" stroke-linecap="round"/>`;
+  else if (key === "net") g = `<line x1="35" y1="60" x2="35" y2="160" stroke="${st}" stroke-width="6"/><line x1="165" y1="60" x2="165" y2="160" stroke="${st}" stroke-width="6"/><rect x="35" y="70" width="130" height="50" fill="#fff" stroke="${st}" stroke-width="4"/>${[56,78,100,122,144].map(x => `<line x1="${x}" y1="70" x2="${x}" y2="120" stroke="${st}" stroke-width="2"/>`).join("")}<line x1="35" y1="95" x2="165" y2="95" stroke="${st}" stroke-width="2"/>`;
+  else if (key === "firstaid") g = `<rect x="45" y="65" width="110" height="85" rx="10" fill="#fff" stroke="${st}" stroke-width="5"/><path d="M82 65V55h36v10" fill="none" stroke="${st}" stroke-width="5"/><rect x="92" y="85" width="16" height="46" fill="#e53935"/><rect x="77" y="100" width="46" height="16" fill="#e53935"/>`;
+  else if (key === "bottle") g = `<rect x="86" y="38" width="28" height="14" rx="3" fill="#2563eb" stroke="${st}" stroke-width="4"/><path d="M80 60 Q80 52 90 52 H110 Q120 52 120 60 V155 Q120 162 112 162 H88 Q80 162 80 155 Z" fill="#bfdbfe" stroke="${st}" stroke-width="5"/><rect x="80" y="95" width="40" height="30" fill="#60a5fa"/>`;
+  else g = `<path d="M78 70V58a12 12 0 0 1 12-12h20a12 12 0 0 1 12 12v12" fill="none" stroke="${st}" stroke-width="6"/><rect x="50" y="70" width="100" height="85" rx="16" fill="#e8734a" stroke="${st}" stroke-width="5"/><rect x="72" y="100" width="56" height="22" rx="4" fill="#fff" stroke="${st}" stroke-width="4"/>`;
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="${bg}"/>${g}</svg>`);
+}
+const eqIsIcon = (url) => String(url || "").startsWith("icon:");
+const eqItemIllustration = (it) => eqIconSvg(eqIsIcon(it.photo_url) ? it.photo_url.slice(5) : eqIconKeyFromName(it.name));
+async function setEquipmentIcon(itemId, key) {
+  const { error } = await supabase.from("equipment_items").update({ photo_url: key ? `icon:${key}` : null, updated_at: new Date().toISOString() }).eq("id", itemId);
+  if (error) throw new Error(/photo_url/.test(error.message || "") ? "データベースに写真の項目がまだありません。追加のSQLを実行してください。" : error.message);
+}
+
+async function getEquipmentMoves(schoolId) {
+  if (!schoolId) return [];
+  const { data, error } = await supabase.from("equipment_moves").select("*").eq("school_id", schoolId)
+    .order("move_date", { ascending:true }).order("created_at", { ascending:true });
+  if (error) {
+    if (/equipment_moves/.test(error.message || "")) throw new Error("データベースに引き継ぎの保存先がまだありません。追加のSQLを実行してください。");
+    throw error;
+  }
+  return data ?? [];
+}
+// ★写真は端末で小さくしてから保存する（スマホの写真はそのままだと数MBあるため）
+function eqResizeImage(file, max = 1280) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(new Error("写真を読み込めませんでした"));
+    r.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("写真を読み込めませんでした"));
+      img.onload = () => {
+        const sc = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(b => b ? resolve(b) : reject(new Error("写真を変換できませんでした")), "image/jpeg", 0.82);
+      };
+      img.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+async function uploadEquipmentPhoto(file, schoolId, itemId) {
+  const blob = await eqResizeImage(file);
+  const path = `${schoolId}/${itemId}/${uid()}.jpg`;
+  const { error: upErr } = await supabase.storage.from("equipment").upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+  if (upErr) throw new Error(/bucket/i.test(upErr.message || "") ? "写真の保存場所がまだありません。追加のSQLを実行してください。" : upErr.message);
+  const { data } = supabase.storage.from("equipment").getPublicUrl(path);
+  const { error } = await supabase.from("equipment_items").update({ photo_url: data.publicUrl, updated_at: new Date().toISOString() }).eq("id", itemId);
+  if (error) throw new Error(/photo_url/.test(error.message || "") ? "データベースに写真の項目がまだありません。追加のSQLを実行してください。" : error.message);
+  return data.publicUrl;
+}
+
+// ★備品画面を開くのを速くするため、前回読んだ内容を覚えておき、まず画面に出してから裏で最新に入れかえる。
+//   マスター画面を開いた時点で先に読み始めておく（prefetchEquipment）。
+// ★アプリを開き直した直後でもすぐ出せるよう、端末にも保存しておく（中身は備品名と引き継ぎだけで小さい）
+const EQ_CACHE_KEY = "equipmentCacheV1";
+let _eqCache = (() => { try { const v = JSON.parse(localStorage.getItem(EQ_CACHE_KEY) || "null"); return v && Array.isArray(v.items) ? { ...v, at: 0 } : null; } catch { return null; } })(); // { schoolId, items, moves, at }
+let _eqPrefetch = null;
+function storeEqCache(c) {
+  _eqCache = c;
+  try { localStorage.setItem(EQ_CACHE_KEY, JSON.stringify({ schoolId: c.schoolId, items: c.items, moves: c.moves })); } catch {}
+}
+async function loadEquipmentData() {
+  const p = await getMyProfile();
+  const sid = p?.school_id || null;
+  if (!sid) return { schoolId:null, items:[], moves:[] };
+  const [items, moves] = await Promise.all([getEquipmentItems(sid), getEquipmentMoves(sid)]);
+  storeEqCache({ schoolId: sid, items, moves, at: Date.now() });
+  return _eqCache;
+}
+function prefetchEquipment() {
+  if (_eqCache && Date.now() - _eqCache.at < 60000) return;
+  if (_eqPrefetch) return;
+  _eqPrefetch = loadEquipmentData().catch(() => null).finally(() => { setTimeout(() => { _eqPrefetch = null; }, 0); });
+}
+
+// ---------- マスター › 備品 ----------
+function EquipmentScreen({ onBack }) {
+  const isViewer = useIsViewer();
+  const [schoolId, setSchoolId] = useState(() => _eqCache?.schoolId || null);
+  const [items, setItems] = useState(() => _eqCache?.items || []);
+  const [moves, setMoves] = useState(() => _eqCache?.moves || []);
+  const [players, setPlayers] = useState([]);
+  const [me, setMe] = useState("");
+  const [loading, setLoading] = useState(() => !_eqCache);
+  const [loadError, setLoadError] = useState("");
+  const [sel, setSel] = useState(() => new Set());
+  const [q, setQ] = useState("");
+  const [sheet, setSheet] = useState(null);     // 引き継ぐ／部室に戻す {mode, to, q, open, date, editLast, ids}
+  const [detailId, setDetailId] = useState(null); // 履歴を開いている備品
+  const [photoId, setPhotoId] = useState(null);   // 大きく表示している写真
+  const [photoPick, setPhotoPick] = useState(null); // 写真の撮り方を選ぶ（備品ID）
+  const [iconMode, setIconMode] = useState(false);  // 「イラストから選ぶ」の一覧を出しているか
+  const [order, setOrder] = useState(null);         // 並び替え中の順番（備品IDの配列）。null＝並び替えしていない
+  const [edit, setEdit] = useState(null);         // 備品の追加・編集 {id?, name, memo, quantity}
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [cancelArm, setCancelArm] = useState(null);
+  const [delMove, setDelMove] = useState(null);   // ★削除しようとしている引き継ぎの記録
+  const [saving, setSaving] = useState(false);
+  const [uploadingId, setUploadingId] = useState(null);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef(null);
+  const today = eqToday();
+
+  const showToast = (m) => { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 2400); };
+  const reload = async (sid = schoolId) => {
+    try {
+      const [list, mv] = await Promise.all([getEquipmentItems(sid), getEquipmentMoves(sid)]);
+      setItems(list); setMoves(mv); setLoadError("");
+      storeEqCache({ schoolId: sid, items: list, moves: mv, at: Date.now() });
+    } catch (e) { setLoadError(e.message || String(e)); }
+  };
+  useEffect(() => {
+    let alive = true;
+    // ★一覧（備品と引き継ぎ）を先に出す。選手名簿は「引き継ぐ」の名前候補と「自分」の判定にだけ使うので、裏で読む
+    (async () => {
+      try {
+        const d = _eqPrefetch ? ((await _eqPrefetch) || await loadEquipmentData()) : await loadEquipmentData();
+        if (!alive) return;
+        setSchoolId(d.schoolId); setItems(d.items); setMoves(d.moves); setLoadError("");
+      } catch (e) { if (alive) setLoadError(e.message || String(e)); }
+      if (alive) setLoading(false);
+    })();
+    (async () => {
+      try {
+        const [p, roster] = await Promise.all([getMyProfile(), getPlayerRoster().catch(() => [])]);
+        if (!alive) return;
+        setPlayers([...new Set((roster || []).filter(r => r.is_own_team !== false).map(r => r.player_name).filter(Boolean))]);
+        setMe(pickDefaultAnalysisPlayer(p, roster) || "");
+      } catch (e) { console.error(e); }
+    })();
+    return () => { alive = false; clearTimeout(toastTimer.current); };
+  }, []);
+
+  // ★備品ごとの記録（今日までが実際、先の日付は予定）
+  const movesOf = (id) => moves.filter(m => m.item_id === id);
+  const pastOf = (id) => movesOf(id).filter(m => m.move_date <= today);
+  const planOf = (id) => movesOf(id).find(m => m.move_date > today) || null;
+  const lastOf = (id) => { const p = pastOf(id); return p[p.length - 1] || null; };
+  const holderOf = (it) => lastOf(it.id)?.to_holder || EQ_BUSHITSU;
+  const sinceOf = (it) => { const m = lastOf(it.id); return m ? m.move_date : (it.created_at || "").slice(0, 10); };
+  const isMe = (h) => !!me && normalizePlayerName(h) === normalizePlayerName(me);
+
+  const norm = (t) => String(t || "").replace(/[\s　]/g, "");
+  const groups = (() => {
+    const qq = norm(q);
+    const list = items.filter(it => !qq || norm(it.name).includes(qq) || norm(holderOf(it)).includes(qq));
+    const map = new Map();
+    list.forEach(it => { const h = holderOf(it); if (!map.has(h)) map.set(h, []); map.get(h).push(it); });
+    const rank = (k) => k === EQ_BUSHITSU ? 0 : isMe(k) ? 1 : 2;
+    return [...map.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, "ja")).map(k => ({ who:k, items:map.get(k) }));
+  })();
+
+  const toggle = (id) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const chosen = items.filter(it => sel.has(it.id));
+
+  const openGive = (mode) => {
+    if (isViewer) { viewerAlert(); return; }
+    setSheet({ mode, to: mode === "return" ? EQ_BUSHITSU : "", q:"", open: mode !== "return", date: today, ids:[...sel] });
+  };
+  const openEditLast = (it) => {
+    if (isViewer) { viewerAlert(); return; }
+    const lm = lastOf(it.id); if (!lm) return;
+    setSheet({ mode: lm.to_holder === EQ_BUSHITSU ? "return" : "give", to: lm.to_holder, q:"", open:false, date: lm.move_date, ids:[it.id], editLast:true });
+  };
+  const openEditPlan = (it) => {
+    if (isViewer) { viewerAlert(); return; }
+    const pl = planOf(it.id); if (!pl) return;
+    setSheet({ mode: pl.to_holder === EQ_BUSHITSU ? "return" : "give", to: pl.to_holder, q:"", open:false, date: pl.move_date, ids:[it.id] });
+  };
+
+  const saveSheet = async () => {
+    const to = (sheet.to || "").trim(); const D = sheet.date || today;
+    if (!to) return;
+    setSaving(true);
+    const dels = [], ups = [], ins = [];
+    let added = 0, fixed = 0;
+    sheet.ids.forEach(id => {
+      const it = items.find(x => x.id === id); if (!it) return;
+      movesOf(id).filter(m => m.move_date > today).forEach(m => dels.push(m.id)); // 前の予定は置きかえる
+      const lm = lastOf(id);
+      const holder = lm?.to_holder || EQ_BUSHITSU;
+      // ★いちばん新しい引き継ぎを直す（履歴の「日付・相手を直す」から、または同じ相手をもう一度選んだとき）
+      if (lm && (sheet.editLast || lm.to_holder === to)) {
+        if (lm.from_holder === to) dels.push(lm.id);   // 元の人に戻した＝その引き継ぎはなかったことにする
+        else ups.push({ id: lm.id, to_holder: to, move_date: D });
+        fixed++; return;
+      }
+      if (holder === to) return;
+      ins.push({ id: uid(), school_id: schoolId, item_id: id, from_holder: holder, to_holder: to, move_date: D });
+      added++;
+    });
+    try {
+      if (dels.length) { const { error } = await supabase.from("equipment_moves").delete().in("id", dels); if (error) throw error; }
+      for (const u of ups) { const { error } = await supabase.from("equipment_moves").update({ to_holder: u.to_holder, move_date: u.move_date }).eq("id", u.id); if (error) throw error; }
+      if (ins.length) { const { error } = await supabase.from("equipment_moves").insert(ins); if (error) throw error; }
+      if (to !== EQ_BUSHITSU) pushEquipHistory(to);
+      const fut = D > today;
+      const tn = to === EQ_BUSHITSU ? "部室に戻す" : `${to}さんに引き継ぐ`;
+      showToast(added ? (fut ? `${eqMd(D)}に${tn}予定を${added}件登録しました` : (to === EQ_BUSHITSU ? `${added}件を部室に戻しました` : `${to}さんに${added}件を引き継ぎました`))
+        : fixed ? (fut ? `${eqMd(D)}の予定に直しました` : `${eqMd(D)}に直しました`) : "変更はありませんでした");
+      setSheet(null); setSel(new Set()); setCancelArm(null);
+      await reload();
+    } catch (e) {
+      alert("保存できませんでした：" + (/equipment_moves/.test(e.message || "") ? "データベースに引き継ぎの保存先がまだありません。追加のSQLを実行してください。" : (e.message || e)));
+    } finally { setSaving(false); }
+  };
+
+  const cancelPlan = async (it) => {
+    if (isViewer) { viewerAlert(); return; }
+    if (cancelArm !== it.id) { setCancelArm(it.id); return; }
+    const ids = movesOf(it.id).filter(m => m.move_date > today).map(m => m.id);
+    try {
+      if (ids.length) { const { error } = await supabase.from("equipment_moves").delete().in("id", ids); if (error) throw error; }
+      setCancelArm(null); showToast("予定を取り消しました"); await reload();
+    } catch (e) { alert("取り消せませんでした：" + (e.message || e)); }
+  };
+
+  // ★引き継ぎの記録を1件だけ削除（いちばん新しい記録なら、持っている人は自動で前の人に戻る）
+  const deleteMove = async () => {
+    if (isViewer) { viewerAlert(); return; }
+    const m = delMove; if (!m) return;
+    const isLast = lastOf(m.item_id)?.id === m.id;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("equipment_moves").delete().eq("id", m.id);
+      if (error) throw error;
+      setDelMove(null); setCancelArm(null);
+      showToast(isLast ? `記録を削除しました（${m.from_holder}に戻りました）` : "記録を削除しました");
+      await reload();
+    } catch (e) { alert("削除できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  const onPickPhoto = async (itemId, file) => {
+    if (!file) return;
+    if (isViewer) { viewerAlert(); return; }
+    setUploadingId(itemId);
+    try { await uploadEquipmentPhoto(file, schoolId, itemId); showToast("写真を登録しました"); await reload(); }
+    catch (e) { alert("写真を保存できませんでした：" + (e.message || e)); }
+    finally { setUploadingId(null); }
+  };
+
+  // ★並び替えの保存（変わった備品だけ sort_order を書きかえる）
+  const saveOrder = async () => {
+    if (isViewer) { viewerAlert(); return; }
+    setSaving(true);
+    try {
+      const changed = order.map((id, i) => ({ id, i })).filter(({ id, i }) => { const it = items.find(x => x.id === id); return it && Number(it.sort_order) !== i; });
+      for (const { id, i } of changed) {
+        const { error } = await supabase.from("equipment_items").update({ sort_order: i, updated_at: new Date().toISOString() }).eq("id", id);
+        if (error) throw error;
+      }
+      setOrder(null); showToast(changed.length ? "並び順を保存しました" : "並び順は変わっていません"); await reload();
+    } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
+  // ★コピーするときの名前：「日傘②」→「日傘③」、「テント3」→「テント4」、それ以外は後ろに「2」
+  const nextCopyName = (name) => {
+    const n = String(name || "").trim();
+    const circ = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳";
+    const used = new Set(items.map(x => x.name));
+    const bump = (base, k, circled) => circled ? (k < circ.length ? base + circ[k] : `${base}${k + 1}`) : `${base}${k}`;
+    let base, k, circled = false;
+    const c = n.slice(-1);
+    if (circ.includes(c)) { base = n.slice(0, -1); k = circ.indexOf(c) + 1; circled = true; }
+    else { const m = n.match(/^(.*?)(\d+)$/); if (m) { base = m[1]; k = Number(m[2]) + 1; } else { base = n; k = 2; } }
+    let name2 = bump(base, k, circled);
+    for (let t = 0; t < 50 && used.has(name2); t++) { k++; name2 = bump(base, k, circled); }
+    return name2;
+  };
+  const startCopy = () => {
+    const src = items.find(x => x.id === edit.id); if (!src) return;
+    setConfirmDel(false);
+    setEdit({ copyOf: src.id, name: nextCopyName(src.name), memo: src.memo || "", quantity: src.quantity || 1, photo_url: src.photo_url || null, srcName: src.name });
+  };
+  const openEdit = (e) => { if (isViewer) { viewerAlert(); return; } setConfirmDel(false); setEdit(e); };
+  const saveItem = async (asCopy = false) => {
+    if (!edit.name.trim()) { alert("備品名を入れてください"); return; }
+    setSaving(true);
+    try {
+      if (asCopy && edit.id) {
+        // ★「コピーして保存」：元の備品はそのままで、入力した内容で新しい備品を作る（元の備品のすぐ下に並べる）
+        const src = items.find(x => x.id === edit.id);
+        const pos = src ? items.indexOf(src) + 1 : items.length;
+        const name = items.some(x => x.name === edit.name.trim()) ? nextCopyName(edit.name.trim()) : edit.name.trim();
+        for (let k = items.length - 1; k >= pos; k--) {
+          const { error } = await supabase.from("equipment_items").update({ sort_order: k + 1 }).eq("id", items[k].id);
+          if (error) throw error;
+        }
+        const row = await saveEquipmentItem({ school_id: schoolId, name, memo: edit.memo, quantity: edit.quantity, sort_order: pos });
+        if (src?.photo_url) await supabase.from("equipment_items").update({ photo_url: src.photo_url }).eq("id", row.id);
+        setEdit(null); showToast(`「${name}」としてコピーしました`); await reload();
+        return;
+      }
+      if (edit.copyOf) {
+        // ★コピーは元の備品のすぐ下に入れる（後ろの備品を1つずつずらす）
+        const src = items.find(x => x.id === edit.copyOf);
+        const pos = src ? items.indexOf(src) + 1 : items.length;
+        for (let k = items.length - 1; k >= pos; k--) {
+          const { error } = await supabase.from("equipment_items").update({ sort_order: k + 1 }).eq("id", items[k].id);
+          if (error) throw error;
+        }
+        const row = await saveEquipmentItem({ school_id: schoolId, name: edit.name, memo: edit.memo, quantity: edit.quantity, sort_order: pos });
+        if (edit.photo_url) await supabase.from("equipment_items").update({ photo_url: edit.photo_url }).eq("id", row.id);
+        setEdit(null); showToast("備品をコピーしました"); await reload();
+        return;
+      }
+      await saveEquipmentItem({ id: edit.id, school_id: schoolId, name: edit.name, memo: edit.memo, quantity: edit.quantity, sort_order: edit.id ? undefined : items.length });
+      setEdit(null); showToast(edit.id ? "備品を直しました" : "備品を追加しました"); await reload();
+    } catch (e) { alert("保存できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
+  const removeItem = async () => {
+    setSaving(true);
+    try { await deleteEquipmentItem(edit.id); setEdit(null); setDetailId(null); setSel(s => { const n = new Set(s); n.delete(edit.id); return n; }); showToast("備品を削除しました"); await reload(); }
+    catch (e) { alert("削除できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  // ---------- 部品 ----------
+  const lk = { background:"none", border:"none", padding:"4px 0", fontSize:15, fontWeight:800, color:C.navy, textDecoration:"underline", textUnderlineOffset:4, textDecorationColor:"#c4cbd8", cursor:"pointer" };
+  const Thumb = ({ it, size = 56 }) => {
+    const box = { flexShrink:0, alignSelf:"center", width:size, height:size, borderRadius:10, overflow:"hidden", border:`1px solid ${C.border}`, background:"#eef1f5", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", boxSizing:"border-box", position:"relative" };
+    if (uploadingId === it.id) return <div style={{ ...box, fontSize:11.5, color:C.textSec, fontWeight:800 }}>保存中…</div>;
+    if (it.photo_url && !eqIsIcon(it.photo_url)) return <button aria-label={`${it.name}の写真を大きく見る`} onClick={()=>setPhotoId(it.id)} style={box}><img src={it.photo_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} /></button>;
+    // ★写真がないときは備品名に合ったイラスト。右下のカメラの印で「押すと写真を撮れる」ことを示す
+    const img = <img src={eqItemIllustration(it)} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />;
+    if (isViewer) return <div style={{ ...box, cursor:"default" }}>{img}</div>;
+    return (
+      <button aria-label={`${it.name}の写真を登録する`} onClick={()=>setPhotoPick(it.id)} style={box}>
+        {img}
+        <span style={{ position:"absolute", right:2, bottom:2, width:20, height:20, borderRadius:"50%", background:C.navy, border:"1.5px solid #fff", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+        </span>
+      </button>
+    );
+  };
+
+
+  const listScrollRef = useRef(0);
+  const openDetail = (id) => { listScrollRef.current = window.scrollY || 0; setCancelArm(null); setDetailId(id); window.scrollTo(0, 0); };
+  const closeDetail = () => { setDetailId(null); setCancelArm(null); setDelMove(null); requestAnimationFrame(() => window.scrollTo(0, listScrollRef.current)); };
+  const eqIconBtn = { flexShrink:0, alignSelf:"center", width:42, height:42, display:"flex", alignItems:"center", justifyContent:"center", border:"1.5px solid #cfd6e2", background:C.white, borderRadius:10, padding:0, cursor:"pointer" };
+  const detail = detailId ? items.find(x => x.id === detailId) : null;
+  const photoItem = photoId ? items.find(x => x.id === photoId) : null;
+
+  return (
+    <div style={{ ...S.page, background:C.white, minHeight:"calc(100dvh / var(--app-zoom, 1))", paddingBottom:0, display:"flex", flexDirection:"column" }}>
+      {/* ★履歴を開いているときも、ほかの画面と同じヘッダーを使う（以前は全画面の重ね表示で、ヘッダーの幅が違っていた） */}
+      <div style={{ ...S.hdr, position:"sticky", top:0, zIndex:20 }}>
+        <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={detail ? closeDetail : onBack} aria-label="戻る">←</button>
+        <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{detail ? detail.name : "🎒 備品"}</span>
+      </div>
+      <div style={{ display: detail ? "none" : "block", flex:"1 0 auto", width:"100%", boxSizing:"border-box", padding:"12px 16px", paddingBottom:40, maxWidth:640, margin:"0 auto" }}>
+        {loading ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>読み込み中...</div>
+        : !schoolId ? <div style={{ textAlign:"center",color:C.textSec,padding:"40px 0" }}>学校情報が未設定のため備品を表示できません</div>
+        : (
+          <>
+            {loadError && <div style={{ background:C.redL, color:C.red, fontSize:13.5, fontWeight:700, borderRadius:10, padding:"10px 12px", marginBottom:10, lineHeight:1.5 }}>{loadError}</div>}
+            {order ? (
+              <>
+                <div style={{ display:"flex", alignItems:"center", gap:8, margin:"2px 0 6px" }}>
+                  <div style={{ flex:1, fontSize:17, fontWeight:900, color:C.navy }}>並び替え</div>
+                  <button onClick={()=>setOrder(null)} style={{ border:"1.5px solid #cfd6e2", background:C.white, color:"#5a6478", borderRadius:10, padding:"9px 14px", fontSize:15, fontWeight:800, cursor:"pointer" }}>やめる</button>
+                  <button onClick={saveOrder} disabled={saving} style={{ border:"none", background:C.accent, color:"#fff", borderRadius:10, padding:"9px 18px", fontSize:15, fontWeight:900, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "完了"}</button>
+                </div>
+                <div style={{ fontSize:14, color:"#5a6478", fontWeight:700, margin:"0 2px 8px", lineHeight:1.5 }}>▲▼で動かして「完了」を押してください。この順番は、持ち主ごとのまとまりの中でも同じ順に並びます。</div>
+                {order.map((id, i) => {
+                  const it = items.find(x => x.id === id); if (!it) return null;
+                  const ab = (dis) => ({ flexShrink:0, width:44, height:44, display:"flex", alignItems:"center", justifyContent:"center", border:"1.5px solid #cfd6e2", background:C.white, borderRadius:10, padding:0, fontSize:17, color: dis ? "#c4cbd8" : C.navy, cursor: dis ? "default" : "pointer" });
+                  const move = (d) => setOrder(o => { const n = o.slice(); const j = i + d; if (j < 0 || j >= n.length) return o; [n[i], n[j]] = [n[j], n[i]]; return n; });
+                  return (
+                    <div key={id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #eef1f5" }}>
+                      <span style={{ width:24, textAlign:"right", fontSize:14, fontWeight:800, color:"#7a8499", fontVariantNumeric:"tabular-nums", flexShrink:0 }}>{i + 1}</span>
+                      <img src={it.photo_url && !eqIsIcon(it.photo_url) ? it.photo_url : eqItemIllustration(it)} alt="" style={{ width:44, height:44, borderRadius:8, objectFit:"cover", border:`1px solid ${C.border}`, flexShrink:0 }} />
+                      <div style={{ flex:1, minWidth:0, fontSize:16.5, fontWeight:800, color:C.text, wordBreak:"break-word" }}>{it.name}</div>
+                      <button aria-label={`${it.name}を上へ`} disabled={i === 0} onClick={()=>move(-1)} style={ab(i === 0)}>▲</button>
+                      <button aria-label={`${it.name}を下へ`} disabled={i === order.length - 1} onClick={()=>move(1)} style={ab(i === order.length - 1)}>▼</button>
+                    </div>
+                  );
+                })}
+              </>
+            ) : (<>
+            <div style={{ display:"flex", alignItems:"center", gap:14, margin:"2px 2px 10px" }}>
+              <div style={{ flex:1, fontSize:16, fontWeight:800, color:C.text }}>備品 {items.length}件</div>
+              <button style={lk} onClick={()=>setSel(new Set(items.map(x => x.id)))}>全選択</button>
+              <button style={lk} onClick={()=>setSel(new Set())}>すべてクリア</button>
+              {!isViewer && items.length > 1 && <button style={lk} onClick={()=>{ setSel(new Set()); setQ(""); setOrder(items.map(x => x.id)); }}>並び替え</button>}
+            </div>
+            <input type="search" value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 備品名・名前でさがす" autoComplete="off"
+              style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 12px", fontSize:16, color:C.text, background:C.white, outline:"none" }} />
+            {items.length === 0 && <div style={{ textAlign:"center", color:C.textSec, fontSize:14.5, padding:"26px 10px" }}>まだ備品が登録されていません。<br/>下の「＋ 備品を追加」から登録してください</div>}
+            {items.length > 0 && groups.length === 0 && <div style={{ textAlign:"center", color:C.textSec, fontSize:14.5, padding:"26px 10px" }}>見つかりませんでした</div>}
+            {groups.map(g => {
+              const allOn = g.items.every(it => sel.has(it.id));
+              return (
+                <div key={g.who} style={{ marginTop:16 }}>
+                  <div style={{ display:"flex", alignItems:"baseline", padding:"0 2px 6px", borderBottom:`2px solid ${C.navy}` }}>
+                    <div style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, color:C.navy, wordBreak:"break-word" }}>{g.who}
+                      {isMe(g.who) && <span style={{ fontSize:14, fontWeight:700, color:"#5a6478", marginLeft:4 }}>（自分）</span>}
+                      <span style={{ fontSize:14, fontWeight:700, color:"#7a8499", marginLeft:8 }}>{g.items.length}件</span></div>
+                    <button style={{ ...lk, fontSize:14.5 }} onClick={()=>setSel(s => { const n = new Set(s); g.items.forEach(it => allOn ? n.delete(it.id) : n.add(it.id)); return n; })}>{allOn ? "全部外す" : "全部選ぶ"}</button>
+                  </div>
+                  {g.items.map(it => {
+                    const on = sel.has(it.id);
+                    const pl = planOf(it.id);
+                    const h = holderOf(it);
+                    const lbl = lastOf(it.id) ? (h === EQ_BUSHITSU ? "戻し" : "受取") : "登録";
+                    return (
+                      <div key={it.id} style={{ display:"flex", alignItems:"stretch", gap:10, padding:"0 6px", margin:"0 -6px", borderRadius:10, borderBottom:`1px solid ${on ? "#f3e3a0" : "#eef1f5"}`, background: on ? "#fff3c4" : "transparent" }}>
+                        <Thumb it={it} />
+                        <button onClick={()=>toggle(it.id)} aria-pressed={on} aria-label={`${it.name}を選ぶ`}
+                          style={{ flex:1, minWidth:0, display:"flex", alignItems:"center", background:"none", border:"none", padding:"12px 2px", textAlign:"left", color:C.text, cursor:"pointer" }}>
+                          <span style={{ flex:1, minWidth:0 }}>
+                            <span style={{ display:"block", fontSize:17, fontWeight:800, wordBreak:"break-word" }}>{it.name}{Number(it.quantity) > 1 && <span style={{ fontSize:14, fontWeight:800, color:"#5a6478", marginLeft:6 }}>×{it.quantity}</span>}</span>
+                            <span style={{ display:"block", fontSize:14.5, fontWeight:700, color:"#5a6478", marginTop:3, fontVariantNumeric:"tabular-nums" }}>{eqMd(sinceOf(it))} {lbl}</span>
+                            {pl && <span style={{ display:"block", fontSize:14, fontWeight:800, color:C.navy, marginTop:4 }}>
+                              <span style={{ display:"inline-block", fontSize:12, fontWeight:800, color:"#5a6478", border:"1px solid #b5bdca", borderRadius:5, padding:"0 5px", marginRight:6, verticalAlign:1 }}>予定</span>
+                              {eqMd(pl.move_date)} {pl.to_holder === EQ_BUSHITSU ? "部室に戻す" : `${pl.to_holder} 引き継ぎ`}</span>}
+                          </span>
+                        </button>
+                        <button onClick={()=>openDetail(it.id)} aria-label={`${it.name}の履歴`}
+                          style={eqIconBtn}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/></svg></button>
+                        {!isViewer && <button onClick={()=>openEdit({ id:it.id, name:it.name, memo:it.memo || "", quantity: it.quantity || 1 })} aria-label={`${it.name}を編集`}
+                          style={{ ...eqIconBtn, marginLeft:-4 }}><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {!isViewer && <button onClick={()=>openEdit({ name:"", memo:"", quantity:1 })}
+              style={{ display:"block", width:"100%", border:"1.5px dashed #c4cbd8", borderRadius:12, padding:13, textAlign:"center", fontSize:15, fontWeight:800, color:C.navy, background:C.white, marginTop:18, cursor:"pointer" }}>＋ 備品を追加</button>}
+            </>)}
+          </>
+        )}
+      </div>
+
+      {/* ★選んだときだけ出るボタン */}
+      {sel.size > 0 && !sheet && !detail && (
+        <div style={{ position:"sticky", bottom:0, zIndex:30, background:"#f7f8fa", borderTop:`1px solid ${C.border}`, padding:"12px 16px calc(14px + env(safe-area-inset-bottom,0px))" }}>
+          <div style={{ maxWidth:640, margin:"0 auto" }}>
+            <button onClick={()=>openGive("give")} style={{ display:"block", width:"100%", background:C.accent, color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:18, fontWeight:900, cursor:"pointer" }}>この{sel.size}件を引き継ぐ</button>
+            {chosen.some(it => holderOf(it) !== EQ_BUSHITSU) && (
+              <button onClick={()=>openGive("return")} style={{ display:"block", width:"100%", background:"linear-gradient(135deg,#6366f1,#4f52d1)", color:"#fff", border:"none", borderRadius:12, padding:14, fontSize:18, fontWeight:900, marginTop:8, cursor:"pointer" }}>この{sel.size}件を部室に戻す</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ★履歴（備品をタップ → 「履歴」） */}
+      {detail && (() => {
+        const lm = lastOf(detail.id);
+        const pl = planOf(detail.id);
+        const evs = pastOf(detail.id).slice().reverse();
+        const h = holderOf(detail);
+        const armed = cancelArm === detail.id;
+        const pbtn = { border:"1.5px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:9, padding:"7px 14px", fontSize:14.5, fontWeight:800, cursor:"pointer" };
+        const ev = (m, i, isPlan) => (
+          <div key={m.id} style={{ display:"flex", gap:12, alignItems:"center", background: isPlan ? "#fafbfc" : C.white, border: isPlan ? "1.5px dashed #9aa5b8" : i === 0 ? `2px solid ${C.accent}` : `1px solid ${C.border}`, borderRadius:13, padding:"13px 12px", marginBottom:8 }}>
+            <div style={{ width:64, flexShrink:0, textAlign:"center", fontSize:18, fontWeight:900, lineHeight:1.15, color: !isPlan && i === 0 ? "#047857" : C.navy, background: isPlan ? C.white : i === 0 ? "#e6faf3" : "#eef1f5", border: isPlan ? `1px solid ${C.border}` : "none", borderRadius:10, padding:"10px 0", fontVariantNumeric:"tabular-nums" }}>
+              {isPlan && <span style={{ display:"block", fontSize:12, color:"#5a6478", fontWeight:800 }}>予定</span>}{eqMd(m.move_date)}</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:7, flexWrap:"wrap", fontSize:17, fontWeight:900 }}>
+                <span>{m.from_holder}</span><span style={{ color:"#7a8499" }}>→</span><span style={{ color:"#047857" }}>{m.to_holder}</span></div>
+              {isPlan && <div style={{ display:"flex", gap:8, marginTop:9 }}>
+                <button style={pbtn} onClick={()=>openEditPlan(detail)}>変更</button>
+                <button style={{ ...pbtn, ...(armed ? { borderColor:C.red, color:C.red } : {}) }} onClick={()=>cancelPlan(detail)}>{armed ? "本当に取り消す" : "取り消す"}</button></div>}
+              {!isPlan && i === 0 && !pl && <div style={{ display:"flex", gap:8, marginTop:9 }}><button style={pbtn} onClick={()=>openEditLast(detail)}>日付・相手を直す</button></div>}
+            </div>
+            {!isPlan && !isViewer && <button style={{ ...pbtn, color:C.red, borderColor:"#f5b5b0", flexShrink:0, alignSelf:"center", padding:"7px 10px" }} onClick={()=>setDelMove(m)}>🗑 削除</button>}
+          </div>
+        );
+        return (
+          <div>
+            <div style={{ padding:"12px 16px 40px", maxWidth:640, margin:"0 auto" }}>
+              <div style={{ background:C.white, border:`1px solid ${C.border}`, borderRadius:14, padding:16, textAlign:"center" }}>
+                <div style={{ display:"flex", justifyContent:"center", marginBottom:10 }}><Thumb it={detail} size={96} /></div>
+                <div style={{ fontSize:15, color:"#7a8499", fontWeight:800 }}>{h === EQ_BUSHITSU ? "いま置いてある場所" : "いま持っている人"}</div>
+                <div style={{ fontSize:22, fontWeight:900, marginTop:4, wordBreak:"break-word" }}>{h}</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#047857", marginTop:4 }}>{eqMd(sinceOf(detail))} {lm ? (h === EQ_BUSHITSU ? "戻し" : "受取") : "登録"}</div>
+                {(Number(detail.quantity) > 1 || detail.memo) && <div style={{ fontSize:14.5, color:"#5a6478", fontWeight:700, marginTop:10, lineHeight:1.55, wordBreak:"break-word", whiteSpace:"pre-wrap" }}>
+                  {Number(detail.quantity) > 1 ? `数量 ${detail.quantity}` : ""}{Number(detail.quantity) > 1 && detail.memo ? "・" : ""}{detail.memo || ""}</div>}
+              </div>
+              <div style={{ fontSize:16.5, fontWeight:900, color:C.navy, margin:"20px 2px 8px" }}>引き継ぎの記録</div>
+              {pl && ev(pl, -1, true)}
+              {evs.map((m, i) => ev(m, i, false))}
+              {!pl && !evs.length && <div style={{ textAlign:"center", color:C.textSec, fontSize:15, padding:"24px 0" }}>まだ引き継ぎの記録はありません</div>}
+              {(pl || evs.length > 0) && <div style={{ fontSize:14, color:"#7a8499", textAlign:"center", margin:"8px 0", fontWeight:700 }}>新しい順に並びます</div>}
+              {delMove && (() => {
+                const isLast = lm?.id === delMove.id;
+                return (
+                  <Modal onClose={()=>!saving && setDelMove(null)}>
+                    <div style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:38, marginBottom:6 }}>🗑</div>
+                      <h3 style={{ fontSize:17, fontWeight:800, marginBottom:10 }}>この記録を削除しますか？</h3>
+                      <div style={{ background:"#f4f6f9", borderRadius:10, padding:10, fontSize:16, fontWeight:800, marginBottom:10, wordBreak:"break-word" }}>{eqMd(delMove.move_date)}　{delMove.from_holder} → {delMove.to_holder}</div>
+                      <div style={{ fontSize:14, lineHeight:1.7, textAlign:"left", background:"#fff7ed", border:"1px solid #fed7aa", color:"#92400e", borderRadius:10, padding:"10px 12px", marginBottom:16 }}>
+                        {isLast
+                          ? <>これは<b>いちばん新しい記録</b>です。削除すると、{delMove.from_holder === EQ_BUSHITSU ? "置いてある場所" : "いま持っている人"}は<b>「{delMove.from_holder}」</b>に戻ります。</>
+                          : <>古い記録なので、{h === EQ_BUSHITSU ? "いま置いてある場所" : "いま持っている人"}（{h}）は変わりません。記録の一覧から消えるだけです。</>}
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                        <button disabled={saving} style={{ padding:12, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={()=>setDelMove(null)}>キャンセル</button>
+                        <button disabled={saving} style={{ padding:12, background:C.red, color:C.white, border:"none", borderRadius:10, fontSize:14, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }} onClick={deleteMove}>{saving ? "削除中…" : "削除する"}</button>
+                      </div>
+                    </div>
+                  </Modal>
+                );
+              })()}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ★引き継ぐ／部室に戻す */}
+      {sheet && (() => {
+        const ret = sheet.mode === "return";
+        const title = ret ? (sheet.editLast ? "部室に戻した日を直す" : "部室に戻す") : (sheet.editLast ? "引き継ぎを直す" : "だれに引き継ぎますか？");
+        const showInput = !sheet.to || sheet.open;
+        const qq = norm(sheet.q);
+        const hits = qq ? players.filter(p => norm(p).includes(qq)) : null;
+        const recent = loadEquipHistory().slice(0, 8);
+        const list = hits || recent;
+        const typed = (sheet.q || "").trim();
+        const D = sheet.date, fut = D > today;
+        const who = ret ? "部室" : (sheet.to ? `${sheet.to}さん` : "相手");
+        const side = (on) => ({ flexShrink:0, border:`1.5px solid ${on ? "#0b6e75" : "#cfd6e2"}`, background: on ? "#eef8f8" : C.white, color: on ? "#0b6e75" : "#5a6478", borderRadius:10, padding:"0 13px", fontSize:15, fontWeight:800, cursor:"pointer" });
+        const sg = { display:"block", width:"100%", textAlign:"left", background:C.white, border:"none", borderTop:"1px solid #eef1f5", padding:12, fontSize:17, fontWeight:800, color:C.text, cursor:"pointer" };
+        const pick = (n) => setSheet(s => ({ ...s, to:n, q:"", open:false }));
+        return (
+          <EquipSheet title={title} onClose={()=>setSheet(null)}>
+            {ret ? (
+              <div style={{ marginTop:14, fontSize:16, fontWeight:800, color:C.text, background:"#f4f6f9", borderRadius:10, padding:12 }}>
+                {sheet.editLast ? "部室に戻した日を直します" : `選んだ備品${sheet.ids.length}件を部室に戻します`}</div>
+            ) : (
+              <>
+                <div style={{ fontSize:16.5, fontWeight:900, color:C.navy, margin:"16px 0 8px" }}>名前を選ぶ</div>
+                {showInput ? (
+                  <input value={sheet.q} autoFocus autoComplete="off" placeholder="🔍 名前を入力"
+                    onChange={e=>{ const v = e.target.value; setSheet(s => ({ ...s, q:v, open:true })); }}
+                    style={{ width:"100%", boxSizing:"border-box", background:"#f4f6f9", border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 12px", fontSize:16, color:C.text, outline:"none" }} />
+                ) : (
+                  <div style={{ display:"flex", alignItems:"center", gap:10, border:"1.5px solid #0b6e75", background:"#eef8f8", borderRadius:12, padding:"9px 10px" }}>
+                    <span style={{ width:24, height:24, borderRadius:"50%", background:"#0b6e75", color:"#fff", fontSize:13, fontWeight:900, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>✓</span>
+                    <span style={{ flex:1, minWidth:0, fontSize:17, fontWeight:900, wordBreak:"break-word" }}>{sheet.to}</span>
+                    <button onClick={()=>setSheet(s => ({ ...s, to:"", open:true }))} style={{ border:"1px solid #cfd6e2", background:C.white, color:C.navy, borderRadius:8, padding:"6px 11px", fontSize:13, fontWeight:800, cursor:"pointer" }}>変更</button>
+                  </div>
+                )}
+                {showInput && (
+                  <div style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:6, maxHeight:"calc(34vh / var(--app-zoom, 1))", overflowY:"auto", boxShadow:"0 6px 16px rgba(0,0,0,0.10)" }}>
+                    <div style={{ fontSize:14, fontWeight:800, color:"#7a8499", padding:"8px 12px 4px", background:"#f8f9fb" }}>{hits ? `候補（${hits.length}人）` : "🕘 最近選んだ人"}</div>
+                    {list.map(n => <button key={n} style={sg} onClick={()=>pick(n)}>{n}</button>)}
+                    {typed && !players.some(p => norm(p) === norm(typed)) && <button style={{ ...sg, color:C.navy }} onClick={()=>pick(typed)}>「{typed}」で登録する</button>}
+                    {!list.length && !typed && <div style={{ padding:12, fontSize:14, color:"#7a8499" }}>名前を入力してください</div>}
+                  </div>
+                )}
+              </>
+            )}
+            <div style={{ fontSize:16.5, fontWeight:900, color:C.navy, margin:"16px 0 8px" }}>{ret ? "戻す日" : "引き継ぐ日"}</div>
+            <div style={{ display:"flex", gap:8, alignItems:"stretch" }}>
+              <input type="date" value={D} onChange={e=>{ const v = e.target.value; if (v) setSheet(s => ({ ...s, date:v })); }}
+                style={{ flex:1, minWidth:0, boxSizing:"border-box", background:"#f4f6f9", border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 12px", fontSize:16, color:C.text, outline:"none" }} />
+              <button style={side(D === today)} onClick={()=>setSheet(s => ({ ...s, date:today }))}>今日</button>
+              <button style={side(D === eqAddDays(today, 1))} onClick={()=>setSheet(s => ({ ...s, date:eqAddDays(today, 1) }))}>明日</button>
+            </div>
+            {fut && <div style={{ marginTop:10, background:"#f4f6f9", borderRadius:10, padding:"10px 12px", fontSize:14.5, fontWeight:700, color:C.text, lineHeight:1.6 }}>
+              {eqMdw(D)}は先の日なので<b>予定</b>として保存します。<br/>その日になると、自動で{who}{ret ? "に戻ります" : "の持ち物になります"}。</div>}
+            <button onClick={saveSheet} disabled={!sheet.to || saving}
+              style={{ display:"block", width:"100%", height:52, marginTop:20, border:"none", borderRadius:12, background: sheet.to ? C.accent : "#b7e8d2", color:"#fff", fontSize:18, fontWeight:900, cursor: sheet.to ? "pointer" : "default", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : "保存"}</button>
+            <div style={{ fontSize:14, color:"#5a6478", textAlign:"center", marginTop:9, fontWeight:700, lineHeight:1.6 }}>
+              {!sheet.to ? "名前を選ぶと「保存」が押せます"
+                : fut ? `それまでは今の持ち主のまま、「予定 ${eqMd(D)} ${ret ? "部室に戻す" : `${sheet.to} 引き継ぎ`}」と表示されます`
+                : D === today ? "今日の日付で記録します" : `${eqMdw(D)}の日付で記録します`}</div>
+          </EquipSheet>
+        );
+      })()}
+
+      {/* ★写真を大きく表示 */}
+      {photoItem && (
+        <div style={{ position:"fixed", inset:0, zIndex:500, background:"rgba(8,14,28,0.92)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, padding:"16px 16px calc(16px + env(safe-area-inset-bottom,0px))" }}>
+          <div style={{ color:"#fff", fontSize:19, fontWeight:900, textAlign:"center", wordBreak:"break-word" }}>{photoItem.name}</div>
+          {uploadingId === photoItem.id
+            ? <div style={{ color:"#fff", fontSize:15, fontWeight:800, padding:40 }}>写真を保存中…</div>
+            : <img src={photoItem.photo_url} alt={`${photoItem.name}の写真`} style={{ maxWidth:"100%", maxHeight:"calc(68vh / var(--app-zoom, 1))", borderRadius:12, background:"#fff", objectFit:"contain" }} />}
+          <div style={{ display:"flex", gap:10, width:"100%", maxWidth:420 }}>
+            {!isViewer && <button onClick={()=>setPhotoPick(photoItem.id)} style={{ flex:1, textAlign:"center", borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"#fff", color:C.navy, border:"none", cursor:"pointer" }}>写真を変更</button>}
+            <button onClick={()=>setPhotoId(null)} style={{ flex:1, borderRadius:12, padding:"13px 0", fontSize:16, fontWeight:800, background:"transparent", color:"#fff", border:"1.5px solid rgba(255,255,255,0.5)", cursor:"pointer" }}>閉じる</button>
+          </div>
+        </div>
+      )}
+
+      {/* ★写真の撮り方を選ぶ（カメラですぐ撮る／撮ってある写真から選ぶ） */}
+      {photoPick && (() => {
+        const it = items.find(x => x.id === photoPick);
+        const opt = { display:"flex", alignItems:"center", gap:12, width:"100%", boxSizing:"border-box", border:`1.5px solid #cfd6e2`, background:C.white, borderRadius:12, padding:"14px 14px", fontSize:17, fontWeight:800, color:C.navy, cursor:"pointer", marginTop:10 };
+        const done = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; const id = photoPick; setPhotoPick(null); setIconMode(false); onPickPhoto(id, f); };
+        const pickIcon = async (key) => {
+          const id = photoPick; setPhotoPick(null); setIconMode(false); setPhotoId(null);
+          try { await setEquipmentIcon(id, key); showToast(key ? "イラストを設定しました" : "名前に合わせたイラストに戻しました"); await reload(); }
+          catch (e) { alert("保存できませんでした：" + (e.message || e)); }
+        };
+        const close = () => { setPhotoPick(null); setIconMode(false); };
+        if (iconMode) {
+          const cur = it && eqIsIcon(it.photo_url) ? it.photo_url.slice(5) : null;
+          const tile = (on) => ({ display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:C.white, border:`2px solid ${on ? C.accent : "#e1e5ec"}`, borderRadius:12, padding:"6px 2px 7px", cursor:"pointer", fontSize:12, fontWeight:800, color:C.text });
+          return (
+            <div style={{ position:"relative", zIndex:600 }}>
+            <EquipSheet title="イラストから選ぶ" onClose={close}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8, marginTop:12 }}>
+                {EQ_ICON_LIST.map(([k, l]) => (
+                  <button key={k} style={tile(cur === k)} onClick={()=>pickIcon(k)} aria-label={`${l}のイラスト`}>
+                    <img src={eqIconSvg(k)} alt="" style={{ width:"100%", aspectRatio:"1 / 1", maxWidth:72, borderRadius:8, display:"block" }} />{l}</button>
+                ))}
+              </div>
+              <button onClick={()=>pickIcon(null)} style={{ display:"block", width:"100%", marginTop:12, border:`1.5px solid #cfd6e2`, background:C.white, borderRadius:12, padding:12, fontSize:15, fontWeight:800, color:C.navy, cursor:"pointer" }}>名前に合わせて自動で選ぶ</button>
+              <button onClick={()=>setIconMode(false)} style={{ display:"block", width:"100%", height:48, marginTop:10, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>← もどる</button>
+            </EquipSheet>
+            </div>
+          );
+        }
+        return (
+          <div style={{ position:"relative", zIndex:600 }}>
+          <EquipSheet title={`${it ? it.name : ""}の写真`} onClose={close}>
+            <label style={opt}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+              カメラで撮る
+              <input type="file" accept="image/*" capture="environment" hidden onChange={done} />
+            </label>
+            <label style={opt}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/></svg>
+              ギャラリーから選ぶ
+              <input type="file" accept="image/*" hidden onChange={done} />
+            </label>
+            <button style={opt} onClick={()=>setIconMode(true)}>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><circle cx="17.25" cy="17.25" r="3.75"/></svg>
+              イラストから選ぶ
+            </button>
+            <button onClick={close} style={{ display:"block", width:"100%", height:48, marginTop:14, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
+          </EquipSheet>
+          </div>
+        );
+      })()}
+
+      {/* ★備品の追加・編集 */}
+      {edit && (
+        <EquipSheet title={edit.copyOf ? "備品をコピー" : edit.id ? "備品を編集" : "備品を追加"} onClose={()=>setEdit(null)}>
+          {edit.copyOf && <div style={{ marginTop:12, fontSize:14.5, fontWeight:700, color:"#3d4657", background:"#f4f6f9", borderRadius:10, padding:"10px 12px", lineHeight:1.5 }}>「{edit.srcName}」をコピーして新しい備品を作ります。名前を確かめて「保存」を押してください。</div>}
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>備品名<span style={{ fontSize:11.5, color:"#fff", background:C.red, borderRadius:5, padding:"1px 6px", marginLeft:6 }}>必須</span></div>
+          <input value={edit.name} onChange={e=>{ const v = e.target.value; setEdit(x => ({ ...x, name:v })); }} placeholder="例：テント3" style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%" }} />
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>数量</div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <button aria-label="1つ減らす" disabled={(edit.quantity||1)<=1} onClick={()=>setEdit(v => ({ ...v, quantity: Math.max(1, (Number(v.quantity)||1) - 1) }))}
+              style={{ width:48, height:48, borderRadius:12, border:"1.5px solid #cfd6e2", background:C.white, fontSize:22, fontWeight:800, color:(edit.quantity||1)<=1 ? "#c4cbd8" : C.navy, cursor:"pointer" }}>−</button>
+            <input inputMode="numeric" value={edit.quantity ?? 1}
+              onChange={e=>{ const v = e.target.value.replace(/[^0-9]/g, ""); setEdit(x => ({ ...x, quantity: v === "" ? "" : Math.min(99, Number(v)) })); }}
+              onBlur={()=>setEdit(x => ({ ...x, quantity: Math.max(1, Number(x.quantity) || 1) }))}
+              style={{ width:70, height:48, boxSizing:"border-box", textAlign:"center", border:"1.5px solid #cfd6e2", borderRadius:10, fontSize:18, fontWeight:800, color:C.text, outline:"none" }} />
+            <button aria-label="1つ増やす" onClick={()=>setEdit(v => ({ ...v, quantity: Math.min(99, (Number(v.quantity)||1) + 1) }))}
+              style={{ width:48, height:48, borderRadius:12, border:"1.5px solid #cfd6e2", background:C.white, fontSize:22, fontWeight:800, color:C.navy, cursor:"pointer" }}>＋</button>
+            <span style={{ fontSize:14, color:C.textSec, fontWeight:700 }}>個</span>
+          </div>
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"14px 0 6px" }}>メモ<span style={{ fontSize:12, color:"#888", marginLeft:6, fontWeight:700 }}>任意</span></div>
+          <textarea value={edit.memo} onChange={e=>{ const v = e.target.value; setEdit(x => ({ ...x, memo:v })); }} placeholder="例：袋の色・中身・注意点など"
+            style={{ border:"1.5px solid #cfd6e2", borderRadius:10, padding:"11px 12px", background:"#fff", color:C.text, outline:"none", fontSize:16, boxSizing:"border-box", width:"100%", minHeight:76, resize:"vertical", lineHeight:1.5, fontFamily:"inherit" }} />
+          {!edit.id && <div style={{ fontSize:13, color:"#7a8499", fontWeight:700, marginTop:8, lineHeight:1.5 }}>{edit.copyOf ? "※コピーした備品は「部室」に入り、元の備品のすぐ下に並びます。写真・イラストもコピーされます。" : "※追加した備品は「部室」に入ります。写真は一覧のイラストを押すと撮れます。"}</div>}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1.6fr", gap:8, marginTop:16 }}>
+            <button onClick={()=>setEdit(null)} style={{ height:48, border:"none", borderRadius:12, background:"#eef1f5", color:"#5a6478", fontSize:15, fontWeight:800, cursor:"pointer" }}>キャンセル</button>
+            <button onClick={()=>saveItem(false)} disabled={saving} style={{ height:48, border:"none", borderRadius:12, background:C.accent, color:"#fff", fontSize:15.5, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "保存中..." : edit.id ? "上書き保存" : "保存"}</button>
+          </div>
+          {edit.id && <button onClick={()=>saveItem(true)} disabled={saving} style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, width:"100%", height:46, marginTop:10, border:"1.5px solid #cfd6e2", borderRadius:12, background:C.white, color:C.navy, fontSize:15, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>
+            コピーして保存</button>}
+          {edit.id && <div style={{ fontSize:12.5, color:"#7a8499", fontWeight:700, marginTop:6, lineHeight:1.5 }}>「コピーして保存」は、元の備品はそのままで、この内容の備品を新しく作ります（名前が同じなら自動で次の番号）。</div>}
+          {edit.id && (confirmDel ? (
+            <div style={{ marginTop:14, textAlign:"center" }}>
+              <div style={{ fontSize:13.5, color:C.text, fontWeight:700, marginBottom:8 }}>「{edit.name}」を削除しますか？</div>
+              <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+                <button data-no-back="1" onClick={()=>setConfirmDel(false)} style={{ border:"1px solid #cfd6e2", background:C.white, borderRadius:10, padding:"8px 16px", fontSize:14, fontWeight:800, color:C.textSec, cursor:"pointer" }}>やめる</button>
+                <button data-no-back="1" onClick={removeItem} disabled={saving} style={{ border:"none", background:C.red, borderRadius:10, padding:"8px 16px", fontSize:14, fontWeight:800, color:"#fff", cursor:"pointer" }}>削除する</button>
+              </div>
+            </div>
+          ) : (
+            <button data-no-back="1" onClick={()=>setConfirmDel(true)} style={{ display:"block", margin:"14px auto 0", background:"none", border:"none", color:C.red, fontSize:14, fontWeight:800, cursor:"pointer" }}>🗑 この備品を削除</button>
+          ))}
+        </EquipSheet>
+      )}
+
+      {toast && <div role="status" style={{ position:"fixed", left:"50%", bottom:"calc(150px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:C.navy, color:"#fff", fontSize:15, fontWeight:800, padding:"11px 18px", borderRadius:24, zIndex:600, boxShadow:"0 6px 16px rgba(0,0,0,0.2)", maxWidth:"90vw", textAlign:"center" }}>{toast}</div>}
+    </div>
+  );
+}
+
+
+function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onGoalSettings, onSeasonSettings, onEquipment, onTrash, onTerms, onGuide, termsAgreedAt, onProfile, onLogout, textScale, onChangeTextScale }) {
+  useEffect(() => { const t = setTimeout(prefetchEquipment, 300); return () => clearTimeout(t); }, []); // ★備品画面を開く前に先読み
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { getMyProfile().then(p=>setIsAdmin(!!p?.is_admin)); }, []);
 
@@ -11090,6 +12498,16 @@ function MasterScreen({ onNavigate, onRoster, onSchoolAdmin, onGroupMembers, onG
               >{l}</button>
             ))}
           </div>
+        </div>
+        <div
+          style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
+          onClick={onEquipment}
+        >
+          <div>
+            <div style={{ fontSize:14,fontWeight:700 }}>🎒 備品</div>
+            <div style={{ fontSize:11,color:C.textSec,marginTop:2 }}>テント・椅子・救急セットなどを、いま誰が持っているか<br/>引き継ぎの記録・予定・写真</div>
+          </div>
+          <span style={{ fontSize:16,color:C.textSec }}>→</span>
         </div>
         <div
           style={{ ...S.card, padding:"16px 14px", marginBottom:10, cursor:"pointer", display:"flex",justifyContent:"space-between",alignItems:"center" }}
@@ -11515,6 +12933,9 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const [showNewModal, setShowNewModal] = useState(false);
   const [mySchoolName, setMySchoolName] = useState(""); // ★自チーム同士の練習試合判定用
   const [playerRoster, setPlayerRoster] = useState([]); // ★次の試合予定カードの参加選手表示用
+  const [homeEquipMap, setHomeEquipMap] = useState({}); // ★次の試合予定カードの「📝 メモ」用（大会ID → メモなど）
+  const [homeMemoFor, setHomeMemoFor] = useState(null);
+  useEffect(() => { (async () => { const p = await getMyProfile().catch(() => null); setHomeEquipMap(await getTournamentEquipmentMap(p?.school_id)); })(); }, []);
   const [participantsModalFor, setParticipantsModalFor] = useState(null); // ★「参加選手」タップ時のポップアップ（大会オブジェクト）
 
   // ★選手マスターは下の初期読み込みの中でも取得しているため、ここでの重複取得は廃止した。
@@ -11580,9 +13001,12 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
   const upcomingTournaments = !liveMatch
     ? (() => {
         const sorted = tournaments
-          .filter(t => (t.end_date || t.start_date) >= todayStr)
+          .filter(t => !t.canceled && (t.end_date || t.start_date) >= todayStr) // ★中止の大会は「次の試合予定」に出さない
           .sort((a,b) => a.start_date.localeCompare(b.start_date));
         if (sorted.length === 0) return [];
+        // ★今日が開催期間に入っている大会（前日から続く複数日の大会も含む）があれば、それをすべて表示する
+        const ongoing = sorted.filter(t => t.start_date <= todayStr);
+        if (ongoing.length > 0) return ongoing;
         const nearestDate = sorted[0].start_date;
         return sorted.filter(t => t.start_date === nearestDate);
       })()
@@ -11637,7 +13061,7 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                 <div style={{ fontSize:11,fontWeight:800,color:C.textSec,marginBottom:8 }}>次の試合予定</div>
                 {upcomingTournaments.map((t, idx) => {
                   const d = daysUntil(t.start_date);
-                  const countdownLabel = d >= 0 ? `あと${d}日` : "";
+                  const countdownLabel = d >= 0 ? `あと${d}日` : "開催中";
                   const participantCount = (t.participant_player_ids || []).length;
                   return (
                   <div key={t.id ?? idx} style={{ ...S.card, padding:16, marginBottom: idx===upcomingTournaments.length-1?0:10, borderLeft:`4px solid ${C.textSec}` }}>
@@ -11651,8 +13075,8 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                       </div>
                       <div style={{ fontSize:16,fontWeight:800,color:C.text }}>{t.name}</div>
                     </div>
-                    {/* ★参加選手・地図・要項を1行にまとめてスペースを節約 */}
-                    {(participantCount > 0 || t.venue_link || t.guideline_url) && (
+                    {/* ★参加選手・地図・メモを1行にまとめてスペースを節約（以前は要項。メモは大会一覧の「📝 メモ」と同じ内容） */}
+                    {(() => { const memoText = (homeEquipMap[t.id]?.memo || "").trim(); return (
                       <div style={{ display:"flex", gap:8, marginTop:12 }}>
                         {participantCount > 0 && (
                           <button
@@ -11660,26 +13084,28 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
                             onClick={e=>{ e.stopPropagation(); setParticipantsModalFor(t); }}
                           ><span>👥</span> {participantCount}人</button>
                         )}
-                        {(t.venue_link || t.guideline_url) && (<>
                         <button
                           disabled={!t.venue_link}
                           style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.venue_link ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.venue_link ? "pointer" : "default" }}
                           onClick={e=>{ e.stopPropagation(); if (t.venue_link) window.open(t.venue_link, "_blank", "noopener,noreferrer"); }}
                         ><span style={{ color: t.venue_link ? "#e53935" : "#c3c9d4" }}>📍</span> 地図</button>
                         <button
-                          disabled={!t.guideline_url}
-                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color: t.guideline_url ? "#1e2a44" : "#c3c9d4", border:"1px solid #e5e7eb", cursor: t.guideline_url ? "pointer" : "default" }}
-                          onClick={e=>{ e.stopPropagation(); if (t.guideline_url) window.open(t.guideline_url, "_blank", "noopener,noreferrer"); }}
-                        ><span style={{ color: t.guideline_url ? "#1976d2" : "#c3c9d4" }}>📄</span> 要項</button>
-                        </>)}
+                          style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, borderRadius:10, padding:"9px 6px", fontSize:12, fontWeight:700, background:"#fff", color:"#1e2a44", border:"1px solid #e5e7eb", cursor:"pointer", position:"relative" }}
+                          onClick={e=>{ e.stopPropagation(); markMemoSeen(t.id, memoText); setHomeMemoFor({ ...t, equipment_plan: homeEquipMap[t.id] || {} }); }}
+                        ><span>📝</span> メモ{isMemoUnseen(t.id, memoText) && <span aria-label="まだ見ていないメモあり" style={{ width:7, height:7, borderRadius:"50%", background:"#e53935", alignSelf:"flex-start", marginTop:2 }} />}</button>
                       </div>
-                    )}
+                    ); })()}
                   </div>
                   );
                 })}
               </div>
             )}
 
+            {/* ★大会のメモ（次の試合予定の「📝 メモ」） */}
+            {homeMemoFor && (
+              <TournamentMemoModal tournament={homeMemoFor} onClose={()=>setHomeMemoFor(null)}
+                onSaved={(plan)=>setHomeEquipMap(m => ({ ...m, [homeMemoFor.id]: plan }))} />
+            )}
             {/* 参加選手一覧ポップアップ */}
             {participantsModalFor && (
               <Modal onClose={()=>setParticipantsModalFor(null)}>
@@ -12143,9 +13569,10 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
                 候補をタップしたときはすぐ確定、手入力のときは「決定」を押すまで確定しない。 */}
             <SchoolField
               value={mySchoolDraft}
-              onChange={name => {
-                setMySchoolDraft(name);
-                // 候補（学校マスター）と完全一致したら、その学校で確定する
+              onChange={name => setMySchoolDraft(name)}
+              // ★候補をタップしたときだけすぐ確定する。以前は入力した文字が学校名と一致した瞬間に確定していたため、
+              //   「ちくし」→「筑紫」と変換した時点で「筑紫」に決まって閉じてしまい、「筑紫台」まで入力できなかった。
+              onPick={name => {
                 const found = schoolsWithId.find(s => s.name === name);
                 if (found) {
                   setMySchoolId(found.id);
@@ -12480,8 +13907,8 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
           const boutBWin = finishedNow && match && winnerSideOf(match)==="B";
           const myClubLabel = ((tm.my_school_id ? schoolMap[tm.my_school_id] : null) || "自チーム") + (tm.my_team_division || "");
           const oppClubLabel = (tm.opponent_name || "相手") + (tm.opponent_division || "");
-          // ★個人戦一覧のカードと同じ「勝ち＝緑／負け＝オレンジ／進行中＝オレンジ／待機中～予定＝緑／中断・途中終了＝グレー」の色帯
-          const stripeColor = isRecording ? C.orange
+          // ★個人戦一覧のカードと同じ「勝ち＝緑／負け＝オレンジ／進行中＝青／待機中～予定＝緑／中断・途中終了＝グレー」の色帯
+          const stripeColor = isRecording ? C.live
             : isSuspended ? C.textSec
             : isAbandoned ? C.textSec
             : finishedNow ? (match && winnerSideOf(match)==="A" ? C.teamA : match ? C.teamB : C.border)
@@ -12506,9 +13933,9 @@ function TeamMatchDetail({ teamMatchId, onBack, onOpenMatch, onNewMatch, onStart
                   )}
                   <span style={{
                     marginLeft:"auto", fontSize:10.5, fontWeight:700, borderRadius:99, padding:"2px 9px", whiteSpace:"nowrap",
-                    border:`1px solid ${isRecording?C.orange:C.border}`,
-                    color:isRecording?C.orange:C.textSec,
-                    background:isRecording?"#fff3e0":"transparent",
+                    border:`1px solid ${isRecording?C.live:C.border}`,
+                    color:isRecording?C.live:C.textSec,
+                    background:isRecording?C.liveL:"transparent",
                   }}>
                     {finishedNow ? "終了" : isAbandoned ? "途中終了" : boutCut ? "打ち切り" : isSuspended ? "中断" : isRecording ? "試合中" : "予定"}
                   </span>
@@ -12968,7 +14395,7 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
     const sorted = [...matches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date));
     const picked = new Set(draft.pickedIds ?? []);
     return (
-      <div style={{ minHeight:"100vh", background:C.white }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.white }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"15px 16px", borderBottom:`1px solid ${C.border}` }}>
           <div style={{ fontSize:17, fontWeight:800 }}>✓ 試合を個別に選ぶ</div>
           <div onClick={()=>setPickOpen(false)} style={{ color:C.textSec, fontSize:19, cursor:"pointer" }}>✕</div>
@@ -13012,7 +14439,7 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
   }
 
   return (
-    <div style={{ minHeight:"100vh", background:C.white }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.white }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"15px 16px", borderBottom:`1px solid ${C.border}` }}>
         <div style={{ fontSize:17, fontWeight:800 }}>🎚️ 集計対象の設定</div>
         <div onClick={onClose} style={{ color:C.textSec, fontSize:19, cursor:"pointer" }}>✕</div>
@@ -13159,13 +14586,16 @@ function AnalysisTabs({ current, onPersonal, onPair, onTeam }) {
 // ============================================================
 const ANALYSIS_TARGET_BG = "linear-gradient(135deg,#1b2a4e,#3a6fc4)";
 const analysisChip = { position:"relative", fontSize:13.5, fontWeight:800, background:"rgba(255,255,255,0.18)", color:"#fff", borderRadius:8, padding:"6px 11px", whiteSpace:"nowrap", border:"none", cursor:"pointer", flexShrink:0 };
-function AnalysisTargetCard({ label, name, onChange, cond, onCond, condSelect, children }) {
+function AnalysisTargetCard({ label, labelLarge, name, onChange, changeLabel, changeActive, teamLine, cond, onCond, condSelect, children }) {
   return (
     <div style={{ background:ANALYSIS_TARGET_BG, color:"#fff", borderRadius:14, padding:"13px 14px", marginBottom:12 }}>
-      <div style={{ fontSize:12.5, fontWeight:700, color:"#dce8ff" }}>{label}</div>
+      {label && (labelLarge
+        ? <div style={{ fontSize:16, fontWeight:800, color:"#fff", lineHeight:1.3 }}>{label}</div>
+        : <div style={{ fontSize:12.5, fontWeight:700, color:"#dce8ff" }}>{label}</div>)}
+      {teamLine && <div style={{ fontSize:16, fontWeight:800, color:"#fff", marginTop:3, lineHeight:1.35, wordBreak:"break-word" }}>{teamLine}</div>}
       <div style={{ display:"flex", alignItems:"center", gap:10, margin:"2px 0 9px" }}>
         <div style={{ flex:1, minWidth:0, fontSize:22, fontWeight:900, lineHeight:1.3, wordBreak:"break-word" }}>{name}</div>
-        {onChange && <button onClick={onChange} style={analysisChip}>変更 ›</button>}
+        {onChange && <button onClick={onChange} style={changeActive ? { ...analysisChip, background:C.accent, border:`1px solid ${C.accent}`, color:"#fff" } : analysisChip}>{changeLabel || "変更"} ›</button>}
       </div>
       {children}
       <div style={{ display:"flex", alignItems:"center", gap:10, borderTop:"1px solid rgba(255,255,255,0.25)", paddingTop:9 }}>
@@ -13219,6 +14649,87 @@ function AnalysisMatchListCard({ title="集計している試合の一覧", open
       {open && <div style={{ padding:"0 14px 12px" }}>{children}</div>}
     </div>
   );
+}
+// ★個人分析：「どの単位で見る？」（全部・大会別・1/3/5/10試合ずつ）と「◀ 前へ／次へ ▶」
+const ANALYSIS_UNITS = [["all","全部"],["tour","大会別"],[1,"1試合"],[3,"3試合"],[5,"5試合"],[10,"10試合"]];
+const ANALYSIS_UNIT_MAX_PAGES = 10; // ★最新から数えて最大10区切りまで
+function AnalysisUnitPager({ unit, page, pageCount, title, sub, onUnit, onPage, disabled }) {
+  const pBtn = (dis) => ({ flexShrink:0, background:C.white, border:"1.5px solid #c9d6ee", borderRadius:10, padding:"10px 11px", fontSize:14, fontWeight:800, color:C.navy, cursor:dis?"default":"pointer", whiteSpace:"nowrap", opacity:dis?0.35:1 });
+  return (
+    <div style={{ ...S.card, padding:"12px 12px 10px", marginBottom:12 }}>
+      <div style={{ fontSize:12.5, fontWeight:800, color:"#5a6478", margin:"0 2px 5px" }}>どの単位で見る？</div>
+      <div style={{ display:"flex", background:"#e6e9ef", borderRadius:11, padding:4, gap:3 }}>
+        {ANALYSIS_UNITS.map(([k,l]) => {
+          const on = unit === k;
+          return (
+            <button key={k} disabled={disabled} onClick={()=>onUnit(k)}
+              style={{ flex:1, padding:"9px 1px", fontSize:13.5, fontWeight:on?800:700, borderRadius:8, border:"none", cursor:disabled?"default":"pointer", whiteSpace:"nowrap",
+                background: on ? C.navy : "transparent", color: on ? "#fff" : "#5a6478" }}>{l}</button>
+          );
+        })}
+      </div>
+      {unit !== "all" && pageCount > 0 && (
+        <>
+          <div style={{ display:"flex", alignItems:"center", gap:8, background:"#eef3fc", borderRadius:12, padding:8, marginTop:10 }}>
+            <button disabled={page<=0} onClick={()=>onPage(page-1)} style={pBtn(page<=0)}>◀ 前へ</button>
+            <div style={{ flex:1, minWidth:0, textAlign:"center", lineHeight:1.35 }}>
+              <div style={{ fontSize:15.5, fontWeight:900, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{title}</div>
+              <div style={{ fontSize:12, fontWeight:700, color:"#5a6478" }}>{sub}</div>
+            </div>
+            <button disabled={page>=pageCount-1} onClick={()=>onPage(page+1)} style={pBtn(page>=pageCount-1)}>次へ ▶</button>
+          </div>
+          <div style={{ display:"flex", justifyContent:"center", gap:5, marginTop:8 }}>
+            {Array.from({ length: pageCount }, (_, i) => (
+              <span key={i} style={{ width: i===page ? 18 : 7, height:7, borderRadius:4, background: i===page ? "#3a6fc4" : "#d5dbe5" }} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+// ★ペア・チーム用：区切りを作る共通処理（個人と同じルール）
+function sortNewestFirst(list) {
+  return (list||[]).map((m,i)=>({ m, i }))
+    .sort((x,y)=> String(y.m.match_date||"").localeCompare(String(x.m.match_date||"")) || (roundProgressRank(y.m.round)-roundProgressRank(x.m.round)) || (y.i - x.i))
+    .map(x=>x.m);
+}
+function buildUnitGroups(newest, unit) {
+  if (unit === "all") return [newest];
+  if (unit === "tour") {
+    const g = [];
+    newest.forEach(m => {
+      const key = (m.tournament_name || "").trim() || "練習試合・大会外";
+      const last = g[g.length-1];
+      if (last && last.key === key) last.list.push(m); else g.push({ key, list:[m] });
+    });
+    return g.slice(0, ANALYSIS_UNIT_MAX_PAGES).map(x => Object.assign(x.list, { tourName: x.key }));
+  }
+  const g = [];
+  for (let i = 0; i < newest.length && g.length < ANALYSIS_UNIT_MAX_PAGES; i += unit) g.push(newest.slice(i, i + unit));
+  if (g.length > 1 && g[g.length-1].length < unit) g.pop();
+  return g;
+}
+function unitLabels(cur, unit, page, isWin, oneLabel) {
+  const title = unit === "tour" ? `${cur.tourName ?? ""}${page===0 ? "（最新）" : ""}`
+    : unit === 1 ? (page===0 ? "最新の試合" : `最新から${page+1}試合目`)
+    : unit === "all" ? "" : (page===0 ? `最新 1〜${unit}試合目` : `最新から ${page*unit+1}〜${page*unit+cur.length}試合目`);
+  if (!cur || cur.length === 0) return { title, sub:"" };
+  const fmtD = (d) => { const x = String(d||"").split("-"); return x.length===3 ? `${Number(x[1])}/${Number(x[2])}` : ""; };
+  const w = cur.filter(isWin).length;
+  const newestD = fmtD(cur[0].match_date), oldestD = fmtD(cur[cur.length-1].match_date);
+  const sub = unit === 1
+    ? `${newestD}${oneLabel ? " "+oneLabel(cur[0]) : ""}（${w ? "勝ち" : "負け"}）`
+    : `${oldestD===newestD ? newestD : oldestD+" 〜 "+newestD}（${cur.length}試合・${w}勝${cur.length-w}敗）`;
+  return { title, sub };
+}
+// ★「前より ±○」の小さな表示（goodUp=true：増えると良い）
+function PrevDiff({ cur, prev, unit="", goodUp=true }) {
+  if (prev == null || cur == null) return null;
+  const v = cur - prev;
+  if (v === 0) return <div style={{ fontSize:11.5, fontWeight:800, color:C.textSec, marginTop:2 }}>前と同じ</div>;
+  const good = goodUp ? v > 0 : v < 0;
+  return <div style={{ fontSize:11.5, fontWeight:800, color: good ? C.accent : C.red, marginTop:2 }}>前より {v>0?"+":"−"}{Math.abs(v)}{unit}</div>;
 }
 // ★直近の試合数（1・3・5・10・全部）
 function AnalysisRecentSegment({ value, onPick, disabled }) {
@@ -13303,7 +14814,7 @@ function PairPickerSheet({ pairs, selectedKey, onSelect, onClose, allowAll }) {
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
       <div onClick={e=>e.stopPropagation()}
-        style={{ width:"100%", maxWidth:520, maxHeight:"85vh", background:C.white, borderRadius:"18px 18px 0 0", display:"flex", flexDirection:"column", paddingBottom:"env(safe-area-inset-bottom)" }}>
+        style={{ width:"100%", maxWidth:520, maxHeight:"calc(85vh / var(--app-zoom, 1))", background:C.white, borderRadius:"18px 18px 0 0", display:"flex", flexDirection:"column", paddingBottom:"env(safe-area-inset-bottom)" }}>
         <div style={{ padding:"8px 14px 0" }}>
           <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
           <div style={{ display:"flex", alignItems:"center", marginBottom:10 }}>
@@ -13352,6 +14863,122 @@ function PairPickerSheet({ pairs, selectedKey, onSelect, onClose, allowAll }) {
   );
 }
 
+// ★相手分析のシートで使う選択欄（名前と「◯試合 ◯勝◯敗」を2行にして揃えるため自前の一覧で選ぶ）
+function OppPicker({ id, open, onToggle, onCloseList, value, placeholder, disabled, items, onPick }) {
+  const listRef = useRef(null);
+  // ★一覧を開いたとき、下が隠れていればシートを少しスクロールして一覧全体が見えるようにする
+  useEffect(() => {
+    if (open && listRef.current) {
+      try { listRef.current.scrollIntoView({ block:"nearest", behavior:"smooth" }); } catch { /* 古い端末は無視 */ }
+    }
+  }, [open]);
+  const cur = items.find(it => it.value === value);
+  const wl = (it) => it.w != null && <span style={{ color: it.w > it.l ? C.accent : it.w < it.l ? C.red : C.textSec, fontWeight:800 }}>{it.w}勝{it.l}敗</span>;
+  const on0 = !!value;
+  return (
+    <>
+      <div onClick={()=>{ if (!disabled) onToggle(id); }}
+        style={{ width:"100%", boxSizing:"border-box", fontSize:16, padding:"11px 12px", borderRadius:10,
+          border:`1.5px solid ${open ? C.navy : on0 ? C.accent : C.border}`, background: disabled ? "#f4f6f9" : C.white, color: disabled ? "#a0a8b8" : C.text,
+          display:"flex", alignItems:"center", gap:8, cursor: disabled ? "default" : "pointer", touchAction:"manipulation", WebkitTapHighlightColor:"transparent" }}>
+        <span style={{ flex:1, minWidth:0, wordBreak:"break-word" }}>{cur ? cur.label : placeholder}</span>
+        <span style={{ fontSize:12, color: disabled ? "#c4cbd8" : C.text }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && (
+        <div ref={listRef} style={{ border:`1px solid ${C.border}`, borderRadius:10, marginTop:4, maxHeight:"calc(38vh / var(--app-zoom, 1))", overflowY:"auto", overscrollBehavior:"contain", boxShadow:"0 4px 12px rgba(0,0,0,0.12)", WebkitOverflowScrolling:"touch", scrollMarginBottom:12 }}>
+          {[{ value:"", label:placeholder }, ...items].map((it, i) => {
+            const on = it.value === value;
+            return (
+              <div key={it.value || "__all"} onClick={()=>{ onPick(it.value); onCloseList(); }}
+                style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderTop: i ? `1px solid ${C.border}` : "none", background: on ? "#eef8f8" : C.white, cursor:"pointer", touchAction:"manipulation" }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:16, fontWeight: on || !it.value ? 800 : 600, color: !it.value ? "#1d4fa8" : C.text, wordBreak:"break-word" }}>{it.label}</div>
+                  {it.sub && <div style={{ fontSize:13, color:C.textSec, fontWeight:700, marginTop:2 }}>{it.sub}{it.w != null && <>　{wl(it)}</>}</div>}
+                </div>
+                {on && <span style={{ color:"#0b6e75", fontSize:16, fontWeight:900 }}>✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ★相手分析：都道府県・学校・ペアをプルダウンで選ぶシート（前回の条件が入った状態で開く）
+const OPP_NO_PREF = "__none";
+function OppSelectSheet({ oppPairs, prefOf, initPref, initClub, initPairKey, onApply, onClose }) {
+  const [pref, setPref] = useState(initPref || "");
+  const [club, setClub] = useState(initClub || "");
+  const [pairKey, setPairKey] = useState(initPairKey || "");
+  // 対戦した学校（試合数・ペア数つき）
+  const schools = useMemo(() => {
+    const map = {};
+    oppPairs.forEach(p => {
+      const name = p.club || "";
+      if (!name) return;
+      const sc = (map[name] ??= { name, pref: prefOf(name) || "", n:0, pairs:[] });
+      sc.n += p.matches.length; sc.pairs.push(p);
+    });
+    return Object.values(map).sort((a,b)=> b.n - a.n || a.name.localeCompare(b.name, "ja"));
+  }, [oppPairs, prefOf]);
+  const prefMatch = (sc) => !pref || (pref === OPP_NO_PREF ? !sc.pref : sc.pref === pref);
+  const prefs = [...new Set(schools.map(sc => sc.pref).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ja"));
+  const hasNoPref = schools.some(sc => !sc.pref);
+  const prefSchools = schools.filter(prefMatch);
+  const curSchool = schools.find(sc => sc.name === club) || null;
+  const clubPairs = curSchool ? [...curSchool.pairs].sort((a,b)=> b.matches.length - a.matches.length) : [];
+  const curPair = clubPairs.find(p => p.key === pairKey) || null;
+  const prefName = pref === OPP_NO_PREF ? "県の登録なし" : pref;
+  const countText = curPair ? `${club}の${curPair.label}ペア`
+    : curSchool ? `${club}の${clubPairs.length}ペア`
+    : pref ? `${prefName}の${prefSchools.length}校`
+    : `全${schools.length}校`;
+  const nothing = !pref && !club && !pairKey;
+  const [listOpen, setListOpen] = useState(null); // ★開いている一覧（"club" | "pair" | null）
+  const lbl = (t) => <div style={{ fontSize:14, fontWeight:800, color:C.navy, margin:"12px 0 6px" }}>{t}</div>;
+  // ★選択欄の部品（OppPicker）は画面の外で定義する。以前はこの中で定義していたため、
+  //   押すたびに3つの選択欄が丸ごと作り直され、スマホでタップが空振りしたり動きが重くなっていた
+  const toggleList = (id) => setListOpen(o => o === id ? null : id);
+  const closeList = () => setListOpen(null);
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,20,40,0.5)", zIndex:300, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{ width:"100%", maxWidth:520, maxHeight:"calc(85vh / var(--app-zoom, 1))", overflowY:"auto", overscrollBehavior:"contain", WebkitOverflowScrolling:"touch", background:C.white, borderRadius:"18px 18px 0 0", padding:"8px 16px 18px", boxSizing:"border-box", paddingBottom:"calc(18px + env(safe-area-inset-bottom))" }}>
+        <div style={{ width:40, height:5, borderRadius:3, background:"#d5dae3", margin:"0 auto 10px" }} />
+        <div style={{ display:"flex", alignItems:"center" }}>
+          <div style={{ flex:1, fontSize:17, fontWeight:900, color:C.navy }}>相手を選択</div>
+          <button aria-label="閉じる" onClick={onClose} style={{ padding:0, width:32, height:32, borderRadius:"50%", border:"none", background:"#f0f2f5", color:C.textSec, fontSize:16, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+        </div>
+        {lbl("都道府県")}
+        <OppPicker id="pref" open={listOpen==="pref"} onToggle={toggleList} onCloseList={closeList} value={pref} placeholder="すべての県"
+          items={[...prefs.map(p => ({ value:p, label:p, n:schools.filter(sc=>sc.pref===p).length })),
+                  ...(hasNoPref ? [{ value:OPP_NO_PREF, label:"県の登録なし", n:schools.filter(sc=>!sc.pref).length }] : [])]
+                 .map(it => ({ ...it, sub:`${it.n}校` }))}
+          onPick={v=>{ setPref(v);
+            const sc = schools.find(x => x.name === club);
+            if (sc && v && !(v === OPP_NO_PREF ? !sc.pref : sc.pref === v)) { setClub(""); setPairKey(""); } }} />
+        {lbl("チーム名（学校名）")}
+        <OppPicker id="club" open={listOpen==="club"} onToggle={toggleList} onCloseList={closeList} value={club} placeholder="すべての学校"
+          items={prefSchools.map(sc => ({ value:sc.name, label:sc.name, sub:`${sc.pref ? sc.pref+"・" : ""}${sc.pairs.length}ペア・${sc.n}試合`, w:sc.pairs.reduce((t,p)=>t+p.w,0), l:sc.pairs.reduce((t,p)=>t+p.l,0) }))}
+          onPick={v=>{ setClub(v); setPairKey(""); }} />
+        {lbl("ペア名")}
+        <OppPicker id="pair" open={listOpen==="pair"} onToggle={toggleList} onCloseList={closeList} value={pairKey} placeholder={curSchool ? "すべてのペア" : "先に学校を選んでください"} disabled={!curSchool}
+          items={clubPairs.map(p => ({ value:p.key, label:p.label, sub:`${p.matches.length}試合`, w:p.w, l:p.l }))}
+          onPick={v=>setPairKey(v)} />
+        {!curSchool && <div style={{ fontSize:12.5, color:C.textSec, marginTop:6 }}>※学校を選ぶと、その学校のペアが選べます</div>}
+        <div style={{ display:"flex", gap:8, marginTop:18 }}>
+          <button onClick={()=>{ setPref(""); setClub(""); setPairKey(""); setListOpen(null); }}
+            style={{ flex:1, padding:"13px 0", borderRadius:12, border:`2px solid ${C.red}`, background:C.white, color:C.red, fontSize:15, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>条件をクリア</button>
+          <button onClick={()=>onApply({ pref, club: curSchool ? club : "", pairKey: curPair ? pairKey : "" })}
+            style={{ flex:1.6, padding:"13px 0", borderRadius:12, border:"none", background:C.accent, color:"#fff", fontSize:16, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>{nothing ? "すべての相手を表示" : "この条件で表示"}</button>
+        </div>
+        <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginTop:7 }}>該当：{countText}</div>
+      </div>
+    </div>
+  );
+}
+
 function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpenMatch }) {
   const [mySchoolName, setMySchoolName] = useState("");
   const [allMatches, setAllMatches] = useState([]);
@@ -13370,10 +14997,17 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   const [oppQuery, setOppQuery] = useState("");                // ★相手分析：学校名・選手名で絞り込み
   const [oppSort, setOppSort] = useState("count");             // ★相手分析：学校・ペアの並び順（rate|win|lose|count）
   const [openSchools, setOpenSchools] = useState(() => new Set()); // ★相手分析：開いている学校
+  const [oppSel, setOppSel] = useState(() => readScreenCache("pairAnalysis")?.oppSel ?? { pref:"", club:"" }); // ★相手分析：「選択 ›」で選んだ県・学校
+  const [oppSelectOpen, setOppSelectOpen] = useState(false);
+  const [schoolPrefMap, setSchoolPrefMap] = useState({}); // ★学校名 → 都道府県（学校マスターより）
+  const [myPlayerName, setMyPlayerName] = useState(null);  // ★ログインした選手本人（保護者は子ども）の選手名
+  // ★自分でペアを選んだ（またはこのページで前に選んでいた）か。選んでいなければ自分の最新ペアを出す
+  const ownPairPickedRef = useRef(!!readScreenCache("pairAnalysis")?.ownPicked);
   const [breakdownDim, setBreakdownDim] = useState("play");
   // ★自分たちのペア：個人分析と同じ「勝敗」「直近◯試合」の絞り込み
   const [pairResult, setPairResult] = useState("all"); // all | win | lose
-  const [pairRecent, setPairRecent] = useState("all"); // all | 1 | 3 | 5 | 10
+  const [pairUnit, setPairUnit] = useState("tour");   // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
+  const [pairUnitPage, setPairUnitPage] = useState(0);
   const [schoolId, setSchoolId] = useState(null);
   const [notes, setNotes] = useState([]);
   const [noteEditing, setNoteEditing] = useState(null); // {id?, text, match_id}
@@ -13388,7 +15022,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
   // ★前回開いたときのデータをすぐ表示し、裏で最新に差し替える（「読み込み中...」で待たせない）
   //   期間の初期値（シーズン）を決めるのは最初の1回だけ。裏の更新で、選び直した期間が戻らないようにする。
   const periodInitRef = useRef(false);
-  const applyData = useCallback(([p, list, schools, simpleList, season]) => {
+  const applyData = useCallback(([p, list, schools, simpleList, season, rosterList]) => {
+    if (rosterList) setMyPlayerName(pickDefaultAnalysisPlayer(p, rosterList));
+    { const pm = {}; (schools||[]).forEach(s => { if (s.name && s.prefecture) pm[s.name.trim()] = s.prefecture; }); setSchoolPrefMap(pm); }
     if (p?.school_id) {
       setSchoolId(p.school_id);
       const s = (schools||[]).find(s => s.id === p.school_id);
@@ -13412,7 +15048,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     (async () => {
       // ★トーナメント表で「結果だけ記録」した試合も勝敗に含める（チームタブと同じ数え方にする）
       // ★シーズン設定も同時に取得する（以前はプロフィール等を待ってから、もう1往復していた）
-      const fresh = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches(), getMySchoolSeason()]);
+      const fresh = await Promise.all([getMyProfile(), getMatchesCached(), getSchools(), getSimpleRecordedDrawMatches(), getMySchoolSeason(), getPlayerRoster().catch(() => null)]);
       writeScreenCache("pairAnalysisData", fresh);
       applyData(fresh);
     })();
@@ -13420,8 +15056,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
   // ★試合スタッツを見て戻ってきたときに、選んでいたペアと画面の状態を復元する
   useEffect(() => {
-    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, period });
-  }, [side, ownPairKey, oppPairKey, period]);
+    writeScreenCache("pairAnalysis", { side, ownPairKey, oppPairKey, period, oppSel, ownPicked: ownPairPickedRef.current });
+  }, [side, ownPairKey, oppPairKey, period, oppSel]);
+  const prefOf = useCallback((name) => schoolPrefMap[String(name||"").trim()] || "", [schoolPrefMap]);
 
   // 自チームが出場した、終了済みの試合（自チーム側をA側にそろえたもの。期間で絞り込み）
   const ownMatches = useMemo(() => {
@@ -13448,13 +15085,32 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     }).sort((a,b)=>b.matches.length-a.matches.length);
   }, [ownMatches, mySchoolName]);
 
+  // ★選手本人（保護者は子ども）が入っている、いちばん最近試合をしたペア
+  const myLatestPairKey = useMemo(() => {
+    if (!myPlayerName) return "";
+    const me = normalizePlayerName(myPlayerName);
+    let best = null;
+    ownMatches.forEach(m => {
+      const pr = ownPairOf(m, mySchoolName);
+      if (!pr || !pr.names.some(n => normalizePlayerName(n) === me)) return;
+      const d = m.match_date || "";
+      if (!best || d > best.d || (d === best.d && String(m.created_at||"") > best.c)) best = { d, c:String(m.created_at||""), key:pr.key };
+    });
+    return best && ownPairs.some(p => p.key === best.key) ? best.key : "";
+  }, [myPlayerName, ownMatches, mySchoolName, ownPairs]);
+
   useEffect(() => {
     if (ownPairs.length === 0) return;
+    // ★まだペアを選んでいない（この画面を初めて開いた）ときは、自分（保護者は子ども）の最新のペアを出す
+    if (!ownPairPickedRef.current && myLatestPairKey) {
+      if (ownPairKey !== myLatestPairKey) setOwnPairKey(myLatestPairKey);
+      return;
+    }
     // ★選んでいたペアが一覧に無い（データ更新で消えた等）ときや、
     //   「すべて」のまま自分たちタブに切り替えたときは、先頭のペアに戻す
     const valid = ownPairs.some(p => p.key === ownPairKey) || (side === "opp" && ownPairKey === "all");
-    if (!valid) setOwnPairKey(ownPairs[0].key);
-  }, [ownPairs, ownPairKey, side]);
+    if (!valid) setOwnPairKey(myLatestPairKey || ownPairs[0].key);
+  }, [ownPairs, ownPairKey, side, myLatestPairKey]);
 
   const selectedOwnPair = ownPairs.find(p => p.key === ownPairKey) || null;
 
@@ -13519,9 +15175,13 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     ? (selectedOwnPair?.matches ?? [])
     : (selectedOppPair?.matches ?? []).filter(m => oppOwnFilter.size === 0 || oppOwnFilter.has(ownPairOf(m, mySchoolName)?.key));
   // ★自分たちのペアだけ：「直近◯試合」で成績の対象をしぼり、「勝敗」で下の内訳の対象をしぼる
-  const targetMatches = (side === "own" && pairRecent !== "all")
-    ? pairBaseMatches.map((m,i)=>({ m, i })).sort((x,y)=> String(y.m.match_date||"").localeCompare(String(x.m.match_date||"")) || (y.i - x.i)).slice(0, pairRecent).map(x=>x.m)
-    : pairBaseMatches;
+  // ★どの単位で見る？：最新から○試合ずつ／大会ごとに区切った、今の区切りの試合
+  const pairUnitGroups = buildUnitGroups(sortNewestFirst(pairBaseMatches), pairUnit);
+  const pairUnitPageSafe = Math.min(pairUnitPage, Math.max(0, pairUnitGroups.length - 1));
+  const pairUnitCur = pairUnitGroups[pairUnitPageSafe] ?? [];
+  const pairUnitInfo = unitLabels(pairUnitCur, pairUnit, pairUnitPageSafe, m => winnerSideOf(m)==="A",
+    m => { const o = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName); return o ? (o.club || o.label) : ""; });
+  const targetMatches = pairUnit === "all" ? pairBaseMatches : [...pairUnitCur].reverse();
   const detailTargetMatches = (side === "own" && pairResult !== "all")
     ? targetMatches.filter(m => winnerSideOf(m) === (pairResult === "win" ? "A" : "B"))
     : targetMatches;
@@ -13584,7 +15244,9 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // ★相手分析で自チームのペアを選んで絞り込んだときも、内訳・サーブ・コースなどを読み直す
-  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart, [...oppOwnFilter].sort().join("|"), pairRecent, pairResult]);
+  }, [side, ownPairKey, oppPairKey, allMatches.length, period, seasonStart, [...oppOwnFilter].sort().join("|"), pairUnit, pairUnitPageSafe, pairResult]);
+  // ★見るペア・期間が変わったら、最新の区切りに戻す
+  useEffect(() => { setPairUnitPage(0); }, [side, ownPairKey, oppPairKey, period]);
 
   const wins = targetMatches.filter(m => winnerSideOf(m)==="A").length;
   const losses = targetMatches.filter(m => winnerSideOf(m)==="B").length;
@@ -13682,7 +15344,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
     background:C.white, fontSize:14.5, fontWeight:700, color:C.text, marginBottom:10, fontFamily:"inherit" };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
@@ -13690,8 +15352,21 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
 
         {pairPickerOpen && (
           <PairPickerSheet pairs={ownPairs} selectedKey={ownPairKey} allowAll={side === "opp"}
-            onSelect={k=>{ setOwnPairKey(k); setOppPairKey(""); setRecordOpen(false); setPairPickerOpen(false); window.scrollTo(0,0); }}
+            onSelect={k=>{ ownPairPickedRef.current = true; setOwnPairKey(k); setOppPairKey(""); setRecordOpen(false); setPairPickerOpen(false); window.scrollTo(0,0); }}
             onClose={()=>setPairPickerOpen(false)} />
+        )}
+        {oppSelectOpen && (
+          <OppSelectSheet oppPairs={oppPairs} prefOf={prefOf}
+            initPref={oppSel.pref || (selectedOppPair ? (prefOf(selectedOppPair.club) || "") : "")}
+            initClub={selectedOppPair ? (selectedOppPair.club || "") : oppSel.club}
+            initPairKey={selectedOppPair ? selectedOppPair.key : ""}
+            onApply={({ pref, club, pairKey })=>{
+              setOppSel({ pref, club });
+              setOppPairKey(pairKey || "");
+              setOpenSchools(club ? new Set([club]) : new Set());
+              setOppSelectOpen(false); window.scrollTo(0,0);
+            }}
+            onClose={()=>setOppSelectOpen(false)} />
         )}
         <AnalysisTabs current="pair" onPersonal={()=>onOpenPersonal && onOpenPersonal()} onTeam={()=>onOpenTeamStats && onOpenTeamStats()} />
 
@@ -13724,6 +15399,10 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
               const rec = (x) => ({ wins:x.w, losses:x.l, total:x.n ?? x.matches.length });
               const cmp = (a,b) => sortByRecord(oppSort)(rec(a), rec(b));
               let list = Object.values(schools).sort((a,b)=> cmp(a,b) || a.club.localeCompare(b.club, "ja"));
+              // ★「選択 ›」で選んだ県・学校で絞り込む
+              if (oppSel.pref) list = list.filter(sc => oppSel.pref === OPP_NO_PREF ? !prefOf(sc.club) : prefOf(sc.club) === oppSel.pref);
+              if (oppSel.club) list = list.filter(sc => sc.club === oppSel.club);
+              const selActive = !!(oppSel.pref || oppSel.club);
               if (qq) {
                 list = list.map(sc => norm(sc.club).includes(qq) ? sc : { ...sc, pairs: sc.pairs.filter(p => norm(p.label).includes(qq)) })
                            .filter(sc => sc.pairs.length > 0);
@@ -13731,7 +15410,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
               const wlColor = (w,l) => w > l ? C.accent : w < l ? C.teamB : C.textSec;
               return (
                 <>
-                  <AnalysisTargetCard label="相手分析" name="対戦した相手ペア" cond={periodCur[1]} condSelect={periodSelect} />
+                  <AnalysisTargetCard label="相手分析" name="対戦した相手ペア" cond={periodCur[1]} condSelect={periodSelect}
+                    onChange={()=>setOppSelectOpen(true)} changeLabel={selActive ? "選択中" : "選択"} changeActive={selActive} />
                   <div style={{ display:"flex", alignItems:"center", gap:6, background:C.white, border:`1.5px solid ${C.border}`, borderRadius:10, padding:"0 11px", marginBottom:4 }}>
                     <span style={{ fontSize:14 }}>🔍</span>
                     <input value={oppQuery} onChange={e=>setOppQuery(e.target.value)} placeholder="学校名・選手名で探す"
@@ -13743,8 +15423,8 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                   </div>
                   {/* ★並び順（チーム分析と同じ） */}
                   <div style={{ display:"flex", gap:5, marginBottom:8 }}>
-                    {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
-                      <button key={k} style={{ ...S.togBtn(oppSort===k,C.navy), flex:1, fontSize:14, padding:"9px 4px", whiteSpace:"nowrap" }} onClick={()=>setOppSort(k)}>{l}</button>
+                    {SORT_RECORD_OPTIONS.map(([k,l])=>(
+                      <button key={k} style={{ ...S.togBtn(oppSort===k,C.navy), flex:1, fontSize:13.5, padding:"9px 2px", whiteSpace:"nowrap", minWidth:0 }} onClick={()=>setOppSort(k)}>{l}</button>
                     ))}
                   </div>
                   {list.length === 0 && <div style={{ textAlign:"center", color:C.textSec, padding:"30px 0", fontSize:13.5 }}>{qq ? "見つかりませんでした" : "対戦した記録がありません"}</div>}
@@ -13755,7 +15435,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         <div onClick={()=>setOpenSchools(prev => { const nx = new Set(prev); nx.has(sc.club) ? nx.delete(sc.club) : nx.add(sc.club); return nx; })}
                           style={{ display:"flex", alignItems:"center", gap:8, padding:"13px 14px", cursor:"pointer" }}>
                           <div style={{ flex:1, minWidth:0, fontSize:18, fontWeight:900, color:C.text, lineHeight:1.35 }}>
-                            {sc.club}<span style={{ display:"block", fontSize:13.5, color:C.textSec, fontWeight:700, marginTop:1 }}>{sc.pairs.length}ペア・{sc.n}試合</span>
+                            {sc.club}<span style={{ display:"block", fontSize:13.5, color:C.textSec, fontWeight:700, marginTop:1 }}>{selActive && prefOf(sc.club) ? `${prefOf(sc.club)}・` : ""}{sc.pairs.length}ペア・{sc.n}試合</span>
                           </div>
                           <div style={{ fontSize:17, fontWeight:900, color:wlColor(sc.w, sc.l), whiteSpace:"nowrap" }}>{sc.w}勝{sc.l}敗</div>
                           <span style={{ color:"#a0a8b8", fontSize:16 }}>{open ? "▴" : "▾"}</span>
@@ -13790,12 +15470,20 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                 )}
 
                 <AnalysisTargetCard
-                  label={side==="own" ? "自チームのペア" : `相手ペア${selectedOppPair?.club ? "（"+selectedOppPair.club+"）" : ""}`}
+                  label={side==="own" ? "自チームのペア" : "相手分析"}
+                  teamLine={side==="own" ? null : (selectedOppPair?.club ? <>🏫 {selectedOppPair.club}{prefOf(selectedOppPair.club) && <span style={{ fontSize:13, fontWeight:700, color:"#dce8ff" }}>（{prefOf(selectedOppPair.club)}）</span>}</> : null)}
                   name={side==="own" ? selectedOwnPair?.label : selectedOppPair.label}
-                  onChange={side==="own" ? ()=>setPairPickerOpen(true) : ()=>{ setOppPairKey(""); window.scrollTo(0,0); }}
-                  cond={`${periodCur[1]}・${targetMatches.length}試合`}
+                  onChange={side==="own" ? ()=>setPairPickerOpen(true) : ()=>setOppSelectOpen(true)}
+                  changeLabel={side==="own" ? "変更" : "選択"}
+                  cond={`${periodCur[1]}・${pairBaseMatches.length}試合`}
                   condSelect={periodSelect}
                 />
+                {pairBaseMatches.length > 0 && (
+                  <AnalysisUnitPager unit={pairUnit} page={pairUnitPageSafe} pageCount={pairUnitGroups.length}
+                    title={pairUnitInfo.title} sub={pairUnitInfo.sub}
+                    onUnit={k=>{ setPairUnit(k); setPairUnitPage(0); setPairResult("all"); setRecordOpen(false); }}
+                    onPage={p=>{ setPairUnitPage(p); setPairResult("all"); setRecordOpen(false); }} />
+                )}
                 <AnalysisRecordCard total={targetMatches.length} wins={wins} losses={losses}
                   filter={pairResult} onFilter={side==="own" ? setPairResult : undefined}>
                   {side === "opp" && ((oppOwnFilter.size === 0 || oppOwnFilter.size === oppOwnRows.length)
@@ -13805,8 +15493,12 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                         <span onClick={()=>setOppOwnFilter(new Set())} style={{ background:"#e3f3f3", borderRadius:10, padding:"2px 9px", cursor:"pointer", whiteSpace:"nowrap" }}>全体に戻す</span>
                       </div>)}
                 </AnalysisRecordCard>
-                <AnalysisMatchListCard open={recordOpen} onToggle={()=>setRecordOpen(v=>!v)}>
-                      {[...targetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
+                <AnalysisMatchListCard
+                  title={pairResult==="win" ? "勝った試合の一覧" : pairResult==="lose" ? "負けた試合の一覧" : "集計している試合の一覧"}
+                  open={recordOpen} onToggle={()=>setRecordOpen(v=>!v)}>
+                      {/* ★戦績カードの「勝ち／負け」の切り替えに合わせて、一覧も絞り込む */}
+                      {detailTargetMatches.length===0 && <div style={{ fontSize:12, color:C.textSec }}>該当する試合がありません</div>}
+                      {[...detailTargetMatches].sort((a,b)=> new Date(b.match_date)-new Date(a.match_date)).map(m => {
                         const win = winnerSideOf(m)==="A";
                         const other = side==="own" ? oppPairOf(m) : ownPairOf(m, mySchoolName);
                         return (
@@ -13824,7 +15516,7 @@ function PairAnalysisScreen({ onNavigate, onOpenPersonal, onOpenTeamStats, onOpe
                       })}
 
                 </AnalysisMatchListCard>
-                {side === "own" && <AnalysisRecentSegment value={pairRecent} onPick={setPairRecent} />}
+
 
                 {/* ★この相手と当たった自チームのペア（押すと、そのペアとの試合だけに絞る。複数選べる） */}
                 {side === "opp" && selectedOppPair && oppOwnRows.length > 0 && (
@@ -14187,7 +15879,10 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const [calViewMonth, setCalViewMonth] = useState(new Date().getMonth());
   const [calMonthViewYear, setCalMonthViewYear] = useState(new Date().getFullYear());
 
-  const [resultMatches, setResultMatches] = useState([]); // 詳細データ込みの試合（分析対象）
+  const [resultMatchesAll, setResultMatches] = useState([]); // 詳細データ込みの試合（分析対象・条件で絞った全部）
+  const [unitSize, setUnitSize] = useState("tour"); // ★どの単位で見る？：all | tour | 1 | 3 | 5 | 10
+  const [unitPage, setUnitPage] = useState(0);     // ★何区切り目か（0＝最新）
+  const [pendingPlayerApply, setPendingPlayerApply] = useState(false); // ★選手をタップしたら、今の条件のまま結果画面へ
   const [resultLoading, setResultLoading] = useState(false);
   const [resultCondLabel, setResultCondLabel] = useState("");
   const [hasLoadedDefault, setHasLoadedDefault] = useState(false);
@@ -14332,6 +16027,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     ? allMatches.filter(m => countsAsFinished(m) && ownSideFor(m, selectedPlayer, effectiveSchoolName))
     : [],
     [allMatches, selectedPlayer, effectiveSchoolName]);
+  // ★選手一覧で選手をタップしたら「集計対象の設定」を通らず、今の条件（期間・大会など）のまま集計して結果画面へ戻る。
+  //   試合を個別に選ぶ条件は前の選手の試合なので外す。
+  useEffect(() => {
+    if (!pendingPlayerApply || !selectedPlayer) return;
+    setPendingPlayerApply(false);
+    const next = { ...scope, pickedIds:[] };
+    setScope(next);
+    const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+    loadResults(list, scopeShortLabel(next, seasonLabel), capped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPlayerApply, selectedPlayer, playerMatches]);
 
   async function loadResults(matchSummaries, condLabel, capped = 0, { silent = false } = {}) {
     // silent：前回の結果を表示したまま裏で差し替える（「集計中...」を出さない・フィルターも戻さない）
@@ -14377,12 +16083,14 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   // ★計測用：画面が描かれた時点を記録する（集計・描画の時間を含む）
   useEffect(() => {
     if (!PERF_ON) return;
-    const label = loading ? "「読み込み中...」を表示" : resultLoading ? "「集計中...」を表示" : resultMatches.length > 0 ? `結果を表示（${resultMatches.length}試合）` : `画面を表示（${mode}）`;
+    const label = loading ? "「読み込み中...」を表示" : resultLoading ? "「集計中...」を表示" : resultMatchesAll.length > 0 ? `結果を表示（${resultMatchesAll.length}試合）` : `画面を表示（${mode}）`;
     requestAnimationFrame(() => perfLog(label));
-  }, [loading, resultLoading, resultMatches, mode]);
+  }, [loading, resultLoading, resultMatchesAll, mode]);
+  // ★選手や条件が変わって集計し直したら、最新の区切りに戻す
+  useEffect(() => { setUnitPage(0); }, [resultMatchesAll]);
   if (loading) {
     return (
-      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
         </div>
@@ -14400,7 +16108,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     if (schoolPickerOpen) {
       const filteredSchools = knownSchoolNames.filter(n => !schoolSearch.trim() || n.toLowerCase().includes(schoolSearch.trim().toLowerCase()));
       return (
-        <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+        <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
           <div style={{ ...S.hdr, color:C.white }}>
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setSchoolPickerOpen(false)}>←</span>
@@ -14435,7 +16143,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
 
     const filteredRoster = rosterForSchool.filter(p => !teamSearch.trim() || p.player_name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
     return (
-      <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:80, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={cancelWizard}>←</span>
@@ -14466,7 +16174,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           <div style={S.card}>
             {filteredRoster.length===0 && <div style={{ padding:16, textAlign:"center", color:C.textSec, fontSize:12 }}>選手が見つかりません</div>}
             {filteredRoster.map(p => (
-              <div key={p.id} onClick={()=>{ setSelectedPlayer(p.player_name); saveLastAnalysisPlayer(p.player_name, selectedSchoolName); }}
+              <div key={p.id} onClick={()=>{ setSelectedPlayer(p.player_name); saveLastAnalysisPlayer(p.player_name, selectedSchoolName); setPendingPlayerApply(true); }}
                 style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px", borderBottom:`1px solid ${C.border}`, cursor:"pointer", background:p.player_name===selectedPlayer?C.accentL:"transparent" }}>
                 <div style={{ width:34,height:34,borderRadius:"50%",background:C.accentL,color:C.accent,fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{p.player_name[0]}</div>
                 <div style={{ flex:1 }}>
@@ -14479,12 +16187,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
           </div>
         </div>
         <div style={{ position:"fixed", left:0, right:0, bottom:0, padding:14, background:C.gray, borderTop:`1px solid ${C.border}` }}>
-          <button
-            disabled={!selectedPlayer}
-            onClick={()=>setMode("scope")}
-            style={{ width:"100%", padding:13, borderRadius:11, border:"none", fontSize:14, fontWeight:800, cursor:selectedPlayer?"pointer":"default",
-              background: selectedPlayer ? C.navy : "#d5dae2", color:"#fff" }}
-          >{selectedPlayer ? "次へ →" : "選手を選んでください"}</button>
+          {/* ★「次へ →」は廃止：選手をタップした時点で結果画面へ戻る */}
+          <div style={{ textAlign:"center", fontSize:13, fontWeight:700, color:C.textSec }}>選手をタップすると、その選手の分析を表示します</div>
           {autoPickNote && <div style={{ fontSize:10, color:"#9aa3b5", marginTop:6, textAlign:"center" }}>{autoPickNote}</div>}
         </div>
       </div>
@@ -14539,7 +16243,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     };
 
     return (
-      <div style={{ minHeight:"100vh", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ ...S.hdr, color:C.white }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <span style={{ cursor:"pointer", fontSize:18 }} onClick={()=>setMode("wizardPlayer")}>←</span>
@@ -14719,6 +16423,55 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   }
 
   // ============ ③ 分析結果（デフォルト表示もここ） ============
+  // ★「どの単位で見る？」：最新から○試合ずつ／大会ごとに区切り、選んだ区切りの試合だけを下の全カードで集計する
+  const unitGroups = (() => {
+    const newest = [...resultMatchesAll].reverse(); // resultMatchesAll は古い順
+    if (unitSize === "all") return [newest];
+    if (unitSize === "tour") {
+      const g = [];
+      newest.forEach(m => {
+        const key = (m.tournament_name || "").trim() || "練習試合・大会外";
+        const last = g[g.length-1];
+        if (last && last.key === key) last.list.push(m); else g.push({ key, list:[m] });
+      });
+      return g.slice(0, ANALYSIS_UNIT_MAX_PAGES).map(x => Object.assign(x.list, { tourName: x.key }));
+    }
+    const n = unitSize, g = [];
+    for (let i = 0; i < newest.length && g.length < ANALYSIS_UNIT_MAX_PAGES; i += n) g.push(newest.slice(i, i + n));
+    // ★割り切れずに余った古い端数は出さない（区切りが1つしかないときはそのまま出す）
+    if (g.length > 1 && g[g.length-1].length < n) g.pop();
+    return g;
+  })();
+  const unitPageSafe = Math.min(unitPage, Math.max(0, unitGroups.length - 1));
+  const unitCur = unitGroups[unitPageSafe] ?? [];
+  const unitPrev = unitSize !== "all" ? (unitGroups[unitPageSafe + 1] ?? null) : null;
+  const resultMatches = [...unitCur].reverse(); // ★下の集計は今までどおり古い順で渡す
+  const unitTitle = unitSize === "tour" ? `${unitCur.tourName ?? ""}${unitPageSafe===0 ? "（最新）" : ""}`
+    : unitSize === 1 ? (unitPageSafe===0 ? "最新の試合" : `最新から${unitPageSafe+1}試合目`)
+    : unitSize === "all" ? "" : (unitPageSafe===0 ? `最新 1〜${unitSize}試合目` : `最新から ${unitPageSafe*unitSize+1}〜${unitPageSafe*unitSize+unitCur.length}試合目`);
+  const unitSub = (() => {
+    if (unitCur.length === 0) return "";
+    const fmtD = (d) => { const x = String(d||"").split("-"); return x.length===3 ? `${Number(x[1])}/${Number(x[2])}` : ""; };
+    const w = unitCur.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true).length;
+    const newestD = fmtD(unitCur[0].match_date), oldestD = fmtD(unitCur[unitCur.length-1].match_date);
+    if (unitSize === 1) {
+      const m = unitCur[0];
+      const team = ownSideFor(m, selectedPlayer, effectiveSchoolName) ?? m.players.find(p=>p.player_name===selectedPlayer)?.team;
+      const oppClub = m.players.find(p=>p.team===(team==="A"?"B":"A"))?.club_name || "";
+      return `${newestD}${oppClub ? " "+oppClub : ""}（${w ? "勝ち" : "負け"}）`;
+    }
+    return `${oldestD===newestD ? newestD : oldestD+" 〜 "+newestD}（${unitCur.length}試合・${w}勝${unitCur.length-w}敗）`;
+  })();
+  function pickUnit(k) {
+    setUnitSize(k); setUnitPage(0); setResultFilter("all"); setResultListOpen(false);
+    // ★以前の「直近○試合」で試合数をしぼっていた場合は、区切るために全部（上限100）を読み直す
+    if (scope.limit && (scope.pickedIds??[]).length===0) {
+      const next = { ...scope, limit:0 };
+      setScope(next);
+      const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
+      loadResults(list, scopeShortLabel(next, seasonLabel), capped);
+    }
+  }
   const wonMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true);
   const lostMatches = resultMatches.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === false);
   const wonRates = keyRatesFromAgg(aggregatePlayerStats(wonMatches, selectedPlayer, effectiveSchoolName));
@@ -14734,6 +16487,16 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const displayedMatchesNewest = newestFirst(displayedMatches);
 
   const agg = aggregatePlayerStats(displayedMatches, selectedPlayer, effectiveSchoolName);
+  // ★1つ古い区切り（「前より ±○」の比較用。勝ち・負けの絞り込みも同じ条件で比べる）
+  const prevUnit = (() => {
+    if (!unitPrev || unitPrev.length === 0) return null;
+    const list = [...unitPrev].reverse();
+    const wins = list.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true).length;
+    const shown = resultFilter==="win" ? list.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === true)
+                : resultFilter==="lose" ? list.filter(m => winForPlayer(m, selectedPlayer, effectiveSchoolName) === false) : list;
+    const a = shown.length ? aggregatePlayerStats(shown, selectedPlayer, effectiveSchoolName) : null;
+    return { total:list.length, wins, rate: list.length ? Math.round(wins/list.length*100) : 0, rateRaw: list.length ? wins/list.length*100 : 0, agg:a };
+  })();
   // ★得点・ミスの内訳は全部の項目を出す（以前は多い順に4つまでで、足しても総得点・総ミスと合わなかった）。
   //   プレーを選ばずに記録したポイントは「プレー未入力」として最後に出す。
   const topPlaysWin = Object.entries(agg.playsWin).sort((a,b)=>b[1]-a[1]);
@@ -14855,7 +16618,7 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
   const metricLabel = { serveRate:"1stサーブ成功率", decisionRate:"決定率" };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:70, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
@@ -14864,16 +16627,25 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         <AnalysisTabs current="personal" onPair={()=>onOpenPairAnalysis && onOpenPairAnalysis()} onTeam={onOpenTeamStats} />
 
         <AnalysisTargetCard
-          label="選手"
+          label={effectiveSchoolName}
+          labelLarge
           name={selectedPlayer}
           onChange={()=>setMode("wizardPlayer")}
-          cond={`${resultCondLabel}・${resultMatches.length}試合`}
+          cond={`${resultCondLabel}・${resultMatchesAll.length}試合`}
           onCond={()=>setMode("scope")}
         />
 
+        {/* ★どの単位で見る？：選んだ区切りの試合だけで、下のカードすべてを集計する */}
+        {resultMatchesAll.length>0 && (
+          <AnalysisUnitPager unit={unitSize} page={unitPageSafe} pageCount={unitGroups.length}
+            title={unitTitle} sub={unitSub} disabled={resultLoading}
+            onUnit={pickUnit}
+            onPage={p=>{ setUnitPage(p); setResultFilter("all"); setResultListOpen(false); }} />
+        )}
+
         {resultCapped > 0 && (
           <div style={{ background:"#fff4e5", border:"1px solid #f5c979", borderRadius:10, padding:12, fontSize:13, fontWeight:700, color:"#8a5a00", lineHeight:1.7, marginBottom:12 }}>
-            ⚠️ 該当する試合が{resultMatches.length + resultCapped}件ありますが、新しい{SCOPE_MAX}試合を対象にしています。<br/>
+            ⚠️ 該当する試合が{resultMatchesAll.length + resultCapped}件ありますが、新しい{SCOPE_MAX}試合を対象にしています。<br/>
             それ以前も見たい場合は、期間や大会でしぼってください。
           </div>
         )}
@@ -14881,7 +16653,15 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
         {/* ★戦績カード（試合数・勝率・戦績と、勝敗の切り替え） */}
         {resultMatches.length>0 && (
           <AnalysisRecordCard total={resultMatches.length} wins={wonMatches.length} losses={lostMatches.length}
-            filter={resultFilter} onFilter={k=>{ setResultFilter(k); setResultListOpen(false); }} />
+            filter={resultFilter} onFilter={k=>setResultFilter(k)}>
+            {prevUnit && (
+              <div style={{ textAlign:"center", fontSize:12.5, fontWeight:700, color:C.textSec, marginTop:8 }}>
+                1つ前の区切り：{prevUnit.wins}勝{prevUnit.total-prevUnit.wins}敗・勝率{prevUnit.rate}%
+                {(() => { const r = resultMatches.length ? wonMatches.length/resultMatches.length*100 : 0; const v = Math.round(r - prevUnit.rateRaw);
+                  return v===0 ? null : <span style={{ marginLeft:6, fontWeight:800, color: v>0 ? C.accent : C.red }}>（勝率 {v>0?"+":"−"}{Math.abs(v)}%）</span>; })()}
+              </div>
+            )}
+          </AnalysisRecordCard>
         )}
 
         {!resultLoading && resultMatches.length>0 && (
@@ -14920,18 +16700,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   
           </AnalysisMatchListCard>
         )}
-
-        <AnalysisRecentSegment
-          value={(scope.pickedIds??[]).length>0 ? null : (scope.limit && [1,3,5,10].includes(scope.limit) ? scope.limit : (!scope.limit ? "all" : null))}
-          disabled={resultLoading}
-          onPick={n=>{
-            // ★シートを開かずに試合数だけ変えるショートカット。条件（scope）も合わせて更新する
-            const next = { ...scope, limit: n==="all" ? 0 : n, pickedIds:[] };
-            setScope(next);
-            const { list, capped } = applyScope(playerMatches, next, { seasonStart, teamMatchIds });
-            loadResults(list, scopeShortLabel(next, seasonLabel), capped);
-          }}
-        />
 
         {resultLoading ? (
           <div style={{ textAlign:"center", padding:40, color:C.textSec }}>集計中...</div>
@@ -15008,14 +16776,17 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{agg.winners}</div>
                     <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>総得点</div>
+                    <PrevDiff cur={agg.winners} prev={prevUnit?.agg?.winners} />
                   </div>
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:C.navy }}>{agg.errors}</div>
                     <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>総ミス</div>
+                    <PrevDiff cur={agg.errors} prev={prevUnit?.agg?.errors} goodUp={false} />
                   </div>
                   <div style={{ textAlign:"center", padding:"10px 2px", background:C.gray, borderRadius:10 }}>
                     <div style={{ fontSize:18, fontWeight:800, color:agg.winners-agg.errors>=0?C.accent:C.red }}>{agg.winners-agg.errors>=0?"+":""}{agg.winners-agg.errors}</div>
                     <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>得失点差</div>
+                    <PrevDiff cur={agg.winners-agg.errors} prev={prevUnit?.agg ? prevUnit.agg.winners-prevUnit.agg.errors : null} />
                   </div>
                 </div>
 
@@ -15281,6 +17052,8 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   const [trendOpen, setTrendOpen] = useState(false); // 月別の勝率推移（折りたたみ）
   const [scoreOpen, setScoreOpen] = useState(false); // 得点・ミス（折りたたみ）
   const [filterOpen, setFilterOpen] = useState(false);
+  const [teamUnit, setTeamUnit] = useState("all");  // ★どの単位で見る？（チーム分析は「全部」が初期値）
+  const [teamUnitPage, setTeamUnitPage] = useState(0);
 
   // ②見る内容タブ：players(選手別) | pairs(ペア別) | opponents(対戦別)
   // ★自チーム／対戦チームの2分割。既存の「選手別・ペア別・対戦別」をこの2つに振り分ける
@@ -15391,7 +17164,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
   ), [allMatches, deletedTournamentNameSet]);
 
   // ①カテゴリ・期間による絞り込み
-  const finished = useMemo(() => {
+  const finishedAll = useMemo(() => {
     let categoryMatches;
     if (statsCat === "tournament") categoryMatches = allMatches.filter(m => m.tournament_name && !deletedTournamentNameSet.has(m.tournament_name));
     else if (statsCat === "team") categoryMatches = allMatches.filter(m => teamMatchIds.has(m.id));
@@ -15408,6 +17181,14 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
       : categoryMatches;
     return periodMatches.filter(countsAsFinished);
   }, [allMatches, deletedTournamentNameSet, teamMatchIds, statsCat, statsCatSub, statsCatTournament, period, seasonStart]);
+  // ★どの単位で見る？：最新から○試合ずつ／大会ごとに区切り、選んだ区切りの試合だけで下を集計する
+  const teamUnitGroups = useMemo(() => buildUnitGroups(sortNewestFirst(finishedAll), teamUnit), [finishedAll, teamUnit]);
+  const teamUnitPageSafe = Math.min(teamUnitPage, Math.max(0, teamUnitGroups.length - 1));
+  const finished = useMemo(() => teamUnit === "all" ? finishedAll : [...(teamUnitGroups[teamUnitPageSafe] ?? [])].reverse(),
+    [finishedAll, teamUnit, teamUnitGroups, teamUnitPageSafe]);
+  const teamUnitInfo = unitLabels(teamUnitGroups[teamUnitPageSafe] ?? [], teamUnit, teamUnitPageSafe, m => winnerSideOf(m)==="A",
+    m => m.players.find(p=>p.team==="B")?.club_name || "");
+  useEffect(() => { setTeamUnitPage(0); }, [finishedAll]);
 
   const teamRecord = useMemo(() => recordOf(finished, m=>winnerSideOf(m)==="A"), [finished]);
 
@@ -15639,6 +17420,11 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 </div>
               )}
 
+            <AnalysisUnitPager unit={teamUnit} page={teamUnitPageSafe} pageCount={teamUnitGroups.length}
+              title={teamUnitInfo.title} sub={teamUnitInfo.sub}
+              onUnit={k=>{ setTeamUnit(k); setTeamUnitPage(0); }}
+              onPage={p=>setTeamUnitPage(p)} />
+
             {/* 総合成績（チーム全体）。勝ち・負けを押すとその試合の一覧が開く */}
             <AnalysisRecordCard total={teamRecord.total} wins={teamRecord.wins} losses={teamRecord.losses}
               filter="" onFilter={k=>{ setBreakdownFilter(k); setShowBreakdown(true); }} />
@@ -15654,12 +17440,12 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
                 >{l}</button>
               ))}
             </div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:6, margin:"0 2px 8px" }}>
+            <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:6, margin:"0 2px 8px" }}>
               <span style={{ fontSize:12, color:"#5a6478", minWidth:0 }}>
                 {tab==="players" ? "タップで選手の戦績へ" : tab==="pairs" ? "タップでペアの詳細へ" : "タップで学校の詳細へ"}
               </span>
-              <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+              <div style={{ display:"flex", gap:4, flexShrink:0, marginLeft:"auto" }}>
+                {SORT_RECORD_OPTIONS.map(([k,l])=>(
                   <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12,padding:"6px 6px",whiteSpace:"nowrap" }} onClick={()=>setSort(k)}>{l}</button>
                 ))}
               </div>
@@ -15788,7 +17574,7 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 
       {showBreakdown && (
         <Modal onClose={()=>setShowBreakdown(false)}>
-          <div style={{ maxHeight:"75vh", overflowY:"auto" }}>
+          <div style={{ maxHeight:"calc(75vh / var(--app-zoom, 1))", overflowY:"auto" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:2 }}>
               <div style={{ fontSize:15, fontWeight:800 }}>総合成績の内訳</div>
               <button
@@ -15849,11 +17635,13 @@ function StatsScreen({ onNavigate, onOpenPlayer, onOpenOpponent, onOpenMatch }) 
 // ============================================================
 // 特定選手の戦績画面（保護者の「お子さんの戦績」/選手本人の「自分の戦績」）
 // ============================================================
-function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
+function PlayerStatsScreen({ onBack, onOpen, initialPlayerName, restoredPlayerName, onPlayerChange }) {
   const [loading, setLoading] = useState(true);
   const [roster, setRoster] = useState([]);
   const [linkedPlayerName, setLinkedPlayerName] = useState(null);
-  const [playerName, setPlayerName] = useState(initialPlayerName || null); // 現在表示中の選手（未選択ならnull＝選択画面）
+  const [playerName, setPlayerName] = useState(initialPlayerName || restoredPlayerName || null); // 現在表示中の選手（未選択ならnull＝選択画面）
+  // ★選んでいる選手を親（画面の履歴）にも伝える。試合を開いて戻ったときに、同じ選手の戦績を開き直すため
+  useEffect(() => { if (onPlayerChange) onPlayerChange(playerName); }, [playerName]);
   const [matches, setMatches] = useState([]);
   const [period, setPeriod] = useState("all");
   const [sort, setSort] = useState("rate");
@@ -15989,12 +17777,12 @@ function PlayerStatsScreen({ onBack, onOpen, initialPlayerName }) {
 
                 {/* ペア別成績 */}
                 <div style={{ ...S.card, padding:16, marginBottom:16 }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10 }}>
+                  <div style={{ display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10 }}>
                     <div style={{ fontSize:15,fontWeight:800,color:C.navy }}>ペア別の成績</div>
                     {/* ★並び替えはペアが2組以上のときだけ出す（1組では並び替える意味がないため） */}
                     {partnerRows.length>=2 && (
-                      <div style={{ display:"flex",gap:4 }}>
-                        {[["rate","勝率順"],["win","勝数順"],["lose","負数順"],["count","試合数順"]].map(([k,l])=>(
+                      <div style={{ display:"flex",gap:4,marginLeft:"auto" }}>
+                        {SORT_RECORD_OPTIONS.map(([k,l])=>(
                           <button key={k} style={{ ...S.togBtn(sort===k,C.navy),fontSize:12,padding:"6px 6px",whiteSpace:"nowrap" }} onClick={()=>setSort(k)}>{l}</button>
                         ))}
                       </div>
@@ -16085,11 +17873,17 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
   // 相手選手別・相手ペア別（こちらの勝率で集計）
   const byOppPlayer = {};
   const byOppPair = {};
+  const oppPairVotes = {}; // ★ペアの表示順（試合と同じ「選手1（後衛）／選手2（前衛）」）を、そのペアの試合で一番多い並びにする
   finished.forEach(m=>{
     const bNames = m.players.filter(p=>p.team==="B").map(p=>p.player_name);
     bNames.forEach(name => { (byOppPlayer[name] ??= []).push(m); });
     const pairKey = bNames.slice().sort().join(" / ");
-    if (pairKey) (byOppPair[pairKey] ??= []).push(m);
+    if (pairKey) {
+      (byOppPair[pairKey] ??= []).push(m);
+      const ordered = m.players.filter(p=>p.team==="B").sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p=>p.player_name);
+      const v = (oppPairVotes[pairKey] ??= {});
+      v[ordered.join("\t")] = (v[ordered.join("\t")] ?? 0) + 1;
+    }
   });
   const oppPlayerRows = Object.entries(byOppPlayer).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A") }));
   oppPlayerRows.sort(sortByRecord(sort));
@@ -16099,14 +17893,15 @@ function OpponentStatsScreen({ schoolName, onBack, onOpen }) {
     list.forEach(mm => {
       const mine = pairOnSide(mm, "A");
       if (!mine) return;
-      const o = (by[mine.key] ??= { label:mine.label, list:[] });
+      const o = (by[mine.key] ??= { label:mine.label, list:[], votes:{} });
       o.list.push(mm);
+      o.votes[mine.names.join("\t")] = (o.votes[mine.names.join("\t")] ?? 0) + 1;
     });
     return Object.values(by)
-      .map(o => ({ label:o.label, ...recordOf(o.list, x=>winnerSideOf(x)==="A") }))
+      .map(o => { const ord = majorityPairOrder(o.votes); return { label: ord.length ? ord.join("・") : o.label, ...recordOf(o.list, x=>winnerSideOf(x)==="A") }; })
       .sort((a,b)=> b.total-a.total || b.rate-a.rate);
   };
-  const oppPairRows = Object.entries(byOppPair).map(([name,list])=>({ name, ...recordOf(list, mm=>winnerSideOf(mm)==="A"), own: ownPairsAgainst(list) }));
+  const oppPairRows = Object.entries(byOppPair).map(([key,list])=>({ name: (majorityPairOrder(oppPairVotes[key]).join(" / ") || key), ...recordOf(list, mm=>winnerSideOf(mm)==="A"), own: ownPairsAgainst(list) }));
   oppPairRows.sort(sortByRecord(sort));
 
   const allFinishedForTrend = matches.filter(m => countsAsFinished(m) && oppOf(m)===schoolName);
@@ -16488,7 +18283,15 @@ function VenueHistoryField({ value, onChange, onPick, history, placeholder }) {
 // ★学校名の誤入力防止用：入力しながら候補が絞り込まれるサジェスト式の入力欄
 // schools は {name, prefecture}[] 形式（prefectureはnullの場合あり）
 // prefFilter: 親から渡される都道府県絞り込み値（任意）
-function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
+// ★一覧の選手名表示用：1人の名前は途中で改行させず、「/」の位置で折り返す
+function renderNoBreakNames(names) {
+  const list = (names || []).filter(Boolean);
+  return list.map((n, i) => (
+    <span key={i} style={{ whiteSpace:"nowrap" }}>{n}{i < list.length - 1 ? "/" : ""}</span>
+  ));
+}
+
+function SchoolField({ value, onChange, onPick, schools, placeholder, prefFilter }) {
   const [open, setOpen] = useState(false);
   const safeValue = value || "";
   const visibleSchools = prefFilter ? schools.filter(s => s.prefecture === prefFilter) : schools;
@@ -16510,7 +18313,7 @@ function SchoolField({ value, onChange, schools, placeholder, prefFilter }) {
           <div style={{ padding:"4px 14px", fontSize:10, color:C.textSec, background:"#f5f6f8" }}>{filtered.length}件中 最大200件を表示（枠内をスクロールできます）</div>
           {filtered.slice(0, 200).map(s => (
             <div key={s.name} style={{ padding:"12px 14px", fontSize:13, color:C.text, borderBottom:"1px solid "+C.border, cursor:"pointer", background:C.white }}
-              onMouseDown={e => { e.preventDefault(); onChange(s.name); setOpen(false); }}
+              onMouseDown={e => { e.preventDefault(); onChange(s.name); onPick && onPick(s.name); setOpen(false); }}
             >{s.name}{s.prefecture ? `（${s.prefecture}）` : ""}</div>
           ))}
         </div>
@@ -16808,6 +18611,15 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
   }, [bothEntryNosNumeric, aEntryNoNum, bEntryNoNum]);
 
   // ★チーム名/学校名の都道府県絞り込み（自チーム・相手チームそれぞれ独立）
+  // ★試合をコピーして作るときなど、学校名を別の学校に変えたら、その側の選手名（と番号）を消す
+  //   （前の学校の選手が残ったまま保存してしまうのを防ぐ）。既存の試合の編集では消さない。
+  const changeClub = (side, v) => {
+    const cur = side === "A" ? aClub : bClub;
+    if (side === "A") setAClub(v); else setBClub(v);
+    if (editing || String(v).trim() === String(cur).trim()) return;
+    if (side === "A") { setAP1(""); setAP2(""); setAEntryNo(""); }
+    else { setBP1(""); setBP2(""); setBEntryNo(""); }
+  };
   const [aClubPref, setAClubPref] = useState("");
   const [bClubPref, setBClubPref] = useState("");
 
@@ -16902,7 +18714,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
     setServeSelectForSave({ aLabel, bLabel });
   }
 
-  async function handleSave(selectedServer) {
+  async function handleSave(selectedServer, opts = {}) {
     setSaving(true);
     try {
       if (editing) {
@@ -16988,6 +18800,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       // ★記録画面を開くときにサーバーから取り直さなくて済むよう、今保存した内容を渡しておく
       primeMatch(rowToMatchFull({ ...match, ...savedRow }, match.players, [], [], []));
       if (selectedServer) markAutoStart(mid); // ★サーブを選んで開始したので、記録画面ですぐ第1ゲームを始める
+      if (opts.simpleResult) markAutoSimple(mid); // ★「結果のみ登録する」：記録画面ですぐ結果の入力を出す
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
       // ★完了を待たずに記録画面へ進む（以前は4人分の登録が終わるまで画面が切り替わらなかった）
       autoRegisterPlayersToRoster([
@@ -17131,7 +18944,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{aClub || "（自チーム）"}</div>
             ) : (
-              <SchoolField value={aClub} onChange={setAClub} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
+              <SchoolField value={aClub} onChange={v=>changeClub("A", v)} schools={schools} placeholder="例：○○中学校" prefFilter={aClubPref} />
             )}
           </FormRow>
           <FormRow label={isDoubles ? "選手1（必須）" : "選手名（必須）"} required>
@@ -17172,7 +18985,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {isTeamMatchGame ? (
               <div style={{ ...S.inp, color:C.text, background:C.gray }}>{bClub || prefillOpponent || "（相手チーム）"}</div>
             ) : (
-              <SchoolField value={bClub} onChange={setBClub} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
+              <SchoolField value={bClub} onChange={v=>changeClub("B", v)} schools={schools} placeholder="例：相手チーム名" prefFilter={bClubPref} />
             )}
           </FormRow>
           <FormRow label={isDoubles ? "選手1" : "選手名"}>
@@ -17310,6 +19123,17 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           >
             {saving ? "登録中..." : scheduledId ? "📅 試合予定を更新する" : "📅 試合予定として登録する"}
           </button>
+        )}
+        {/* ★ポイントは記録せず、試合の結果（ゲーム数）だけを登録する */}
+        {!editing && !isTeamMatchGame && (
+          <button
+            style={{ ...S.btn(canSave && !saving ? "#fff" : C.border, canSave && !saving ? C.navy : C.textSec), border:`1.5px solid ${canSave && !saving ? C.navy : C.border}`, marginTop:8 }}
+            disabled={!canSave || saving}
+            onClick={()=>{
+              if (isYounger === null || isYounger === undefined) { alert("若番／遅番を選択してください"); return; }
+              handleSave(null, { simpleResult: true });
+            }}
+          >{saving ? "保存中..." : "📝 結果のみ登録する"}</button>
         )}
         {/* ★画面の一番下まで入力したあと、上まで戻らずに抜けられるようにする（大会詳細の「← 戻る」と同じ見た目） */}
         {onCancel && (
@@ -17771,6 +19595,13 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
   // ★サーブを選んで「試合開始」した直後は、「第1ゲームの準備」画面を出さずにそのまま第1ゲームを始める
   //   （準備画面にあった順番の変更などは、記録画面の「⋯」→「サーブレシーブの順番変更」でできる）
+  // ★試合作成画面の「結果のみ登録する」から来たときは、すぐ「結果だけ記録」の小窓を出す
+  useEffect(() => {
+    if (!takeAutoSimple(initialMatch.id)) return;
+    if (viewOnly || match.status === "finished" || match.games.length > 0) return;
+    setSimpleScoreA(""); setSimpleScoreB(""); setShowSimpleResult(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (!takeAutoStart(initialMatch.id)) return;
     if (viewOnly || match.status === "finished" || match.games.length > 0) return;
@@ -18281,7 +20112,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   }
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, ...(osRecording ? { paddingBottom:0 } : {}) }}>
       {restoredNotice && (
         <div style={{ background:"#fff3e0", borderBottom:"1px solid #ffd9b3", padding:"8px 14px", fontSize:11.5, color:"#8a5a00", display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ flex:1 }}>⚠️ 前回、同期できないまま終了した記録を復元しました。保存できる状態になり次第、自動で保存されます。</span>
@@ -18317,12 +20148,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           </div>
           <div style={{ display:"flex", gap:6, flex:"none" }}>
             {match.status==="active" && (
-              <button
-                style={{ background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,color:C.white,fontSize:13,padding:"5px 8px",cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
-                onClick={onRefresh}
-                disabled={refreshing}
-                title="最新データに更新"
-              >{refreshing ? "..." : "🔄"}</button>
+              <RefreshButton onClick={onRefresh} spinning={refreshing} size={32} />
             )}
             {/* ★記録中はLINE共有を「⋯」（その他の操作）に入れたので、ヘッダーには出さない（観戦中・試合前後は従来通り） */}
             {(match.status==="active" || match.status==="finished") && (viewOnly || !currentGame || match.status==="finished") && (
@@ -18443,10 +20269,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           )}
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <span style={{ fontSize:12, color:C.textSec, fontWeight:700 }}>{isViewer ? "👀 閲覧専用（記録・編集はできません）" : "👁 観戦モード（スコア閲覧のみ）"}</span>
-            <button
-              style={{ background:C.navy, border:"none", borderRadius:8, color:"#fff", fontSize:12, padding:"5px 10px", cursor:"pointer", opacity: refreshing ? 0.5 : 1 }}
-              onClick={onRefresh} disabled={refreshing}
-            >{refreshing ? "更新中..." : "🔄 最新に更新"}</button>
+            <RefreshButton onClick={onRefresh} spinning={refreshing} label={refreshing ? "更新中..." : "最新に更新"} size={34} onLight />
           </div>
           {/* ★試合が終了していなければ、いつでも自分が記録者としてロックを引き継げるようにする
                 （記録者ロックが自分以外・または不整合になっていても、これで即座に復帰できる） */}
@@ -18523,7 +20346,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
       {/* 記録タブ */}
       {tab==="record"&&(
-        <div style={{ padding:"10px 12px 20px" }}>
+        <div style={{ padding: osRecording ? "10px 12px 0" : "10px 12px 20px" }}>
           {match.games.length>0 && !viewOnly && !osRecording && (
             <div style={{ textAlign:"right", marginBottom:8 }}>
               <button
@@ -18825,7 +20648,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               {/* ★動画リンクの追加・編集モーダル。「動画リンクを追加する」ボタンを押したときだけ開く。 */}
               {showVideoModal && (
                 <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center" }} onClick={()=>setShowVideoModal(false)}>
-                  <div style={{ background:C.white,borderRadius:"16px 16px 0 0",padding:16,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+                  <div style={{ background:C.white,borderRadius:"16px 16px 0 0",padding:16,width:"100%",maxWidth:480,maxHeight:"calc(85vh / var(--app-zoom, 1))",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
                       <div style={{ fontSize:14,fontWeight:800,color:C.navy }}>🎥 動画リンク</div>
                       <div style={{ color:C.textSec,fontSize:18,cursor:"pointer",padding:4 }} onClick={()=>setShowVideoModal(false)}>✕</div>
@@ -18890,7 +20713,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                       onClick={async ()=>{
                         const cleaned = videoLinksDraft.map((v,i)=>({ ...v, title: v.title.trim() || `動画${i+1}` }));
                         setVideoLinksDraft(cleaned);
-                        const updated = { ...match, video_links: cleaned };
+                        const updated = { ...match, video_links: cleaned, _videoLinksEdited: true };
                         setVideoSaving(true);
                         try {
                           // ★通常の試合記録（persist）は保存完了を待たず即座に画面を返す作りだが、
@@ -19311,7 +21134,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               <button onClick={onClick} style={{ ...btnBase, ...selStyle(on), flex:1, padding:"10px 2px", fontSize:14, ...extra }}>{label}</button>
             );
             return (
-              <div style={{ paddingBottom:"60vh" }}>
+              <div>
                 {/* 1点前に戻す／選択をクリア */}
                 <div style={{ display:"flex", gap:8, marginBottom:8 }}>
                   <button style={{ flex:1, padding:"10px 12px", background:C.white, border:`1px solid ${C.border}`, borderRadius:10, fontSize:14, fontWeight:800, color:"#b4433c", cursor:"pointer" }}
@@ -19467,10 +21290,15 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
 
                 {/* ★中断・途中終了などは「記録する」ボタンの近くに置くと押し間違えるため、上の「⋯ その他」にまとめた */}
 
-                {/* 記録するボタン（画面の一番下に固定） */}
-                <div style={{ position:"fixed", left:0, right:0, bottom:0, display:"flex", justifyContent:"center", padding:"0 10px calc(10px + env(safe-area-inset-bottom))", pointerEvents:"none", zIndex:50 }}>
+                {/* ★下の選択肢を「記録する」ボタンより上までスクロールできるようにする余白（以前はpaddingBottomで確保） */}
+                <div aria-hidden="true" style={{ height:"calc(60vh / var(--app-zoom, 1))" }} />
+                {/* 記録するボタン（画面の一番下に貼りつく）
+                    ★以前は position:fixed で画面に固定していたが、文字を大きくしている人（アプリの「文字の大きさ」＝画面全体のzoom、
+                      またはスマホ本体の文字サイズ設定）だと、ブラウザによっては「一番下」の位置を拡大前の大きさで計算してしまい、
+                      ボタンが画面の真ん中に浮いて止まっていた。ページの流れの中に置く sticky に変えて、拡大の影響を受けないようにした。 */}
+                <div style={{ position:"sticky", bottom:0, display:"flex", justifyContent:"center", padding:"8px 0 calc(10px + env(safe-area-inset-bottom))", pointerEvents:"none", zIndex:50 }}>
                   <button disabled={!osReady} onClick={osRecord} style={{ pointerEvents:"auto", maxWidth:520, width:"100%", border:"none", borderRadius:14, padding:"13px 10px", background: osReady ? "#ffd23f" : "#e6e8ee", color: osReady ? C.navy : "#a6adbd", fontWeight:900, fontSize:18, boxShadow: osReady ? "0 4px 14px rgba(0,0,0,.18)" : "none", cursor: osReady ? "pointer" : "default" }}>
-                    🎥 記録する
+                    記録する
                     <span style={{ display:"block", fontSize:12, fontWeight:700, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{summary}</span>
                   </button>
                 </div>
@@ -20369,10 +22197,10 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
   function MiniBar({ label, count, max, total, color }) {
     const pct = total > 0 ? Math.round(count / total * 100) : 0;
     return (
-      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-        <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{label}</span>
-        <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0,width:52 }}>{count}回 {pct}%</span>
-        <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}>
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7 }}>
+        <span style={{ fontSize:13.5,color:C.textSec,width:84,flexShrink:0 }}>{label}</span>
+        <span style={{ fontSize:13.5,fontWeight:700,color:"#555",flexShrink:0,width:76 }}>{count}回 {pct}%</span>
+        <div style={{ flex:1,maxWidth:"50%",height:7,background:"#e8e8e8",borderRadius:3 }}>
           <div style={{ width:`${max>0?Math.round(count/max*100):0}%`,height:"100%",background:color,borderRadius:3 }}/>
         </div>
       </div>
@@ -20385,8 +22213,8 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
     const max = Math.max(...rows.map(r => r[1]));
     return (
       <>
-        <div style={{ borderTop:`1px dashed ${C.border}`,margin:"8px 0" }}/>
-        <div style={{ fontSize:10,fontWeight:700,color:C.textSec,marginBottom:6 }}>{title}</div>
+        <div style={{ borderTop:`1px dashed ${C.border}`,margin:"9px 0" }}/>
+        <div style={{ fontSize:13.5,fontWeight:700,color:C.textSec,marginBottom:6 }}>{title}</div>
         {rows.map(([label,n]) => <MiniBar key={label} label={label} count={n} max={max} total={total} color={color}/>)}
       </>
     );
@@ -20400,9 +22228,9 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       <div style={{ marginBottom:12 }}>
         {/* 数値ラベル行 */}
         <div style={{ display:"flex", alignItems:"center", marginBottom:4 }}>
-          <span style={{ fontSize:13, fontWeight:700, color:C.teamA, width:28, textAlign:"left" }}>{a}</span>
-          <span style={{ flex:1, fontSize:11, color:C.textSec, textAlign:"center" }}>{label}</span>
-          <span style={{ fontSize:13, fontWeight:700, color:C.teamB, width:28, textAlign:"right" }}>{b}</span>
+          <span style={{ fontSize:16, fontWeight:700, color:C.teamA, width:32, textAlign:"left" }}>{a}</span>
+          <span style={{ flex:1, fontSize:13.5, color:C.textSec, textAlign:"center" }}>{label}</span>
+          <span style={{ fontSize:16, fontWeight:700, color:C.teamB, width:32, textAlign:"right" }}>{b}</span>
         </div>
         {/* バー行：左=自チームA（右寄せ）、中央区切り、右=相手B（左寄せ） */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 2px 1fr", alignItems:"center", height:8, gap:2 }}>
@@ -20428,9 +22256,9 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       {/* チーム比較 */}
       <div style={{ background:C.white,borderRadius:12,border:`1px solid ${C.border}`,padding:14,marginBottom:12 }}>
         <div style={{ display:"flex",justifyContent:"space-between",marginBottom:12 }}>
-          <span style={{ fontSize:12,fontWeight:700,color:C.teamA }}>自チーム</span>
-          <span style={{ fontSize:11,color:C.textSec }}>チーム比較</span>
-          <span style={{ fontSize:12,fontWeight:700,color:C.teamB }}>相手チーム</span>
+          <span style={{ fontSize:14.5,fontWeight:700,color:C.teamA }}>自チーム</span>
+          <span style={{ fontSize:13.5,color:C.textSec }}>チーム比較</span>
+          <span style={{ fontSize:14.5,fontWeight:700,color:C.teamB }}>相手チーム</span>
         </div>
         <Bar a={totalA} b={totalB} label="総ポイント"/>
         <Bar a={winA}   b={winB}   label="決めた得点"/>
@@ -20441,7 +22269,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
       {/* ★自チーム/相手チーム切替タブ */}
       <div style={{ display:"flex",background:"#f0f2f6",padding:3,borderRadius:10,marginBottom:12 }}>
         {[["A","自チーム"],["B","相手チーム"]].map(([t,l])=>(
-          <button key={t} style={{ flex:1,padding:7,border:"none",cursor:"pointer",borderRadius:8,fontSize:12,fontWeight:700,background:teamFilter===t?C.white:"transparent",color:teamFilter===t?C.navy:C.textSec,boxShadow:teamFilter===t?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTeamFilter(t)}>{l}</button>
+          <button key={t} style={{ flex:1,padding:9,border:"none",cursor:"pointer",borderRadius:8,fontSize:14.5,fontWeight:700,background:teamFilter===t?C.white:"transparent",color:teamFilter===t?C.navy:C.textSec,boxShadow:teamFilter===t?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>setTeamFilter(t)}>{l}</button>
         ))}
       </div>
 
@@ -20461,10 +22289,10 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
         const diffGood = hasGoals && goals.goal_point_diff!=null ? pointDiff >= goals.goal_point_diff : pointDiff > 0;
         return (
           <div key={`${p.team}__${p.player_name}`} style={{ ...S.card,marginBottom:10 }}>
-            <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"8px 12px",display:"flex",alignItems:"center",gap:8 }}>
-              <div style={{ width:26,height:26,borderRadius:"50%",background:p.team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:C.white }}>{p.player_name[0]}</div>
-              <span style={{ fontSize:13,fontWeight:700,color:C.white,flex:1 }}>{p.player_name}</span>
-              <span style={{ fontSize:10,color:"#8099cc" }}>計 {p.total}pt</span>
+            <div style={{ background:p.team==="A"?C.navyMid:C.navy,padding:"10px 14px",display:"flex",alignItems:"center",gap:8 }}>
+              <div style={{ width:32,height:32,borderRadius:"50%",background:p.team==="A"?"#2ecc71":"#f97316",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.white }}>{p.player_name[0]}</div>
+              <span style={{ fontSize:16,fontWeight:700,color:C.white,flex:1 }}>{p.player_name}</span>
+              <span style={{ fontSize:13,color:"#8099cc" }}>計 {p.total}pt</span>
             </div>
             <div style={{ padding:12 }}>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10 }}>
@@ -20474,27 +22302,27 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                   ["得点差", pointDiff>=0?`+${pointDiff}`:`${pointDiff}`, diffGood?C.accent:C.red],
                 ].map(([l,v,c])=>(
                   <div key={l} style={{ background:`${c}11`,borderRadius:8,padding:"8px 4px",textAlign:"center" }}>
-                    <div style={{ fontSize:18,fontWeight:700,color:c }}>{v}</div>
-                    <div style={{ fontSize:9,color:C.textSec,fontWeight:700 }}>{l}</div>
+                    <div style={{ fontSize:24,fontWeight:700,color:c }}>{v}</div>
+                    <div style={{ fontSize:12.5,color:C.textSec,fontWeight:700 }}>{l}</div>
                   </div>
                 ))}
               </div>
               {/* ★サーブ・レシーブ（2ポイントごとの交代を反映。関与があった選手のみ表示。目標比較で色分け） */}
               {(p.serveTotal>0||p.receiveTotal>0)&&(
                 <>
-                  <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>🎾 サーブ・レシーブ</div>
+                  <div style={{ fontSize:13.5,color:C.textSec,fontWeight:700,marginBottom:6 }}>🎾 サーブ・レシーブ</div>
                   {p.serveTotal>0&&(()=>{
                     const inCount=p.serveTotal-p.serveFault; const rate=Math.round(inCount/p.serveTotal*100);
                     const good = hasGoals && goals.goal_first_serve_pct!=null ? rate>=goals.goal_first_serve_pct : null;
                     const barColor = good===null?C.accent:(good?C.accent:C.red);
                     return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
-                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>1stサーブ確率</span>
-                        <span style={{ fontSize:11,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7,paddingLeft:10 }}>
+                        <span style={{ fontSize:13.5,color:C.textSec,width:104,flexShrink:0 }}>1stサーブ確率</span>
+                        <span style={{ fontSize:14,fontWeight:700,color:good===null?C.navy:(good?C.accent:C.red),whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {inCount}/{p.serveTotal}・{rate}%
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
+                          {good!==null&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
                         </span>
-                        <div style={{ flex:1,maxWidth:"50%",height:6,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
+                        <div style={{ flex:1,maxWidth:"50%",height:8,background:C.border,borderRadius:3 }}><div style={{ width:`${rate}%`,height:"100%",background:barColor,borderRadius:3 }}/></div>
                       </div>
                     );
                   })()}
@@ -20507,11 +22335,11 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     if (isOwn ? !(p.receiveTotal>0 || rMiss>0) : rMiss===0) return null;
                     const good = rMiss===0;
                     return (
-                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:10 }}>
-                        <span style={{ fontSize:10,color:C.textSec,width:84,flexShrink:0 }}>レシーブミス</span>
-                        <span style={{ fontSize:11,fontWeight:700,color:good?C.accent:C.red,whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7,paddingLeft:10 }}>
+                        <span style={{ fontSize:13.5,color:C.textSec,width:104,flexShrink:0 }}>レシーブミス</span>
+                        <span style={{ fontSize:14,fontWeight:700,color:good?C.accent:C.red,whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:4 }}>
                           {rMiss}回
-                          {isOwn&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
+                          {isOwn&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>{good?"達成":"未達"}</span>}
                         </span>
                       </div>
                     );
@@ -20522,20 +22350,20 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
               {/* ★プレイ結果と内訳（決めた／ミスしたの2グループに分解。目標比較で色分け） */}
               {(winPlays.length>0||errPlays.length>0)&&(
                 <div style={{ marginTop:8 }}>
-                  <div style={{ fontSize:10,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ結果と内訳</div>
+                  <div style={{ fontSize:13.5,color:C.textSec,fontWeight:700,marginBottom:6 }}>プレイ結果と内訳</div>
                   {winPlays.length>0&&(()=>{
                     const good = hasGoals && goals.goal_winner_count!=null ? p.winners>=goals.goal_winner_count : null;
                     return (
                       <div style={{ background:C.white,borderRadius:8,padding:"8px 10px",marginBottom:8 }}>
-                        <div style={{ fontSize:10,fontWeight:700,color:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                        <div style={{ fontSize:14,fontWeight:700,color:C.accent,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✓ 決めたプレイ（{p.winners}回）
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
+                          {good!==null&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_winner_count}回以上：{good?"達成":"未達"}</span>}
                         </div>
                         {winPlays.map(([k,n])=>(
-                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                            <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
-                            <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0 }}>{n}回</span>
-                            <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
+                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7 }}>
+                            <span style={{ fontSize:13.5,color:C.textSec,width:84,flexShrink:0 }}>{getPlayLabel(k)}</span>
+                            <span style={{ fontSize:13.5,fontWeight:700,color:"#555",flexShrink:0,minWidth:40 }}>{n}回</span>
+                            <div style={{ flex:1,maxWidth:"50%",height:7,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.winners*100)}%`,height:"100%",background:"#7bdba0",borderRadius:3 }}/></div>
                           </div>
                         ))}
                         {/* ★フォア/バック別の得点（記録はしていたが今まで集計していなかった項目） */}
@@ -20559,15 +22387,15 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                     const good = hasGoals && goals.goal_error_count!=null ? p.errors<=goals.goal_error_count : null;
                     return (
                       <div style={{ background:C.white,borderRadius:8,padding:"8px 10px" }}>
-                        <div style={{ fontSize:10,fontWeight:700,color:C.red,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
+                        <div style={{ fontSize:14,fontWeight:700,color:C.red,marginBottom:6,display:"flex",alignItems:"center",gap:6 }}>
                           ✕ ミスしたプレイ（{p.errors}回）
-                          {good!==null&&<span style={{ fontSize:9,padding:"1px 5px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
+                          {good!==null&&<span style={{ fontSize:11.5,padding:"1px 6px",borderRadius:8,background:good?`${C.accent}22`:`${C.red}22`,color:good?C.accent:C.red }}>目標{goals.goal_error_count}回以下：{good?"達成":"未達"}</span>}
                         </div>
                         {errPlays.map(([k,n])=>(
-                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                            <span style={{ fontSize:10,color:C.textSec,width:70,flexShrink:0 }}>{getPlayLabel(k)}</span>
-                            <span style={{ fontSize:10,fontWeight:700,color:"#555",flexShrink:0 }}>{n}回</span>
-                            <div style={{ flex:1,maxWidth:"50%",height:5,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
+                          <div key={k} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:7 }}>
+                            <span style={{ fontSize:13.5,color:C.textSec,width:84,flexShrink:0 }}>{getPlayLabel(k)}</span>
+                            <span style={{ fontSize:13.5,fontWeight:700,color:"#555",flexShrink:0,minWidth:40 }}>{n}回</span>
+                            <div style={{ flex:1,maxWidth:"50%",height:7,background:"#e8e8e8",borderRadius:3 }}><div style={{ width:`${Math.round(n/p.errors*100)}%`,height:"100%",background:"#f0a49c",borderRadius:3 }}/></div>
                           </div>
                         ))}
                         {/* ★ミスの種類（ネット／オーバー／チップ） */}
@@ -20593,7 +22421,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                         />
                         {/* ★ミスの種類は入力が任意なので、必ず母数を添える */}
                         {(p.missTyped ?? 0) > 0 && (
-                          <div style={{ fontSize:9.5,color:"#9aa1ad",marginTop:6 }}>※ミスの種類が入力された {p.missTyped}/{p.errors}件をもとに集計</div>
+                          <div style={{ fontSize:12,color:"#9aa1ad",marginTop:6 }}>※ミスの種類が入力された {p.missTyped}/{p.errors}件をもとに集計</div>
                         )}
                       </div>
                     );
@@ -21887,7 +23715,7 @@ function PlayerRosterScreen({ onBack }) {
 
   useEffect(() => {
     reload();
-    getSchools().then(list => {
+    getSchools(true).catch(() => getSchools()).then(list => {
       setSchools(list);
       getMyProfile().then(p => {
         if (p?.school_id) {
@@ -21912,8 +23740,13 @@ function PlayerRosterScreen({ onBack }) {
       ? otherPlayers.filter(p => schoolPrefByName[p.team_name] === schoolPrefFilter)
       : otherPlayers;
   const availablePrefs = [...new Set(schools.map(s => s.prefecture).filter(Boolean))].sort();
+  // ★都道府県を選んだときは、選手がまだ登録されていない学校も学校マスターから出す
+  //   （以前は選手登録済みの学校だけだったため、学校マスターにある佐賀県の学校が出てこなかった）
   const filteredOtherSchoolNames = schoolPrefFilter
-    ? otherSchoolNames.filter(n => schoolPrefByName[n] === schoolPrefFilter)
+    ? [...new Set([
+        ...otherSchoolNames.filter(n => schoolPrefByName[n] === schoolPrefFilter),
+        ...schools.filter(s => s.prefecture === schoolPrefFilter && s.name && s.name !== mySchoolName).map(s => s.name),
+      ])].sort((a, b) => a.localeCompare(b, "ja"))
     : otherSchoolNames;
 
   const handLabel = (k) => k==="right" ? "右利き" : k==="left" ? "左利き" : "";
@@ -22845,7 +24678,7 @@ function AuthScreen({ onAuthed }) {
   // 一瞬でもステップ1が見えてから飛び直す、という見た目のガタつきを避けるため簡易ローディングを表示する
   if (!sessionRestoreChecked) {
     return (
-      <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#f4f6f9", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", display:"flex", alignItems:"center", justifyContent:"center", background:"#f4f6f9", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
         <div style={{ textAlign:"center", color:C.textSec }}>
           <div style={{ fontSize:36, marginBottom:8 }}>🎾</div>
           読み込み中...
@@ -23238,7 +25071,7 @@ function AiAnalysisAddScreen({ match, existing, onSaved, onCancel }) {
   };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white, display:"flex", alignItems:"center", gap:10 }}>
         <span style={{ cursor:"pointer", fontSize:18 }} onClick={onCancel}>←</span>
         <div style={{ fontSize:18, fontWeight:800 }}>{existing ? "AI動画分析を編集" : "AI動画分析を追加"}</div>
@@ -23301,7 +25134,7 @@ function AiAnalysisDetailScreen({ match, analysis, onBack, onEdit, onDelete }) {
   const isViewer = useIsViewer(); // ★閲覧専用アカウントは見るだけ（編集・削除は不可）
   const label = aiMatchLabel(match).text;
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
@@ -23385,7 +25218,7 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
   }, [effectivePlayer, period]);
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         {/* ★ホーム・試合一覧とヘッダーの高さをそろえるため、説明の小さい文字は出さない */}
         <div style={{ fontSize:20, fontWeight:800 }}>🤖 AI動画分析</div>
@@ -23501,7 +25334,7 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
   const filtered = candidates.filter(r => !search.trim() || r.player_name.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
-    <div style={{ minHeight:"100vh", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:40, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ cursor:"pointer", fontSize:18 }} onClick={onBack}>←</span>
@@ -23575,6 +25408,9 @@ export default function App() {
   });
   useEffect(() => {
     document.documentElement.style.zoom = `${textScale}%`;
+    // ★画面全体をzoomで拡大すると、vh（画面の高さ）を使った大きさも一緒に拡大されて画面からはみ出す
+    //   （小窓の「閉じる」が画面の外に出て押せなくなっていた）。高さの指定はこの値で割って打ち消す。
+    document.documentElement.style.setProperty("--app-zoom", String(Number(textScale) / 100 || 1));
     try { localStorage.setItem("textScale", textScale); } catch(e) {}
   }, [textScale]);
 
@@ -23647,6 +25483,9 @@ export default function App() {
   const [statsPlayerName,   setStatsPlayerName]   = useState(null); // 直接開く選手名（統計画面から遷移時）
   const [statsOpponentName, setStatsOpponentName] = useState(null); // 直接開く対戦相手校名
   const [playerStatsFrom,   setPlayerStatsFrom]   = useState("home"); // 選手戦績画面の戻り先（home/stats）
+  // ★選手戦績の画面の中で選んだ選手（「選手を選ぶ」から選んだ人）。画面の履歴に残しておき、
+  //   その選手の試合を開いてから戻ったときに「選手を選ぶ」ではなく、その選手の戦績に戻れるようにする
+  const [statsSelectedPlayer, setStatsSelectedPlayer] = useState(null);
   // 団体戦関連
   const [teamMatchId,  setTeamMatchId]  = useState(null);
   const [teamMatchEditId, setTeamMatchEditId] = useState(null);
@@ -23753,7 +25592,7 @@ export default function App() {
   const NO_HISTORY_SCREENS = new Set(["setup", "teamMatchSetup", "teamMatchGameSetup", "teamMatchGameEdit", "aiAnalysisAdd"]);
   const navSnap = {
     screen, prevScreen, recordInitialTab, initMatchType, listFilter, matchId, copySourceId, editTargetId,
-    statsPlayerName, statsOpponentName, playerStatsFrom,
+    statsPlayerName, statsOpponentName, playerStatsFrom, statsSelectedPlayer,
     teamMatchId, teamMatchEditId, teamMatchOrderNum, teamMatchGameEditMatchId, teamMatchCopyId, listMatchMode,
     tournamentContext, creatingFromTournament, tournamentSeg,
     aiAnalysisPlayer, aiAnalysisTargetMatch, aiAnalysisEditRow, aiAnalysisReturnScreen, aiAnalysisEditReturnScreen,
@@ -23787,6 +25626,18 @@ export default function App() {
   };
   const lastSnapRef = useRef(null);   // 今の画面（最新の状態）
   const restoringRef = useRef(false); // 履歴から戻している最中は、履歴に積まない
+  // ★試合一覧へ「戻る」で戻ってきたとき（履歴の一個前が試合一覧だったとき）は、さっき見ていた位置で表示する
+  //   （下のタブなどで新しく開いたときは、これまで通り一番上から）。判定は画面を描く前に行う。
+  if (screen === "list" && lastSnapRef.current && lastSnapRef.current.screen !== "list") {
+    const hist = navHistoryRef.current;
+    if (restoringRef.current || (hist.length && navKeyOf(hist[hist.length - 1]) === "list")) markMatchListReturn();
+  }
+  // ★大会の中から開いた画面（試合・団体戦・ランキングなど）から大会詳細へ戻ったときは、さっきの位置で表示する
+  //   （試合一覧・ホーム・分析などのタブから新しく開いたときは、これまで通り一番上から）
+  const TOURNAMENT_FRESH_FROM = new Set(["list","home","personalAnalysis","pairAnalysis","stats","master","aiAnalysisList","tournamentDetail"]);
+  if (screen === "tournamentDetail" && tournamentContext && lastSnapRef.current && !TOURNAMENT_FRESH_FROM.has(lastSnapRef.current.screen)) {
+    markTournamentDetailReturn(tournamentContext.id);
+  }
   useEffect(() => {
     const prev = lastSnapRef.current;
     const curKey = navKeyOf(navSnap);
@@ -23803,7 +25654,22 @@ export default function App() {
       }
     }
     lastSnapRef.current = navSnap; // 同じ画面の中での変化（大会詳細のタブなど）も、最新の状態として覚えておく
+    saveNavForBounce();
   });
+
+  // ★保険：今の画面と画面の履歴を、このタブの中だけ（sessionStorage）に控えておく。
+  //   万一ブラウザが戻るでアプリの履歴を飛ばしてページを読み込み直しても（下の「読み込み直し対策」）、
+  //   ホームではなく、本来戻りたかった一個前の画面を開き直せるようにする。
+  const savedNavSigRef = useRef("");
+  function saveNavForBounce() {
+    try {
+      const hist = navHistoryRef.current;
+      const sig = `${navKeyOf(navSnap)}#${hist.length}#${hist.length ? navKeyOf(hist[hist.length - 1]) : ""}#${navSnap.statsSelectedPlayer ?? ""}`;
+      if (sig === savedNavSigRef.current) return; // 画面の種類・履歴に変化が無ければ書き込まない
+      savedNavSigRef.current = sig;
+      sessionStorage.setItem(NAV_BOUNCE_KEY, JSON.stringify({ doc: NAV_DOC_ID, at: Date.now(), cur: navSnap, hist: hist.slice(-30) }));
+    } catch (e) {}
+  }
 
   // ★削除された試合・団体戦・大会を開いていた画面を、履歴から取り除く
   //   （戻るで削除済みの試合の記録画面などが開いてしまわないように）
@@ -23836,7 +25702,7 @@ export default function App() {
     const apply = () => {
       setPrevScreen(snap.prevScreen); setRecordInitialTab(snap.recordInitialTab); setInitMatchType(snap.initMatchType);
       setListFilter(snap.listFilter); setMatchId(snap.matchId); setCopySourceId(snap.copySourceId); setEditTargetId(snap.editTargetId);
-      setStatsPlayerName(snap.statsPlayerName); setStatsOpponentName(snap.statsOpponentName); setPlayerStatsFrom(snap.playerStatsFrom);
+      setStatsPlayerName(snap.statsPlayerName); setStatsOpponentName(snap.statsOpponentName); setPlayerStatsFrom(snap.playerStatsFrom); setStatsSelectedPlayer(snap.statsSelectedPlayer ?? null);
       setTeamMatchId(snap.teamMatchId); setTeamMatchEditId(snap.teamMatchEditId); setTeamMatchOrderNum(snap.teamMatchOrderNum);
       setTeamMatchGameEditMatchId(snap.teamMatchGameEditMatchId); setTeamMatchCopyId(snap.teamMatchCopyId); setListMatchMode(snap.listMatchMode);
       setTournamentContext(snap.tournamentContext); setCreatingFromTournament(snap.creatingFromTournament); setTournamentSeg(snap.tournamentSeg);
@@ -23926,18 +25792,64 @@ export default function App() {
     };
     // ★本体の戻るの直後に画面をタップした場合（確認ダイアログのボタン・下部ナビなど）は、
     //   そのタップの操作を優先する（一個前の画面への差し替えはしない）
-    //   あわせて、見張りの位置にいなければ（forward に失敗したときなど）ここで積み直す
     const onPointerDown = () => {
       backIntentRef.current = null;
-      if (!window.__stAtTrap && !isTrap(window.history.state)) armTrap();
+    };
+    // ★見張りの位置にいなければ（forward に失敗したときなど）ここで積み直す。
+    //   2026-10 修正：以前は pointerdown（指が触れた瞬間）で積み直していたが、スマホでは指が触れた瞬間は
+    //   まだ「ユーザーの操作」と見なされない（指を離してタップが確定した時点で操作扱いになる）。
+    //   スクロールで触れただけでも見張りを積んでしまい、Android の Chrome に「勝手に積まれた履歴」と判定されて、
+    //   次の戻るでアプリ内の履歴がまとめて飛ばされ、ページが読み込み直されて（＝ホームに戻って）いた。
+    //   → タップが確定した click / キー入力のときだけ、操作として認められている場合に限って積み直す。
+    const onActivated = () => {
+      if (window.__stAtTrap || isTrap(window.history.state)) return;
+      try { if (navigator.userActivation && !navigator.userActivation.isActive) return; } catch (e) {}
+      armTrap();
     };
     window.addEventListener("popstate", onPop);
     document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("click", onActivated, true);
+    document.addEventListener("keydown", onActivated, true);
     return () => {
       clearTimeout(fallbackTimer);
       window.removeEventListener("popstate", onPop);
       document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("click", onActivated, true);
+      document.removeEventListener("keydown", onActivated, true);
     };
+  }, []);
+
+  // ★読み込み直し対策（2026-10）
+  //   Android の Chrome は、戻るのときに「操作なしで積まれた履歴」を飛ばすことがあり、その場合は
+  //   アプリの履歴がまとめて飛ばされて、ページが読み込み直される（＝アプリが最初のホーム画面から始まる）。
+  //   アプリはホーム以外の画面から自分でページを離れることは無いので、
+  //   「戻るで読み込み直された」＋「直前に控えた画面がホーム以外」なら、戻るが押されたとみなして
+  //   控えておいた画面の履歴から一個前の画面を開き直す。
+  //   （戻る先の古いページが Chrome に保存されたまま表示された場合＝pageshow の persisted も同じように扱う）
+  useEffect(() => {
+    const tryRestore = (raw) => {
+      try {
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (!saved || saved.doc === NAV_DOC_ID) return;              // このページ自身が控えたもの＝読み込み直しではない
+        if (Date.now() - (saved.at || 0) > 30 * 60 * 1000) return;   // 古すぎる控えは使わない
+        if (!saved.cur || saved.cur.screen === "home") return;       // ホームから離れた（終了した）ときは何もしない
+        const hist = Array.isArray(saved.hist) ? saved.hist.filter(sn => sn && sn.screen) : [];
+        if (hist.length === 0) return;
+        navHistoryRef.current = hist;
+        restorePrevRef.current && restorePrevRef.current();
+      } catch (e) { console.error(e); }
+    };
+    let navType = "";
+    try { navType = performance.getEntriesByType("navigation")[0]?.type || ""; } catch (e) {}
+    if (navType === "back_forward") tryRestore(NAV_BOUNCE_AT_LOAD);
+    const onShow = (e) => {
+      if (!e.persisted) return;
+      let raw = null; try { raw = sessionStorage.getItem(NAV_BOUNCE_KEY); } catch (err) {}
+      tryRestore(raw);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
   }, []);
 
   // プロフィール（学校・男女区分が未設定だと試合・選手マスターを共有できないため、設定完了をチェック）
@@ -24090,6 +26002,8 @@ export default function App() {
         onBack={()=>{ setStatsPlayerName(null); setScreen(playerStatsFrom); }}
         onOpen={id=>openMatchSmart(id, { prevScreen:"home" })}
         initialPlayerName={statsPlayerName}
+        restoredPlayerName={statsSelectedPlayer}
+        onPlayerChange={setStatsSelectedPlayer}
       />
     );
   }
@@ -24253,7 +26167,7 @@ export default function App() {
         onNewTeamMatch={()=>{ setTournamentContext(null); setTeamMatchEditId(null); setScreen("teamMatchSetup"); }}
         onOpen={id=>openMatchSmart(id, { prevScreen:"home", listMatchMode:"individual" })}
         onNavigate={goNav}
-        onGoPlayerStats={()=>{ setStatsPlayerName(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
+        onGoPlayerStats={()=>{ setStatsPlayerName(null); setStatsSelectedPlayer(null); setPlayerStatsFrom("home"); setScreen("playerStats"); }}
         onProfile={()=>setScreen("profile")}
         onGoToTournaments={()=>{ setTournamentContext(null); setListMatchMode("tournament"); setScreen("list"); }}
         onOpenTournament={t=>{ setTournamentContext(t); setListMatchMode("tournament"); setScreen("tournamentDetail"); }}
@@ -24329,6 +26243,7 @@ export default function App() {
         onGroupMembers={()=>setScreen("groupMembers")}
         onGoalSettings={()=>setScreen("goalSettings")}
         onSeasonSettings={()=>setScreen("seasonSettings")}
+        onEquipment={()=>setScreen("equipment")}
         onProfile={()=>setScreen("profile")}
         onTrash={()=>{ setPendingOpenTrash(true); setListMatchMode("tournament"); setScreen("list"); }}
         onTerms={()=>setScreen("terms")}
@@ -24351,6 +26266,9 @@ export default function App() {
   }
   if (screen==="seasonSettings") {
     return <SeasonSettingsScreen onBack={()=>setScreen("master")} />;
+  }
+  if (screen==="equipment") {
+    return <EquipmentScreen onBack={()=>setScreen("master")} />;
   }
   if (screen==="groupMembers") {
     return <GroupMembersScreen onBack={()=>setScreen("master")} />;
@@ -24379,7 +26297,7 @@ export default function App() {
     return (
       <StatsScreen
         onNavigate={key=>{ if (key==="stats") { setScreen("personalAnalysis"); return; } goNav(key); }}
-        onOpenPlayer={name=>{ setStatsPlayerName(name); setPlayerStatsFrom("stats"); setScreen("playerStats"); }}
+        onOpenPlayer={name=>{ setStatsPlayerName(name); setStatsSelectedPlayer(null); setPlayerStatsFrom("stats"); setScreen("playerStats"); }}
         onOpenOpponent={name=>{ setStatsOpponentName(name); setScreen("opponentStats"); }}
         onOpenMatch={id=>{ setMatchId(id); setPrevScreen("stats"); setRecordInitialTab(null); setScreen("record"); }}
       />
