@@ -11863,6 +11863,7 @@ function EquipmentScreen({ onBack }) {
   const [edit, setEdit] = useState(null);         // 備品の追加・編集 {id?, name, memo, quantity}
   const [confirmDel, setConfirmDel] = useState(false);
   const [cancelArm, setCancelArm] = useState(null);
+  const [delMove, setDelMove] = useState(null);   // ★削除しようとしている引き継ぎの記録
   const [saving, setSaving] = useState(false);
   const [uploadingId, setUploadingId] = useState(null);
   const [toast, setToast] = useState("");
@@ -11983,6 +11984,22 @@ function EquipmentScreen({ onBack }) {
     } catch (e) { alert("取り消せませんでした：" + (e.message || e)); }
   };
 
+  // ★引き継ぎの記録を1件だけ削除（いちばん新しい記録なら、持っている人は自動で前の人に戻る）
+  const deleteMove = async () => {
+    if (isViewer) { viewerAlert(); return; }
+    const m = delMove; if (!m) return;
+    const isLast = lastOf(m.item_id)?.id === m.id;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("equipment_moves").delete().eq("id", m.id);
+      if (error) throw error;
+      setDelMove(null); setCancelArm(null);
+      showToast(isLast ? `記録を削除しました（${m.from_holder}に戻りました）` : "記録を削除しました");
+      await reload();
+    } catch (e) { alert("削除できませんでした：" + (e.message || e)); }
+    finally { setSaving(false); }
+  };
+
   const onPickPhoto = async (itemId, file) => {
     if (!file) return;
     if (isViewer) { viewerAlert(); return; }
@@ -12091,7 +12108,7 @@ function EquipmentScreen({ onBack }) {
 
   const listScrollRef = useRef(0);
   const openDetail = (id) => { listScrollRef.current = window.scrollY || 0; setCancelArm(null); setDetailId(id); window.scrollTo(0, 0); };
-  const closeDetail = () => { setDetailId(null); setCancelArm(null); requestAnimationFrame(() => window.scrollTo(0, listScrollRef.current)); };
+  const closeDetail = () => { setDetailId(null); setCancelArm(null); setDelMove(null); requestAnimationFrame(() => window.scrollTo(0, listScrollRef.current)); };
   const eqIconBtn = { flexShrink:0, alignSelf:"center", width:42, height:42, display:"flex", alignItems:"center", justifyContent:"center", border:"1.5px solid #cfd6e2", background:C.white, borderRadius:10, padding:0, cursor:"pointer" };
   const detail = detailId ? items.find(x => x.id === detailId) : null;
   const photoItem = photoId ? items.find(x => x.id === photoId) : null;
@@ -12220,6 +12237,7 @@ function EquipmentScreen({ onBack }) {
                 <button style={{ ...pbtn, ...(armed ? { borderColor:C.red, color:C.red } : {}) }} onClick={()=>cancelPlan(detail)}>{armed ? "本当に取り消す" : "取り消す"}</button></div>}
               {!isPlan && i === 0 && !pl && <div style={{ display:"flex", gap:8, marginTop:9 }}><button style={pbtn} onClick={()=>openEditLast(detail)}>日付・相手を直す</button></div>}
             </div>
+            {!isPlan && !isViewer && <button style={{ ...pbtn, color:C.red, borderColor:"#f5b5b0", flexShrink:0, alignSelf:"center", padding:"7px 10px" }} onClick={()=>setDelMove(m)}>🗑 削除</button>}
           </div>
         );
         return (
@@ -12238,6 +12256,27 @@ function EquipmentScreen({ onBack }) {
               {evs.map((m, i) => ev(m, i, false))}
               {!pl && !evs.length && <div style={{ textAlign:"center", color:C.textSec, fontSize:15, padding:"24px 0" }}>まだ引き継ぎの記録はありません</div>}
               {(pl || evs.length > 0) && <div style={{ fontSize:14, color:"#7a8499", textAlign:"center", margin:"8px 0", fontWeight:700 }}>新しい順に並びます</div>}
+              {delMove && (() => {
+                const isLast = lm?.id === delMove.id;
+                return (
+                  <Modal onClose={()=>!saving && setDelMove(null)}>
+                    <div style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:38, marginBottom:6 }}>🗑</div>
+                      <h3 style={{ fontSize:17, fontWeight:800, marginBottom:10 }}>この記録を削除しますか？</h3>
+                      <div style={{ background:"#f4f6f9", borderRadius:10, padding:10, fontSize:16, fontWeight:800, marginBottom:10, wordBreak:"break-word" }}>{eqMd(delMove.move_date)}　{delMove.from_holder} → {delMove.to_holder}</div>
+                      <div style={{ fontSize:14, lineHeight:1.7, textAlign:"left", background:"#fff7ed", border:"1px solid #fed7aa", color:"#92400e", borderRadius:10, padding:"10px 12px", marginBottom:16 }}>
+                        {isLast
+                          ? <>これは<b>いちばん新しい記録</b>です。削除すると、{delMove.from_holder === EQ_BUSHITSU ? "置いてある場所" : "いま持っている人"}は<b>「{delMove.from_holder}」</b>に戻ります。</>
+                          : <>古い記録なので、{h === EQ_BUSHITSU ? "いま置いてある場所" : "いま持っている人"}（{h}）は変わりません。記録の一覧から消えるだけです。</>}
+                      </div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                        <button disabled={saving} style={{ padding:12, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:14, fontWeight:800, cursor:"pointer" }} onClick={()=>setDelMove(null)}>キャンセル</button>
+                        <button disabled={saving} style={{ padding:12, background:C.red, color:C.white, border:"none", borderRadius:10, fontSize:14, fontWeight:800, cursor:"pointer", opacity: saving ? 0.6 : 1 }} onClick={deleteMove}>{saving ? "削除中…" : "削除する"}</button>
+                      </div>
+                    </div>
+                  </Modal>
+                );
+              })()}
             </div>
           </div>
         );
