@@ -4144,12 +4144,18 @@ function calcMatchSummary(match) {
   // ★サーブ分析（チーム別：A=自チーム／B=相手。fault_count: 0=1stイン/1=2ndイン/2=ダブルフォルト）
   const serveBy = {};
   ["A","B"].forEach(t => { serveBy[t] = { s1:0, s2:0, df:0, total:0, s1Win:0, s2Win:0 }; });
+  // ★レシーブ分析用：レシーブ側チームのレシーブミス（相手の1stサーブ時／2ndサーブ時）
+  const recvMissBy = { A:{ m1:0, m2:0 }, B:{ m1:0, m2:0 } };
   for (const g of match.games) {
     for (let idx=0; idx<g.points.length; idx++) {
       const pt = g.points[idx];
       const st = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
       const r = serveBy[st]; if (!r) continue;
       r.total++;
+      const rt = st==="A" ? "B" : "A"; // レシーブ側
+      if (pt.play_type==="receive" && !pt.is_winner && !isNetIn(pt)) {
+        if (pt.fault_count===1) recvMissBy[rt].m2++; else recvMissBy[rt].m1++;
+      }
       if (pt.fault_count===0){ r.s1++; if(pt.scoring_team===st) r.s1Win++; }
       else if (pt.fault_count===1){ r.s2++; if(pt.scoring_team===st) r.s2Win++; }
       else if (pt.fault_count===2){ r.df++; }
@@ -4187,7 +4193,7 @@ function calcMatchSummary(match) {
   return {
     totalA, totalB, attackA, oppMissA, selfMissA, oppAttackA, decisionRate,
     topScorer, scoreRanking, missRanking, posStats, bestPlays, worstPlays, pointSources, missSources,
-    serve1st, serve2nd, serveDf, serveTotal, firstServeWin, firstServeTotal, secondServeWin, secondServeTotal, serveBy,
+    serve1st, serve2nd, serveDf, serveTotal, firstServeWin, firstServeTotal, secondServeWin, secondServeTotal, serveBy, recvMissBy,
     maxWinStreak, maxLoseStreak, timeline,
   };
 }
@@ -22016,19 +22022,25 @@ function MatchSummaryPanel({ match, part="all" }) {
         // ★サーブ分析：左＝自チーム（緑）／右＝相手（オレンジ）。色＝チームの意味に統一する
         //   （以前は自チームの数字だけを「本数＝緑・割合＝オレンジ」で並べていて、色の意味が分かりにくかった）
         const A = sum.serveBy.A, B = sum.serveBy.B;
-        const pct = (n, d) => d>0 ? `${Math.round(n/d*100)}%` : "—";
-        const cnt = (r, n) => r.total>0 ? `${n}本（${pct(n, r.total)}）` : "—";
-        const winRate = (w, n) => n>0 ? `${w}/${n}（${pct(w, n)}）` : "—";
+        // ★本数が0で割合が出せないときは「—」ではなく「機会なし」と表示する（記録漏れや0点と見分けられるように）
+        const NA = "__na__";
+        const pct = (n, d) => d>0 ? `${Math.round(n/d*100)}%` : "";
+        const cnt = (r, n) => r.total>0 ? `${n}本（${pct(n, r.total)}）` : NA;
+        const winRate = (w, n) => n>0 ? `${w}/${n}（${pct(w, n)}）` : NA;
+        const val = (v, color, align) => v===NA
+          ? <span style={{ fontSize:11, fontWeight:600, color:C.textSec, textAlign:align }}>機会なし</span>
+          : <span style={{ fontSize:13, fontWeight:800, color, textAlign:align }}>{v}</span>;
         const sameName = teamALabel === teamBLabel;
         const nameA = sameName ? "自チーム" : teamALabel, nameB = sameName ? "相手" : teamBLabel;
         const row = (label, a, b, note) => (
           <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", alignItems:"center", gap:8, padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
-            <span style={{ fontSize:13, fontWeight:800, color:C.teamA }}>{a}</span>
+            {val(a, C.teamA, "left")}
             <span style={{ fontSize:11, color:C.textSec, textAlign:"center", lineHeight:1.3 }}>{label}{note && <><br/><span style={{ fontSize:9.5 }}>{note}</span></>}</span>
-            <span style={{ fontSize:13, fontWeight:800, color:C.teamB, textAlign:"right" }}>{b}</span>
+            {val(b, C.teamB, "right")}
           </div>
         );
         return (
+          <>
           <details style={detailBox}>
             <summary style={summaryBtn}>🎾 サーブ分析</summary>
             <div style={{ padding:"0 14px 14px" }}>
@@ -22044,6 +22056,30 @@ function MatchSummaryPanel({ match, part="all" }) {
               {row("2ndサーブ時の得点", winRate(A.s2Win, A.s2), winRate(B.s2Win, B.s2), "得点/本数")}
             </div>
           </details>
+          {/* ★レシーブ分析：相手のサーブ記録から、レシーブ側の得点を出す（選手の推定は使わないので誤差が出ない）。
+               左＝自チームがレシーブしたとき（相手Bのサーブ）／右＝相手がレシーブしたとき（自チームAのサーブ） */}
+          {(() => {
+            const rmA = sum.recvMissBy?.A ?? { m1:0, m2:0 }, rmB = sum.recvMissBy?.B ?? { m1:0, m2:0 };
+            const recvA = B.s1 + B.s2, recvB = A.s1 + A.s2; // ダブルフォルトはレシーブしていないので除く
+            return (
+              <details style={detailBox}>
+                <summary style={summaryBtn}>🛡 レシーブ分析</summary>
+                <div style={{ padding:"0 14px 14px" }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", alignItems:"center", gap:8, paddingBottom:6, borderBottom:`2px solid ${C.border}` }}>
+                    <span style={{ fontSize:12, fontWeight:800, color:C.white, background:C.teamA, borderRadius:6, padding:"3px 8px", justifySelf:"start", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nameA}</span>
+                    <span style={{ fontSize:10, color:C.textSec }}>レシーブ{recvA}本 / {recvB}本</span>
+                    <span style={{ fontSize:12, fontWeight:800, color:C.white, background:C.teamB, borderRadius:6, padding:"3px 8px", justifySelf:"end", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nameB}</span>
+                  </div>
+                  {row("1stレシーブ時の得点", winRate(B.s1 - B.s1Win, B.s1), winRate(A.s1 - A.s1Win, A.s1), "得点/本数")}
+                  {row("2ndレシーブ時の得点", winRate(B.s2 - B.s2Win, B.s2), winRate(A.s2 - A.s2Win, A.s2), "得点/本数")}
+                  {row("レシーブミス（1st時）", `${rmA.m1}回`, `${rmB.m1}回`)}
+                  {row("レシーブミス（2nd時）", `${rmA.m2}回`, `${rmB.m2}回`)}
+                  {row("相手のダブルフォルト", `${B.df}点`, `${A.df}点`)}
+                </div>
+              </details>
+            );
+          })()}
+          </>
         );
       })()}
 
@@ -22432,7 +22468,7 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                       <>
                         {row}
                         <div style={{ paddingLeft:10,marginBottom:9 }}>
-                          <div style={{ display:"flex",gap:8,marginBottom:6 }}>
+                          <div style={{ display:"flex",gap:8 }}>
                             <div style={{ flex:1,background:C.gray,borderRadius:8,padding:"7px 10px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                               <span style={{ fontSize:12.5,color:C.textSec }}>1stサーブ時</span>
                               <span style={{ fontSize:14.5,fontWeight:800,color:C.navy }}>{m1}回</span>
@@ -22441,10 +22477,6 @@ function StatsTab({ match, onDownloadCsv, onShareLine }) {
                               <span style={{ fontSize:12.5,color:C.textSec }}>2ndサーブ時</span>
                               <span style={{ fontSize:14.5,fontWeight:800,color:C.red }}>{m2}回</span>
                             </div>
-                          </div>
-                          <div style={{ height:6,borderRadius:3,background:C.border,display:"flex",overflow:"hidden" }}>
-                            <div style={{ width:`${m1/rMiss*100}%`,background:C.navy }}/>
-                            <div style={{ width:`${m2/rMiss*100}%`,background:C.red }}/>
                           </div>
                         </div>
                       </>
