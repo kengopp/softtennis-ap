@@ -4152,9 +4152,10 @@ function calcMatchSummary(match) {
       const st = g.is_final ? finalServer(g.server_team, idx) : g.server_team;
       const r = serveBy[st]; if (!r) continue;
       r.total++;
-      const rt = st==="A" ? "B" : "A"; // レシーブ側
-      if (pt.play_type==="receive" && !pt.is_winner && !isNetIn(pt)) {
-        if (pt.fault_count===1) recvMissBy[rt].m2++; else recvMissBy[rt].m1++;
+      // ★レシーブミスは「ミスした選手のチーム」（＝得点されなかった側）に数える。選手カードの内訳と同じ考え方
+      if (pt.play_type==="receive" && !pt.is_winner && !isNetIn(pt) && (pt.scoring_team==="A" || pt.scoring_team==="B")) {
+        const mt = pt.scoring_team==="A" ? "B" : "A";
+        if (pt.fault_count===1) recvMissBy[mt].m2++; else recvMissBy[mt].m1++;
       }
       if (pt.fault_count===0){ r.s1++; if(pt.scoring_team===st) r.s1Win++; }
       else if (pt.fault_count===1){ r.s2++; if(pt.scoring_team===st) r.s2Win++; }
@@ -6633,6 +6634,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const [seg, setSegRaw] = useState(initialSeg || "team"); // team | individual
   const setSeg = (v) => { setSegRaw(v); onSegChange && onSegChange(v); };
   const [showMoreMenu, setShowMoreMenu] = useState(false); // ★ヘッダー右上「⋯」メニューの開閉
+  const [excelExporting, setExcelExporting] = useState(false); // ★分析Excelを作成中
   const [matches, setMatches] = useState([]);
   const [teamMatches, setTeamMatches] = useState([]);
   const [aiAnalyzedMatchIds, setAiAnalyzedMatchIds] = useState(new Set()); // ★AI分析が付いているmatch_idの集合（団体戦一覧のグレーAIバッジ用）
@@ -7000,6 +7002,14 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
 
   return (
     <div ref={rootRef} style={S.page}>
+      {excelExporting && (
+        <div style={{ position:"fixed", inset:0, zIndex:50, background:"rgba(15,32,68,0.45)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:C.white, borderRadius:14, padding:"20px 24px", textAlign:"center", boxShadow:"0 8px 24px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>Excelを作成中…</div>
+            <div style={{ fontSize:12.5, color:C.textSec, marginTop:6 }}>大会の全試合を集計しています。少しお待ちください</div>
+          </div>
+        </div>
+      )}
       <div style={{ ...S.hdr, display:"flex", alignItems:"center", gap:10 }}>
         <button style={{ background:"none", border:"none", color:C.white, fontSize:20, cursor:"pointer" }} onClick={onBack}>←</button>
         <div style={{ flex:1, minWidth:0 }}>
@@ -7030,6 +7040,21 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text }}
                   onClick={()=>{ setShowMoreMenu(false); onOpenDailyRanking && onOpenDailyRanking(tournament); }}
                 >📊 日別選手ランキング</button>
+                <button
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:excelExporting?"default":"pointer", color:C.text, opacity:excelExporting?0.5:1 }}
+                  disabled={excelExporting}
+                  onClick={async ()=>{
+                    setShowMoreMenu(false);
+                    setExcelExporting(true);
+                    try {
+                      await exportTournamentExcel(tournament, mySchoolName);
+                    } catch (e) {
+                      alert("Excelの作成に失敗しました。もう一度お試しください。\n" + (e?.message || e));
+                    } finally {
+                      setExcelExporting(false);
+                    }
+                  }}
+                >📗 Excelで分析を出力</button>
                 <button
                   style={{ display:"block", width:"100%", textAlign:"left", padding:"11px 14px", border:"none", borderTop:"1px solid "+C.border, background:C.white, fontSize:13, fontWeight:700, cursor:"pointer", color:C.text, ...(isViewer?viewerDisabledStyle:{}) }}
                   onClick={()=>{ if(isViewer){viewerAlert();return;} setShowMoreMenu(false); onOpenPairMaster && onOpenPairMaster(tournament); }}
@@ -7744,6 +7769,442 @@ function downloadTextFile(text, fileName) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ============================================================
+// ★大会の分析Excel（先生向け）
+//   大会を1つ選ぶと、その大会の全試合を1つのExcelファイルにまとめて出力する。
+//   シート：分析レポート（自チーム／相手）・個人別（自チーム／相手）・日別ランキング・試合一覧・
+//          サーブ集計(検算)・ポイントデータ
+//   ・分析レポート／個人別／サーブ集計の数字は、すべて「ポイントデータ」シートを参照するExcelの式で書く。
+//     先生がポイントデータを直すと、レポート側の数字と横棒（データバー）も自動で変わる。
+//   ・日別ランキングだけは、アプリの画面と同じ計算で出した「出力した時点の順位」を値で書く。
+//   ・Excel作成用のライブラリ(ExcelJS)は容量が大きいので、ボタンを押したときだけ読み込む。
+// ============================================================
+const EXCELJS_URL = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+let _excelJsPromise = null;
+function loadExcelJs() {
+  if (typeof window !== "undefined" && window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (_excelJsPromise) return _excelJsPromise;
+  _excelJsPromise = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = EXCELJS_URL; s.async = true;
+    s.onload = () => (window.ExcelJS ? resolve(window.ExcelJS) : reject(new Error("Excel作成の準備に失敗しました")));
+    s.onerror = () => { _excelJsPromise = null; reject(new Error("Excel作成の準備に失敗しました（通信状況を確認してください）")); };
+    document.head.appendChild(s);
+  });
+  return _excelJsPromise;
+}
+
+// ★大会の全試合（個人戦＋団体戦の中の各試合）を、ポイントまで含めて取得する。
+//   対象の選び方は日別ランキングと同じ（大会の開催期間外の日付は除く）。
+async function loadTournamentMatchesForExcel(tournament) {
+  const { uniqueRows } = await getRankingTargetRows(tournament.name);
+  const tStart = tournament.start_date;
+  const tEnd = tournament.end_date || tournament.start_date;
+  const ids = uniqueRows
+    .filter(r => r.date && (!tStart || r.date >= tStart) && (!tEnd || r.date <= tEnd))
+    .map(r => r.matchId);
+  return await getFullMatchesByIds(ids);
+}
+
+function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) {
+  const FONT = "Meiryo UI";
+  const COL = { navy:"FF0F2044", green:"FF2ECC71", orange:"FFF97316", red:"FFE53935", gray:"FF7A8499",
+                border:"FFDDE2EA", white:"FFFFFFFF", pink:"FFF8B4B4", light:"FFBBBBBB", black:"FF000000" };
+  const ownLabel = mySchoolName || "自チーム";
+  const tName = tournament?.name || "大会";
+
+  // ---------- 試合を日付→回戦の順に並べる ----------
+  const matches = (matchesRaw || []).filter(Boolean).slice().sort((a, b) =>
+    String(a.match_date || "").localeCompare(String(b.match_date || "")) ||
+    (roundProgressRank(a.round) - roundProgressRank(b.round)) ||
+    String(a.match_number || "").localeCompare(String(b.match_number || ""), "ja", { numeric:true })
+  );
+
+  // ---------- 試合ごとの基本情報 ----------
+  const sideNames = (m, side) => (m.players || []).filter(p => p.team === side)
+    .sort((a, b) => (a.order_num ?? 0) - (b.order_num ?? 0)).map(p => p.player_name).filter(Boolean);
+  const matchInfo = matches.map((m, i) => {
+    const my = mySideOf(m, mySchoolName);
+    const opp = my === "A" ? "B" : "A";
+    const oppClub = (m.players || []).find(p => p.team === opp)?.club_name || "";
+    const w = winnerSideOf(m);
+    const result = m.status !== "finished" ? "途中" : w === my ? "勝" : w === opp ? "敗" : "—";
+    const sMy = my === "A" ? m.match_score_a : m.match_score_b;
+    const sOpp = my === "A" ? m.match_score_b : m.match_score_a;
+    return { m, no: i + 1, my, opp, oppClub, ownNames: sideNames(m, my), oppNames: sideNames(m, opp), result,
+             score: (sMy ?? "") === "" && (sOpp ?? "") === "" ? "" : `${sMy ?? 0}-${sOpp ?? 0}` };
+  });
+
+  // ---------- ポイントデータ（1ポイント＝1行。検算タブと同じ割り出し方を使う） ----------
+  const missLabel = (k) => MISS_TYPES.find(x => x.key === k)?.label ?? RETIRED_MISS_LABELS[k] ?? (k || "");
+  const sideLabel = (k) => SIDE_TYPES.find(x => x.key === k)?.label ?? (k || "");
+  const courseLabel = (k) => { const c = normCourse(k); return COURSE_TYPES.find(x => x.key === c)?.dir ?? (c || ""); };
+  const pointRows = [];
+  for (const info of matchInfo) {
+    const { m, no, my } = info;
+    const rel = (t) => (t === "A" || t === "B") ? (t === my ? "自チーム" : "相手") : "";
+    for (const r of buildServeReceiveRows(m)) {
+      const pt = r.point;
+      // ★選手の所属チームはスタッツと同じ考え方で決める（得点なら得点した側、ミスなら得点されなかった側）
+      let playerName = pt.player_name || "";
+      let playerTeam = "";
+      if (pt.scoring_team === "A" || pt.scoring_team === "B") {
+        playerTeam = pt.is_winner ? pt.scoring_team : (pt.scoring_team === "A" ? "B" : "A");
+      }
+      let playLabel = pt.play_type ? getPlayLabel(pt.play_type) : "";
+      // ★ダブルフォルトは選手名なしで記録されるので、サーブを打った選手のミスとして書く（スタッツと同じ）
+      if (r.serveResult === "df" && !playerName) {
+        playerName = r.serverPlayer || "";
+        playerTeam = r.serverTeam || "";
+        playLabel = "ダブルフォルト";
+      }
+      const net = isNetIn(pt);
+      const resLabel = !playerName && !pt.play_type ? "" : net ? "ネットイン" : pt.is_winner ? "得点" : "ミス";
+      const a = pt.score_a_after, b = pt.score_b_after;
+      const score = (a == null || b == null) ? "" : (my === "A" ? `${a}-${b}` : `${b}-${a}`);
+      pointRows.push([
+        m.match_date || "", no, m.round || "", info.oppClub, r.game?.is_final ? "ファイナル" : (r.game?.game_number ?? ""),
+        r.idx + 1, rel(r.serverTeam), r.serverPlayer || "",
+        r.serveResult === "1st" ? "1st" : r.serveResult === "2nd" ? "2nd" : r.serveResult === "df" ? "DF" : "",
+        r.receiverPlayer || "", rel(pt.scoring_team), playerName, playerName ? rel(playerTeam) : "",
+        playLabel, pt.side_type ? sideLabel(pt.side_type) : "", pt.course_type ? courseLabel(pt.course_type) : "",
+        resLabel, (!pt.is_winner && pt.miss_type) ? missLabel(pt.miss_type) : "", score,
+      ]);
+    }
+  }
+
+  // ---------- 共通の書き方 ----------
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "ソフトテニス記録アプリ";
+  wb.calcProperties.fullCalcOnLoad = true; // 開いたときに式を計算させる
+  const font = (o = {}) => ({ name:FONT, size:o.size ?? 10, bold:!!o.bold, color:{ argb:o.color ?? COL.black } });
+  const put = (ws, r, c, v, o = {}) => {
+    const cell = ws.getCell(r, c);
+    cell.value = (typeof v === "string" && v.startsWith("=")) ? { formula: v.slice(1) } : (v === "" ? null : v);
+    cell.font = font(o);
+    if (o.fmt) cell.numFmt = o.fmt;
+    if (o.body) cell.border = { bottom:{ style:"thin", color:{ argb:COL.border } } };
+    if (o.align) cell.alignment = { horizontal:o.align, vertical:"middle" };
+    return cell;
+  };
+  const header = (ws, r, cols, start = 1, fill = COL.navy) => cols.forEach((t, i) => {
+    const cell = ws.getCell(r, start + i);
+    cell.value = t; cell.font = font({ bold:true, color:COL.white });
+    cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:fill } };
+    cell.alignment = { horizontal:"center", vertical:"middle", wrapText:true };
+  });
+  const title = (ws, t, sub) => { put(ws, 1, 1, t, { size:16, bold:true, color:COL.navy }); put(ws, 2, 1, sub, { color:COL.gray }); };
+  const section = (ws, r, t, c = 1) => put(ws, r, c, t, { size:12, bold:true, color:COL.navy });
+  const note = (ws, r, t, c = 1) => put(ws, r, c, t, { size:9, color:COL.gray });
+  // 横棒は数字が読めるよう、チーム色・赤を少し薄くして使う
+  const BAR_TINT = { [COL.red]:"FFF5A3A3", [COL.green]:"FFA8E6C1", [COL.orange]:"FFFCC79A" };
+  const dataBar = (ws, ref, argb) => ws.addConditionalFormatting({ ref, rules:[{
+    type:"dataBar", gradient:false, minLength:0, maxLength:100,
+    cfvo:[{ type:"num", value:0 }, { type:"max" }], color:{ argb: BAR_TINT[argb] ?? argb },
+  }] });
+  const heat = (ws, ref) => ws.addConditionalFormatting({ ref, rules:[{
+    type:"colorScale", cfvo:[{ type:"num", value:0 }, { type:"max" }], color:[{ argb:COL.white }, { argb:COL.pink }],
+  }] });
+  const widths = (ws, list, start = 1) => list.forEach((w, i) => { ws.getColumn(start + i).width = w; });
+  const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
+
+  const PD = "ポイントデータ";
+  const lastRow = Math.max(2, pointRows.length + 1);
+  const R = (col) => `'${PD}'!$${col}$2:$${col}$${lastRow}`;
+  const MNO = R("B"), SRV = R("G"), SRVP = R("H"), SV = R("I"), SC = R("K"), PL = R("L"), PT = R("M"),
+        PLAY = R("N"), SIDE = R("O"), RES = R("Q"), MT = R("R");
+  const matchCount = matchInfo.length;
+  const ML = 4 + matchCount; // 試合一覧の最終行
+
+  // プレー・ミスの種類の並び（データに出てくるものだけ。アプリの選択肢の順）
+  const usedPlays = new Set(pointRows.map(r => r[13]));
+  const playOrder = [...PLAY_TYPES.map(p => p.label), "ダブルフォルト"];
+  const plays = playOrder.filter(l => usedPlays.has(l));
+  usedPlays.forEach(l => { if (l && !plays.includes(l)) plays.push(l); });
+  const hasNoPlay = pointRows.some(r => r[11] && !r[13]);
+  const missKinds = MISS_TYPES.map(x => x.label);
+  const sidePlays = plays.filter(l => l !== "サーブ" && l !== "ダブルフォルト");
+
+  // ---------- シートを作る（並び順どおりに作成） ----------
+  const wsRepOwn = wb.addWorksheet("分析レポート_自チーム", { properties:{ tabColor:{ argb:COL.green } }, views:[{ showGridLines:false, state:"frozen", ySplit:3 }] });
+  const wsRepOpp = wb.addWorksheet("分析レポート_相手", { properties:{ tabColor:{ argb:COL.orange } }, views:[{ showGridLines:false, state:"frozen", ySplit:3 }] });
+  const wsIndOwn = wb.addWorksheet("個人別_自チーム", { properties:{ tabColor:{ argb:COL.green } }, views:[{ showGridLines:false, state:"frozen", xSplit:1, ySplit:4 }] });
+  const wsIndOpp = wb.addWorksheet("個人別_相手", { properties:{ tabColor:{ argb:COL.orange } }, views:[{ showGridLines:false, state:"frozen", xSplit:1, ySplit:4 }] });
+  const wsRank = wb.addWorksheet("日別ランキング", { views:[{ showGridLines:false }] });
+  const wsM = wb.addWorksheet("試合一覧", { views:[{ state:"frozen", ySplit:4 }] });
+  const wsK = wb.addWorksheet("サーブ集計(検算)", { views:[{ showGridLines:false, state:"frozen", ySplit:4 }] });
+  const wsP = wb.addWorksheet(PD, { views:[{ state:"frozen", ySplit:1 }] });
+
+  // ---------- ポイントデータ ----------
+  const pdCols = ["日付","試合No","回戦","相手校","ゲーム","ポイント","サーブ側","サーバー","サーブ","レシーバー","得点チーム","選手","選手のチーム","プレー","フォア/バック","コース","結果","ミスの種類","スコア(自-相手)"];
+  if (pointRows.length > 0) {
+    wsP.addTable({
+      name: "PointData", ref: "A1", headerRow: true,
+      style: { theme: "TableStyleLight9", showRowStripes: true },
+      columns: pdCols.map(n => ({ name:n, filterButton:true })),
+      rows: pointRows.map(r => r.map(v => (v === "" ? null : v))),
+    });
+  } else {
+    header(wsP, 1, pdCols);
+    put(wsP, 2, 1, "この大会にはポイントの記録がありません", { color:COL.gray });
+  }
+  wsP.getRow(1).font = font({ bold:true, color:COL.white });
+  widths(wsP, [11,7,9,12,9,7,9,14,6,14,9,14,10,12,10,9,8,11,12]);
+
+  // ---------- 試合一覧 ----------
+  title(wsM, "試合一覧", `${tName}　全${matchCount}試合`);
+  header(wsM, 4, ["試合No","日付","回戦",`${ownLabel}のペア`,"相手校","相手のペア","ゲームカウント(自-相手)","勝敗"]);
+  wsM.getRow(4).height = 30;
+  matchInfo.forEach((info, i) => {
+    const r = 5 + i;
+    [info.no, info.m.match_date || "", info.m.round || "", info.ownNames.join("・"), info.oppClub, info.oppNames.join("・"), info.score]
+      .forEach((v, j) => put(wsM, r, j + 1, v, { body:true }));
+    put(wsM, r, 8, info.result, { body:true, bold:true, align:"center", color: info.result === "勝" ? COL.green : info.result === "敗" ? COL.red : COL.gray });
+  });
+  widths(wsM, [7,11,9,22,12,24,12,6]);
+
+  // ---------- 分析レポート ----------
+  const report = (ws, team, color) => {
+    const other = team === "自チーム" ? "相手" : "自チーム";
+    const T = q(team), O = q(other);
+    title(ws, `分析レポート（${team === "自チーム" ? ownLabel : "対戦相手"}）`,
+      `${tName}　全${matchCount}試合　※数字はすべて「${PD}」シートから自動計算しています`);
+    widths(ws, [24,13,13,13,13,13,3,3,6,34,9,8]);
+
+    // サマリー
+    let r = 4; section(ws, r, "■ サマリー");
+    header(ws, r + 1, ["項目","合計","1試合平均"], 1, color);
+    put(ws, r + 2, 1, "得点（決めた）", { body:true }); put(ws, r + 2, 2, `=COUNTIFS(${PT},${T},${RES},"得点")`, { body:true });
+    put(ws, r + 3, 1, "ミス", { body:true });           put(ws, r + 3, 2, `=COUNTIFS(${PT},${T},${RES},"ミス")`, { body:true });
+    put(ws, r + 4, 1, "得失点差", { body:true });       put(ws, r + 4, 2, `=B${r + 2}-B${r + 3}`, { body:true, fmt:"+0;-0;0" });
+    for (let x = r + 2; x <= r + 4; x++) put(ws, x, 3, `=IF(${matchCount}=0,0,B${x}/${matchCount})`, { body:true, fmt: x === r + 4 ? "+0.0;-0.0;0.0" : "0.0" });
+    note(ws, r + 5, `※試合数 ${matchCount}（「試合一覧」より）。ネットインは得点・ミスに含めません`);
+
+    // ミスの種類
+    r = 11; section(ws, r, "■ ミスの種類（何のミスが多いか）");
+    header(ws, r + 1, ["ミスの種類","回数","割合"], 1, color);
+    const kinds = [...missKinds.map(k => [k, q(k)]), ["未入力", '""']];
+    const k1 = r + 2, k2 = r + 1 + kinds.length;
+    kinds.forEach(([lab, crit], i) => {
+      const x = k1 + i;
+      put(ws, x, 1, lab, { body:true });
+      put(ws, x, 2, `=COUNTIFS(${PT},${T},${RES},"ミス",${MT},${crit})`, { body:true });
+      put(ws, x, 3, `=IFERROR(B${x}/SUM($B$${k1}:$B$${k2}),0)`, { body:true, fmt:"0%" });
+    });
+    dataBar(ws, `B${k1}:B${k2}`, COL.red);
+
+    // プレー別
+    r = k2 + 2; section(ws, r, "■ プレー別の得点とミス");
+    header(ws, r + 1, ["プレー","得点","ミス","決定率"], 1, color);
+    const playRows = [...plays.map(l => [l, q(l)]), ...(hasNoPlay ? [["プレー未入力", '""']] : [])];
+    const p1 = r + 2, p2 = r + 1 + Math.max(1, playRows.length);
+    playRows.forEach(([lab, crit], i) => {
+      const x = p1 + i;
+      put(ws, x, 1, lab, { body:true });
+      put(ws, x, 2, `=COUNTIFS(${PT},${T},${PLAY},${crit},${RES},"得点")`, { body:true });
+      put(ws, x, 3, `=COUNTIFS(${PT},${T},${PLAY},${crit},${RES},"ミス")`, { body:true });
+      put(ws, x, 4, `=IF(B${x}+C${x}=0,"機会なし",B${x}/(B${x}+C${x}))`, { body:true, fmt:"0%" });
+    });
+    if (playRows.length > 0) { dataBar(ws, `B${p1}:B${p2}`, COL.green); dataBar(ws, `C${p1}:C${p2}`, COL.red); }
+    note(ws, p2 + 1, "※決定率＝得点÷（得点＋ミス）");
+
+    // フォア／バック
+    r = p2 + 3; section(ws, r, "■ フォア／バック別のミス");
+    header(ws, r + 1, ["プレー","フォアのミス","バックのミス"], 1, color);
+    const s1 = r + 2, s2 = r + 1 + Math.max(1, sidePlays.length);
+    sidePlays.forEach((lab, i) => {
+      const x = s1 + i;
+      put(ws, x, 1, lab, { body:true });
+      put(ws, x, 2, `=COUNTIFS(${PT},${T},${PLAY},${q(lab)},${SIDE},"フォア",${RES},"ミス")`, { body:true });
+      put(ws, x, 3, `=COUNTIFS(${PT},${T},${PLAY},${q(lab)},${SIDE},"バック",${RES},"ミス")`, { body:true });
+    });
+    if (sidePlays.length > 0) heat(ws, `B${s1}:C${s2}`);
+
+    // サーブ
+    r = s2 + 2; section(ws, r, "■ サーブ");
+    header(ws, r + 1, ["項目","本数","割合","そのときの得点","得点率"], 1, color);
+    const tot = `COUNTIFS(${SRV},${T},${SV},"<>")`;
+    [["1stイン","1st"],["2ndイン","2nd"],["ダブルフォルト","DF"]].forEach(([lab, s], i) => {
+      const x = r + 2 + i;
+      put(ws, x, 1, lab, { body:true });
+      put(ws, x, 2, `=COUNTIFS(${SRV},${T},${SV},"${s}")`, { body:true });
+      put(ws, x, 3, `=IF(${tot}=0,"機会なし",B${x}/${tot})`, { body:true, fmt:"0%" });
+      if (s !== "DF") {
+        put(ws, x, 4, `=COUNTIFS(${SRV},${T},${SV},"${s}",${SC},${T})`, { body:true });
+        put(ws, x, 5, `=IF(B${x}=0,"機会なし",D${x}/B${x})`, { body:true, fmt:"0%" });
+      } else { put(ws, x, 4, "—", { body:true }); put(ws, x, 5, "—", { body:true }); }
+    });
+    dataBar(ws, `B${r + 2}:B${r + 4}`, team === "自チーム" ? COL.green : COL.orange);
+
+    // レシーブ
+    r = r + 6; section(ws, r, "■ レシーブ");
+    header(ws, r + 1, ["項目","レシーブ本数","得点","得点率","レシーブミス"], 1, color);
+    [["相手の1stサーブ","1st"],["相手の2ndサーブ","2nd"]].forEach(([lab, s], i) => {
+      const x = r + 2 + i;
+      put(ws, x, 1, lab, { body:true });
+      put(ws, x, 2, `=COUNTIFS(${SRV},${O},${SV},"${s}")`, { body:true });
+      put(ws, x, 3, `=COUNTIFS(${SRV},${O},${SV},"${s}",${SC},${T})`, { body:true });
+      put(ws, x, 4, `=IF(B${x}=0,"機会なし",C${x}/B${x})`, { body:true, fmt:"0%" });
+      put(ws, x, 5, `=COUNTIFS(${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"${s}")`, { body:true });
+    });
+    const xd = r + 4;
+    put(ws, xd, 1, "相手のダブルフォルト", { body:true }); put(ws, xd, 2, "—", { body:true });
+    put(ws, xd, 3, `=COUNTIFS(${SRV},${O},${SV},"DF")`, { body:true }); put(ws, xd, 4, "—", { body:true }); put(ws, xd, 5, "—", { body:true });
+    dataBar(ws, `E${r + 2}:E${r + 3}`, COL.red);
+
+    // 一番多いミス TOP5（右側）＋ 集計用の組み合わせ一覧
+    section(ws, 4, "■ 一番多いミス TOP5（練習テーマ候補）", 9);
+    header(ws, 5, ["順位","プレー × フォア/バック × ミスの種類","回数"], 9, color);
+    const hr = 14;
+    section(ws, hr, "（集計用）ミスの組み合わせ一覧", 9);
+    header(ws, hr + 1, ["","組み合わせ","回数","補助"], 9, COL.gray);
+    const combos = [];
+    sidePlays.forEach(p => ["フォア","バック"].forEach(sd => missKinds.forEach(mk => combos.push([p, sd, mk]))));
+    const h1 = hr + 2, h2 = hr + 1 + Math.max(1, combos.length);
+    combos.forEach(([p, sd, mk], i) => {
+      const x = h1 + i;
+      put(ws, x, 10, `${p}×${sd}×${mk}`, { body:true });
+      put(ws, x, 11, `=COUNTIFS(${PT},${T},${PLAY},${q(p)},${SIDE},"${sd}",${MT},"${mk}",${RES},"ミス")`, { body:true });
+      // 同じ回数のときに順位がぶつからないよう、上の行ほどわずかに大きくする補助の値
+      put(ws, x, 12, `=K${x}+(10000-ROW())/1000000`, { body:true, size:8, color:COL.light });
+    });
+    if (combos.length > 0) {
+      dataBar(ws, `K${h1}:K${h2}`, COL.red);
+      for (let i = 0; i < 5; i++) {
+        const x = 6 + i;
+        put(ws, x, 9, i + 1, { body:true, align:"center" });
+        if (i < combos.length) {
+          const pick = `MATCH(LARGE($L$${h1}:$L$${h2},${i + 1}),$L$${h1}:$L$${h2},0)`;
+          put(ws, x, 10, `=IF(INDEX($K$${h1}:$K$${h2},${pick})=0,"—",INDEX($J$${h1}:$J$${h2},${pick}))`, { body:true, bold:true, size:11 });
+          put(ws, x, 11, `=INDEX($K$${h1}:$K$${h2},${pick})`, { body:true, bold:true, size:11 });
+        }
+      }
+      dataBar(ws, "K6:K10", COL.red);
+    }
+    note(ws, 11, "※フォア/バックとミスの種類まで記録されたミスだけで数えています", 9);
+  };
+  report(wsRepOwn, "自チーム", COL.green);
+  report(wsRepOpp, "相手", COL.orange);
+
+  // ---------- 個人別 ----------
+  const indiv = (ws, team, color) => {
+    const T = q(team);
+    title(ws, `個人別スタッツ（${team === "自チーム" ? ownLabel : "対戦相手"}）`,
+      "合計と1試合平均。色が濃いほど多い。試合数・勝敗は出力時の値、それ以外は「ポイントデータ」から自動計算");
+    const cols = ["選手","試合数","勝","敗","得点","ミス","得失点差","得点/試合","ミス/試合","1stサーブ率","レシーブミス(1st時)","レシーブミス(2nd時)", ...missKinds, "一番多いミス"];
+    header(ws, 4, cols, 1, color); ws.getRow(4).height = 32;
+    // 選手ごとの試合数・勝敗（出場した試合の結果から）
+    const agg = new Map();
+    matchInfo.forEach(info => {
+      const names = team === "自チーム" ? info.ownNames : info.oppNames;
+      names.forEach(n => {
+        const a = agg.get(n) ?? { n, matches:0, win:0, lose:0 };
+        a.matches++;
+        const won = team === "自チーム" ? info.result === "勝" : info.result === "敗";
+        const lost = team === "自チーム" ? info.result === "敗" : info.result === "勝";
+        if (won) a.win++; if (lost) a.lose++;
+        agg.set(n, a);
+      });
+    });
+    const list = [...agg.values()];
+    const mk1 = 13, mkLast = 12 + missKinds.length, cTop = mkLast + 1;
+    list.forEach((a, i) => {
+      const r = 5 + i, nm = `$A${r}`;
+      put(ws, r, 1, a.n, { body:true, bold:true });
+      put(ws, r, 2, a.matches, { body:true }); put(ws, r, 3, a.win, { body:true }); put(ws, r, 4, a.lose, { body:true });
+      put(ws, r, 5, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"得点")`, { body:true });
+      put(ws, r, 6, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"ミス")`, { body:true });
+      put(ws, r, 7, `=E${r}-F${r}`, { body:true, fmt:"+0;-0;0" });
+      put(ws, r, 8, `=IF(B${r}=0,0,E${r}/B${r})`, { body:true, fmt:"0.0" });
+      put(ws, r, 9, `=IF(B${r}=0,0,F${r}/B${r})`, { body:true, fmt:"0.0" });
+      put(ws, r, 10, `=IF(COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"<>")=0,"機会なし",COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"1st")/COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"<>"))`, { body:true, fmt:"0%" });
+      put(ws, r, 11, `=COUNTIFS(${PL},${nm},${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"1st")`, { body:true });
+      put(ws, r, 12, `=COUNTIFS(${PL},${nm},${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"2nd")`, { body:true });
+      missKinds.forEach((k, j) => put(ws, r, mk1 + j, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"ミス",${MT},"${k}")`, { body:true }));
+      const rng = `${ws.getColumn(mk1).letter}${r}:${ws.getColumn(mkLast).letter}${r}`;
+      const hdr = `$${ws.getColumn(mk1).letter}$4:$${ws.getColumn(mkLast).letter}$4`;
+      put(ws, r, cTop, `=IF(MAX(${rng})=0,"—",INDEX(${hdr},MATCH(MAX(${rng}),${rng},0)))`, { body:true });
+    });
+    if (list.length > 0) {
+      const e = 4 + list.length;
+      dataBar(ws, `E5:E${e}`, COL.green); dataBar(ws, `F5:F${e}`, COL.red);
+      dataBar(ws, `H5:H${e}`, COL.green); dataBar(ws, `I5:I${e}`, COL.red);
+      heat(ws, `K5:L${e}`);
+      heat(ws, `${ws.getColumn(mk1).letter}5:${ws.getColumn(mkLast).letter}${e}`);
+    } else {
+      put(ws, 5, 1, "対象の選手がいません", { color:COL.gray });
+    }
+    widths(ws, [18,7,5,5,7,7,9,9,9,10,11,11, ...missKinds.map(() => 9), 12]);
+  };
+  indiv(wsIndOwn, "自チーム", COL.green);
+  indiv(wsIndOpp, "相手", COL.orange);
+
+  // ---------- 日別ランキング（自チーム・1試合平均。アプリの画面と同じ計算） ----------
+  title(wsRank, `日別ランキング（${ownLabel}・1試合平均）`, "アプリの日別ランキングと同じ内容です。出力した時点の順位を書いています");
+  const byDate = new Map();
+  matches.forEach(m => { if (m.match_date) (byDate.get(m.match_date) ?? byDate.set(m.match_date, []).get(m.match_date)).push(m); });
+  let rr = 4;
+  const blocks = [
+    ["レシーブミスが少ない順", p => p.receiveMiss, "回", false, p => p.receiveTotal > 0],
+    ["得点（決めた）が多い順", p => p.winners, "点", true, () => true],
+    ["ミスが少ない順", p => p.errors, "回", false, () => true],
+    ["得失点差が大きい順", p => p.winners - p.errors, "", true, () => true],
+  ];
+  [...byDate.keys()].sort().forEach(date => {
+    const players = aggregateRankingPlayers([{ date, matches: byDate.get(date) }], mySchoolName).filter(p => p.matches > 0);
+    section(wsRank, rr, `■ ${date}（${byDate.get(date).length}試合）`); rr++;
+    let maxLen = 0;
+    blocks.forEach(([t, valueOf, unit, higher, filt], bi) => {
+      const c0 = 1 + bi * 4;
+      header(wsRank, rr, ["順位", t, "1試合平均"], c0, COL.green);
+      const list = players.filter(filt).map(p => ({ p, total: valueOf(p), avg: valueOf(p) / p.matches }))
+        .sort((a, b) => (higher ? b.avg - a.avg : a.avg - b.avg) || (b.p.matches - a.p.matches));
+      list.forEach((x, i) => {
+        const r = rr + 1 + i;
+        const totalStr = unit === "" ? `${x.total > 0 ? "+" : ""}${x.total}` : `${x.total}${unit}`;
+        put(wsRank, r, c0, i + 1, { body:true, align:"center" });
+        put(wsRank, r, c0 + 1, `${x.p.name}（${x.p.matches}試合・合計${totalStr}）`, { body:true });
+        put(wsRank, r, c0 + 2, Math.round(x.avg * 10) / 10, { body:true, bold:true, fmt: unit === "" ? "+0.0;-0.0;0.0" : "0.0" });
+      });
+      maxLen = Math.max(maxLen, list.length);
+      wsRank.getColumn(c0).width = 5; wsRank.getColumn(c0 + 1).width = 28; wsRank.getColumn(c0 + 2).width = 9; wsRank.getColumn(c0 + 3).width = 2;
+    });
+    rr += maxLen + 3;
+  });
+  if (byDate.size === 0) put(wsRank, 4, 1, "対象の試合がありません", { color:COL.gray });
+
+  // ---------- サーブ集計（検算） ----------
+  title(wsK, "サーブ集計（アプリの「検算」タブと同じ）", "試合ごと・選手ごとの1st／2nd／DF。1ポイントずつの明細は「ポイントデータ」シート（サーバー・レシーバーの列）");
+  header(wsK, 4, ["試合No","日付","回戦","選手","チーム","1st","2nd","DF","計","1st率"]);
+  let kr = 5;
+  matchInfo.forEach(info => {
+    [["自チーム", info.ownNames], ["相手", info.oppNames]].forEach(([team, names]) => names.forEach(n => {
+      [info.no, info.m.match_date || "", info.m.round || "", n, team].forEach((v, j) => put(wsK, kr, j + 1, v, { body:true }));
+      ["1st","2nd","DF"].forEach((s, j) => put(wsK, kr, 6 + j, `=COUNTIFS(${MNO},$A${kr},${SRVP},$D${kr},${SRV},$E${kr},${SV},"${s}")`, { body:true }));
+      put(wsK, kr, 9, `=SUM(F${kr}:H${kr})`, { body:true, bold:true });
+      put(wsK, kr, 10, `=IF(I${kr}=0,"機会なし",F${kr}/I${kr})`, { body:true, fmt:"0%" });
+      kr++;
+    }));
+  });
+  widths(wsK, [7,11,9,16,9,6,6,6,6,9]);
+
+  return wb;
+}
+
+async function exportTournamentExcel(tournament, mySchoolName) {
+  const [ExcelJS, matches] = await Promise.all([loadExcelJs(), loadTournamentMatchesForExcel(tournament)]);
+  if (!matches || matches.length === 0) throw new Error("この大会には出力できる試合がありません");
+  const wb = buildTournamentWorkbook(ExcelJS, tournament, matches, mySchoolName);
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const safeName = String(tournament.name || "大会").replace(/[\\/:*?"<>|\s]+/g, "_");
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `大会分析_${safeName}.xlsx`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
