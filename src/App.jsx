@@ -16559,41 +16559,8 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     </div>
   );
 
-  // ★成長の推移：集計対象の試合を1試合ずつ集計し、1st/2ndサーブ得点率の変化を並べる。
-  //   試合数が多いと棒が細くなりすぎるため、新しい方から最大10試合だけを対象にする。
+  // ★試合ごとの表で表示する最大試合数（新しい方から）
   const TREND_MAX = 10;
-  const serveTrend = (() => {
-    const src = displayedMatches;
-    if (!src || src.length < 2) return null;
-    // ★同じ日に何試合もある大会では日付だけでは順番が決まらないため、日付→回戦の順で並べる
-    const ordered = [...src].sort((a,b) => {
-      const d = new Date(a.match_date) - new Date(b.match_date);
-      if (d !== 0) return d;
-      return roundProgressRank(a.round) - roundProgressRank(b.round);
-    });
-    const target = ordered.slice(-TREND_MAX);
-    // ★同じ日に何試合もあるので、その日の何試合目かを番号で表す（回戦名は長すぎて入らない）
-    const dayCount = {};
-    const rows = target.map(m => {
-      const d = m.match_date || "";
-      dayCount[d] = (dayCount[d] ?? 0) + 1;
-      const a = aggregatePlayerStats([m], selectedPlayer, effectiveSchoolName);
-      const s1 = a.serve1st ?? 0, s2 = a.serve2nd ?? 0;
-      return {
-        id: m.id,
-        date: d,
-        no: dayCount[d],
-        round: m.round || "",
-        r1: s1 > 0 ? Math.round((a.serve1stWin ?? 0) / s1 * 100) : null,
-        r2: s2 > 0 ? Math.round((a.serve2ndWin ?? 0) / s2 * 100) : null,
-      };
-    });
-    // ★データが1試合分しかないと「推移」にならないので、2試合以上ある指標だけ出す
-    const has1 = rows.filter(r => r.r1 !== null).length >= 2;
-    const has2 = rows.filter(r => r.r2 !== null).length >= 2;
-    if (!has1 && !has2) return null;
-    return { rows, has1, has2, omitted: src.length - target.length };
-  })();
 
   // ★レシーブミスの内訳（集計）：相手の1stサーブ時／2ndサーブ時の回数。
   //   レシーブ機会数はローテーションからの推定値で誤差が出やすいため使わず、％は「レシーブミス全体に占める割合」。
@@ -16622,41 +16589,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
     const games = agg.matchesCounted || src.length || 1;
     return { m1, m2, total, avg: Math.round(total / games * 10) / 10, rows, omitted: src.length - target.length };
   })();
-
-  // 推移カード1枚分（棒グラフ）
-  const TrendCard = ({ title, pick, color }) => (
-    <div style={S.card}>
-      <div style={{ padding:14 }}>
-        <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:2 }}>{title}</div>
-        <div style={{ fontSize:12.5, color:C.textSec, marginBottom:6 }}>← 古い　新しい →（棒をタップすると試合へ）</div>
-        <div style={{ display:"flex", alignItems:"flex-end", gap:6, height:120, paddingTop:20 }}>
-          {serveTrend.rows.map(r => {
-            const v = pick(r);
-            return (
-              <div key={r.id} onClick={()=>onOpenMatch && onOpenMatch(r.id)}
-                style={{ flex:"1 1 0", minWidth:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", height:"100%", cursor:"pointer" }}>
-                <div style={{ fontSize:13.5, fontWeight:800, color:v===null?C.textSec:C.text, marginBottom:4, whiteSpace:"nowrap" }}>{v===null?"—":`${v}%`}</div>
-                <div style={{ width:"100%", height:`${v===null?2:Math.max(v,3)}%`, background:v===null?"#e3e7ee":color, borderRadius:"5px 5px 0 0" }}/>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ display:"flex", gap:6, marginTop:6 }}>
-          {serveTrend.rows.map(r => (
-            <div key={r.id} style={{ flex:"1 1 0", minWidth:0, textAlign:"center" }}>
-              <div style={{ fontSize:14, fontWeight:800, color:C.text }}>{r.no}</div>
-              <div style={{ fontSize:11.5, color:C.textSec }}>
-                {r.date ? `${Number(r.date.slice(5,7))}/${Number(r.date.slice(8,10))}` : ""}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize:12, color:"#8a92a0", marginTop:8, lineHeight:1.6 }}>
-          数字はその日の何試合目かを表します。「—」はサーブの記録が無い試合です。
-        </div>
-      </div>
-    </div>
-  );
 
   // ★レシーブミス率は算出方法が複雑で誤差が出やすいため、比較表からは外す（内部計算・keyRatesFromAggは維持）
   const metricLabel = { serveRate:"1stサーブ成功率", decisionRate:"決定率" };
@@ -16837,23 +16769,6 @@ function PersonalAnalysisScreen({ onNavigate, onOpenPairAnalysis, onOpenTeamStat
                   )}
                 </div>
               </div>
-            )}
-
-            {/* ★成長の推移：サーブ分析（合計）のすぐ下で、試合ごとの変化を見る */}
-            {serveTrend && (
-              <>
-                <div style={{ fontSize:15, fontWeight:800, color:C.navy, margin:"16px 0 2px" }}>📈 成長の推移</div>
-                <div style={{ fontSize:12.5, color:C.textSec, marginBottom:8 }}>
-                  いま集計している{displayedMatches.length}試合を1試合ずつ集計しています
-                </div>
-                {serveTrend.has1 && <TrendCard title="1stサーブ得点率（試合ごと）" pick={r=>r.r1} color={C.accent} />}
-                {serveTrend.has2 && <TrendCard title="2ndサーブ得点率（試合ごと）" pick={r=>r.r2} color="#8fdcbb" />}
-                {serveTrend.omitted > 0 && (
-                  <div style={{ fontSize:12.5, color:C.textSec, textAlign:"center", marginTop:-4, marginBottom:12 }}>
-                    直近{TREND_MAX}試合を表示しています（ほか{serveTrend.omitted}試合）
-                  </div>
-                )}
-              </>
             )}
 
             {/* 得点・ミスの内訳 */}
