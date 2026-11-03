@@ -7699,7 +7699,7 @@ function aggregateRankingPlayers(dayGroups, mySchoolName) {
   const PLACEHOLDER_NAMES = new Set(["前衛", "後衛"]);
   const playerAgg = {};
   const ensure = (name, date) => {
-    const r = (playerAgg[name] ??= { name, matches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0, firstDate:null, lastDate:null });
+    const r = (playerAgg[name] ??= { name, matches:0, pointMatches:0, wins:0, losses:0, winners:0, errors:0, serveTotal:0, serveFault:0, receiveTotal:0, receiveMiss:0, firstDate:null, lastDate:null });
     // ★その選手が実際に出場した最初と最後の日（CSVの「開始日」「終了日」に使う）
     if (date) {
       if (!r.firstDate || date < r.firstDate) r.firstDate = date;
@@ -7723,6 +7723,9 @@ function aggregateRankingPlayers(dayGroups, mySchoolName) {
           r.winners += s.winners; r.errors += s.errors;
           r.serveTotal += s.serveTotal; r.serveFault += s.serveFault;
           r.receiveTotal += s.receiveTotal; r.receiveMiss += s.receiveMiss;
+          // ★ポイントを記録した試合の数（1試合平均の母数）。ゲームカウントだけ入れた試合は
+          //   calcPlayerStatsに出てこないので数えない
+          r.pointMatches++;
           seenThisMatch.set(s.player_name, s.team);
         });
         // ★「結果だけ記録」の試合はポイントデータが無くcalcPlayerStatsに出てこないため、
@@ -7833,7 +7836,8 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     const result = m.status !== "finished" ? "途中" : w === my ? "勝" : w === opp ? "敗" : "—";
     const sMy = my === "A" ? m.match_score_a : m.match_score_b;
     const sOpp = my === "A" ? m.match_score_b : m.match_score_a;
-    return { m, no: i + 1, my, opp, oppClub, ownNames: sideNames(m, my), oppNames: sideNames(m, opp), result,
+    const hasPoints = (m.games || []).some(g => (g.points || []).length > 0);
+    return { m, no: i + 1, my, opp, oppClub, ownNames: sideNames(m, my), oppNames: sideNames(m, opp), result, hasPoints,
              score: (sMy ?? "") === "" && (sOpp ?? "") === "" ? "" : `${sMy ?? 0}-${sOpp ?? 0}` };
   });
 
@@ -7916,6 +7920,8 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   const MNO = R("B"), SRV = R("G"), SRVP = R("H"), SV = R("I"), SC = R("K"), PL = R("L"), PT = R("M"),
         PLAY = R("N"), SIDE = R("O"), RES = R("Q"), MT = R("R");
   const matchCount = matchInfo.length;
+  // ★1試合平均の母数は「ポイントを記録した試合」だけ（ゲームカウントだけ入れた試合は除く）
+  const pointMatchCount = matchInfo.filter(x => x.hasPoints).length;
   const ML = 4 + matchCount; // 試合一覧の最終行
 
   // プレー・ミスの種類の並び（データに出てくるものだけ。アプリの選択肢の順）
@@ -7955,15 +7961,16 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
 
   // ---------- 試合一覧 ----------
   title(wsM, "試合一覧", `${tName}　全${matchCount}試合`);
-  header(wsM, 4, ["試合No","日付","回戦",`${ownLabel}のペア`,"相手校","相手のペア","ゲームカウント(自-相手)","勝敗"]);
+  header(wsM, 4, ["試合No","日付","回戦",`${ownLabel}のペア`,"相手校","相手のペア","ゲームカウント(自-相手)","勝敗","ポイント記録"]);
   wsM.getRow(4).height = 30;
   matchInfo.forEach((info, i) => {
     const r = 5 + i;
     [info.no, info.m.match_date || "", info.m.round || "", info.ownNames.join("・"), info.oppClub, info.oppNames.join("・"), info.score]
       .forEach((v, j) => put(wsM, r, j + 1, v, { body:true }));
     put(wsM, r, 8, info.result, { body:true, bold:true, align:"center", color: info.result === "勝" ? COL.green : info.result === "敗" ? COL.red : COL.gray });
+    put(wsM, r, 9, info.hasPoints ? "あり" : "結果のみ", { body:true, align:"center", color: info.hasPoints ? COL.black : COL.gray });
   });
-  widths(wsM, [7,11,9,22,12,24,12,6]);
+  widths(wsM, [7,11,9,22,12,24,12,6,10]);
 
   // ---------- 分析レポート ----------
   const report = (ws, team, color) => {
@@ -7979,8 +7986,8 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     put(ws, r + 2, 1, "得点（決めた）", { body:true }); put(ws, r + 2, 2, `=COUNTIFS(${PT},${T},${RES},"得点")`, { body:true });
     put(ws, r + 3, 1, "ミス", { body:true });           put(ws, r + 3, 2, `=COUNTIFS(${PT},${T},${RES},"ミス")`, { body:true });
     put(ws, r + 4, 1, "得失点差", { body:true });       put(ws, r + 4, 2, `=B${r + 2}-B${r + 3}`, { body:true, fmt:"+0;-0;0" });
-    for (let x = r + 2; x <= r + 4; x++) put(ws, x, 3, `=IF(${matchCount}=0,0,B${x}/${matchCount})`, { body:true, fmt: x === r + 4 ? "+0.0;-0.0;0.0" : "0.0" });
-    note(ws, r + 5, `※試合数 ${matchCount}（「試合一覧」より）。ネットインは得点・ミスに含めません`);
+    for (let x = r + 2; x <= r + 4; x++) put(ws, x, 3, `=IF(${pointMatchCount}=0,0,B${x}/${pointMatchCount})`, { body:true, fmt: x === r + 4 ? "+0.0;-0.0;0.0" : "0.0" });
+    note(ws, r + 5, `※1試合平均はポイントを記録した${pointMatchCount}試合で計算（全${matchCount}試合のうち、結果のみの${matchCount - pointMatchCount}試合は除く）。ネットインは得点・ミスに含めません`);
 
     // ミスの種類
     r = 11; section(ws, r, "■ ミスの種類（何のミスが多いか）");
@@ -8092,16 +8099,17 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   const indiv = (ws, team, color) => {
     const T = q(team);
     title(ws, `個人別スタッツ（${team === "自チーム" ? ownLabel : "対戦相手"}）`,
-      "合計と1試合平均。色が濃いほど多い。試合数・勝敗は出力時の値、それ以外は「ポイントデータ」から自動計算");
-    const cols = ["選手","試合数","勝","敗","得点","ミス","得失点差","得点/試合","ミス/試合","1stサーブ率","レシーブミス(1st時)","レシーブミス(2nd時)", ...missKinds, "一番多いミス"];
+      "合計と1試合平均（ポイントを記録した試合だけで計算）。色が濃いほど多い。試合数・勝敗は出力時の値、それ以外は「ポイントデータ」から自動計算");
+    const cols = ["選手","試合数","うちポイント記録","勝","敗","得点","ミス","得失点差","得点/試合","ミス/試合","1stサーブ率","レシーブミス(1st時)","レシーブミス(2nd時)", ...missKinds, "一番多いミス"];
     header(ws, 4, cols, 1, color); ws.getRow(4).height = 32;
-    // 選手ごとの試合数・勝敗（出場した試合の結果から）
+    // 選手ごとの試合数・勝敗（出場した試合の結果から）と、ポイントを記録した試合数
     const agg = new Map();
     matchInfo.forEach(info => {
       const names = team === "自チーム" ? info.ownNames : info.oppNames;
       names.forEach(n => {
-        const a = agg.get(n) ?? { n, matches:0, win:0, lose:0 };
+        const a = agg.get(n) ?? { n, matches:0, pointMatches:0, win:0, lose:0 };
         a.matches++;
+        if (info.hasPoints) a.pointMatches++;
         const won = team === "自チーム" ? info.result === "勝" : info.result === "敗";
         const lost = team === "自チーム" ? info.result === "敗" : info.result === "勝";
         if (won) a.win++; if (lost) a.lose++;
@@ -8109,19 +8117,20 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
       });
     });
     const list = [...agg.values()];
-    const mk1 = 13, mkLast = 12 + missKinds.length, cTop = mkLast + 1;
+    const mk1 = 14, mkLast = 13 + missKinds.length, cTop = mkLast + 1;
     list.forEach((a, i) => {
       const r = 5 + i, nm = `$A${r}`;
       put(ws, r, 1, a.n, { body:true, bold:true });
-      put(ws, r, 2, a.matches, { body:true }); put(ws, r, 3, a.win, { body:true }); put(ws, r, 4, a.lose, { body:true });
-      put(ws, r, 5, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"得点")`, { body:true });
-      put(ws, r, 6, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"ミス")`, { body:true });
-      put(ws, r, 7, `=E${r}-F${r}`, { body:true, fmt:"+0;-0;0" });
-      put(ws, r, 8, `=IF(B${r}=0,0,E${r}/B${r})`, { body:true, fmt:"0.0" });
-      put(ws, r, 9, `=IF(B${r}=0,0,F${r}/B${r})`, { body:true, fmt:"0.0" });
-      put(ws, r, 10, `=IF(COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"<>")=0,"機会なし",COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"1st")/COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"<>"))`, { body:true, fmt:"0%" });
-      put(ws, r, 11, `=COUNTIFS(${PL},${nm},${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"1st")`, { body:true });
-      put(ws, r, 12, `=COUNTIFS(${PL},${nm},${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"2nd")`, { body:true });
+      put(ws, r, 2, a.matches, { body:true }); put(ws, r, 3, a.pointMatches, { body:true });
+      put(ws, r, 4, a.win, { body:true }); put(ws, r, 5, a.lose, { body:true });
+      put(ws, r, 6, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"得点")`, { body:true });
+      put(ws, r, 7, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"ミス")`, { body:true });
+      put(ws, r, 8, `=F${r}-G${r}`, { body:true, fmt:"+0;-0;0" });
+      put(ws, r, 9, `=IF(C${r}=0,0,F${r}/C${r})`, { body:true, fmt:"0.0" });
+      put(ws, r, 10, `=IF(C${r}=0,0,G${r}/C${r})`, { body:true, fmt:"0.0" });
+      put(ws, r, 11, `=IF(COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"<>")=0,"機会なし",COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"1st")/COUNTIFS(${SRVP},${nm},${SRV},${T},${SV},"<>"))`, { body:true, fmt:"0%" });
+      put(ws, r, 12, `=COUNTIFS(${PL},${nm},${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"1st")`, { body:true });
+      put(ws, r, 13, `=COUNTIFS(${PL},${nm},${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"2nd")`, { body:true });
       missKinds.forEach((k, j) => put(ws, r, mk1 + j, `=COUNTIFS(${PL},${nm},${PT},${T},${RES},"ミス",${MT},"${k}")`, { body:true }));
       const rng = `${ws.getColumn(mk1).letter}${r}:${ws.getColumn(mkLast).letter}${r}`;
       const hdr = `$${ws.getColumn(mk1).letter}$4:$${ws.getColumn(mkLast).letter}$4`;
@@ -8129,14 +8138,14 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     });
     if (list.length > 0) {
       const e = 4 + list.length;
-      dataBar(ws, `E5:E${e}`, COL.green); dataBar(ws, `F5:F${e}`, COL.red);
-      dataBar(ws, `H5:H${e}`, COL.green); dataBar(ws, `I5:I${e}`, COL.red);
-      heat(ws, `K5:L${e}`);
+      dataBar(ws, `F5:F${e}`, COL.green); dataBar(ws, `G5:G${e}`, COL.red);
+      dataBar(ws, `I5:I${e}`, COL.green); dataBar(ws, `J5:J${e}`, COL.red);
+      heat(ws, `L5:M${e}`);
       heat(ws, `${ws.getColumn(mk1).letter}5:${ws.getColumn(mkLast).letter}${e}`);
     } else {
       put(ws, 5, 1, "対象の選手がいません", { color:COL.gray });
     }
-    widths(ws, [18,7,5,5,7,7,9,9,9,10,11,11, ...missKinds.map(() => 9), 12]);
+    widths(ws, [18,7,9,5,5,7,7,9,9,9,10,11,11, ...missKinds.map(() => 9), 12]);
   };
   indiv(wsIndOwn, "自チーム", COL.green);
   indiv(wsIndOpp, "相手", COL.orange);
@@ -8153,23 +8162,25 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     ["得失点差が大きい順", p => p.winners - p.errors, "", true, () => true],
   ];
   [...byDate.keys()].sort().forEach(date => {
-    const players = aggregateRankingPlayers([{ date, matches: byDate.get(date) }], mySchoolName).filter(p => p.matches > 0);
+    // ★1試合平均の母数は、ポイントを記録した試合だけ（アプリの日別ランキングと同じ）
+    const players = aggregateRankingPlayers([{ date, matches: byDate.get(date) }], mySchoolName).filter(p => (p.pointMatches ?? 0) > 0);
     section(wsRank, rr, `■ ${date}（${byDate.get(date).length}試合）`); rr++;
     let maxLen = 0;
     blocks.forEach(([t, valueOf, unit, higher, filt], bi) => {
       const c0 = 1 + bi * 4;
       header(wsRank, rr, ["順位", t, "1試合平均"], c0, COL.green);
-      const list = players.filter(filt).map(p => ({ p, total: valueOf(p), avg: valueOf(p) / p.matches }))
-        .sort((a, b) => (higher ? b.avg - a.avg : a.avg - b.avg) || (b.p.matches - a.p.matches));
+      const list = players.filter(filt).map(p => ({ p, total: valueOf(p), avg: valueOf(p) / p.pointMatches }))
+        .sort((a, b) => (higher ? b.avg - a.avg : a.avg - b.avg) || (b.p.pointMatches - a.p.pointMatches));
       list.forEach((x, i) => {
         const r = rr + 1 + i;
         const totalStr = unit === "" ? `${x.total > 0 ? "+" : ""}${x.total}` : `${x.total}${unit}`;
         put(wsRank, r, c0, i + 1, { body:true, align:"center" });
-        put(wsRank, r, c0 + 1, `${x.p.name}（${x.p.matches}試合・合計${totalStr}）`, { body:true });
+        const excluded = Math.max(0, x.p.matches - x.p.pointMatches);
+        put(wsRank, r, c0 + 1, `${x.p.name}（${x.p.pointMatches}試合・合計${totalStr}${excluded > 0 ? `・結果のみ${excluded}試合は除く` : ""}）`, { body:true });
         put(wsRank, r, c0 + 2, Math.round(x.avg * 10) / 10, { body:true, bold:true, fmt: unit === "" ? "+0.0;-0.0;0.0" : "0.0" });
       });
       maxLen = Math.max(maxLen, list.length);
-      wsRank.getColumn(c0).width = 5; wsRank.getColumn(c0 + 1).width = 28; wsRank.getColumn(c0 + 2).width = 9; wsRank.getColumn(c0 + 3).width = 2;
+      wsRank.getColumn(c0).width = 5; wsRank.getColumn(c0 + 1).width = 34; wsRank.getColumn(c0 + 2).width = 9; wsRank.getColumn(c0 + 3).width = 2;
     });
     rr += maxLen + 3;
   });
@@ -8379,12 +8390,15 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
   // ★1試合平均のランキング1つ分を作る（higherIsBetter=falseなら少ない順）
   function avgMetric(key, icon, title, src, valueOf, unit, higherIsBetter) {
     const fmt1 = v => (Math.round(v * 10) / 10).toFixed(1);
-    const list = src.filter(p=>p.matches>0).map(p => {
+    // ★母数は「ポイントを記録した試合」だけ。ゲームカウントだけ入れた試合は得点・ミスが0になり平均を下げてしまうため除く
+    const list = src.filter(p=>(p.pointMatches ?? 0)>0).map(p => {
       const total = valueOf(p);
-      const avg = total / p.matches;
+      const n = p.pointMatches;
+      const avg = total / n;
       const sign = unit==="" && avg>0 ? "+" : "";
       const totalStr = unit==="" ? `${total>0?"+":""}${total}` : `${total}${unit}`;
-      return { name:p.name, sub:`${p.matches}試合・合計${totalStr}`, val:`${sign}${fmt1(avg)}${unit}`, avg, matches:p.matches };
+      const excluded = Math.max(0, (p.matches ?? 0) - n);
+      return { name:p.name, sub:`${n}試合・合計${totalStr}${excluded>0?`（結果のみ${excluded}試合は除く）`:""}`, val:`${sign}${fmt1(avg)}${unit}`, avg, matches:n };
     }).sort((a,b) => {
       const d = higherIsBetter ? b.avg - a.avg : a.avg - b.avg;
       if (Math.abs(d) > 1e-9) return d;
