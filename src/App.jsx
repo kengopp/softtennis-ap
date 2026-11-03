@@ -7915,19 +7915,34 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
     setCsvSheetOpen(true);
   }
 
+  // ★1試合平均のランキング1つ分を作る（higherIsBetter=falseなら少ない順）
+  function avgMetric(key, icon, title, src, valueOf, unit, higherIsBetter) {
+    const fmt1 = v => (Math.round(v * 10) / 10).toFixed(1);
+    const list = src.filter(p=>p.matches>0).map(p => {
+      const total = valueOf(p);
+      const avg = total / p.matches;
+      const sign = unit==="" && avg>0 ? "+" : "";
+      const totalStr = unit==="" ? `${total>0?"+":""}${total}` : `${total}${unit}`;
+      return { name:p.name, sub:`${p.matches}試合・合計${totalStr}`, val:`${sign}${fmt1(avg)}${unit}`, avg, matches:p.matches };
+    }).sort((a,b) => {
+      const d = higherIsBetter ? b.avg - a.avg : a.avg - b.avg;
+      if (Math.abs(d) > 1e-9) return d;
+      return b.matches - a.matches;
+    });
+    return [{ key, icon, title:`${title}（1試合平均）`, list }];
+  }
+
   const metrics = [
     { key:"winloss", icon:"🏆", title:"勝敗",
       list: players.filter(p=>p.matches>0).map(p=>({ name:p.name, sub:`${p.matches}試合`, val:`${p.wins}勝${p.losses}敗`, sortVal:p.wins*1000-p.losses })).sort((a,b)=>b.sortVal-a.sortVal) },
     { key:"firstserve", icon:"🎾", title:"1stサーブ率",
       list: players.filter(p=>p.serveTotal>0).map(p=>({ name:p.name, sub:`${p.serveTotal-p.serveFault}/${p.serveTotal}本`, val:`${Math.round((p.serveTotal-p.serveFault)/p.serveTotal*100)}%`, sortVal:(p.serveTotal-p.serveFault)/p.serveTotal })).sort((a,b)=>b.sortVal-a.sortVal) },
-    { key:"receivemiss", icon:"🛡", title:"レシーブミスが少ない順",
-      list: players.filter(p=>p.receiveTotal>0).map(p=>({ name:p.name, sub:null, val:`${p.receiveMiss}回`, sortVal:-p.receiveMiss })).sort((a,b)=>b.sortVal-a.sortVal) },
-    { key:"winners", icon:"💪", title:"得点（決めた）が多い順",
-      list: players.map(p=>({ name:p.name, sub:null, val:`${p.winners}点`, sortVal:p.winners })).sort((a,b)=>b.sortVal-a.sortVal) },
-    { key:"errors", icon:"📝", title:"ミスが少ない順",
-      list: players.map(p=>({ name:p.name, sub:null, val:`${p.errors}回`, sortVal:-p.errors })).sort((a,b)=>b.sortVal-a.sortVal) },
-    { key:"diff", icon:"📊", title:"得失点差が大きい順",
-      list: players.map(p=>({ name:p.name, sub:null, val:(p.winners-p.errors)>=0?`+${p.winners-p.errors}`:`${p.winners-p.errors}`, sortVal:p.winners-p.errors })).sort((a,b)=>b.sortVal-a.sortVal) },
+    // ★レシーブミス以降は、試合数の違いで不公平にならないよう「1試合平均」で順位を付ける。
+    //   平均が同じときは試合数が多い選手を上にする（たまたまの結果に左右されにくいため）。
+    ...avgMetric("receivemiss", "🛡", "レシーブミスが少ない順", players.filter(p=>p.receiveTotal>0), p=>p.receiveMiss, "回", false),
+    ...avgMetric("winners", "💪", "得点（決めた）が多い順", players, p=>p.winners, "点", true),
+    ...avgMetric("errors", "📝", "ミスが少ない順", players, p=>p.errors, "回", false),
+    ...avgMetric("diff", "📊", "得失点差が大きい順", players, p=>p.winners-p.errors, "", true),
   ];
 
   if (expandedMetric) {
@@ -7946,7 +7961,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
                 <div style={{ width:26, textAlign:"center", fontSize:15, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:16, fontWeight:700 }}>{row.name}</div>
-                  {row.sub && <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                  {row.sub && <div style={{ fontSize:14, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
                 </div>
                 <div style={{ fontSize:17, fontWeight:800, color:C.navy }}>{row.val}</div>
               </div>
@@ -8070,7 +8085,7 @@ function DailyPlayerRankingScreen({ tournament, onBack, mySchoolName }) {
                         <div style={{ width:26, textAlign:"center", fontSize:15, fontWeight:800, color:i<3?C.navy:C.textSec }}>{i+1}</div>
                         <div style={{ flex:1 }}>
                           <div style={{ fontSize:16, fontWeight:700 }}>{row.name}</div>
-                          {row.sub && <div style={{ fontSize:12.5, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
+                          {row.sub && <div style={{ fontSize:14, color:C.textSec, marginTop:1 }}>{row.sub}</div>}
                         </div>
                         <div style={{ fontSize:17, fontWeight:800, color:C.navy }}>{row.val}</div>
                       </div>
