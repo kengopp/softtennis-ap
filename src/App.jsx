@@ -7828,8 +7828,11 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   // ---------- 試合ごとの基本情報 ----------
   const sideNames = (m, side) => (m.players || []).filter(p => p.team === side)
     .sort((a, b) => (a.order_num ?? 0) - (b.order_num ?? 0)).map(p => p.player_name).filter(Boolean);
+  const isMyClub = (c) => !!mySchoolName && !!c && c.trim() === mySchoolName.trim();
   const matchInfo = matches.map((m, i) => {
     const my = mySideOf(m, mySchoolName);
+    // ★自チーム同士の対戦（東福岡 対 東福岡）。両方の選手を「自チーム」として数える
+    const intra = ["A","B"].every(t => (m.players || []).some(p => p.team === t && isMyClub(p.club_name)));
     const opp = my === "A" ? "B" : "A";
     const oppClub = (m.players || []).find(p => p.team === opp)?.club_name || "";
     const w = winnerSideOf(m);
@@ -7837,7 +7840,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     const sMy = my === "A" ? m.match_score_a : m.match_score_b;
     const sOpp = my === "A" ? m.match_score_b : m.match_score_a;
     const hasPoints = (m.games || []).some(g => (g.points || []).length > 0);
-    return { m, no: i + 1, my, opp, oppClub, ownNames: sideNames(m, my), oppNames: sideNames(m, opp), result, hasPoints,
+    return { m, no: i + 1, my, opp, oppClub, ownNames: sideNames(m, my), oppNames: sideNames(m, opp), result, hasPoints, intra,
              score: (sMy ?? "") === "" && (sOpp ?? "") === "" ? "" : `${sMy ?? 0}-${sOpp ?? 0}` };
   });
 
@@ -7847,8 +7850,8 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   const courseLabel = (k) => { const c = normCourse(k); return COURSE_TYPES.find(x => x.key === c)?.dir ?? (c || ""); };
   const pointRows = [];
   for (const info of matchInfo) {
-    const { m, no, my } = info;
-    const rel = (t) => (t === "A" || t === "B") ? (t === my ? "自チーム" : "相手") : "";
+    const { m, no, my, intra } = info;
+    const rel = (t) => (t === "A" || t === "B") ? ((intra || t === my) ? "自チーム" : "相手") : "";
     for (const r of buildServeReceiveRows(m)) {
       const pt = r.point;
       // ★選手の所属チームはスタッツと同じ考え方で決める（得点なら得点した側、ミスなら得点されなかった側）
@@ -7874,7 +7877,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
         r.serveResult === "1st" ? "1st" : r.serveResult === "2nd" ? "2nd" : r.serveResult === "df" ? "DF" : "",
         r.receiverPlayer || "", rel(pt.scoring_team), playerName, playerName ? rel(playerTeam) : "",
         playLabel, pt.side_type ? sideLabel(pt.side_type) : "", pt.course_type ? courseLabel(pt.course_type) : "",
-        resLabel, (!pt.is_winner && pt.miss_type) ? missLabel(pt.miss_type) : "", score,
+        resLabel, (!pt.is_winner && pt.miss_type) ? missLabel(pt.miss_type) : "", score, intra ? "○" : "",
       ]);
     }
   }
@@ -7923,7 +7926,10 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   const lastRow = Math.max(2, pointRows.length + 1);
   const R = (col) => `'${PD}'!$${col}$2:$${col}$${lastRow}`;
   const MNO = R("B"), SRV = R("G"), SRVP = R("H"), SV = R("I"), SC = R("K"), PL = R("L"), PT = R("M"),
-        PLAY = R("N"), SIDE = R("O"), RES = R("Q"), MT = R("R");
+        PLAY = R("N"), SIDE = R("O"), RES = R("Q"), MT = R("R"), SAME = R("T");
+  // ★同校対決の試合は、サーブ・レシーブの「得点率」などチーム対チームの数字からは除く
+  //   （どちらが得点しても自チームの得点になり、率が正しく出ないため）
+  const NOT_SAME = `${SAME},""`;
   const matchCount = matchInfo.length;
   // ★1試合平均の母数は「ポイントを記録した試合」だけ（ゲームカウントだけ入れた試合は除く）
   const pointMatchCount = matchInfo.filter(x => x.hasPoints).length;
@@ -7949,7 +7955,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   const wsP = wb.addWorksheet(PD, { views:[{ state:"frozen", ySplit:1 }] });
 
   // ---------- ポイントデータ ----------
-  const pdCols = ["日付","試合No","回戦","相手校","ゲーム","ポイント","サーブ側","サーバー","サーブ","レシーバー","得点チーム","選手","選手のチーム","プレー","フォア/バック","コース","結果","ミスの種類","スコア(自-相手)"];
+  const pdCols = ["日付","試合No","回戦","相手校","ゲーム","ポイント","サーブ側","サーバー","サーブ","レシーバー","得点チーム","選手","選手のチーム","プレー","フォア/バック","コース","結果","ミスの種類","スコア(自-相手)","同校対決"];
   if (pointRows.length > 0) {
     wsP.addTable({
       name: "PointData", ref: "A1", headerRow: true,
@@ -7962,7 +7968,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     put(wsP, 2, 1, "この大会にはポイントの記録がありません", { color:COL.gray });
   }
   wsP.getRow(1).font = font({ bold:true, color:COL.white });
-  widths(wsP, [11,7,9,12,9,7,9,14,6,14,9,14,10,12,10,9,8,11,12]);
+  widths(wsP, [11,7,9,12,9,7,9,14,6,14,9,14,10,12,10,9,8,11,12,9]);
 
   // ---------- 試合一覧 ----------
   title(wsM, "試合一覧", `全${matchCount}試合`);
@@ -7970,7 +7976,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   wsM.getRow(4).height = 30;
   matchInfo.forEach((info, i) => {
     const r = 5 + i;
-    [info.no, info.m.match_date || "", info.m.round || "", info.ownNames.join("・"), info.oppClub, info.oppNames.join("・"), info.score]
+    [info.no, info.m.match_date || "", info.m.round || "", info.ownNames.join("・"), info.intra ? `${info.oppClub}（同校対決）` : info.oppClub, info.oppNames.join("・"), info.score]
       .forEach((v, j) => put(wsM, r, j + 1, v, { body:true }));
     put(wsM, r, 8, info.result, { body:true, bold:true, align:"center", color: info.result === "勝" ? COL.green : info.result === "敗" ? COL.red : COL.gray });
     put(wsM, r, 9, info.hasPoints ? "あり" : "結果のみ", { body:true, align:"center", color: info.hasPoints ? COL.black : COL.gray });
@@ -8037,14 +8043,14 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     // サーブ
     r = s2 + 2; section(ws, r, "■ サーブ");
     header(ws, r + 1, ["項目","本数","割合","そのときの得点","得点率"], 1, color);
-    const tot = `COUNTIFS(${SRV},${T},${SV},"<>")`;
+    const tot = `COUNTIFS(${SRV},${T},${SV},"<>",${NOT_SAME})`;
     [["1stイン","1st"],["2ndイン","2nd"],["ダブルフォルト","DF"]].forEach(([lab, s], i) => {
       const x = r + 2 + i;
       put(ws, x, 1, lab, { body:true });
-      put(ws, x, 2, `=COUNTIFS(${SRV},${T},${SV},"${s}")`, { body:true });
+      put(ws, x, 2, `=COUNTIFS(${SRV},${T},${SV},"${s}",${NOT_SAME})`, { body:true });
       put(ws, x, 3, `=IF(${tot}=0,"機会なし",B${x}/${tot})`, { body:true, fmt:"0%" });
       if (s !== "DF") {
-        put(ws, x, 4, `=COUNTIFS(${SRV},${T},${SV},"${s}",${SC},${T})`, { body:true });
+        put(ws, x, 4, `=COUNTIFS(${SRV},${T},${SV},"${s}",${SC},${T},${NOT_SAME})`, { body:true });
         put(ws, x, 5, `=IF(B${x}=0,"機会なし",D${x}/B${x})`, { body:true, fmt:"0%" });
       } else { put(ws, x, 4, "—", { body:true }); put(ws, x, 5, "—", { body:true }); }
     });
@@ -8059,12 +8065,13 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
       put(ws, x, 2, `=COUNTIFS(${SRV},${O},${SV},"${s}")`, { body:true });
       put(ws, x, 3, `=COUNTIFS(${SRV},${O},${SV},"${s}",${SC},${T})`, { body:true });
       put(ws, x, 4, `=IF(B${x}=0,"機会なし",C${x}/B${x})`, { body:true, fmt:"0%" });
-      put(ws, x, 5, `=COUNTIFS(${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"${s}")`, { body:true });
+      put(ws, x, 5, `=COUNTIFS(${PT},${T},${PLAY},"レシーブ",${RES},"ミス",${SV},"${s}",${NOT_SAME})`, { body:true });
     });
     const xd = r + 4;
     put(ws, xd, 1, "相手のダブルフォルト", { body:true }); put(ws, xd, 2, "—", { body:true });
     put(ws, xd, 3, `=COUNTIFS(${SRV},${O},${SV},"DF")`, { body:true }); put(ws, xd, 4, "—", { body:true }); put(ws, xd, 5, "—", { body:true });
     dataBar(ws, `E${r + 2}:E${r + 3}`, COL.red);
+    if (matchInfo.some(x => x.intra)) note(ws, xd + 1, "※サーブ・レシーブの表には、自チーム同士の対戦（同校対決）は入れていません");
 
     // 一番多いミス TOP5（右側）＋ 集計用の組み合わせ一覧
     section(ws, 4, "■ 一番多いミス TOP5（練習テーマ候補）", 9);
@@ -8109,17 +8116,22 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     header(ws, 4, cols, 1, color); ws.getRow(4).height = 32;
     // 選手ごとの試合数・勝敗（出場した試合の結果から）と、ポイントを記録した試合数
     const agg = new Map();
+    const add = (n, info, won, lost) => {
+      const a = agg.get(n) ?? { n, matches:0, pointMatches:0, win:0, lose:0 };
+      a.matches++;
+      if (info.hasPoints) a.pointMatches++;
+      if (won) a.win++; if (lost) a.lose++;
+      agg.set(n, a);
+    };
     matchInfo.forEach(info => {
-      const names = team === "自チーム" ? info.ownNames : info.oppNames;
-      names.forEach(n => {
-        const a = agg.get(n) ?? { n, matches:0, pointMatches:0, win:0, lose:0 };
-        a.matches++;
-        if (info.hasPoints) a.pointMatches++;
-        const won = team === "自チーム" ? info.result === "勝" : info.result === "敗";
-        const lost = team === "自チーム" ? info.result === "敗" : info.result === "勝";
-        if (won) a.win++; if (lost) a.lose++;
-        agg.set(n, a);
-      });
+      const ownWon = info.result === "勝", ownLost = info.result === "敗";
+      if (team === "自チーム") {
+        info.ownNames.forEach(n => add(n, info, ownWon, ownLost));
+        // ★同校対決は相手側の選手も自チームとして入れる（勝敗はその選手から見た結果）
+        if (info.intra) info.oppNames.forEach(n => add(n, info, ownLost, ownWon));
+      } else if (!info.intra) {
+        info.oppNames.forEach(n => add(n, info, ownLost, ownWon));
+      }
     });
     const list = [...agg.values()];
     const mk1 = 14, mkLast = 13 + missKinds.length, cTop = mkLast + 1;
@@ -8196,7 +8208,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   header(wsK, 4, ["試合No","日付","回戦","選手","チーム","1st","2nd","DF","計","1st率"]);
   let kr = 5;
   matchInfo.forEach(info => {
-    [["自チーム", info.ownNames], ["相手", info.oppNames]].forEach(([team, names]) => names.forEach(n => {
+    [["自チーム", info.ownNames], [info.intra ? "自チーム" : "相手", info.oppNames]].forEach(([team, names]) => names.forEach(n => {
       [info.no, info.m.match_date || "", info.m.round || "", n, team].forEach((v, j) => put(wsK, kr, j + 1, v, { body:true }));
       ["1st","2nd","DF"].forEach((s, j) => put(wsK, kr, 6 + j, `=COUNTIFS(${MNO},$A${kr},${SRVP},$D${kr},${SRV},$E${kr},${SV},"${s}")`, { body:true }));
       put(wsK, kr, 9, `=SUM(F${kr}:H${kr})`, { body:true, bold:true });
