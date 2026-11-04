@@ -8139,7 +8139,18 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
         info.oppNames.forEach(n => add(n, info, ownLost, ownWon));
       }
     });
-    const list = [...agg.values()];
+    // ★並び順：試合数が多い順 → 勝数 → 得失点差 → 得点が多い順 → ミスが少ない順
+    //   （得点・ミスはポイントデータと同じ数え方で出す）
+    const wins = new Map(), errs = new Map();
+    pointRows.forEach(r => {
+      if (r[12] !== team || !r[11]) return;
+      if (r[16] === "得点") wins.set(r[11], (wins.get(r[11]) ?? 0) + 1);
+      else if (r[16] === "ミス") errs.set(r[11], (errs.get(r[11]) ?? 0) + 1);
+    });
+    const list = [...agg.values()].sort((x, y) => {
+      const wx = wins.get(x.n) ?? 0, wy = wins.get(y.n) ?? 0, ex = errs.get(x.n) ?? 0, ey = errs.get(y.n) ?? 0;
+      return (y.matches - x.matches) || (y.win - x.win) || ((wy - ey) - (wx - ex)) || (wy - wx) || (ex - ey);
+    });
     const mk1 = 14, mkLast = 13 + missKinds.length, cTop = mkLast + 1;
     list.forEach((a, i) => {
       const r = 5 + i, nm = `$A${r}`;
