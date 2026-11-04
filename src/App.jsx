@@ -6834,9 +6834,13 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
     const seen = new Set();
     const list = [];
     individualMatches.forEach(m => {
-      const side = mySideOf(m, mySchoolName);
-      const names = (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/");
-      if (names && !seen.has(names)) { seen.add(names); list.push(names); }
+      // ★同校対決ではB側も自チームのペアなので、両側とも候補に入れる
+      const mine = ["A","B"].filter(t => (m.players || []).some(p => p.team === t && p.club_name && mySchoolName && p.club_name.trim() === mySchoolName.trim()));
+      const sides = mine.length > 0 ? mine : [mySideOf(m, mySchoolName)];
+      sides.forEach(side => {
+        const names = (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/");
+        if (names && !seen.has(names)) { seen.add(names); list.push(names); }
+      });
     });
     return list;
   }, [individualMatches, mySchoolName]);
@@ -6889,9 +6893,11 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   const filteredIndividualMatches = individualMatches.filter(m => {
     if (individualRoundFilter !== "all" && m.round !== individualRoundFilter) return false;
     if (individualPairFilter !== "all") {
-      const side = mySideOf(m, mySchoolName);
-      const names = (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/");
-      if (names !== individualPairFilter) return false;
+      // ★選んだペアがA側・B側のどちらにいても表示する（同校対決で相手側にいる試合も出す）
+      const hit = ["A","B"].some(side =>
+        (m.players || []).filter(p => p.team === side).sort((a,b)=>(a.order_num??0)-(b.order_num??0)).map(p => p.player_name).filter(Boolean).join("/") === individualPairFilter
+      );
+      if (!hit) return false;
     }
     if (individualResultFilter === "win" && individualRoundFilter === "all") {
       // ★「回戦：すべて」のときの「勝ち残りのみ」は、大会全体を通じて一度も負けていないペア
