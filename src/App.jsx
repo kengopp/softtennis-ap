@@ -7899,7 +7899,12 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     cell.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:fill } };
     cell.alignment = { horizontal:"center", vertical:"middle", wrapText:true };
   });
-  const title = (ws, t, sub) => { put(ws, 1, 1, t, { size:16, bold:true, color:COL.navy }); put(ws, 2, 1, sub, { color:COL.gray }); };
+  // 1行目＝シート名、2行目＝大会名（同じ大きさ）、3行目＝説明（小さめ）
+  const title = (ws, t, sub) => {
+    put(ws, 1, 1, t, { size:16, bold:true, color:COL.navy });
+    put(ws, 2, 1, tName, { size:16, bold:true, color:COL.navy });
+    put(ws, 3, 1, sub, { color:COL.gray });
+  };
   const section = (ws, r, t, c = 1) => put(ws, r, c, t, { size:12, bold:true, color:COL.navy });
   const note = (ws, r, t, c = 1) => put(ws, r, c, t, { size:9, color:COL.gray });
   // 横棒は数字が読めるよう、チーム色・赤を少し薄くして使う
@@ -7960,7 +7965,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
   widths(wsP, [11,7,9,12,9,7,9,14,6,14,9,14,10,12,10,9,8,11,12]);
 
   // ---------- 試合一覧 ----------
-  title(wsM, "試合一覧", `${tName}　全${matchCount}試合`);
+  title(wsM, "試合一覧", `全${matchCount}試合`);
   header(wsM, 4, ["試合No","日付","回戦",`${ownLabel}のペア`,"相手校","相手のペア","ゲームカウント(自-相手)","勝敗","ポイント記録"]);
   wsM.getRow(4).height = 30;
   matchInfo.forEach((info, i) => {
@@ -7977,7 +7982,7 @@ function buildTournamentWorkbook(ExcelJS, tournament, matchesRaw, mySchoolName) 
     const other = team === "自チーム" ? "相手" : "自チーム";
     const T = q(team), O = q(other);
     title(ws, `分析レポート（${team === "自チーム" ? ownLabel : "対戦相手"}）`,
-      `${tName}　全${matchCount}試合　※数字はすべて「${PD}」シートから自動計算しています`);
+      `全${matchCount}試合　※数字はすべて「${PD}」シートから自動計算しています`);
     widths(ws, [24,13,13,13,13,13,3,3,6,34,9,8]);
 
     // サマリー
