@@ -40,7 +40,11 @@ const PLAY_TYPES = [
   { key: "smash",    label: "スマッシュ" },
   { key: "lob",      label: "ロブ"      },
   { key: "drop",     label: "ツイスト"  }, // ★旧「ドロップ」。過去データも同じキーなので表示だけ切り替わる
+  // ★2026-11 追加：タッチネット（ネットに触れた反則）。③で「ミスした」を選んだときだけ表示する
+  { key: "touch_net", label: "タッチネット", errorOnly: true },
 ];
+// ★⑤「どんなプレー？」に並べるボタン（タッチネットは「ミスした」のときだけ出す）
+const playTypesShown = (kind) => kind === "error" ? PLAY_TYPES : PLAY_TYPES.filter(p => !p.errorOnly);
 // ★プレーの選択肢から外したもの（過去の記録の表示用）。ネットインは③「この得点は？」の区分に移した
 const RETIRED_PLAY_LABELS = { net_in: "ネットイン", __none: "プレー未入力" };
 
@@ -113,7 +117,7 @@ const MISS_TYPES = [
 const RETIRED_MISS_LABELS = {};
 // ★ミス時は「サーブ」を選択肢から外す（サーブのミス＝ダブルフォルトで別に記録するため）
 const playTypesFor = (resultType) =>
-  resultType === "error" ? PLAY_TYPES.filter(p => p.key !== "serve") : PLAY_TYPES;
+  resultType === "error" ? PLAY_TYPES.filter(p => p.key !== "serve") : PLAY_TYPES.filter(p => !p.errorOnly);
 // ★3列のボタン表示用：ミス時も並びが崩れないよう「サーブ」は消さずに押せない状態で残す
 // ★ネットインのときもサーブは押せない（サーブのネットインはレット＝やり直しのため）
 const playDisabledFor = (resultType, key) => (resultType === "error" || resultType === "net_in") && key === "serve";
@@ -4749,6 +4753,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
     setResult(k); setPlayerName(null);
     if (k !== "error") setMiss(null);
     if (k === "error" && play === "serve") setPlay(null);
+    if (k !== "error" && play === "touch_net") setPlay(null); // ★タッチネットはミスのときだけ
     if (k === "net_in") { if (play === "serve") setPlay(null); setSide(null); setCourse(null); }
     if (k === "direct") { setSide(null); setCourse(null); } // ★サーブが相手に当たってもダイレクトなのでサーブは選べる
   };
@@ -4829,7 +4834,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
         <div style={{ marginBottom:12 }}>
           {head(5, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
-            {PLAY_TYPES.map(p => (
+            {playTypesShown(kind).map(p => (
               <button key={p.key} disabled={playDisabledFor(result, p.key)} onClick={()=>setPlay(play===p.key?null:p.key)} style={{ ...btn, ...sel(play===p.key), padding:"10px 2px", fontSize:14, ...(playDisabledFor(result, p.key) ? PLAY_OFF_STYLE : {}) }}>{p.label}</button>
             ))}
           </div>
@@ -20384,10 +20389,10 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         <div style={{ marginBottom:12 }}>
           {head(1, "この得点は？")}
           <div style={{ display:"flex", gap:8 }}>
-            <KindButton onClick={()=>{ if(kind!=="winner") setLastPointFields(gameId, { result_type:"winner", player_name:null, miss_type:null }); }} style={{ ...btn, ...sel(kind==="winner") }} label="決めた" note={`（${osTeamName(scoreTeam)}の得点）`} />
+            <KindButton onClick={()=>{ if(kind!=="winner") setLastPointFields(gameId, { result_type:"winner", player_name:null, miss_type:null, ...(lp.play_type==="touch_net"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="winner") }} label="決めた" note={`（${osTeamName(scoreTeam)}の得点）`} />
             <KindButton onClick={()=>{ if(kind!=="error") setLastPointFields(gameId, { result_type:"error", player_name:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="error","#d8645c") }} label="ミスした" note={`（${osTeamName(osOther(scoreTeam))}のミス）`} />
-            <KindButton onClick={()=>{ if(kind!=="net_in") setLastPointFields(gameId, { result_type:"net_in", player_name:null, miss_type:null, side_type:null, course_type:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="net_in") }} label="ネットイン" note="（運の得点）" />
-            <KindButton onClick={()=>{ if(kind!=="direct") setLastPointFields(gameId, { result_type:"direct", player_name:null, miss_type:null, side_type:null, course_type:null }); }} style={{ ...btn, ...sel(kind==="direct") }} label="ダイレクト" note="（体に当てた）" />
+            <KindButton onClick={()=>{ if(kind!=="net_in") setLastPointFields(gameId, { result_type:"net_in", player_name:null, miss_type:null, side_type:null, course_type:null, ...((lp.play_type==="serve" || lp.play_type==="touch_net")?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="net_in") }} label="ネットイン" note="（運の得点）" />
+            <KindButton onClick={()=>{ if(kind!=="direct") setLastPointFields(gameId, { result_type:"direct", player_name:null, miss_type:null, side_type:null, course_type:null, ...(lp.play_type==="touch_net"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="direct") }} label="ダイレクト" note="（体に当てた）" />
           </div>
         </div>
         <div style={{ marginBottom:12, ...(kind ? {} : { opacity:0.35, pointerEvents:"none" }) }}>
@@ -20397,7 +20402,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
         <div style={{ marginBottom:12 }}>
           {head(3, "どんなプレー？", "（任意）")}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
-            {PLAY_TYPES.map(p => (
+            {playTypesShown(kind).map(p => (
               <button key={p.key} disabled={playDisabledFor(lp.result_type, p.key)} onClick={()=>toggle("play_type", p.key)} style={{ ...btn, ...sel(lp.play_type===p.key), padding:"10px 2px", fontSize:14, ...(playDisabledFor(lp.result_type, p.key) ? PLAY_OFF_STYLE : {}) }}>{p.label}</button>
             ))}
           </div>
@@ -20639,7 +20644,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
     if (v !== "df") osGoTo("team", 0.5);
   }
   function osPickTeam(t){ setOsTeam(t); setOsKind(null); setOsPlayer(null); setOsMiss(null); osGoTo("kind"); }
-  function osPickKind(k){ setOsKind(k); setOsPlayer(null); setOsMiss(null); if ((k==="error" || k==="net_in") && osPlay==="serve") setOsPlay(null); if (isRarePoint(k)) { setOsSide(null); setOsCourse(null); } osGoTo("player"); }
+  function osPickKind(k){ setOsKind(k); setOsPlayer(null); setOsMiss(null); if ((k==="error" || k==="net_in") && osPlay==="serve") setOsPlay(null); if (k!=="error" && osPlay==="touch_net") setOsPlay(null); if (isRarePoint(k)) { setOsSide(null); setOsCourse(null); } osGoTo("player"); }
   function osPickPlayer(n){ setOsPlayer(n); osGoTo("play"); }
   function osPickPlay(k){ const v = osPlay===k ? null : k; setOsPlay(v); if (v && !isRarePoint(osKind)) osGoTo("side"); }
   function osPickSide(k){ const v = osSide===k ? null : k; setOsSide(v); if (v) osGoTo(osKind==="error" ? "miss" : "course"); }
@@ -21796,7 +21801,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   <div style={{ marginBottom:12, ...dim(step56Off) }}>
                     {head(5, !!osPlay, "どんなプレー？", "（任意）")}
                     <div ref={osRefs.play} style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6 }}>
-                      {PLAY_TYPES.map(p => (
+                      {playTypesShown(osKind).map(p => (
                         <button key={p.key} disabled={playDisabledFor(osKind, p.key)} onClick={()=>osPickPlay(p.key)} style={{ ...btnBase, ...selStyle(osPlay===p.key), padding:"10px 2px", fontSize:14, ...(playDisabledFor(osKind, p.key) ? PLAY_OFF_STYLE : {}) }}>{p.label}</button>
                       ))}
                     </div>
