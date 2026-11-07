@@ -26030,16 +26030,18 @@ const VA_COLORS = [
   { c:"#a259ff", n:"紫" }, { c:"#2f9bff", n:"青" }, { c:"#5ce1e6", n:"水色" }, { c:"#34c759", n:"緑" },
   { c:"#ffffff", n:"白" }, { c:"#1c1c1e", n:"黒" },
 ];
-const VA_NAMES = { select:"選択", traj:"軌道", aim:"打ちたい", arrow:"矢印", circle:"円", pen:"手書き", player:"選手" };
-const VA_TOOLS = ["select", "traj", "aim", "arrow", "circle", "pen", "player"];
+const VA_NAMES = { select:"選択", traj:"軌道", aim:"打ちたい", arrow:"矢印", circle:"円", rect:"四角", pen:"手書き", player:"選手" };
+// ★並び：上の段「選択・手書き・打ちたい・矢印」、下の段「円・四角・軌道・選手」
+const VA_TOOLS = ["select", "pen", "aim", "arrow", "circle", "rect", "traj", "player"];
 const VA_HINTS = {
-  select: "すでにある線・円・選手などをタップすると選べます。ドラッグで移動、色ボタンで色の変更、「この書き込みを削除」で削除できます。何もない所をタップすると選択が外れます（時間は進みません）。",
-  traj:   "ボールの位置を順にタップすると、点が線でつながって軌道になります。タップするたびに自動で少し進むので、続けてタップするだけでOKです。すでにある線を選ぶときは「選択」に切り替えてください。",
-  aim:    "何もない所を、打った位置から「ここに打ちたかった」場所までなぞってください。描いたあとは、目標の円・打った位置の白い丸・点線をドラッグして動かせます。",
-  arrow:  "なぞった方向に矢印を描きます。描いたあとは、両端をドラッグで始点・終点を、線の途中をドラッグで全体を動かせます。",
-  circle: "何もない所を中心から外側へなぞると円になります。描いた円は、内側をドラッグで移動、縁や白い丸をドラッグで大きさを変えられます。",
-  pen:    "指でなぞったとおりに線を描きます。描いたあとは、両端の白い丸をドラッグで始点・終点を、線の途中をドラッグで全体を動かせます。",
-  player: "タップした所に選手を置きます（タップした位置が足元）。体をドラッグで移動、枠の右上の白い丸をドラッグで大きさを変えられます。名前や役割を書いたり、「理想の位置」にすると半透明の点線で「ここに立つべきだった」を表せます。",
+  select: "すでにある線・円・選手などをタップすると選べます。ドラッグで移動、色ボタンで色の変更、動画の右下の🗑で削除できます。何もない所をタップすると選択が外れます（時間は進みません）。",
+  traj:   "ボールの位置を順にタップすると、点が線でつながって軌道になります。タップするたびに自動で少し進むので、続けてタップするだけでOKです。すでにある線をさわるときは「選択」に切り替えてください。",
+  aim:    "何もない所を、打った位置から「ここに打ちたかった」場所までなぞってください。描いたあとに動かすときは「選択」に切り替えてください。",
+  arrow:  "なぞった方向に矢印を描きます。近くに線があっても新しく描けます。動かすときは「選択」に切り替えてください（矢じりで終点、白い丸で始点）。",
+  circle: "何もない所を中心から外側へなぞると円になります。動かす・大きさを変えるときは「選択」に切り替えてください。",
+  rect:   "何もない所を、四角の角から反対の角までなぞると四角になります。動かす・大きさを変えるときは「選択」に切り替えてください（4つの角で大きさ、内側で移動）。",
+  pen:    "指でなぞったとおりに線を描きます。動かすときは「選択」に切り替えてください。",
+  player: "タップした所に選手を置きます（タップした位置が足元）。置くときに指をずらすと位置を調整できます。あとで動かす・大きさを変えるときは「選択」に切り替えてください。置いたあとにほかの所をタップすると確定し、もう一度タップすると次の選手を置けます。名前や役割を書いたり、「理想の位置」にすると半透明の点線で「ここに立つべきだった」を表せます。",
 };
 const VA_EPS = 0.02;
 const vaNewId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -26070,7 +26072,7 @@ function vaHideYouTubeCaptions(yp) {
 
 // ---------- プレーヤー（スマホの動画 / YouTube を同じ使い方にそろえる） ----------
 class VALocalPlayer {
-  constructor(el) { this.el = el; this.step = 1 / 30; this.stepLabel = "1コマ"; this.rates = [0.1, 0.25, 0.5, 1]; }
+  constructor(el) { this.el = el; this.step = 1 / 30; this.stepLabel = "1コマ"; this.rates = [0.1, 0.25, 0.5, 1, 1.5, 2]; }
   get time() { return this.el.currentTime || 0; }
   get duration() { return isFinite(this.el.duration) ? this.el.duration : 0; }
   get paused() { return this.el.paused; }
@@ -26081,7 +26083,7 @@ class VALocalPlayer {
 }
 class VAYouTubePlayer {
   constructor(yt) {
-    this.p = yt; this.step = 0.1; this.stepLabel = "0.1秒"; this.rates = [0.25, 0.5, 0.75, 1];
+    this.p = yt; this.step = 0.1; this.stepLabel = "0.1秒"; this.rates = [0.25, 0.5, 0.75, 1, 1.5, 2];
     this._seekTo = null; this._seekAt = 0; this.everPlayed = false;
   }
   get time() {
@@ -26129,7 +26131,7 @@ class VAEngine {
     return t >= this.startOf(s) - VA_EPS && t <= this.endOf(s);
   }
   changed() { this.onChange(); }
-  dirty() { this.onDirty(); this.onChange(); }
+  dirty() { this.histCommit(); this.onDirty(); this.onChange(); }
 
   // ---- 選択・確定 ----
   select(sh, byTap = false) {
@@ -26164,19 +26166,29 @@ class VAEngine {
     this.sel = null; this.selByTap = false;
     this.redraw(); this.dirty(); return true;
   }
-  undo() {
-    if (this.traj && this.traj.pts.length) {
-      this.traj.pts.pop();
-      if (!this.traj.pts.length) { this.shapes = this.shapes.filter(x => x !== this.traj); this.traj = null; }
-    } else { const x = this.shapes.pop(); if (x === this.sel) { this.sel = null; this.selByTap = false; } }
-    this.redraw(); this.dirty();
+  // ---- 1つ前に戻す／1つ先に進む ----
+  // 書き込みが変わるたびに、その時点の内容を履歴に残す（描く・動かす・色・削除・軌道の点・名前・メモなど、すべて）
+  snap() { return JSON.stringify(this.shapes); }
+  histInit() { this.hist = [this.snap()]; this.hi = 0; }
+  histCommit() {
+    if (!this.hist || this.drag || this.cur || this.hi < 0) return;   // ドラッグ中は途中の位置を残さない
+    const sn = this.snap();
+    if (sn === this.hist[this.hi]) return;
+    this.hist = this.hist.slice(0, this.hi + 1); this.hist.push(sn);
+    if (this.hist.length > 100) this.hist.shift();
+    this.hi = this.hist.length - 1;
   }
-  clearNow() {
-    const t = this.now(), gone = this.shapes.filter(x => this.isVisible(x, t));
-    if (!gone.length) return 0;
-    this.shapes = this.shapes.filter(x => !gone.includes(x)); this.traj = null; this.sel = null; this.selByTap = false;
-    this.redraw(); this.dirty(); return gone.length;
+  canUndo() { return !!this.hist && this.hi > 0; }
+  canRedo() { return !!this.hist && this.hi >= 0 && this.hi < this.hist.length - 1; }
+  histRestore(sn) {
+    const tid = this.traj && this.traj.id;
+    this.shapes = JSON.parse(sn);
+    this.traj = tid ? (this.shapes.find(x => x.id === tid) || null) : null;
+    this.sel = null; this.selByTap = false; this.cur = null; this.drag = null;
+    this.redraw(); this.onDirty(); this.onChange();
   }
+  undo() { this.histCommit(); if (this.canUndo()) { this.hi--; this.histRestore(this.hist[this.hi]); } }
+  redo() { this.histCommit(); if (this.canRedo()) { this.hi++; this.histRestore(this.hist[this.hi]); } }
 
   // ---- 当たり判定 ----
   hitCircle(p) {
@@ -26202,7 +26214,12 @@ class VAEngine {
     for (let i = list.length - 1; i >= 0; i--) {
       const s = list[i];
       const ax = s.a[0] * W, ay = s.a[1] * H, bx = s.b[0] * W, by = s.b[1] * H;
-      if (Math.hypot(px - bx, py - by) < R + tol) return { s, mode: "b" };
+      if (type === "arrow") {
+        // ★矢印は終点の矢じり全体をつまめるように、矢じりの中心あたりを広めに判定する
+        const ang = Math.atan2(by - ay, bx - ax), hh = this.lw() * 5.5;
+        const hx = bx - Math.cos(ang) * hh * 0.5, hy = by - Math.sin(ang) * hh * 0.5;
+        if (Math.hypot(px - hx, py - hy) < hh * 0.6 + tol || Math.hypot(px - bx, py - by) < tol + 6) return { s, mode: "b" };
+      } else if (Math.hypot(px - bx, py - by) < R + tol) return { s, mode: "b" };
       if (Math.hypot(px - ax, py - ay) < tol + 4) return { s, mode: "a" };
       const vx = bx - ax, vy = by - ay, L2 = vx * vx + vy * vy || 1;
       const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2));
@@ -26241,11 +26258,26 @@ class VAEngine {
     }
     return null;
   }
+  // 四角：4つの角＝その角を動かして大きさ変更、内側・ふち＝移動
+  rectCorners(s) { return [[s.a[0], s.a[1]], [s.b[0], s.a[1]], [s.b[0], s.b[1]], [s.a[0], s.b[1]]]; }
+  hitRect(p) {
+    const W = this.W, H = this.H, tol = 18, px = p[0] * W, py = p[1] * H;
+    const list = this.shapes.filter(x => x.type === "rect" && this.isVisible(x));
+    if (this.sel && list.includes(this.sel)) { list.splice(list.indexOf(this.sel), 1); list.push(this.sel); }
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i], cs = this.rectCorners(s);
+      for (let k = 0; k < 4; k++) if (Math.hypot(px - cs[k][0] * W, py - cs[k][1] * H) < tol + 4) return { s, mode: "c" + k };
+      const x1 = Math.min(s.a[0], s.b[0]) * W - tol / 2, x2 = Math.max(s.a[0], s.b[0]) * W + tol / 2;
+      const y1 = Math.min(s.a[1], s.b[1]) * H - tol / 2, y2 = Math.max(s.a[1], s.b[1]) * H + tol / 2;
+      if (px > x1 && px < x2 && py > y1 && py < y2) return { s, mode: "move" };
+    }
+    return null;
+  }
   hitAny(p) {
-    const order = [...new Set([this.tool, "player", "circle", "aim", "arrow", "pen", "traj"])];
+    const order = [...new Set([this.tool, "player", "circle", "rect", "aim", "arrow", "pen", "traj"])];
     for (const t of order) {
       if (!VA_NAMES[t] || t === "select") continue;
-      const h = t === "circle" ? this.hitCircle(p) : t === "player" ? this.hitPlayer(p)
+      const h = t === "circle" ? this.hitCircle(p) : t === "player" ? this.hitPlayer(p) : t === "rect" ? this.hitRect(p)
               : (t === "pen" || t === "traj") ? this.hitPoly(p, t) : this.hitAB(p, t);
       if (h) return h;
     }
@@ -26277,29 +26309,31 @@ class VAEngine {
     if (!this.player || !this.canvas) return;
     const p = this.pos(e);
     if (this.mode !== "draw" || this.readOnly) {
-      // ★再生モードで止まっているときに書き込みをタップ → 描き込みモードの「選択」でその書き込みを選ぶ
-      const h = (!this.readOnly && this.player.paused) ? this.hitAny(p) : null;
-      if (h) { e.preventDefault(); this.mode = "draw"; this.setTool("select"); this.select(h.s, true); return; }
+      // ★再生モードのタップは再生／一時停止だけ（モードのタブは、押したときしか切り替えない）
       this.onTogglePlay(); return;
     }
     e.preventDefault();
     if (this.loading) { this.onBusy(); return; }
+    // 「軌道」：タップは必ず軌道の点（時間も進む）
     if (this.traj || this.tool === "traj") { this.addTrajPoint(p); return; }
-    const hit = this.hitAny(p);
-    if (!hit && this.tool === "select") { this.confirm(); return; }
-    if (hit) {
-      if (this.tool !== "select" && hit.s.type !== this.tool) this.setTool(hit.s.type);
+    // ★すでにある書き込みをさわれるのは「選択」のときだけ。ほかの道具のときは、近くに線があっても必ず新しく描く
+    if (this.tool === "select") {
+      const hit = this.hitAny(p);
+      if (!hit) { this.confirm(); return; }               // 何もない所 ＝ 選択を外すだけ
       this.select(hit.s, true);
       if (hit.s.type !== "traj") { try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {} this.startDrag(hit, p); }
       return;
     }
+    // ★選手を置いた直後に、ほかの所をタップ ＝ 確定するだけ（もう1人は置かない。次のタップでまた置ける）
+    if (this.tool === "player" && this.sel && this.sel.type === "player" && !this.selByTap) { this.confirm(); return; }
+    this.confirm();   // 描いた直後の書き込みは、次を描き始めたら確定
     try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
     const base = { id: vaNewId(), t: this.now(), color: this.color };
     if (this.tool === "player") {
       const sh = { ...base, type: "player", f: p, sz: 0.12 + 0.16 * Math.max(0, Math.min(1, p[1])), label: "", ghost: false };
       this.shapes.push(sh); this.select(sh);
-      this.drag = { mode: "move", s: sh, start: p, f0: p.slice(), sz0: sh.sz, moved: false };
-      this.dirty(); return;
+      this.drag = { mode: "move", s: sh, start: p, f0: p.slice(), sz0: sh.sz, moved: false, created: true };
+      this.onDirty(); this.onChange(); return;
     }
     if (this.tool === "pen") this.cur = { ...base, type: "pen", pts: [p] };
     else if (this.tool === "circle") this.cur = { ...base, type: "circle", c: p, e: p };
@@ -26323,6 +26357,12 @@ class VAEngine {
       } else if (s.type === "circle") {
         if (d.mode === "move") { s.c = [d.c0[0] + dx, d.c0[1] + dy]; s.e = [d.e0[0] + dx, d.e0[1] + dy]; }
         else s.e = p;
+      } else if (s.type === "rect" && d.mode !== "move") {
+        // 角0=(a.x,a.y) 1=(b.x,a.y) 2=(b.x,b.y) 3=(a.x,b.y)：つまんだ角だけ動かす
+        const k = +d.mode.slice(1), a = d.a0.slice(), b = d.b0.slice();
+        if (k === 0 || k === 3) a[0] += dx; else b[0] += dx;
+        if (k === 0 || k === 1) a[1] += dy; else b[1] += dy;
+        s.a = a; s.b = b;
       } else {
         if (d.mode === "move") { s.a = [d.a0[0] + dx, d.a0[1] + dy]; s.b = [d.b0[0] + dx, d.b0[1] + dy]; }
         else if (d.mode === "a") s.a = [d.a0[0] + dx, d.a0[1] + dy];
@@ -26338,7 +26378,7 @@ class VAEngine {
     this.redraw();
   }
   pointerUp() {
-    if (this.drag) { const moved = this.drag.moved; this.drag = null; this.redraw(); if (moved) this.dirty(); return; }
+    if (this.drag) { const d = this.drag; this.drag = null; this.redraw(); if (d.moved || d.created) this.dirty(); return; }
     if (!this.cur) return;
     const s = this.cur; this.cur = null;
     const W = this.W, H = this.H;
@@ -26346,13 +26386,14 @@ class VAEngine {
     let ok;
     if (s.type === "pen") ok = s.pts.length > 2;
     else if (s.type === "circle") ok = dist(s.c, s.e) > 6;
+    else if (s.type === "rect") ok = Math.abs(s.a[0] - s.b[0]) * W > 6 && Math.abs(s.a[1] - s.b[1]) * H > 6;
     else ok = dist(s.a, s.b) > 10;
     if (ok) { this.shapes.push(s); this.select(s); this.dirty(); }
-    else this.redraw();
+    else this.redraw();   // ★なぞらずにタップしただけ ＝ 確定するだけ（道具もタブもそのまま）
   }
 
   // ---- 描画 ----
-  showSel(s) { return s === this.sel && this.mode === "draw" && !this.readOnly && (this.tool === s.type || this.tool === "select"); }
+  showSel(s) { return s === this.sel && this.mode === "draw" && !this.readOnly && this.tool === "select"; }   // つまむ所は「選択」のときだけ出す
   endHandles(a, b, color, lw) {
     const o = this.ctx;
     o.save(); o.shadowBlur = 0; o.shadowColor = "transparent";
@@ -26426,6 +26467,18 @@ class VAEngine {
       } else if (s.type === "pen") {
         o.beginPath(); s.pts.forEach((p, i) => { const q = X(p); i ? o.lineTo(...q) : o.moveTo(...q); }); o.stroke();
         if (this.showSel(s)) this.endHandles(X(s.pts[0]), X(s.pts[s.pts.length - 1]), s.color, lw);
+      } else if (s.type === "rect") {
+        const a = X(s.a), b = X(s.b);
+        const x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]), w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
+        o.globalAlpha = .18; o.fillRect(x, y, w, h);
+        o.globalAlpha = 1; o.strokeRect(x, y, w, h);
+        if (this.showSel(s)) {
+          o.shadowBlur = 0;
+          o.setLineDash([5, 4]); o.lineWidth = 1.5; o.strokeStyle = "#fff";
+          o.strokeRect(x - lw * 1.6, y - lw * 1.6, w + lw * 3.2, h + lw * 3.2); o.setLineDash([]);
+          o.fillStyle = "#fff"; o.strokeStyle = s.color; o.lineWidth = 3;
+          this.rectCorners(s).forEach(q => { const c = X(q); o.beginPath(); o.arc(c[0], c[1], lw * 2.2, 0, 7); o.fill(); o.stroke(); });
+        }
       } else if (s.type === "circle") {
         const c = X(s.c), e = X(s.e), r = Math.hypot(e[0] - c[0], e[1] - c[1]);
         o.globalAlpha = .18; o.beginPath(); o.arc(c[0], c[1], r, 0, 7); o.fill();
@@ -26458,13 +26511,21 @@ class VAEngine {
             o.beginPath(); o.arc(a[0], a[1], lw * 2.4, 0, 7); o.fill(); o.stroke();
           }
         } else {
-          const h = lw * 4;
+          // ★選択中は、終点の「矢じり」そのものをつまむ所にする（丸で隠さず、白いふちで目立たせる）
+          const selA = this.showSel(s);
+          const h = lw * (selA ? 5.5 : 4);
           o.beginPath(); o.moveTo(...a); o.lineTo(b[0] - Math.cos(ang) * h * 0.6, b[1] - Math.sin(ang) * h * 0.6); o.stroke();
           o.beginPath(); o.moveTo(...b);
           o.lineTo(b[0] - h * Math.cos(ang - 0.45), b[1] - h * Math.sin(ang - 0.45));
           o.lineTo(b[0] - h * Math.cos(ang + 0.45), b[1] - h * Math.sin(ang + 0.45));
-          o.closePath(); o.fill();
-          if (this.showSel(s)) this.endHandles(a, b, s.color, lw);
+          o.closePath();
+          if (selA) { o.save(); o.strokeStyle = "#fff"; o.lineWidth = 5; o.lineJoin = "round"; o.stroke(); o.restore(); }
+          o.fill();
+          if (selA) {
+            o.shadowBlur = 0; o.shadowColor = "transparent";
+            o.fillStyle = "#fff"; o.strokeStyle = s.color; o.lineWidth = 3;
+            o.beginPath(); o.arc(a[0], a[1], lw * 2.4, 0, 7); o.fill(); o.stroke();   // 始点は白い丸
+          }
         }
       } else if (s.type === "traj") {
         // ★再生中は、ボールを追うように「その時刻までの点」だけを描く
@@ -26663,7 +26724,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   //   読み込みが終わるまでは描き込みできないようにして、読み込んだ内容で上書きされるのを防ぐ。
   const [loadingShapes, setLoadingShapes] = useState(false);
   const loadShapesFor = useCallback(async (src) => {
-    eng.loading = true; setLoadingShapes(true);
+    eng.loading = true; setLoadingShapes(true); eng.hist = null;
     eng.shapes = []; eng.sel = null; eng.traj = null; eng.cur = null; eng.drag = null; eng.redraw();
     const scope = scopeRef.current;
     const lkey = vaLocalKey(scope, src.key);
@@ -26691,6 +26752,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     eng.loading = false; setLoadingShapes(false);
     eng.shapes = Array.isArray(shapes) ? shapes : [];
     eng.sel = null; eng.traj = null; eng.cur = null; eng.drag = null;
+    eng.histInit();
     lastSaved.current = resend ? null : vaSerialize(eng.shapes);
     eng.redraw(); rerender();
     if (resend) saveSoon();
@@ -26913,12 +26975,16 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   const savedByKey = Object.fromEntries(savedList.map(r => [r.source_key, r]));
   const localSaved = savedList.filter(r => r.source_key.startsWith("local:") && Array.isArray(r.shapes) && r.shapes.length);
   const matchLabel = match ? ([match.tournament_name, match.round].filter(Boolean).join(" ") || "試合") : (shared ? "👥 チームで共有" : "🔒 自分だけ");
+  const undoIcon = <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 L4 9 L9 4"/><path d="M4 9 H14 a6 6 0 0 1 0 12 H10"/></svg>;
+  const redoIcon = <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 14 L20 9 L15 4"/><path d="M20 9 H10 a6 6 0 0 0 0 12 H14"/></svg>;
+  const urBtn = (on) => ({ width:50, height:50, flexShrink:0, padding:"2px 0 0", border:"1.5px solid #9fb3cf", background:"#eef3fb", borderRadius:12, color:C.navy, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", opacity: on ? 1 : 0.45, cursor: on ? "pointer" : "default" });
   const toolIcon = {
     select: <path d="M5 3 L5 19 L9.5 14.5 L12.5 21 L15 19.8 L12 13.5 L18 13.5 Z"/>,
     traj: <><path d="M3 18 Q9 2 15 12 T22 9"/><circle cx="3" cy="18" r="2" fill="currentColor"/><circle cx="9" cy="8" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="21" cy="9" r="2" fill="currentColor"/></>,
     aim: <><path d="M3 20 L16 7" strokeDasharray="3 3"/><circle cx="18" cy="5" r="3"/></>,
     arrow: <path d="M4 20 L19 5 M11 5 H19 V13"/>,
     circle: <circle cx="12" cy="12" r="8"/>,
+    rect: <rect x="4" y="6" width="16" height="12" rx="1"/>,
     pen: <path d="M3 17 C6 10 9 20 12 13 S18 8 21 12"/>,
     player: <><circle cx="12" cy="5" r="2.6"/><path d="M8.5 21 V10.5 Q12 8.5 15.5 10.5 V21 M17 12 L20.5 7.5"/><ellipse cx="21" cy="5.5" rx="1.8" ry="2.4"/></>,
   };
@@ -27005,6 +27071,13 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
               />
               <div style={{ position:"absolute", top:8, left:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background: isDraw ? "#e65100" : "rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{isDraw ? "描き込み中" : "再生"}</div>
               <div style={{ position:"absolute", top:8, right:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{rate}x</div>
+              {/* ★動画の右下のゴミ箱：「選択」で選んでいる書き込みをボタン1つで消す */}
+              {isDraw && eng.tool === "select" && eng.sel && (
+                <button aria-label="選んでいる書き込みを削除" title="削除" data-va-keep
+                  onPointerDown={e => e.stopPropagation()}
+                  onClick={() => { if (eng.deleteSelected()) showToast("選択した書き込みを削除しました"); }}
+                  style={{ position:"absolute", right:8, bottom:8, width:40, height:40, padding:0, border:"none", borderRadius:"50%", background:"rgba(198,40,40,.92)", color:"#fff", fontSize:19, lineHeight:"40px", textAlign:"center", boxShadow:"0 2px 6px rgba(0,0,0,.35)", zIndex:2, cursor:"pointer" }}>🗑</button>
+              )}
               {skipLabel && (
                 <div style={{ position:"absolute", top:"50%", left: skipLabel.side === "right" ? "75%" : "25%", transform:"translate(-50%,-50%)", fontSize:18, fontWeight:800, color:"#fff", background:"rgba(0,0,0,.55)", padding:"10px 16px", borderRadius:999, pointerEvents:"none", whiteSpace:"nowrap" }}>{skipLabel.text}</div>
               )}
@@ -27031,13 +27104,22 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
               <button style={{ ...btn, padding:"10px 2px", fontSize:12.5, whiteSpace:"nowrap" }} onClick={() => stepBy(1)}>{player ? player.stepLabel : "1コマ"} ▶</button>
               <button style={{ ...btn, padding:"10px 2px", fontSize:12.5, whiteSpace:"nowrap", background:"#eef3fb", borderColor:"#c9d8ee", color:C.navy }} onClick={() => skip(10)}>10秒 ⏩</button>
             </div>
-            <div style={{ display:"flex", gap:5 }} data-va-trajkeep>
-              {rates.map(r => (
-                <button key={r} onClick={() => changeRate(r)} style={{ border:`1px solid ${r === rate ? C.navy : C.border}`, background: r === rate ? C.navy : C.white, color: r === rate ? C.white : C.textSec, borderRadius:999, padding:"7px 9px", fontSize:12, fontWeight:700, cursor:"pointer" }}>{r}x</button>
-              ))}
+            <div style={{ display:"flex", alignItems:"center", gap:6, width:"100%" }} data-va-trajkeep>
+              <div style={{ display:"flex", gap:3, flex:1, minWidth:0 }}>
+                {rates.map(r => (
+                  <button key={r} onClick={() => changeRate(r)} style={{ flex:"1 1 auto", minWidth:0, textAlign:"center", letterSpacing:-0.2, border:`1px solid ${r === rate ? C.navy : C.border}`, background: r === rate ? C.navy : C.white, color: r === rate ? C.white : C.textSec, borderRadius:999, padding:"8px 0", fontSize:12, fontWeight:700, cursor:"pointer" }}>{r}x</button>
+                ))}
+              </div>
+              {/* ★1つ前に戻す／1つ先に進む（Excelなどと同じ）。描き込みモードのときだけ出す */}
+              {isDraw && (
+                <div data-va-undo style={{ display:"flex", gap:6 }}>
+                  <button title="1つ前に戻す" aria-label="1つ前に戻す" disabled={!eng.canUndo()} style={urBtn(eng.canUndo())} onClick={() => eng.undo()}>{undoIcon}<span style={{ fontSize:10.5, fontWeight:800, lineHeight:1.1 }}>戻す</span></button>
+                  <button title="1つ先に進む" aria-label="1つ先に進む" disabled={!eng.canRedo()} style={urBtn(eng.canRedo())} onClick={() => eng.redo()}>{redoIcon}<span style={{ fontSize:10.5, fontWeight:800, lineHeight:1.1 }}>進む</span></button>
+                </div>
+              )}
             </div>
           </div>
-          {source?.kind === "yt" && <div style={{ fontSize:10.5, color:C.textSec, marginTop:6 }}>YouTubeの仕様上、スローは0.25倍まで、コマ送りは約0.1秒刻みです。</div>}
+          {source?.kind === "yt" && <div style={{ fontSize:10.5, color:C.textSec, marginTop:6 }}>YouTubeの仕様上、スローは0.25倍まで（速くは2倍まで）、コマ送りは約0.1秒刻みです。</div>}
 
           <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap", marginTop:10, fontSize:12.5, color:C.textSec }}>
             <label style={{ display:"flex", alignItems:"center", gap:5 }}>書き込みの表示（共通）
@@ -27080,7 +27162,6 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                   <span style={{ flex:1, minWidth:0, fontSize:12, fontWeight:700, color:C.navy }}>
                     {eng.traj ? "軌道を記録中（ほかのボタンで確定）" : eng.selByTap ? `選択中：${VA_NAMES[sel.type]}（色をタップで変更）` : `描いた直後：${VA_NAMES[sel.type]}（ほかのボタンで確定）`}
                   </span>
-                  <button style={{ ...btn, color:C.red, padding:"6px 10px", whiteSpace:"nowrap" }} onClick={() => { if (eng.deleteSelected()) showToast("選択した書き込みを削除しました"); }}>🗑 この書き込みを削除</button>
                 </div>
               )}
               {sel && sel.type === "player" && (
@@ -27115,10 +27196,6 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                   <button style={{ ...btn, marginLeft:"auto", background:C.navy, color:C.white, border:"none" }} onClick={() => { const ok = eng.traj && eng.traj.pts.length >= 2; eng.finishTraj(); if (ok) showToast("軌道を確定しました"); }}>軌道を確定</button>
                 </div>
               )}
-              <div style={{ display:"flex", justifyContent:"flex-end", gap:8, marginTop:10 }}>
-                <button data-va-trajkeep data-va-undo style={{ ...btn, background:"transparent" }} onClick={() => eng.undo()}>↶ 1つ戻す</button>
-                <button style={{ ...btn, background:"transparent", color:C.red }} onClick={() => { const n = eng.clearNow(); showToast(n ? `${n}個の書き込みを消しました` : "この時刻に書き込みはありません"); }}>この時刻の書き込みを消す</button>
-              </div>
             </div>
           )}
         </div>
@@ -27142,15 +27219,16 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
               const durs = [...new Set(g.items.map(x => eng.durOf(x)))];
               const sum = Object.entries(counts).map(([k, v]) => VA_NAMES[k] + v).join("・") + "　表示" + durs.join("/") + "秒" + (g.items.some(x => x.dur !== undefined) ? "（個別）" : "");
               return (
-                <div key={g.key} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 4px", borderTop:`1px solid ${C.border}`, background: g.key === openKey ? "#e6eefb" : "transparent", borderRadius: g.key === openKey ? 8 : 0 }}>
+                // ★行のどこをタップしても、その時刻を開く（「開く」ボタンはなくした）
+                <div key={g.key} onClick={() => openGroup(g)} style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 4px", borderTop:`1px solid ${C.border}`, background: g.key === openKey ? "#e6eefb" : "transparent", borderRadius: g.key === openKey ? 8 : 0, cursor:"pointer" }}>
                   <span style={{ fontVariantNumeric:"tabular-nums", fontWeight:800, color:C.navy, minWidth:62 }}>{vaFmt(g.t)}</span>
                   <div style={{ flex:1, minWidth:0, fontSize:13 }}>
                     {g.memo || "（メモなし）"}
                     <div style={{ fontSize:10.5, color:C.textSec }}>{sum}</div>
                   </div>
-                  <button style={btn} onClick={() => openGroup(g)}>開く</button>
                   {!readOnly && (
-                    <button style={{ ...btn, background:"transparent", color:C.red }} onClick={() => {
+                    <button style={{ ...btn, background:"transparent", color:C.red }} onClick={(ev) => {
+                      ev.stopPropagation();   // 削除ボタンは行を開かない
                       if (confirmDelKey === g.key) { deleteGroup(g); setConfirmDelKey(null); }
                       else { setConfirmDelKey(g.key); setTimeout(() => setConfirmDelKey(k => k === g.key ? null : k), 2500); }
                     }}>{confirmDelKey === g.key ? "本当に削除" : "削除"}</button>
