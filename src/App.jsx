@@ -27631,6 +27631,7 @@ function VideoHubScreen({ onNavigate }) {
   const [profile, setProfile] = useState(null);
   const [recent, setRecent] = useState(null);          // null = 読み込み中
   const [matchVideos, setMatchVideos] = useState(null);
+  const [drawnMatches, setDrawnMatches] = useState(() => new Set());   // ★線などを書き込んだ試合（✏️ 書き込みあり）
   const [opened, setOpened] = useState(null);           // { initial } または { match }
   const [ytSheet, setYtSheet] = useState(false);
   const [ytUrl, setYtUrl] = useState("");
@@ -27649,6 +27650,21 @@ function VideoHubScreen({ onNavigate }) {
   const loadRecent = useCallback(() => {
     vaLoadRecent().then(rows => setRecent(rows || []));
   }, []);
+  // ★試合の動画に書き込みがあるか（見られる書き込みが1つでもあれば「書き込みあり」）
+  const loadDrawn = useCallback(async (list) => {
+    if (!list || !list.length) { setDrawnMatches(new Set()); return; }
+    try {
+      const { data, error } = await supabase.from("video_annotations").select("match_id, scope, shapes")
+        .in("scope", list.map(m => "match:" + m.id));
+      if (error) { console.error(error); return; }
+      const ids = new Set();
+      (data || []).forEach(r => {
+        let sh = r.shapes; if (typeof sh === "string") { try { sh = JSON.parse(sh); } catch (_) { sh = []; } }
+        if (Array.isArray(sh) && sh.length) ids.add(r.match_id || String(r.scope).replace(/^match:/, ""));
+      });
+      setDrawnMatches(ids);
+    } catch (e) { console.error(e); }
+  }, []);
   useEffect(() => {
     getMyProfile().then(p => setProfile(p));
     loadRecent();
@@ -27658,9 +27674,11 @@ function VideoHubScreen({ onNavigate }) {
         .select("id, match_date, tournament_name, round, video_links")
         .order("match_date", { ascending: false }).limit(150);
       if (error) { console.error(error); setMatchVideos([]); return; }
-      setMatchVideos((data || []).filter(m => normalizeVideoLinks(m.video_links).length > 0).slice(0, 20));
+      const list = (data || []).filter(m => normalizeVideoLinks(m.video_links).length > 0).slice(0, 20);
+      setMatchVideos(list);
+      loadDrawn(list);
     })();
-  }, [loadRecent]);
+  }, [loadRecent, loadDrawn]);
 
   const openYt = () => {
     const id = youtubeIdOf(ytUrl);
@@ -27696,7 +27714,7 @@ function VideoHubScreen({ onNavigate }) {
       setGuide(r);   // ★まず「この動画を選んでください」と目印（画像・長さ）を見せる
     }
   };
-  const closeAnalysis = () => { setOpened(null); loadRecent(); };
+  const closeAnalysis = () => { setOpened(null); loadRecent(); loadDrawn(matchVideos); };
 
   // ★名前で絞り込み（「続きから」と「試合に登録された動画」の両方）
   //   ひらがな/カタカナ・大文字/小文字・全角/半角の違いは気にしない
@@ -27821,10 +27839,15 @@ function VideoHubScreen({ onNavigate }) {
               const links = normalizeVideoLinks(m.video_links);
               return (
                 <div key={m.id} onClick={() => setOpened({ match: m })} style={{ display:"flex", gap:10, alignItems:"center", padding:"10px 2px", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
-                  {thumb(links[0]?.id, "▶")}
+                  <div style={{ position:"relative", flexShrink:0 }}>
+                    {thumb(links[0]?.id, "▶")}
+                    {drawnMatches.has(m.id) && <span style={{ position:"absolute", left:3, top:3, width:22, height:22, borderRadius:"50%", background:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, boxShadow:"0 1px 3px rgba(0,0,0,.35)" }}>✏️</span>}
+                  </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:700, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{matchTitle(m)}</div>
                     <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>{tag("#eef7ee", "#2e7d32", "試合の動画")}{fmtDate(m.match_date)}・動画{links.length}本</div>
+                    {/* ★線などを描いた動画だけ「書き込みあり」 */}
+                    {drawnMatches.has(m.id) && <div style={{ marginTop:4 }}><span style={{ display:"inline-block", fontSize:10.5, fontWeight:700, borderRadius:5, padding:"2px 6px", background:"#fff1d6", color:"#9a5b00", border:"1px solid #f3c97a" }}>✏️ 書き込みあり</span></div>}
                   </div>
                 </div>
               );
