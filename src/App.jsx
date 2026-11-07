@@ -27308,6 +27308,42 @@ function VideoHubScreen({ onNavigate }) {
   };
   const closeAnalysis = () => { setOpened(null); loadRecent(); };
 
+  // ★名前で絞り込み（「続きから」と「試合に登録された動画」の両方）
+  //   ひらがな/カタカナ・大文字/小文字・全角/半角の違いは気にしない
+  const [q, setQ] = useState("");
+  const vaNorm = (t) => String(t || "").normalize("NFKC").toLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, "");
+  const qn = vaNorm(q);
+  const hitQ = (text) => !qn || vaNorm(text).includes(qn);
+  const recentTitle = (r) => {
+    const isYt = (r.source_key || "").startsWith("yt:");
+    return r.title || (isYt ? "YouTube動画" : (r.source_key || "").replace(/^local:/, "").replace(/:\d+$/, ""));
+  };
+  const matchTitle = (m) => [m.tournament_name, m.round].filter(Boolean).join(" ") || "試合";
+
+  // ★「続きから」の削除：1回目で「本当に削除」、もう一度押すと、その動画の描き込みをまとめて消す（自分が作ったものだけ）
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [hubMsg, setHubMsg] = useState("");
+  const showHubMsg = (m) => { setHubMsg(m); setTimeout(() => setHubMsg(x => x === m ? "" : x), 2000); };
+  const deleteRecent = async (r) => {
+    const k = r.scope + "|" + r.source_key;
+    if (confirmDel !== k) {
+      setConfirmDel(k);
+      setTimeout(() => setConfirmDel(x => x === k ? null : x), 2500);
+      return;
+    }
+    setConfirmDel(null);
+    try {
+      await vaDeleteRow(r.scope, r.source_key);
+      try { localStorage.removeItem(vaLocalKey(r.scope, r.source_key)); } catch (_) {}
+      setRecent(prev => (prev || []).filter(x => !(x.scope === r.scope && x.source_key === r.source_key)));
+      showHubMsg(`「${recentTitle(r)}」の描き込みを削除しました`);
+    } catch (e) {
+      console.error(e);
+      showHubMsg("削除できませんでした。通信状態を確かめてもう一度お試しください");
+    }
+  };
+
   const card = { ...S.card, padding:14, marginBottom:12 };
   const fmtDay = (iso) => { try { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()}`; } catch (_) { return ""; } };
   const tag = (bg, color, text) => <span style={{ display:"inline-block", fontSize:10, fontWeight:700, borderRadius:5, padding:"2px 6px", marginRight:4, background:bg, color }}>{text}</span>;
@@ -27337,17 +27373,27 @@ function VideoHubScreen({ onNavigate }) {
           <input ref={fileRef} type="file" accept="video/*" style={{ display:"none" }} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; onFile(f); }} />
         </div>
 
+        {/* ★名前で探す（下の一覧を絞り込み） */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, border:`1px solid ${C.border}`, borderRadius:12, padding:"0 12px", marginBottom:12, background:C.white, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+          <span>🔍</span>
+          <input type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="動画の名前で探す（下の一覧を絞り込み）" autoComplete="off"
+            style={{ flex:1, minWidth:0, border:"none", background:"transparent", padding:"12px 0", fontSize:14, outline:"none" }} />
+          {q && <button aria-label="消す" onClick={() => setQ("")} style={{ border:"none", background:"#c3c9d4", color:"#fff", width:22, height:22, borderRadius:"50%", fontSize:11, lineHeight:"22px", padding:0, flexShrink:0, cursor:"pointer" }}>✕</button>}
+        </div>
+
         <div style={card}>
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>続きから（最近分析した動画）</div>
           {recent === null ? (
             <div style={{ fontSize:12, color:C.textSec, padding:"8px 2px" }}>読み込み中…</div>
           ) : recent.length === 0 ? (
             <div style={{ fontSize:12, color:C.textSec, padding:"8px 2px" }}>まだありません。動画を開いて描き込むと、ここに並びます。</div>
-          ) : recent.map(r => {
+          ) : !recent.some(r => hitQ(recentTitle(r))) ? (
+            <div style={{ fontSize:12, color:C.textSec, padding:"8px 2px" }}>「{q}」に合う動画はありません。</div>
+          ) : recent.filter(r => hitQ(recentTitle(r))).map(r => {
             const isYt = (r.source_key || "").startsWith("yt:");
-            const n = Array.isArray(r.shapes) ? r.shapes.length : 0;
             const mine = r.owner_id && r.owner_id === ctx.userId;
-            const title = r.title || (isYt ? "YouTube動画" : (r.source_key || "").replace(/^local:/, "").replace(/:\d+$/, ""));
+            const title = recentTitle(r);
+            const delKey = r.scope + "|" + r.source_key;
             return (
               <div key={r.scope + r.source_key} onClick={() => openRecent(r)} style={{ display:"flex", gap:10, alignItems:"center", padding:"10px 2px", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
                 {thumb(isYt ? r.source_key.slice(3) : null, "📱")}
@@ -27356,9 +27402,15 @@ function VideoHubScreen({ onNavigate }) {
                   <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>
                     {isYt ? tag("#fde7e7", "#c62828", "YouTube") : tag("#e6f0fb", "#0b5cad", "スマホ")}
                     {r.shared ? tag("#f3eefc", "#6a3fb5", mine ? "チームで共有" : "チームの人が作成") : tag("#eef0f3", "#555", "自分だけ")}
-                    描き込み{n}件・{fmtDay(r.updated_at)}
+                    {fmtDay(r.updated_at)}
                   </div>
                 </div>
+                {mine && !isViewer && (
+                  <button onClick={(ev) => { ev.stopPropagation(); deleteRecent(r); }}
+                    style={{ border:`1px solid ${C.border}`, background:C.white, color:C.red, borderRadius:9, padding:"8px 10px", fontSize:12.5, fontWeight:700, whiteSpace:"nowrap", flexShrink:0, cursor:"pointer" }}>
+                    {confirmDel === delKey ? "本当に削除" : "削除"}
+                  </button>
+                )}
               </div>
             );
           })}
@@ -27370,13 +27422,16 @@ function VideoHubScreen({ onNavigate }) {
         {matchVideos && matchVideos.length > 0 && (
           <div style={card}>
             <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>試合に登録された動画から選ぶ</div>
-            {matchVideos.map(m => {
+            {!matchVideos.some(m => hitQ(matchTitle(m) + " " + normalizeVideoLinks(m.video_links).map(v => v.title || "").join(" "))) && (
+              <div style={{ fontSize:12, color:C.textSec, padding:"8px 2px" }}>「{q}」に合う試合の動画はありません。</div>
+            )}
+            {matchVideos.filter(m => hitQ(matchTitle(m) + " " + normalizeVideoLinks(m.video_links).map(v => v.title || "").join(" "))).map(m => {
               const links = normalizeVideoLinks(m.video_links);
               return (
                 <div key={m.id} onClick={() => setOpened({ match: m })} style={{ display:"flex", gap:10, alignItems:"center", padding:"10px 2px", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
                   {thumb(links[0]?.id, "▶")}
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{[m.tournament_name, m.round].filter(Boolean).join(" ") || "試合"}</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{matchTitle(m)}</div>
                     <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>{tag("#eef7ee", "#2e7d32", "試合の動画")}{fmtDate(m.match_date)}・動画{links.length}本</div>
                   </div>
                 </div>
@@ -27418,6 +27473,7 @@ function VideoHubScreen({ onNavigate }) {
           onClose={closeAnalysis}
         />
       )}
+      {hubMsg && <div style={{ position:"fixed", left:"50%", bottom:"calc(84px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", padding:"9px 14px", borderRadius:9, fontSize:13, zIndex:300, maxWidth:"90vw", pointerEvents:"none" }}>{hubMsg}</div>}
       <NavBar active="video" onNavigate={onNavigate} />
     </div>
   );
