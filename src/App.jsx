@@ -26629,6 +26629,45 @@ function vaScopeOf({ matchId, shared, schoolId, userId }) {
   return "user:" + (userId || "me");
 }
 const vaLocalKey = (scope, sourceKey) => `va:${scope}:${sourceKey}`;
+// ★スマホの動画の目印（1コマ目の小さな画像と長さ）。「続きから」で同じ動画を選び直すときの手がかり。
+//   動画そのものと同じく、この端末の中だけに保存する（データベースには送らない）
+const vaThumbKey = (sourceKey) => "va:thumb:" + sourceKey;
+function vaGetThumb(sourceKey) { try { return JSON.parse(localStorage.getItem(vaThumbKey(sourceKey)) || "null"); } catch (_) { return null; } }
+function vaSaveThumb(sourceKey, info) {
+  if (!info || (!info.img && !info.dur)) return;
+  try { localStorage.setItem(vaThumbKey(sourceKey), JSON.stringify({ img: info.img || null, dur: info.dur || 0 })); } catch (_) {}
+}
+// 選んだ動画ファイルから、長さと1コマ目（1秒あたり）の画像を読む
+function vaReadVideoInfo(file) {
+  return new Promise(resolve => {
+    let finished = false;
+    const v = document.createElement("video");
+    v.muted = true; v.playsInline = true; v.preload = "auto";
+    const url = URL.createObjectURL(file);
+    const done = (img) => {
+      if (finished) return; finished = true;
+      const dur = isFinite(v.duration) ? v.duration : 0;
+      try { v.removeAttribute("src"); v.load(); } catch (_) {}
+      URL.revokeObjectURL(url);
+      resolve({ name: file.name, size: file.size, dur, img });
+    };
+    v.onloadedmetadata = () => { try { v.currentTime = Math.min(1, (v.duration || 2) / 2); } catch (_) { done(null); } };
+    v.onseeked = () => {
+      try {
+        const w = 240, h = Math.max(1, Math.round(w * (v.videoHeight || 135) / (v.videoWidth || 240)));
+        const c = document.createElement("canvas"); c.width = w; c.height = h;
+        c.getContext("2d").drawImage(v, 0, 0, w, h);
+        done(c.toDataURL("image/jpeg", 0.6));
+      } catch (_) { done(null); }
+    };
+    v.onerror = () => done(null);
+    setTimeout(() => done(null), 8000);
+    v.src = url;
+  });
+}
+// 長さの表示：選ぶ画面（Googleフォトなど）と同じ「04:59」「1:00:22」の形と、「4分59秒」の形
+const vaLen = d => { d = Math.round(d || 0); const h = Math.floor(d / 3600), m = Math.floor(d % 3600 / 60), sec = d % 60; return (h ? h + ":" + String(m).padStart(2, "0") : String(m).padStart(2, "0")) + ":" + String(sec).padStart(2, "0"); };
+const vaLenJp = d => { d = Math.round(d || 0); const h = Math.floor(d / 3600), m = Math.floor(d % 3600 / 60), sec = d % 60; return (h ? h + "時間" : "") + (h || m ? m + "分" : "") + sec + "秒"; };
 // ★座標などは小数4桁に丸めて保存する（見た目は変わらず、データ量が約1/3になる）
 function vaSerialize(shapes) {
   return JSON.stringify(
@@ -26919,6 +26958,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     el.onloadedmetadata = () => { if (el.videoWidth) setAspect(el.videoWidth / el.videoHeight); };
     const pl = new VALocalPlayer(el);
     eng.player = pl; setPlayer(pl);
+    vaReadVideoInfo(file).then(info => vaSaveThumb(src.key, info));   // 「続きから」の目印を作っておく
   }, [closeSource, eng, loadShapesFor, startView]);
 
   useEffect(() => () => {
@@ -27490,6 +27530,8 @@ function VideoHubScreen({ onNavigate }) {
   const [localShare, setLocalShare] = useState(false);
   const fileRef = useRef(null);
   const pendingLocal = useRef(null);                    // 「続きから」でスマホ動画を選び直すときの元の情報
+  const [guide, setGuide] = useState(null);             // 選び直す前の案内（「続きから」の行）
+  const [mismatch, setMismatch] = useState(null);       // 違う動画を選んだとき { prev, row, file, info }
 
   const isViewer = !!profile?.is_viewer;
   const ctx = useMemo(() => ({ schoolId: profile?.school_id || null, userId: profile?.id || null }), [profile]);
@@ -27520,14 +27562,28 @@ function VideoHubScreen({ onNavigate }) {
   const onFile = (f) => {
     if (!f) return;
     const prev = pendingLocal.current; pendingLocal.current = null;
+    // ★「続きから」で選び直したのに、前と違う動画だったとき：そのまま開かずに確認する
+    if (prev && `local:${f.name}:${f.size}` !== prev.key) {
+      setMismatch({ prev, row: prev.row, file: f, info: null });
+      vaReadVideoInfo(f).then(info => setMismatch(m => (m && m.file === f) ? { ...m, info } : m));
+      return;
+    }
     setOpened({ initial: { kind:"local", file:f, shared: prev ? prev.shared : (localShare && !!ctx.schoolId), ownerId: prev?.ownerId, expectKey: prev?.key } });
+  };
+  const pickAgain = (prev) => {
+    setGuide(null); setMismatch(null);
+    pendingLocal.current = prev;
+    fileRef.current && fileRef.current.click();
+  };
+  const openAsNew = () => {
+    const f = mismatch && mismatch.file; setMismatch(null);
+    if (f) setOpened({ initial: { kind:"local", file:f, shared: localShare && !!ctx.schoolId } });
   };
   const openRecent = (r) => {
     if (r.kind === "yt" || (r.source_key || "").startsWith("yt:")) {
       setOpened({ initial: { kind:"yt", ytId: r.source_key.slice(3), title: r.title || "YouTube動画", shared: !!r.shared, ownerId: r.owner_id } });
     } else {
-      pendingLocal.current = { shared: !!r.shared, ownerId: r.owner_id, key: r.source_key };
-      fileRef.current && fileRef.current.click();
+      setGuide(r);   // ★まず「この動画を選んでください」と目印（画像・長さ）を見せる
     }
   };
   const closeAnalysis = () => { setOpened(null); loadRecent(); };
@@ -27559,7 +27615,7 @@ function VideoHubScreen({ onNavigate }) {
     setConfirmDel(null);
     try {
       await vaDeleteRow(r.scope, r.source_key);
-      try { localStorage.removeItem(vaLocalKey(r.scope, r.source_key)); } catch (_) {}
+      try { localStorage.removeItem(vaLocalKey(r.scope, r.source_key)); localStorage.removeItem(vaThumbKey(r.source_key)); } catch (_) {}
       setRecent(prev => (prev || []).filter(x => !(x.scope === r.scope && x.source_key === r.source_key)));
       showHubMsg(`「${recentTitle(r)}」の描き込みを削除しました`);
     } catch (e) {
@@ -27571,9 +27627,11 @@ function VideoHubScreen({ onNavigate }) {
   const card = { ...S.card, padding:14, marginBottom:12 };
   const fmtDay = (iso) => { try { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()}`; } catch (_) { return ""; } };
   const tag = (bg, color, text) => <span style={{ display:"inline-block", fontSize:10, fontWeight:700, borderRadius:5, padding:"2px 6px", marginRight:4, background:bg, color }}>{text}</span>;
-  const thumb = (ytId, icon) => (
-    <div style={{ width:84, height:48, borderRadius:7, background:"#222", flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:20 }}>
-      {ytId ? <img src={youtubeThumbOf(ytId)} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : icon}
+  const thumb = (ytId, icon, local) => (
+    <div style={{ position:"relative", width:84, height:48, borderRadius:7, background:"#222", flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:20 }}>
+      {ytId ? <img src={youtubeThumbOf(ytId)} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+        : local && local.img ? <img src={local.img} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : icon}
+      {local && local.dur > 0 && <span style={{ position:"absolute", right:3, bottom:3, background:"rgba(0,0,0,.7)", color:"#fff", fontSize:10.5, fontWeight:700, borderRadius:4, padding:"1px 4px", fontVariantNumeric:"tabular-nums", lineHeight:1.3 }}>{vaLen(local.dur)}</span>}
     </div>
   );
 
@@ -27620,7 +27678,7 @@ function VideoHubScreen({ onNavigate }) {
             const delKey = r.scope + "|" + r.source_key;
             return (
               <div key={r.scope + r.source_key} onClick={() => openRecent(r)} style={{ display:"flex", gap:10, alignItems:"center", padding:"10px 2px", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
-                {thumb(isYt ? r.source_key.slice(3) : null, "📱")}
+                {thumb(isYt ? r.source_key.slice(3) : null, "📱", isYt ? null : vaGetThumb(r.source_key))}
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:13, fontWeight:700, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{title}</div>
                   <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>
@@ -27639,7 +27697,7 @@ function VideoHubScreen({ onNavigate }) {
             );
           })}
           {recent && recent.some(r => !(r.source_key || "").startsWith("yt:")) && (
-            <div style={{ fontSize:11, color:C.textSec, marginTop:6 }}>※スマホの動画は、続きを開くときに同じ動画ファイルを選び直します。</div>
+            <div style={{ fontSize:11, color:C.textSec, marginTop:6 }}>※スマホの動画は、続きを開くときに同じ動画を選び直します（画像と長さを目印にしてください）。</div>
           )}
         </div>
 
@@ -27687,6 +27745,72 @@ function VideoHubScreen({ onNavigate }) {
           </div>
         </div>
       )}
+
+      {/* ★スマホの動画の「続きから」：選び直す前に、どの動画かの目印を見せる */}
+      {guide && (() => {
+        const info = vaGetThumb(guide.source_key);
+        const name = recentTitle(guide);
+        const prev = { shared: !!guide.shared, ownerId: guide.owner_id, key: guide.source_key, row: guide };
+        return (
+          <div onClick={e => { if (e.target === e.currentTarget) setGuide(null); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:400 }}>
+            <div style={{ background:C.white, width:"100%", maxHeight:"92vh", overflowY:"auto", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>
+              <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>📱 この動画を選んでください</div>
+              {info && info.img && (
+                <div style={{ position:"relative", borderRadius:10, overflow:"hidden", background:"#222", marginBottom:10 }}>
+                  <img src={info.img} alt="" style={{ display:"block", width:"100%", maxHeight:"34vh", objectFit:"contain" }} />
+                  {info.dur > 0 && <span style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.7)", color:"#fff", fontSize:15, fontWeight:800, borderRadius:6, padding:"3px 8px", fontVariantNumeric:"tabular-nums" }}>{vaLen(info.dur)}</span>}
+                </div>
+              )}
+              <div style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:"4px 10px", fontSize:13, marginBottom:10 }}>
+                <b style={{ color:C.textSec }}>長さ</b><span>{info && info.dur > 0 ? `${vaLenJp(info.dur)}（選ぶ画面では「${vaLen(info.dur)}」と表示）` : "不明（この端末では、まだ目印がありません）"}</span>
+                <b style={{ color:C.textSec }}>名前</b><span style={{ wordBreak:"break-all" }}>{name}</span>
+                <b style={{ color:C.textSec }}>分析した日</b><span>{fmtDay(guide.updated_at)}</span>
+              </div>
+              <div style={{ fontSize:12, color:C.textSec, lineHeight:1.6, marginBottom:12 }}>
+                {info && info.img ? "次の画面で、上の画像と同じ場面・同じ長さの動画をタップすると、描き込みの続きが開きます。" : "次の画面で、同じ名前・同じ長さの動画をタップすると、描き込みの続きが開きます。"}
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setGuide(null)}>やめる</button>
+                <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => pickAgain(prev)}>動画を選ぶ</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ★選んだ動画が前と違うとき：そのまま開かずに確認する */}
+      {mismatch && (() => {
+        const old = vaGetThumb(mismatch.prev.key);
+        const oldName = mismatch.row ? recentTitle(mismatch.row) : mismatch.prev.key.replace(/^local:/, "").replace(/:\d+$/, "");
+        const nu = mismatch.info;
+        const pic = (img, dur, label) => (
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:11, color:C.textSec, marginBottom:3 }}>{label}</div>
+            <div style={{ position:"relative", aspectRatio:"16/9", borderRadius:8, overflow:"hidden", background:"#222", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:20 }}>
+              {img ? <img src={img} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : "📱"}
+              {dur > 0 && <span style={{ position:"absolute", right:4, top:4, background:"rgba(0,0,0,.7)", color:"#fff", fontSize:11, fontWeight:700, borderRadius:4, padding:"1px 5px", fontVariantNumeric:"tabular-nums" }}>{vaLen(dur)}</span>}
+            </div>
+          </div>
+        );
+        return (
+          <div onClick={e => { if (e.target === e.currentTarget) setMismatch(null); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:400 }}>
+            <div style={{ background:C.white, width:"100%", maxHeight:"92vh", overflowY:"auto", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>
+              <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>⚠ 前の動画と違うようです</div>
+              <div style={{ background:"#fff3e0", border:"1px solid #ffcc80", color:"#8a4b00", fontSize:12.5, borderRadius:9, padding:"9px 10px", lineHeight:1.6, marginBottom:10, wordBreak:"break-all" }}>
+                選んだ動画は {nu && nu.dur > 0 ? <b>{vaLen(nu.dur)}</b> : null}「{mismatch.file.name}」でした。<br />
+                続きの動画は {old && old.dur > 0 ? <b>{vaLen(old.dur)}</b> : null}「{oldName}」です。
+              </div>
+              <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                {pic(old && old.img, old && old.dur, "続きの動画")}
+                {pic(nu && nu.img, nu && nu.dur, "選んだ動画")}
+              </div>
+              <button style={{ ...S.btn(C.navy), width:"100%" }} onClick={() => pickAgain(mismatch.prev)}>もう一度選び直す</button>
+              <button style={{ ...S.btn(C.white), width:"100%", color:C.navy, border:`1px solid ${C.border}`, marginTop:8 }} onClick={openAsNew}>この動画を新しく分析する</button>
+              <button style={{ ...S.btn("transparent"), width:"100%", color:C.textSec, marginTop:4 }} onClick={() => setMismatch(null)}>やめる</button>
+            </div>
+          </div>
+        );
+      })()}
 
       {opened && (
         <VideoAnalysisScreen
