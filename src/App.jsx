@@ -26047,6 +26047,8 @@ const VA_HINTS = {
   player: "タップした所に選手を置きます（タップした位置が足元）。置くときに指をずらすと位置を調整できます。あとで動かす・大きさを変えるときは「選択」に切り替えてください。置いたあとにほかの所をタップすると確定し、もう一度タップすると次の選手を置けます。名前や役割を書いたり、「理想の位置」にすると半透明の点線で「ここに立つべきだった」を表せます。",
 };
 const VA_EPS = 0.02;
+// ★iPhone/iPad（iOSのChromeもSafariと同じ仕組み）：画面の全画面命令は使わず、画面いっぱいの表示だけにする
+const VA_IS_IOS = typeof navigator !== "undefined" && (/iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
 const vaNewId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const vaFmt = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t - m * 60; return m + ":" + s.toFixed(2).padStart(5, "0"); };
 
@@ -26834,7 +26836,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   const enterFs = useCallback((withTip) => {
     setFs(true); setFsPalette(false);
     const w = stageWrapRef.current;
-    try {
+    if (!VA_IS_IOS) try {
       const r = w && (w.requestFullscreen ? w.requestFullscreen() : (w.webkitRequestFullscreen && w.webkitRequestFullscreen()));
       if (r && r.catch) r.catch(() => {});
     } catch (_) {}
@@ -27112,6 +27114,14 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   };
   const toastEl = toast && <div style={{ position:"fixed", left:"50%", ...(fs ? { top:"calc(104px + env(safe-area-inset-top,0px))" } : { bottom:"calc(24px + env(safe-area-inset-bottom,0px))" }), transform:"translateX(-50%)", textAlign:"center", background:"#1d2330", color:"#fff", padding:"9px 14px", borderRadius:9, fontSize:13, zIndex:600, pointerEvents:"none", maxWidth:"90vw" }}>{toast}</div>;
   const ytTapNeeded = source?.kind === "yt" && ytNeedsTap && !ytError;
+  // ★動画の右下のゴミ箱：「選択」で選んでいる書き込みをボタン1つで消す
+  const trashBtn = isDraw && eng.tool === "select" && eng.sel && (
+    <button aria-label="選んでいる書き込みを削除" title="削除" data-va-keep
+      onPointerDown={e => e.stopPropagation()}
+      onClick={() => { if (eng.deleteSelected()) showToast("選択した書き込みを削除しました"); }}
+      style={{ position:"absolute", right: fs ? 12 : 8, bottom: fs ? (portrait ? "calc(160px + env(safe-area-inset-bottom,0px))" : "calc(96px + env(safe-area-inset-bottom,0px))") : 56, pointerEvents:"auto",
+        width: fs ? 46 : 40, height: fs ? 46 : 40, padding:0, border:"none", borderRadius:"50%", background:"rgba(198,40,40,.92)", color:"#fff", fontSize: fs ? 22 : 19, lineHeight: fs ? "46px" : "40px", textAlign:"center", boxShadow:"0 2px 6px rgba(0,0,0,.35)", zIndex:4, cursor:"pointer", transform:"translateZ(0)", WebkitTransform:"translateZ(0)" }}>🗑</button>
+  );
 
   return (
     <div style={{ position:"fixed", inset:0, zIndex:500, background:C.gray, overflowY: fs ? "hidden" : "auto", WebkitOverflowScrolling:"touch", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
@@ -27182,7 +27192,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
           <div ref={stageWrapRef} style={fs
             ? { position:"fixed", inset:0, zIndex:50, display:"flex", justifyContent:"center", alignItems:"center", background:"#000", overflow:"hidden" }
             : { display:"flex", justifyContent:"center", background:"#000", borderRadius:10, overflow:"hidden" }}>
-            <div style={{ position:"relative", width:stageSize.w || "100%", height:stageSize.h || 200, background:"#000" }}>
+            <div style={{ position:"relative", zIndex:0, width:stageSize.w || "100%", height:stageSize.h || 200, background:"#000" }}>
               <video ref={videoRef} playsInline preload="metadata" style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"contain", display: source?.kind === "local" ? "block" : "none" }} />
               <div ref={ytBoxRef} style={{ position:"absolute", inset:0, display: source?.kind === "yt" ? "block" : "none" }} />
               <canvas
@@ -27201,24 +27211,21 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
               {!fs && source && (
                 <button aria-label="全画面" title="全画面" data-va-undo data-va-trajkeep onClick={() => enterFs(false)}
                   onPointerDown={e => e.stopPropagation()}
-                  style={{ position:"absolute", right:8, bottom:8, width:40, height:40, padding:0, border:"none", borderRadius:"50%", background:"rgba(0,0,0,.55)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2, cursor:"pointer" }}>{expandIcon}</button>
+                  style={{ position:"absolute", right:8, bottom:8, width:40, height:40, padding:0, border:"none", borderRadius:"50%", background:"rgba(0,0,0,.55)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2, cursor:"pointer", transform:"translateZ(0)", WebkitTransform:"translateZ(0)" }}>{expandIcon}</button>
               )}
               {/* ★動画の右下のゴミ箱：「選択」で選んでいる書き込みをボタン1つで消す */}
-              {isDraw && eng.tool === "select" && eng.sel && (
-                <button aria-label="選んでいる書き込みを削除" title="削除" data-va-keep
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={() => { if (eng.deleteSelected()) showToast("選択した書き込みを削除しました"); }}
-                  style={{ position: fs ? "fixed" : "absolute", right: fs ? 12 : 8, bottom: fs ? (portrait ? "calc(160px + env(safe-area-inset-bottom,0px))" : "calc(96px + env(safe-area-inset-bottom,0px))") : 56,
-                    width: fs ? 46 : 40, height: fs ? 46 : 40, padding:0, border:"none", borderRadius:"50%", background:"rgba(198,40,40,.92)", color:"#fff", fontSize: fs ? 22 : 19, lineHeight: fs ? "46px" : "40px", textAlign:"center", boxShadow:"0 2px 6px rgba(0,0,0,.35)", zIndex:4, cursor:"pointer" }}>🗑</button>
-              )}
+              {!fs && trashBtn}
               {skipLabel && (
                 <div style={{ position:"absolute", top:"50%", left: skipLabel.side === "right" ? "75%" : "25%", transform:"translate(-50%,-50%)", fontSize:18, fontWeight:800, color:"#fff", background:"rgba(0,0,0,.55)", padding:"10px 16px", borderRadius:999, pointerEvents:"none", whiteSpace:"nowrap" }}>{skipLabel.text}</div>
               )}
             </div>
             {/* ★全画面のときだけ出る操作（動画の上に重ねる） */}
             {fs && (
-              <>
-                <div style={{ position:"absolute", zIndex:3, top:0, left:0, right:0, display:"flex", alignItems:"center", gap:8, padding:"calc(6px + env(safe-area-inset-top,0px)) 10px 6px", background:"linear-gradient(rgba(0,0,0,.65),rgba(0,0,0,0))", color:"#fff" }}>
+              // ★iPhone（Safari・Chrome）では、動画が上に重ねたボタンより手前に描かれてボタンが見えなくなることがある。
+              //   ボタンをまとめた層を別の重なり（translateZ）にして、必ず動画より手前に出す
+              <div style={{ position:"absolute", inset:0, zIndex:3, pointerEvents:"none", transform:"translateZ(0)", WebkitTransform:"translateZ(0)" }}>
+                {trashBtn}
+                <div style={{ position:"absolute", pointerEvents:"auto", zIndex:3, top:0, left:0, right:0, display:"flex", alignItems:"center", gap:8, padding:"calc(6px + env(safe-area-inset-top,0px)) 10px 6px", background:"linear-gradient(rgba(0,0,0,.65),rgba(0,0,0,0))", color:"#fff" }}>
                   <button style={fsb} onClick={handleClose}>← 戻る</button>
                   {!readOnly ? (
                     <div style={{ display:"flex", background:"rgba(255,255,255,.14)", borderRadius:9, padding:2, gap:2, margin:"0 auto" }}>
@@ -27238,8 +27245,8 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
 
                 {isDraw && (
                   <div style={portrait
-                    ? { position:"absolute", zIndex:3, display:"grid", gridTemplateColumns:"repeat(10,32px)", gap:3, left:"50%", bottom:"calc(104px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"rgba(0,0,0,.5)", borderRadius:12, padding:5 }
-                    : { position:"absolute", zIndex:3, display:"grid", gridTemplateColumns:"repeat(2,36px)", gap:3, left:"calc(6px + env(safe-area-inset-left,0px))", top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,.5)", borderRadius:12, padding:5 }}>
+                    ? { position:"absolute", pointerEvents:"auto", zIndex:3, display:"grid", gridTemplateColumns:"repeat(10,32px)", gap:3, left:"50%", bottom:"calc(104px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"rgba(0,0,0,.5)", borderRadius:12, padding:5 }
+                    : { position:"absolute", pointerEvents:"auto", zIndex:3, display:"grid", gridTemplateColumns:"repeat(2,36px)", gap:3, left:"calc(6px + env(safe-area-inset-left,0px))", top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,.5)", borderRadius:12, padding:5 }}>
                     {VA_TOOLS.map(t => {
                       const on = eng.tool === t, sz = portrait ? 32 : 36;
                       return <button key={t} title={VA_NAMES[t]} aria-label={VA_NAMES[t]} onClick={() => pickTool(t)} style={{ width:sz, height:sz, border:"none", borderRadius:8, background: on ? "#fff" : "transparent", color: on ? C.navy : "#fff", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
@@ -27250,7 +27257,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                   </div>
                 )}
                 {isDraw && fsPalette && (
-                  <div style={{ position:"absolute", zIndex:3, display:"flex", flexWrap:"wrap", gap:6, background:"rgba(0,0,0,.6)", borderRadius:12, padding:8,
+                  <div style={{ position:"absolute", pointerEvents:"auto", zIndex:3, display:"flex", flexWrap:"wrap", gap:6, background:"rgba(0,0,0,.6)", borderRadius:12, padding:8,
                     ...(portrait ? { left:"50%", bottom:"calc(160px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", width:"max-content", maxWidth:"calc(100vw - 20px)", justifyContent:"center" }
                                  : { left:96, top:"50%", transform:"translateY(-50%)", width:150 }) }}>
                     {VA_COLORS.map(o => (
@@ -27260,7 +27267,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                   </div>
                 )}
                 {isDraw && eng.tool === "text" && (
-                  <div data-va-stamps style={{ position:"absolute", zIndex:3, display:"flex", flexWrap:"nowrap", overflowX:"auto", WebkitOverflowScrolling:"touch", gap:6, background:"rgba(0,0,0,.55)", borderRadius:12, padding:6,
+                  <div data-va-stamps style={{ position:"absolute", pointerEvents:"auto", zIndex:3, display:"flex", flexWrap:"nowrap", overflowX:"auto", WebkitOverflowScrolling:"touch", gap:6, background:"rgba(0,0,0,.55)", borderRadius:12, padding:6,
                     ...(portrait ? { left:10, right:10, bottom:"calc(150px + env(safe-area-inset-bottom,0px))" } : { top:"calc(52px + env(safe-area-inset-top,0px))", left:96, right:10 }) }}>
                     {stampEndChip(true)}
                     {VA_STAMP_WORDS.map(w => stampChip(w, true))}
@@ -27273,7 +27280,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                   </div>
                 )}
 
-                <div style={{ position:"absolute", zIndex:3, bottom:0, left:0, right:0, display:"flex", flexDirection:"column", gap:4, padding:"6px 10px calc(6px + env(safe-area-inset-bottom,0px))", background:"linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.7))", color:"#fff" }} data-va-trajkeep>
+                <div style={{ position:"absolute", pointerEvents:"auto", zIndex:3, bottom:0, left:0, right:0, display:"flex", flexDirection:"column", gap:4, padding:"6px 10px calc(6px + env(safe-area-inset-bottom,0px))", background:"linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.7))", color:"#fff" }} data-va-trajkeep>
                   <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                     <input type="range" min="0" max="1" step="0.001" value={duration ? time / duration : 0} style={{ flex:1, margin:0 }}
                       onChange={e => { const p = eng.player; if (p) { p.seek(+e.target.value * p.duration); setTime(p.time); } }} />
@@ -27290,7 +27297,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                   </div>
                 </div>
                 {toastEl}
-              </>
+              </div>
             )}
           </div>
 
