@@ -26062,6 +26062,12 @@ function vaLoadYouTubeApi() {
   return _vaYtApiPromise;
 }
 
+// ★YouTubeの字幕を消す。公式に約束された機能ではないので、効かなくても止まらないように try で囲む
+function vaHideYouTubeCaptions(yp) {
+  try { yp.unloadModule && yp.unloadModule("captions"); } catch (_) {}
+  try { yp.unloadModule && yp.unloadModule("cc"); } catch (_) {}
+}
+
 // ---------- プレーヤー（スマホの動画 / YouTube を同じ使い方にそろえる） ----------
 class VALocalPlayer {
   constructor(el) { this.el = el; this.step = 1 / 30; this.stepLabel = "1コマ"; this.rates = [0.1, 0.25, 0.5, 1]; }
@@ -26713,15 +26719,21 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
       const box = document.createElement("div"); ytBoxRef.current.innerHTML = ""; ytBoxRef.current.appendChild(box);
       const yp = new YT.Player(box, {
         videoId: v.id, width: "100%", height: "100%",
-        playerVars: { playsinline: 1, controls: 0, rel: 0, modestbranding: 1, disablekb: 1, fs: 0, iv_load_policy: 3 },
+        // ★cc_load_policy:0 … 字幕（自動字幕）を最初から出さない
+        playerVars: { playsinline: 1, controls: 0, rel: 0, modestbranding: 1, disablekb: 1, fs: 0, iv_load_policy: 3, cc_load_policy: 0 },
         events: {
           onReady: () => {
+            vaHideYouTubeCaptions(yp);
             const pl = new VAYouTubePlayer(yp);
             ytObjRef.current = yp; eng.player = pl; setPlayer(pl);
             setYtNeedsTap(true); // ★iPhoneなどでは、最初の1回は動画そのものをタップしないと再生できない
             eng.resize();
           },
-          onStateChange: (ev) => { if (ev.data === 1 && eng.player) { eng.player.everPlayed = true; setYtNeedsTap(false); } },
+          onStateChange: (ev) => {
+            if (ev.data === 1) vaHideYouTubeCaptions(yp); // ★再生が始まったら字幕の機能ごと止める（YouTubeの設定で字幕をオンにしている人でも消えるように）
+            if (ev.data === 1 && eng.player) { eng.player.everPlayed = true; setYtNeedsTap(false); }
+          },
+          onApiChange: () => vaHideYouTubeCaptions(yp),
           onError: () => setYtError("この動画を再生できませんでした。限定公開（または公開）になっているか確認してください。"),
         },
       });
@@ -26777,6 +26789,24 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
 
   // ---- 再生操作 ----
   const stepBy = (n) => { const p = eng.player; if (!p) return; p.pause(); p.seek(p.time + n * p.step); };
+  // ★10秒とばし：押した回数だけ続けてとぶ（3回で30秒）。再生中なら再生したまま。
+  //   続けて押したときは、前にとんだ先から数える（YouTubeは時刻の反映が少し遅れるため）
+  const skipRef = useRef({ sum: 0, target: null, at: 0, timer: null });
+  const [skipLabel, setSkipLabel] = useState(null);   // { text, side }
+  const skip = (sec) => {
+    const p = eng.player; if (!p) return;
+    const k = skipRef.current, now = Date.now();
+    const cont = k.target !== null && now - k.at < 1200 && Math.sign(k.sum) === Math.sign(sec);
+    const base = cont ? k.target : p.time;
+    const d = p.duration || 0;
+    const to = Math.max(0, d ? Math.min(d - 0.05, base + sec) : base + sec);
+    p.seek(to);
+    k.sum = cont ? k.sum + sec : sec; k.target = to; k.at = now;
+    setSkipLabel({ text: (k.sum > 0 ? "⏩ +" : "⏪ −") + Math.abs(k.sum) + "秒", side: k.sum > 0 ? "right" : "left" });
+    clearTimeout(k.timer);
+    k.timer = setTimeout(() => { setSkipLabel(null); k.sum = 0; k.target = null; }, 1000);
+    setTime(to);
+  };
   const togglePlay = () => {
     const p = eng.player; if (!p) return;
     if (p.paused) { p.play(); if (source?.kind === "yt" && !p.everPlayed) setTimeout(() => { if (!p.everPlayed) setYtNeedsTap(true); }, 1200); }
@@ -26975,6 +27005,9 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
               />
               <div style={{ position:"absolute", top:8, left:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background: isDraw ? "#e65100" : "rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{isDraw ? "描き込み中" : "再生"}</div>
               <div style={{ position:"absolute", top:8, right:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{rate}x</div>
+              {skipLabel && (
+                <div style={{ position:"absolute", top:"50%", left: skipLabel.side === "right" ? "75%" : "25%", transform:"translate(-50%,-50%)", fontSize:18, fontWeight:800, color:"#fff", background:"rgba(0,0,0,.55)", padding:"10px 16px", borderRadius:999, pointerEvents:"none", whiteSpace:"nowrap" }}>{skipLabel.text}</div>
+              )}
             </div>
           </div>
 
@@ -26991,10 +27024,12 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
           </div>
 
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginTop:8, flexWrap:"wrap" }}>
-            <div style={{ display:"flex", gap:6 }} data-va-trajkeep>
-              <button style={{ ...btn, minWidth:58, padding:"10px 8px" }} onClick={() => stepBy(-1)}>◀ {player ? player.stepLabel : "1コマ"}</button>
-              <button style={{ ...btn, minWidth:64, padding:"10px 8px", background:C.navy, color:C.white, border:"none", fontSize:16 }} onClick={togglePlay} data-va-play>{paused ? "▶" : "❚❚"}</button>
-              <button style={{ ...btn, minWidth:58, padding:"10px 8px" }} onClick={() => stepBy(1)}>{player ? player.stepLabel : "1コマ"} ▶</button>
+            <div style={{ width:"100%", display:"grid", gridTemplateColumns:"1fr 1fr 1.2fr 1fr 1fr", gap:5 }} data-va-trajkeep>
+              <button style={{ ...btn, padding:"10px 2px", fontSize:12.5, whiteSpace:"nowrap", background:"#eef3fb", borderColor:"#c9d8ee", color:C.navy }} onClick={() => skip(-10)}>⏪ 10秒</button>
+              <button style={{ ...btn, padding:"10px 2px", fontSize:12.5, whiteSpace:"nowrap" }} onClick={() => stepBy(-1)}>◀ {player ? player.stepLabel : "1コマ"}</button>
+              <button style={{ ...btn, padding:"10px 2px", background:C.navy, color:C.white, border:"none", fontSize:16 }} onClick={togglePlay} data-va-play>{paused ? "▶" : "❚❚"}</button>
+              <button style={{ ...btn, padding:"10px 2px", fontSize:12.5, whiteSpace:"nowrap" }} onClick={() => stepBy(1)}>{player ? player.stepLabel : "1コマ"} ▶</button>
+              <button style={{ ...btn, padding:"10px 2px", fontSize:12.5, whiteSpace:"nowrap", background:"#eef3fb", borderColor:"#c9d8ee", color:C.navy }} onClick={() => skip(10)}>10秒 ⏩</button>
             </div>
             <div style={{ display:"flex", gap:5 }} data-va-trajkeep>
               {rates.map(r => (
