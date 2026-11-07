@@ -26198,6 +26198,12 @@ class VAEngine {
     this.traj = null; this.cur = null; this.drag = null; this.sel = null; this.selByTap = false;
     this.redraw(); this.dirty(); return vis.length;
   }
+  // ★この動画の書き込み（線・円・文字・メモ）をすべて削除（「↶ 戻す」で戻せる）
+  clearAll() {
+    const n = this.groups().length;
+    this.shapes = []; this.traj = null; this.cur = null; this.drag = null; this.sel = null; this.selByTap = false;
+    this.redraw(); this.dirty(); return n;
+  }
   setAnim(v) {
     const t = this.sel; if (!t || !VA_ANIM_TYPES.includes(t.type)) return;
     if (v) t.anim = v; else delete t.anim;
@@ -26803,6 +26809,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   const [saveState, setSaveState] = useState("");      // "" | "saving" | "saved" | "local"
   const [toast, setToastMsg] = useState("");
   const toastTimer = useRef(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
   // ★全画面（動画を画面いっぱいに広げて、その上で描く）。動画を開くと最初から全画面
   const [fs, setFs] = useState(false);
   const fsRef = useRef(false); fsRef.current = fs;
@@ -27557,7 +27564,20 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
         {/* 書き込みのタイミング一覧 */}
         {source && (
           <div style={card}>
-            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:6 }}>書き込みのタイミング</div>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+              <div style={{ fontSize:14, fontWeight:800, color:C.navy, flex:1 }}>書き込みのタイミング</div>
+              {/* ★この動画の書き込みとメモをすべて削除。押し間違い防止で2回押し（「↶ 戻す」で戻せる） */}
+              {!readOnly && groups.length > 0 && (
+                <button style={{ ...btn, whiteSpace:"nowrap", border:`1px solid ${confirmClearAll ? C.red : C.border}`, background: confirmClearAll ? C.red : C.white, color: confirmClearAll ? C.white : C.red }}
+                  onClick={() => {
+                    if (confirmClearAll) {
+                      setConfirmClearAll(false); setOpenKey(null);
+                      const n = eng.clearAll();
+                      showToast(`この動画の書き込みとメモ（${n}件）をすべて削除しました（↶ 戻すで戻せます）`);
+                    } else { setConfirmClearAll(true); setTimeout(() => setConfirmClearAll(false), 2500); }
+                  }}>{confirmClearAll ? "本当に全部削除" : "🗑 すべて削除"}</button>
+              )}
+            </div>
             <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10, lineHeight:1.6 }}>書き込んだ時刻は自動で記録されます。再生すると、その時刻になったときに線や円が表示されます。</div>
             {!readOnly && (
               <div style={{ display:"flex", gap:8, marginBottom:10 }}>
