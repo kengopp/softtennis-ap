@@ -4689,7 +4689,7 @@ function NavBar({ active, onNavigate }) {
   const items = [
     ["home",   "🏠", "ホーム"],
     ["list",   "📋", "試合"],
-    ["aiAnalysisList","🤖", "AI分析"],
+    ["video",  "🎬", "動画"],   // ★AI分析は「📊 分析」のタブ（🤖 AI）へ移した
     ["stats",  "📊", "分析"],
     ["master", "🗂",  "設定"],
   ];
@@ -15144,15 +15144,18 @@ function ScopeSheet({ matches, scope, seasonStart, seasonLabel, teamMatchIds, on
 // ペア分析画面：自分たち（自チームのペア）／相手分析（過去に対戦した相手ペア）
 // ============================================================
 // ★分析の「個人／ペア／チーム」タブ（試合一覧の「大会／団体戦／個人戦」と同じ見た目）
-function AnalysisTabs({ current, onPersonal, onPair, onTeam }) {
-  const tabs = [["personal","👤 個人",onPersonal],["pair","👥 ペア",onPair],["team","🏫 チーム",onTeam]];
+// ★「🤖 AI」タブ（AI動画分析）は、どの分析画面からでも同じ所へ移るので、Appの画面切り替えを直接使う
+let _appGoNav = null;
+function AnalysisTabs({ current, onPersonal, onPair, onTeam, onAi }) {
+  const goAi = onAi || (() => _appGoNav && _appGoNav("aiAnalysisList"));
+  const tabs = [["personal","👤 個人",onPersonal],["pair","👥 ペア",onPair],["team","🏫 チーム",onTeam],["ai","🤖 AI",goAi]];
   return (
     <div style={{ display:"flex", background:"#e6e9ef", borderRadius:12, padding:4, gap:4, marginBottom:10 }}>
       {tabs.map(([k,l,fn]) => {
         const on = current === k;
         return (
           <div key={k} onClick={on ? undefined : fn}
-            style={{ flex:1, textAlign:"center", padding:"10px 2px", fontSize:14.5, fontWeight:800, borderRadius:9, whiteSpace:"nowrap",
+            style={{ flex:1, textAlign:"center", padding:"10px 2px", fontSize:13.5, fontWeight:800, borderRadius:9, whiteSpace:"nowrap",
               background: on ? C.white : "transparent", color: on ? C.navy : C.textSec,
               boxShadow: on ? "0 1px 4px rgba(0,0,0,0.12)" : "none", cursor: on ? "default" : "pointer" }}>{l}</div>
         );
@@ -19973,6 +19976,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
   const [videoUrlError, setVideoUrlError] = useState("");
   const [memoSaved, setMemoSaved] = useState(true); // メモが保存済みかどうか
   const [memoSaving, setMemoSaving] = useState(false); // ★保存中は「戻る」ボタンを押しても未保存警告が出ないよう、保存完了まで待つ
+  const [showVideoAnalysis, setShowVideoAnalysis] = useState(false); // ★動画分析（スロー・描き込み）画面
   const [showVideoModal, setShowVideoModal] = useState(false); // ★動画リンクの追加・一覧はボタンを押したときだけモーダルで開く
   const [videoSaving, setVideoSaving] = useState(false); // ★保存中は「戻る」ボタンを押しても未保存警告が出ないよう、保存完了までモーダルを閉じない
   const [suspendConfirm, setSuspendConfirm] = useState(false); // 中断確認ダイアログ
@@ -21176,6 +21180,14 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     onClick={()=>{ setVideoLinksDraft(normalizeVideoLinks(match.video_links)); setVideoUrlInput(""); setVideoUrlError(""); setShowVideoModal(true); }}
                   >🎥 {match.video_links && match.video_links.length > 0 ? `動画リンクを貼る（${match.video_links.length}件）` : "動画リンクを貼る"}</button>
                 </>
+              )}
+              {/* ★動画分析：試合のYouTube動画／スマホ内の動画を、スロー・コマ送りで見ながら線や円を描き込める */}
+              <button
+                style={{ ...S.btn("#fff"), color:C.navy, border:"1px solid "+C.navy, marginBottom:8, display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}
+                onClick={()=>setShowVideoAnalysis(true)}
+              >🎬 動画をスロー・描き込みで分析</button>
+              {showVideoAnalysis && (
+                <VideoAnalysisScreenForMatch match={match} readOnly={isViewer} onClose={()=>setShowVideoAnalysis(false)} />
               )}
               {/* ボタン群 */}
               {/* ★スタッツ／スコアは上部のタブ（記録・スコア・スタッツ・検算）と機能が重複しているため削除。
@@ -25844,9 +25856,14 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
     <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
         {/* ★ホーム・試合一覧とヘッダーの高さをそろえるため、説明の小さい文字は出さない */}
-        <div style={{ fontSize:20, fontWeight:800 }}>🤖 AI動画分析</div>
+        {/* ★AI分析は「📊 分析」の「🤖 AI」タブとして表示する */}
+        <div style={{ fontSize:20, fontWeight:800 }}>分析</div>
       </div>
       <div style={{ padding:14 }}>
+        <AnalysisTabs current="ai"
+          onPersonal={()=>onNavigate && onNavigate("stats")}
+          onPair={()=>onNavigate && onNavigate("pairAnalysis")}
+          onTeam={()=>onNavigate && onNavigate("teamStats")} />
         <div onClick={onSwitchPlayer} style={{ ...S.card, padding:"12px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", marginBottom:12 }}>
           <div>
             <div style={{ fontSize:11, color:C.textSec }}>表示対象</div>
@@ -25909,7 +25926,7 @@ function AiAnalysisListScreen({ selectedPlayerName, onSwitchPlayer, onOpenAnalys
           );
         })}
       </div>
-      <NavBar active="aiAnalysisList" onNavigate={onNavigate} />
+      <NavBar active="stats" onNavigate={onNavigate} />
     </div>
   );
 }
@@ -25994,6 +26011,1301 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ★動画分析（試合動画にスロー再生・コマ送り・描き込み）
+//   ・入口：下のメニュー「🎬 動画」（VideoHubScreen）／試合詳細のボタン
+//   ・対象：スマホ内の動画（アップロードはしない）／YouTubeのURL（試合に登録していなくてもOK）
+//   ・描き込みは「動画の時刻」付きで保存し、再生するとその時刻に表示する
+//   ・保存先：Supabase の video_annotations（共有範囲 scope＋動画ごとに1行、shapes に JSON 配列）
+//       scope = 'match:<試合ID>'（試合の動画）／'school:<学校ID>'（チームで共有）／'user:<ユーザーID>'（自分だけ）
+//     通信できないときに備えて、端末（localStorage）にも控えを残す
+//   ・閲覧専用アカウントは見るだけ（描き込み・メモはできない）
+// ============================================================
+const VA_COLORS = [
+  { c:"#ffd400", n:"黄（ボール）" }, { c:"#ff9500", n:"オレンジ" }, { c:"#ff3b30", n:"赤" }, { c:"#ff5fa2", n:"ピンク" },
+  { c:"#a259ff", n:"紫" }, { c:"#2f9bff", n:"青" }, { c:"#5ce1e6", n:"水色" }, { c:"#34c759", n:"緑" },
+  { c:"#ffffff", n:"白" }, { c:"#1c1c1e", n:"黒" },
+];
+const VA_NAMES = { select:"選択", traj:"軌道", aim:"打ちたい", arrow:"矢印", circle:"円", pen:"手書き", player:"選手" };
+const VA_TOOLS = ["select", "traj", "aim", "arrow", "circle", "pen", "player"];
+const VA_HINTS = {
+  select: "すでにある線・円・選手などをタップすると選べます。ドラッグで移動、色ボタンで色の変更、「この書き込みを削除」で削除できます。何もない所をタップすると選択が外れます（時間は進みません）。",
+  traj:   "ボールの位置を順にタップすると、点が線でつながって軌道になります。タップするたびに自動で少し進むので、続けてタップするだけでOKです。すでにある線を選ぶときは「選択」に切り替えてください。",
+  aim:    "何もない所を、打った位置から「ここに打ちたかった」場所までなぞってください。描いたあとは、目標の円・打った位置の白い丸・点線をドラッグして動かせます。",
+  arrow:  "なぞった方向に矢印を描きます。描いたあとは、両端をドラッグで始点・終点を、線の途中をドラッグで全体を動かせます。",
+  circle: "何もない所を中心から外側へなぞると円になります。描いた円は、内側をドラッグで移動、縁や白い丸をドラッグで大きさを変えられます。",
+  pen:    "指でなぞったとおりに線を描きます。描いたあとは、両端の白い丸をドラッグで始点・終点を、線の途中をドラッグで全体を動かせます。",
+  player: "タップした所に選手を置きます（タップした位置が足元）。体をドラッグで移動、枠の右上の白い丸をドラッグで大きさを変えられます。名前や役割を書いたり、「理想の位置」にすると半透明の点線で「ここに立つべきだった」を表せます。",
+};
+const VA_EPS = 0.02;
+const vaNewId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const vaFmt = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = t - m * 60; return m + ":" + s.toFixed(2).padStart(5, "0"); };
+
+// ---------- YouTube IFrame API の読み込み（1回だけ） ----------
+let _vaYtApiPromise = null;
+function vaLoadYouTubeApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (_vaYtApiPromise) return _vaYtApiPromise;
+  _vaYtApiPromise = new Promise((resolve, reject) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (typeof prev === "function") { try { prev(); } catch (e) {} } resolve(window.YT); };
+    const s = document.createElement("script");
+    s.src = "https://www.youtube.com/iframe_api";
+    s.async = true;
+    s.onerror = () => { _vaYtApiPromise = null; reject(new Error("YouTubeの読み込みに失敗しました")); };
+    document.head.appendChild(s);
+  });
+  return _vaYtApiPromise;
+}
+
+// ---------- プレーヤー（スマホの動画 / YouTube を同じ使い方にそろえる） ----------
+class VALocalPlayer {
+  constructor(el) { this.el = el; this.step = 1 / 30; this.stepLabel = "1コマ"; this.rates = [0.1, 0.25, 0.5, 1]; }
+  get time() { return this.el.currentTime || 0; }
+  get duration() { return isFinite(this.el.duration) ? this.el.duration : 0; }
+  get paused() { return this.el.paused; }
+  play() { const p = this.el.play(); if (p && p.catch) p.catch(() => {}); }
+  pause() { this.el.pause(); }
+  seek(t) { this.el.currentTime = Math.max(0, Math.min(this.duration || t, t)); }
+  setRate(r) { this.el.playbackRate = r; }
+}
+class VAYouTubePlayer {
+  constructor(yt) {
+    this.p = yt; this.step = 0.1; this.stepLabel = "0.1秒"; this.rates = [0.25, 0.5, 0.75, 1];
+    this._seekTo = null; this._seekAt = 0; this.everPlayed = false;
+  }
+  get time() {
+    const t = this.p.getCurrentTime ? this.p.getCurrentTime() : 0;
+    // ★止めたままシークした直後は、YouTube側の時刻がすぐには変わらないことがあるため、
+    //   追いつくまで（最大1.5秒）は指定した時刻を返す（コマ送り直後の描き込みの時刻がずれないように）
+    if (this._seekTo !== null) {
+      if (Math.abs(t - this._seekTo) < 0.06 || Date.now() - this._seekAt > 1500 || !this.paused) this._seekTo = null;
+      else return this._seekTo;
+    }
+    return t || 0;
+  }
+  get duration() { return (this.p.getDuration && this.p.getDuration()) || 0; }
+  get paused() { const s = this.p.getPlayerState ? this.p.getPlayerState() : -1; return !(s === 1 || s === 3); }
+  play() { this.p.playVideo && this.p.playVideo(); }
+  pause() { this.p.pauseVideo && this.p.pauseVideo(); }
+  seek(t) {
+    const d = this.duration; t = Math.max(0, d ? Math.min(d, t) : t);
+    this._seekTo = t; this._seekAt = Date.now();
+    this.p.seekTo && this.p.seekTo(t, true);
+  }
+  setRate(r) { this.p.setPlaybackRate && this.p.setPlaybackRate(r); }
+}
+
+// ---------- 描き込みの本体（キャンバスへの描画・当たり判定・ドラッグ） ----------
+class VAEngine {
+  constructor() {
+    this.canvas = null; this.ctx = null; this.player = null;
+    this.shapes = []; this.sel = null; this.selByTap = false; this.traj = null; this.cur = null; this.drag = null;
+    this.tool = "select"; this.color = "#ffd400"; this.mode = "play"; this.showDur = 2;
+    this.readOnly = false; this.autoStep = true; this.stepN = 3;
+    this.onChange = () => {}; this.onDirty = () => {}; this.onTogglePlay = () => {}; this.onStep = () => {}; this.onBusy = () => {};
+    this.loading = false;
+  }
+  get W() { return this.canvas ? this.canvas.clientWidth : 1; }
+  get H() { return this.canvas ? this.canvas.clientHeight : 1; }
+  now() { return this.player ? this.player.time : 0; }
+  lw() { return Math.max(2.5, this.W * 0.006); }
+  startOf(s) { return s.type === "traj" ? (s.pts[0] ? s.pts[0].t : 0) : s.t; }
+  durOf(s) { return s.dur !== undefined ? s.dur : this.showDur; }
+  endOf(s) { return (s.type === "traj" ? s.pts[s.pts.length - 1].t : s.t) + this.durOf(s); }
+  isVisible(s, t = this.now()) {
+    if (s === this.traj || s === this.cur) return true;
+    if (s.type === "traj" && !s.pts.length) return false;
+    return t >= this.startOf(s) - VA_EPS && t <= this.endOf(s);
+  }
+  changed() { this.onChange(); }
+  dirty() { this.onDirty(); this.onChange(); }
+
+  // ---- 選択・確定 ----
+  select(sh, byTap = false) {
+    this.sel = sh; this.selByTap = !!(sh && byTap);
+    if (sh) this.color = sh.color;
+    this.redraw(); this.changed();
+  }
+  confirm() { if (this.sel) { this.sel = null; this.selByTap = false; this.redraw(); this.changed(); } }
+  finishTraj() {
+    if (!this.traj) return;
+    if (this.traj.pts.length < 2) this.shapes = this.shapes.filter(x => x !== this.traj);
+    this.traj = null; this.sel = null; this.selByTap = false;
+    this.redraw(); this.dirty();
+  }
+  setTool(t) {
+    if (t !== "select" && (!this.sel || this.sel.type !== t)) { this.sel = null; this.selByTap = false; }
+    if (t !== "traj") this.finishTraj();
+    this.tool = t;
+    if (t === "traj" && this.color !== "#ffd400") this.color = "#ffd400";
+    if (t === "aim" && this.color === "#ffd400") this.color = "#ff3b30";
+    this.redraw(); this.changed();
+  }
+  pickColor(c) {
+    this.color = c;
+    const t = this.traj || this.sel;
+    if (t) { t.color = c; this.redraw(); this.dirty(); } else this.changed();
+  }
+  deleteSelected() {
+    const t = this.traj || this.sel; if (!t) return false;
+    this.shapes = this.shapes.filter(x => x !== t);
+    if (t === this.traj) this.traj = null;
+    this.sel = null; this.selByTap = false;
+    this.redraw(); this.dirty(); return true;
+  }
+  undo() {
+    if (this.traj && this.traj.pts.length) {
+      this.traj.pts.pop();
+      if (!this.traj.pts.length) { this.shapes = this.shapes.filter(x => x !== this.traj); this.traj = null; }
+    } else { const x = this.shapes.pop(); if (x === this.sel) { this.sel = null; this.selByTap = false; } }
+    this.redraw(); this.dirty();
+  }
+  clearNow() {
+    const t = this.now(), gone = this.shapes.filter(x => this.isVisible(x, t));
+    if (!gone.length) return 0;
+    this.shapes = this.shapes.filter(x => !gone.includes(x)); this.traj = null; this.sel = null; this.selByTap = false;
+    this.redraw(); this.dirty(); return gone.length;
+  }
+
+  // ---- 当たり判定 ----
+  hitCircle(p) {
+    const W = this.W, H = this.H, tol = 16;
+    const list = this.shapes.filter(x => x.type === "circle" && this.isVisible(x));
+    if (this.sel && list.includes(this.sel)) { list.splice(list.indexOf(this.sel), 1); list.push(this.sel); }
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i];
+      const cx = s.c[0] * W, cy = s.c[1] * H, r = Math.hypot((s.e[0] - s.c[0]) * W, (s.e[1] - s.c[1]) * H);
+      const hx = s.e[0] * W, hy = s.e[1] * H, px = p[0] * W, py = p[1] * H;
+      if (s === this.sel && Math.hypot(px - hx, py - hy) < tol + 6) return { s, mode: "resize" };
+      const d = Math.hypot(px - cx, py - cy);
+      if (Math.abs(d - r) < tol) return { s, mode: "resize" };
+      if (d < r) return { s, mode: "move" };
+    }
+    return null;
+  }
+  hitAB(p, type) {
+    const W = this.W, H = this.H, tol = 18, R = type === "aim" ? this.lw() * 4 : 0;
+    const list = this.shapes.filter(x => x.type === type && this.isVisible(x));
+    if (this.sel && list.includes(this.sel)) { list.splice(list.indexOf(this.sel), 1); list.push(this.sel); }
+    const px = p[0] * W, py = p[1] * H;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i];
+      const ax = s.a[0] * W, ay = s.a[1] * H, bx = s.b[0] * W, by = s.b[1] * H;
+      if (Math.hypot(px - bx, py - by) < R + tol) return { s, mode: "b" };
+      if (Math.hypot(px - ax, py - ay) < tol + 4) return { s, mode: "a" };
+      const vx = bx - ax, vy = by - ay, L2 = vx * vx + vy * vy || 1;
+      const t = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2));
+      if (Math.hypot(px - (ax + vx * t), py - (ay + vy * t)) < tol) return { s, mode: "move" };
+    }
+    return null;
+  }
+  hitPoly(p, type) {
+    const W = this.W, H = this.H, tol = 14, px = p[0] * W, py = p[1] * H;
+    const list = this.shapes.filter(x => x.type === type && x !== this.traj && this.isVisible(x));
+    for (let i = list.length - 1; i >= 0; i--) {
+      const pts = list[i].pts.map(q => Array.isArray(q) ? [q[0] * W, q[1] * H] : [q.x * W, q.y * H]);
+      if (!pts.length) continue;
+      if (type === "pen") {
+        const a = pts[0], b = pts[pts.length - 1];
+        if (Math.hypot(px - b[0], py - b[1]) < tol + 8) return { s: list[i], mode: "b" };
+        if (Math.hypot(px - a[0], py - a[1]) < tol + 8) return { s: list[i], mode: "a" };
+      }
+      for (let k = 0; k < pts.length; k++) {
+        const a = pts[k], b = pts[Math.min(k + 1, pts.length - 1)];
+        const vx = b[0] - a[0], vy = b[1] - a[1], L2 = vx * vx + vy * vy || 1;
+        const t = Math.max(0, Math.min(1, ((px - a[0]) * vx + (py - a[1]) * vy) / L2));
+        if (Math.hypot(px - (a[0] + vx * t), py - (a[1] + vy * t)) < tol) return { s: list[i], mode: "move" };
+      }
+    }
+    return null;
+  }
+  hitPlayer(p) {
+    const W = this.W, H = this.H, px = p[0] * W, py = p[1] * H;
+    const list = this.shapes.filter(x => x.type === "player" && this.isVisible(x));
+    if (this.sel && list.includes(this.sel)) { list.splice(list.indexOf(this.sel), 1); list.push(this.sel); }
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i], fx = s.f[0] * W, fy = s.f[1] * H, h = s.sz * H, w = h * 0.5;
+      if (s === this.sel && Math.hypot(px - (fx + h * 0.374), py - (fy - h - 4)) < 22) return { s, mode: "resize" };
+      if (px > fx - w / 2 - 6 && px < fx + w / 2 + 6 && py > fy - h - 6 && py < fy + 8) return { s, mode: "move" };
+    }
+    return null;
+  }
+  hitAny(p) {
+    const order = [...new Set([this.tool, "player", "circle", "aim", "arrow", "pen", "traj"])];
+    for (const t of order) {
+      if (!VA_NAMES[t] || t === "select") continue;
+      const h = t === "circle" ? this.hitCircle(p) : t === "player" ? this.hitPlayer(p)
+              : (t === "pen" || t === "traj") ? this.hitPoly(p, t) : this.hitAB(p, t);
+      if (h) return h;
+    }
+    return null;
+  }
+  penFractions(pts) {
+    const W = this.W, H = this.H, f = [0]; let L = 0;
+    for (let i = 1; i < pts.length; i++) { L += Math.hypot((pts[i][0] - pts[i - 1][0]) * W, (pts[i][1] - pts[i - 1][1]) * H); f.push(L); }
+    return f.map(v => L ? v / L : 0);
+  }
+
+  // ---- 指・マウスの操作 ----
+  pos(e) { const r = this.canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; }
+  addTrajPoint(p) {
+    if (!this.traj) { this.traj = { id: vaNewId(), type: "traj", color: this.color, pts: [] }; this.shapes.push(this.traj); }
+    this.traj.pts.push({ x: p[0], y: p[1], t: this.now() });
+    this.redraw(); this.dirty();
+    if (this.autoStep) setTimeout(() => this.onStep(this.stepN), 60);
+  }
+  startDrag(hit, p) {
+    const h = hit.s;
+    this.drag = { mode: hit.mode, s: h, start: p,
+      c0: h.c && h.c.slice(), e0: h.e && h.e.slice(), a0: h.a && h.a.slice(), b0: h.b && h.b.slice(),
+      pts0: h.type === "pen" ? h.pts.map(q => q.slice()) : null,
+      frac: h.type === "pen" ? this.penFractions(h.pts) : null,
+      f0: h.f && h.f.slice(), sz0: h.sz, moved: false };
+  }
+  pointerDown(e) {
+    if (!this.player || !this.canvas) return;
+    const p = this.pos(e);
+    if (this.mode !== "draw" || this.readOnly) {
+      // ★再生モードで止まっているときに書き込みをタップ → 描き込みモードの「選択」でその書き込みを選ぶ
+      const h = (!this.readOnly && this.player.paused) ? this.hitAny(p) : null;
+      if (h) { e.preventDefault(); this.mode = "draw"; this.setTool("select"); this.select(h.s, true); return; }
+      this.onTogglePlay(); return;
+    }
+    e.preventDefault();
+    if (this.loading) { this.onBusy(); return; }
+    if (this.traj || this.tool === "traj") { this.addTrajPoint(p); return; }
+    const hit = this.hitAny(p);
+    if (!hit && this.tool === "select") { this.confirm(); return; }
+    if (hit) {
+      if (this.tool !== "select" && hit.s.type !== this.tool) this.setTool(hit.s.type);
+      this.select(hit.s, true);
+      if (hit.s.type !== "traj") { try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {} this.startDrag(hit, p); }
+      return;
+    }
+    try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    const base = { id: vaNewId(), t: this.now(), color: this.color };
+    if (this.tool === "player") {
+      const sh = { ...base, type: "player", f: p, sz: 0.12 + 0.16 * Math.max(0, Math.min(1, p[1])), label: "", ghost: false };
+      this.shapes.push(sh); this.select(sh);
+      this.drag = { mode: "move", s: sh, start: p, f0: p.slice(), sz0: sh.sz, moved: false };
+      this.dirty(); return;
+    }
+    if (this.tool === "pen") this.cur = { ...base, type: "pen", pts: [p] };
+    else if (this.tool === "circle") this.cur = { ...base, type: "circle", c: p, e: p };
+    else this.cur = { ...base, type: this.tool, a: p, b: p };
+    this.redraw();
+  }
+  pointerMove(e) {
+    if (this.drag) {
+      const p = this.pos(e), d = this.drag, s = d.s;
+      const dx = p[0] - d.start[0], dy = p[1] - d.start[1];
+      d.moved = true;
+      if (s.type === "player") {
+        if (d.mode === "move") s.f = [d.f0[0] + dx, d.f0[1] + dy];
+        else s.sz = Math.max(0.05, Math.min(0.9, s.f[1] - p[1]));
+      } else if (s.type === "pen") {
+        // 全体＝平行移動／始点・終点＝その端ほど大きく動かして形をなめらかに保つ
+        s.pts = d.pts0.map((q, i) => {
+          const w = d.mode === "a" ? 1 - d.frac[i] : d.mode === "b" ? d.frac[i] : 1;
+          return [q[0] + dx * w, q[1] + dy * w];
+        });
+      } else if (s.type === "circle") {
+        if (d.mode === "move") { s.c = [d.c0[0] + dx, d.c0[1] + dy]; s.e = [d.e0[0] + dx, d.e0[1] + dy]; }
+        else s.e = p;
+      } else {
+        if (d.mode === "move") { s.a = [d.a0[0] + dx, d.a0[1] + dy]; s.b = [d.b0[0] + dx, d.b0[1] + dy]; }
+        else if (d.mode === "a") s.a = [d.a0[0] + dx, d.a0[1] + dy];
+        else s.b = [d.b0[0] + dx, d.b0[1] + dy];
+      }
+      this.redraw(); return;
+    }
+    if (!this.cur) return;
+    const p = this.pos(e);
+    if (this.cur.type === "pen") this.cur.pts.push(p);
+    else if (this.cur.type === "circle") this.cur.e = p;
+    else this.cur.b = p;
+    this.redraw();
+  }
+  pointerUp() {
+    if (this.drag) { const moved = this.drag.moved; this.drag = null; this.redraw(); if (moved) this.dirty(); return; }
+    if (!this.cur) return;
+    const s = this.cur; this.cur = null;
+    const W = this.W, H = this.H;
+    const dist = (a, b) => Math.hypot((a[0] - b[0]) * W, (a[1] - b[1]) * H);
+    let ok;
+    if (s.type === "pen") ok = s.pts.length > 2;
+    else if (s.type === "circle") ok = dist(s.c, s.e) > 6;
+    else ok = dist(s.a, s.b) > 10;
+    if (ok) { this.shapes.push(s); this.select(s); this.dirty(); }
+    else this.redraw();
+  }
+
+  // ---- 描画 ----
+  showSel(s) { return s === this.sel && this.mode === "draw" && !this.readOnly && (this.tool === s.type || this.tool === "select"); }
+  endHandles(a, b, color, lw) {
+    const o = this.ctx;
+    o.save(); o.shadowBlur = 0; o.shadowColor = "transparent";
+    o.fillStyle = "#fff"; o.strokeStyle = color; o.lineWidth = 3;
+    [a, b].forEach(q => { o.beginPath(); o.arc(q[0], q[1], lw * 2.4, 0, 7); o.fill(); o.stroke(); });
+    o.restore();
+  }
+  drawPlayer(s, W, H, lw) {
+    const o = this.ctx;
+    const fx = s.f[0] * W, fy = s.f[1] * H, h = s.sz * H;
+    const head = h * 0.13, bodyW = h * 0.3, legH = h * 0.33, bodyTop = fy - h + head * 2.1;
+    const rr = (x, y, w, hh, r) => { o.beginPath(); if (o.roundRect) o.roundRect(x, y, w, hh, r); else o.rect(x, y, w, hh); };
+    o.save();
+    if (s.ghost) o.globalAlpha = 0.5;
+    o.shadowBlur = 0; o.fillStyle = "rgba(0,0,0,.3)";
+    o.beginPath(); o.ellipse(fx, fy, bodyW * 0.8, bodyW * 0.22, 0, 0, 7); o.fill();
+    o.fillStyle = s.color; o.strokeStyle = "#fff"; o.lineWidth = Math.max(1.5, lw * 0.5);
+    if (s.ghost) o.setLineDash([4, 3]);
+    const legW = bodyW * 0.34;
+    rr(fx - bodyW * 0.42, fy - legH, legW, legH, legW * 0.4); o.fill(); o.stroke();
+    rr(fx + bodyW * 0.08, fy - legH, legW, legH, legW * 0.4); o.fill(); o.stroke();
+    rr(fx - bodyW / 2, bodyTop, bodyW, fy - legH - bodyTop + legW * 0.3, bodyW * 0.35); o.fill(); o.stroke();
+    const rx = fx + bodyW * 0.95, ry = bodyTop - head * 0.6;
+    o.beginPath(); o.moveTo(fx + bodyW * 0.45, bodyTop + head); o.lineTo(rx - head * 0.3, ry + head * 1.1); o.stroke();
+    o.beginPath(); o.ellipse(rx, ry, head * 0.75, head * 1.05, 0.35, 0, 7); o.stroke();
+    o.beginPath(); o.arc(fx, fy - h + head, head, 0, 7); o.fill(); o.stroke();
+    o.setLineDash([]);
+    const label = s.label || (s.ghost ? "理想" : "");
+    if (label) {
+      o.globalAlpha = 1;
+      const fs = Math.max(11, Math.min(18, h * 0.13));
+      o.font = "bold " + fs + "px sans-serif"; o.textAlign = "center";
+      const tw = o.measureText(label).width + 10, ty = fy - h - fs * 0.6 - 4;
+      o.fillStyle = "rgba(0,0,0,.65)"; rr(fx - tw / 2, ty - fs * 0.85, tw, fs * 1.3, 5); o.fill();
+      o.fillStyle = "#fff"; o.fillText(label, fx, ty + fs * 0.2);
+    }
+    o.restore();
+    if (this.showSel(s)) {
+      o.save(); o.shadowBlur = 0;
+      o.setLineDash([5, 4]); o.strokeStyle = "#fff"; o.lineWidth = 1.5;
+      o.strokeRect(fx - bodyW * 0.9, fy - h - 4, bodyW * 1.8 + head * 0.8, h + 10); o.setLineDash([]);
+      o.fillStyle = "#fff"; o.strokeStyle = s.color; o.lineWidth = 3;
+      o.beginPath(); o.arc(fx + h * 0.374, fy - h - 4, lw * 2.4, 0, 7); o.fill(); o.stroke();
+      o.restore();
+    }
+  }
+  resize() {
+    if (!this.canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    this.canvas.width = Math.max(1, Math.round(this.W * dpr)); this.canvas.height = Math.max(1, Math.round(this.H * dpr));
+    this.ctx = this.canvas.getContext("2d");
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.redraw();
+  }
+  redraw() {
+    const o = this.ctx; if (!o) return;
+    const W = this.W, H = this.H;
+    o.clearRect(0, 0, W, H);
+    const lw = this.lw(), X = p => [p[0] * W, p[1] * H];
+    const tNow = this.now();
+    const playing = this.player && !this.player.paused;
+    const all = (this.cur ? [...this.shapes, this.cur] : this.shapes).filter(s => this.isVisible(s, tNow));
+    all.forEach(s => {
+      o.save();
+      o.strokeStyle = s.color; o.fillStyle = s.color;
+      o.lineWidth = lw; o.lineCap = "round"; o.lineJoin = "round";
+      o.shadowColor = "rgba(0,0,0,.6)"; o.shadowBlur = 3;
+      if (this.showSel(s) && (s.type === "pen" || s.type === "traj" || s.type === "arrow")) { o.shadowColor = "#fff"; o.shadowBlur = 14; }
+      if (s.type === "player") {
+        this.drawPlayer(s, W, H, lw);
+      } else if (s.type === "pen") {
+        o.beginPath(); s.pts.forEach((p, i) => { const q = X(p); i ? o.lineTo(...q) : o.moveTo(...q); }); o.stroke();
+        if (this.showSel(s)) this.endHandles(X(s.pts[0]), X(s.pts[s.pts.length - 1]), s.color, lw);
+      } else if (s.type === "circle") {
+        const c = X(s.c), e = X(s.e), r = Math.hypot(e[0] - c[0], e[1] - c[1]);
+        o.globalAlpha = .18; o.beginPath(); o.arc(c[0], c[1], r, 0, 7); o.fill();
+        o.globalAlpha = 1; o.stroke();
+        if (this.showSel(s)) {
+          o.shadowBlur = 0;
+          o.setLineDash([5, 4]); o.lineWidth = 1.5; o.strokeStyle = "#fff";
+          o.beginPath(); o.arc(c[0], c[1], r + lw * 1.6, 0, 7); o.stroke(); o.setLineDash([]);
+          o.fillStyle = "#fff"; o.strokeStyle = s.color; o.lineWidth = 3;
+          o.beginPath(); o.arc(e[0], e[1], lw * 2.4, 0, 7); o.fill(); o.stroke();
+          o.beginPath(); o.moveTo(c[0] - lw * 2, c[1]); o.lineTo(c[0] + lw * 2, c[1]); o.moveTo(c[0], c[1] - lw * 2); o.lineTo(c[0], c[1] + lw * 2);
+          o.strokeStyle = "#fff"; o.lineWidth = 2; o.stroke();
+        }
+      } else if (s.type === "arrow" || s.type === "aim") {
+        const a = X(s.a), b = X(s.b), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        if (s.type === "aim") {
+          const R = lw * 4;
+          const end = [b[0] - Math.cos(ang) * R * 1.1, b[1] - Math.sin(ang) * R * 1.1];
+          o.setLineDash([lw * 2.5, lw * 2]); o.beginPath(); o.moveTo(...a); o.lineTo(...end); o.stroke();
+          o.setLineDash([]);
+          o.beginPath(); o.arc(b[0], b[1], R, 0, 7); o.stroke();
+          o.beginPath(); o.arc(b[0], b[1], lw * 0.9, 0, 7); o.fill();
+          o.font = "bold " + Math.round(lw * 4.2) + "px sans-serif";
+          o.fillText("ここ", b[0] + R + 4, b[1] - R);
+          if (this.showSel(s)) {
+            o.shadowBlur = 0;
+            o.setLineDash([5, 4]); o.lineWidth = 1.5; o.strokeStyle = "#fff";
+            o.beginPath(); o.arc(b[0], b[1], R + lw * 1.8, 0, 7); o.stroke(); o.setLineDash([]);
+            o.fillStyle = "#fff"; o.strokeStyle = s.color; o.lineWidth = 3;
+            o.beginPath(); o.arc(a[0], a[1], lw * 2.4, 0, 7); o.fill(); o.stroke();
+          }
+        } else {
+          const h = lw * 4;
+          o.beginPath(); o.moveTo(...a); o.lineTo(b[0] - Math.cos(ang) * h * 0.6, b[1] - Math.sin(ang) * h * 0.6); o.stroke();
+          o.beginPath(); o.moveTo(...b);
+          o.lineTo(b[0] - h * Math.cos(ang - 0.45), b[1] - h * Math.sin(ang - 0.45));
+          o.lineTo(b[0] - h * Math.cos(ang + 0.45), b[1] - h * Math.sin(ang + 0.45));
+          o.closePath(); o.fill();
+          if (this.showSel(s)) this.endHandles(a, b, s.color, lw);
+        }
+      } else if (s.type === "traj") {
+        // ★再生中は、ボールを追うように「その時刻までの点」だけを描く
+        const src = (s === this.traj || !playing) ? s.pts : s.pts.filter(p => p.t <= tNow + VA_EPS);
+        const pts = src.map(p => [p.x * W, p.y * H]);
+        if (pts.length > 1) {
+          o.beginPath(); o.moveTo(...pts[0]);
+          for (let i = 1; i < pts.length - 1; i++) {
+            const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2;
+            o.quadraticCurveTo(pts[i][0], pts[i][1], mx, my);
+          }
+          o.lineTo(...pts[pts.length - 1]); o.stroke();
+        }
+        pts.forEach((p, i) => {
+          o.beginPath(); o.arc(p[0], p[1], lw * 1.3, 0, 7); o.fill();
+          if (i === pts.length - 1 && s === this.traj) { o.lineWidth = lw * 0.6; o.beginPath(); o.arc(p[0], p[1], lw * 3, 0, 7); o.stroke(); }
+        });
+      }
+      o.restore();
+    });
+  }
+  // 近いタイミング（0.2秒以内）の書き込みを1つのグループにまとめる（一覧・再生バーの印用）
+  groups() {
+    const list = this.shapes.filter(x => x !== this.traj && !(x.type === "traj" && !x.pts.length))
+      .slice().sort((a, b) => this.startOf(a) - this.startOf(b));
+    const out = [];
+    list.forEach(sh => {
+      const g = out[out.length - 1];
+      if (g && this.startOf(sh) - g.t <= 0.2) g.items.push(sh);
+      else out.push({ t: this.startOf(sh), items: [sh] });
+    });
+    out.forEach(g => { g.key = g.items[0].id; g.memo = (g.items.find(x => x.memo) || {}).memo || ""; });
+    return out;
+  }
+}
+
+// ---------- 保存（Supabase＋端末の控え） ----------
+function vaScopeOf({ matchId, shared, schoolId, userId }) {
+  if (matchId) return "match:" + matchId;
+  if (shared && schoolId) return "school:" + schoolId;
+  return "user:" + (userId || "me");
+}
+const vaLocalKey = (scope, sourceKey) => `va:${scope}:${sourceKey}`;
+// ★座標などは小数4桁に丸めて保存する（見た目は変わらず、データ量が約1/3になる）
+function vaSerialize(shapes) {
+  return JSON.stringify(
+    shapes.filter(x => !(x.type === "traj" && x.pts.length < 2)),
+    (k, v) => (typeof v === "number" ? Math.round(v * 1e4) / 1e4 : v)
+  );
+}
+const VA_LIST_COLS = "scope, source_key, title, kind, shared, match_id, owner_id, shapes, updated_at";
+async function vaLoadList(matchId) {
+  const { data, error } = await supabase.from("video_annotations").select("source_key, shapes, updated_at").eq("scope", "match:" + matchId);
+  if (error) { console.error(error); return null; }
+  return data ?? [];
+}
+// 「続きから」：試合に結びつかない動画（自分だけ＋チームで共有）の新しい順
+async function vaLoadRecent() {
+  const { data, error } = await supabase.from("video_annotations").select(VA_LIST_COLS)
+    .is("match_id", null).order("updated_at", { ascending: false }).limit(40);
+  if (error) { console.error(error); return null; }
+  return data ?? [];
+}
+async function vaLoadShapes(scope, sourceKey) {
+  const { data, error } = await supabase.from("video_annotations").select("shapes").eq("scope", scope).eq("source_key", sourceKey).maybeSingle();
+  if (error) throw error;
+  return data ? (Array.isArray(data.shapes) ? data.shapes : []) : null;
+}
+async function vaSaveRow(row) {
+  const { error } = await supabase.from("video_annotations").upsert(row, { onConflict: "scope,source_key" });
+  if (error) throw error;
+}
+async function vaDeleteRow(scope, sourceKey) {
+  const { error } = await supabase.from("video_annotations").delete().eq("scope", scope).eq("source_key", sourceKey);
+  if (error) throw error;
+}
+
+// ---------- 画面 ----------
+// match   … 試合詳細から開いたとき（その試合の動画）
+// initial … 「🎬 動画」から開いたとき：{ kind:"yt", ytId, title, shared, ownerId } / { kind:"local", file, shared, ownerId, expectKey }
+// ctx     … { schoolId, userId }（共有範囲を決めるのに使う）
+function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
+  const engRef = useRef(null);
+  if (!engRef.current) engRef.current = new VAEngine();
+  const eng = engRef.current;
+  eng.readOnly = !!readOnly;
+
+  const [, setTick] = useState(0);
+  const rerender = useCallback(() => setTick(t => t + 1), []);
+  const [source, setSource] = useState(null);          // { kind:"yt"|"local", key, title, ytId?, url? }
+  const [player, setPlayer] = useState(null);
+  const [savedList, setSavedList] = useState([]);      // この試合で描き込み済みの動画
+  const [ytNeedsTap, setYtNeedsTap] = useState(false);
+  const [ytError, setYtError] = useState("");
+  const [aspect, setAspect] = useState(16 / 9);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [paused, setPaused] = useState(true);
+  const [rate, setRate] = useState(1);
+  const [showDur, setShowDurState] = useState(() => { try { return Number(localStorage.getItem("va:showDur")) || 2; } catch (_) { return 2; } });
+  const [pauseAt, setPauseAt] = useState(false);
+  const [memo, setMemo] = useState("");
+  const [openKey, setOpenKey] = useState(null);
+  const [saveState, setSaveState] = useState("");      // "" | "saving" | "saved" | "local"
+  const [toast, setToastMsg] = useState("");
+  const toastTimer = useRef(null);
+  const showToast = useCallback(msg => { setToastMsg(msg); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 1800); }, []);
+
+  const videoRef = useRef(null), ytBoxRef = useRef(null), canvasRef = useRef(null), stageWrapRef = useRef(null), fileRef = useRef(null);
+  const ytObjRef = useRef(null);
+  const saveTimer = useRef(null), lastSaved = useRef(null), sourceRef = useRef(null);
+  sourceRef.current = source;
+
+  const videoLinks = useMemo(() => normalizeVideoLinks(match?.video_links), [match]);
+  // ★共有範囲（試合の動画以外）：チームで共有／自分だけ
+  const [shared, setShared] = useState(() => initial ? initial.shared !== false : true);
+  const scopeRef = useRef(null);
+  scopeRef.current = vaScopeOf({ matchId: match?.id, shared, schoolId: ctx.schoolId, userId: ctx.userId });
+  const canChangeShare = !match && !readOnly && !!ctx.schoolId && (!initial?.ownerId || initial.ownerId === ctx.userId);
+
+  // ★アプリ全体の「文字の大きさ」(zoom) を、この画面を開いている間だけ解除する。
+  //   zoom がかかったままだと、指で触った位置と描き込みの位置がずれる端末があるため。
+  useEffect(() => {
+    const html = document.documentElement;
+    const prevZoom = html.style.zoom, prevOverflow = document.body.style.overflow;
+    html.style.zoom = ""; document.body.style.overflow = "hidden";
+    return () => { html.style.zoom = prevZoom; document.body.style.overflow = prevOverflow; };
+  }, []);
+
+  // この試合で描き込み済みの動画一覧
+  useEffect(() => {
+    if (!match) return;
+    let alive = true;
+    vaLoadList(match.id).then(list => { if (alive && list) setSavedList(list); });
+    return () => { alive = false; };
+  }, [match?.id]);
+
+  // ---- 保存 ----
+  // ★保存の流れ：端末の控え（未送信の印つき）をすぐ書く → Supabaseへ順番に送る → 送れたら印を外す。
+  //   未送信の控えが残っていれば、次に開いたときはそちらを優先して表示し、送り直す。
+  const saveChain = useRef(Promise.resolve());
+  const saveNow = useCallback(() => {
+    clearTimeout(saveTimer.current); saveTimer.current = null;
+    const src = sourceRef.current; if (!src || eng.readOnly || eng.loading) return;
+    const json = vaSerialize(eng.shapes);
+    if (json === lastSaved.current) return;
+    const scope = scopeRef.current;
+    const lkey = vaLocalKey(scope, src.key);
+    const row = { scope, source_key: src.key, title: src.title || null, kind: src.kind, shared: !scope.startsWith("user:"),
+      match_id: match?.id ?? null, school_id: ctx.schoolId ?? null, shapes: JSON.parse(json), updated_at: new Date().toISOString() };
+    try { localStorage.setItem(lkey, JSON.stringify({ shapes: json, pending: true })); } catch (_) {}
+    lastSaved.current = json;
+    setSaveState("saving");
+    saveChain.current = saveChain.current.then(async () => {
+      try {
+        await Promise.race([
+          vaSaveRow(row),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 10000)),
+        ]);
+        try { const cur = JSON.parse(localStorage.getItem(lkey) || "null"); if (cur && cur.shapes === json) localStorage.setItem(lkey, JSON.stringify({ shapes: json, pending: false })); } catch (_) {}
+        if (sourceRef.current === src && lastSaved.current === json) setSaveState("saved");
+        setSavedList(prev => {
+          const rest = prev.filter(r => r.source_key !== src.key);
+          return [...rest, { source_key: src.key, shapes: JSON.parse(json), updated_at: new Date().toISOString() }];
+        });
+      } catch (e) {
+        console.error(e);
+        if (sourceRef.current === src && lastSaved.current === json) { lastSaved.current = null; setSaveState("local"); } // 次の変更・画面を閉じるときに送り直す
+      }
+    });
+  }, [eng, match, shared, ctx.schoolId]);
+  const saveSoon = useCallback(() => {
+    if (eng.readOnly || saveTimer.current) return;  // ★予約済みなら先送りしない（再生中でも必ず保存される）
+    saveTimer.current = setTimeout(saveNow, 800);
+  }, [eng, saveNow]);
+  useEffect(() => {
+    const flush = () => { saveNow(); };
+    const onVis = () => { if (document.hidden) saveNow(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", onVis); };
+  }, [saveNow]);
+
+  // ---- エンジンとReactをつなぐ ----
+  useEffect(() => {
+    eng.onChange = rerender;
+    eng.onDirty = saveSoon;
+    eng.onTogglePlay = () => { const p = eng.player; if (!p) return; if (p.paused) p.play(); else p.pause(); };
+    eng.onStep = n => stepBy(n);
+    eng.onBusy = () => showToast("描き込みを読み込み中です。少し待ってください");
+  });
+  eng.showDur = showDur;
+
+  // ---- 動画を開く ----
+  // ★動画はすぐ開き、描き込みは並行して読み込む（通信が遅いときに動画まで待たされないように）。
+  //   読み込みが終わるまでは描き込みできないようにして、読み込んだ内容で上書きされるのを防ぐ。
+  const [loadingShapes, setLoadingShapes] = useState(false);
+  const loadShapesFor = useCallback(async (src) => {
+    eng.loading = true; setLoadingShapes(true);
+    eng.shapes = []; eng.sel = null; eng.traj = null; eng.cur = null; eng.drag = null; eng.redraw();
+    const scope = scopeRef.current;
+    const lkey = vaLocalKey(scope, src.key);
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem(lkey) || "null"); } catch (_) {}
+    let shapes = null, resend = false;
+    if (local && local.pending && typeof local.shapes === "string") {
+      // 前回送れなかった描き込みが端末に残っている → それを表示して送り直す
+      try { shapes = JSON.parse(local.shapes); resend = true; } catch (_) {}
+    }
+    if (shapes === null) {
+      try {
+        shapes = await Promise.race([
+          vaLoadShapes(scope, src.key),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000)),
+        ]);
+        if (shapes === null) shapes = [];
+      } catch (e) {
+        console.error(e);
+        try { shapes = local && typeof local.shapes === "string" ? JSON.parse(local.shapes) : []; } catch (_) { shapes = []; }
+        showToast("通信できないため、この端末に残っている描き込みを表示しています");
+      }
+    }
+    if (sourceRef.current !== src) return; // 読み込み中に別の動画へ切り替えた
+    eng.loading = false; setLoadingShapes(false);
+    eng.shapes = Array.isArray(shapes) ? shapes : [];
+    eng.sel = null; eng.traj = null; eng.cur = null; eng.drag = null;
+    lastSaved.current = resend ? null : vaSerialize(eng.shapes);
+    eng.redraw(); rerender();
+    if (resend) saveSoon();
+  }, [eng, rerender, showToast, saveSoon]);
+
+  const closeSource = useCallback(async () => {
+    eng.finishTraj();
+    saveNow(); // ★端末への控えはすぐ書かれる。通信の完了は待たずに切り替える
+    if (ytObjRef.current) { try { ytObjRef.current.destroy(); } catch (_) {} ytObjRef.current = null; }
+    if (videoRef.current && videoRef.current.src) {
+      try { videoRef.current.pause(); URL.revokeObjectURL(videoRef.current.src); } catch (_) {}
+      videoRef.current.removeAttribute("src"); try { videoRef.current.load(); } catch (_) {}
+    }
+    eng.player = null; setPlayer(null); setSource(null); setYtNeedsTap(false); setYtError("");
+    eng.shapes = []; eng.sel = null; setOpenKey(null); setMemo(""); setSaveState("");
+  }, [eng, saveNow]);
+
+  const openYouTube = useCallback(async (v) => {
+    await closeSource();
+    const src = { kind: "yt", key: "yt:" + v.id, title: v.title || "YouTube動画", ytId: v.id };
+    setSource(src); sourceRef.current = src; setAspect(16 / 9); setRate(1);
+    loadShapesFor(src);
+    try {
+      const YT = await vaLoadYouTubeApi();
+      if (sourceRef.current !== src || !ytBoxRef.current) return;
+      const box = document.createElement("div"); ytBoxRef.current.innerHTML = ""; ytBoxRef.current.appendChild(box);
+      const yp = new YT.Player(box, {
+        videoId: v.id, width: "100%", height: "100%",
+        playerVars: { playsinline: 1, controls: 0, rel: 0, modestbranding: 1, disablekb: 1, fs: 0, iv_load_policy: 3 },
+        events: {
+          onReady: () => {
+            const pl = new VAYouTubePlayer(yp);
+            ytObjRef.current = yp; eng.player = pl; setPlayer(pl);
+            setYtNeedsTap(true); // ★iPhoneなどでは、最初の1回は動画そのものをタップしないと再生できない
+            eng.resize();
+          },
+          onStateChange: (ev) => { if (ev.data === 1 && eng.player) { eng.player.everPlayed = true; setYtNeedsTap(false); } },
+          onError: () => setYtError("この動画を再生できませんでした。限定公開（または公開）になっているか確認してください。"),
+        },
+      });
+    } catch (e) { setYtError(e.message || "YouTubeを読み込めませんでした"); }
+  }, [closeSource, eng, loadShapesFor]);
+
+  const openLocal = useCallback(async (file) => {
+    if (!file) return;
+    await closeSource();
+    const src = { kind: "local", key: `local:${file.name}:${file.size}`, title: file.name };
+    if (initial?.expectKey && initial.expectKey !== src.key) showToast("前回と違う動画ファイルなので、新しい動画として開きました");
+    setSource(src); sourceRef.current = src; setRate(1);
+    loadShapesFor(src);
+    const el = videoRef.current; if (!el) return;
+    el.src = URL.createObjectURL(file);
+    el.onloadedmetadata = () => { if (el.videoWidth) setAspect(el.videoWidth / el.videoHeight); };
+    const pl = new VALocalPlayer(el);
+    eng.player = pl; setPlayer(pl);
+  }, [closeSource, eng, loadShapesFor]);
+
+  useEffect(() => () => {
+    // 画面を閉じるとき
+    clearTimeout(saveTimer.current);
+    if (ytObjRef.current) { try { ytObjRef.current.destroy(); } catch (_) {} }
+  }, []);
+
+  // ★「🎬 動画」から開いたときは、渡された動画をすぐ開く
+  const openedInitial = useRef(false);
+  useEffect(() => {
+    if (!initial || openedInitial.current) return;
+    openedInitial.current = true;
+    if (initial.kind === "yt") openYouTube({ id: initial.ytId, title: initial.title });
+    else if (initial.kind === "local" && initial.file) openLocal(initial.file);
+  }, [initial, openYouTube, openLocal]);
+
+  // ★共有範囲の切り替え（チームで共有 ⇔ 自分だけ）：新しい範囲へ保存し直してから、元の範囲のデータを消す
+  const switchShared = async (next) => {
+    const src = sourceRef.current; if (!src || next === shared) return;
+    eng.finishTraj();
+    const oldScope = scopeRef.current;
+    const newScope = vaScopeOf({ matchId: null, shared: next, schoolId: ctx.schoolId, userId: ctx.userId });
+    try {
+      const exist = await vaLoadShapes(newScope, src.key);
+      if (exist && exist.length) { showToast(next ? "チームに同じ動画の描き込みがすでにあるため、切り替えられません" : "自分だけの描き込みがすでにあるため、切り替えられません"); return; }
+    } catch (e) { showToast("通信できないため、今は切り替えられません"); return; }
+    scopeRef.current = newScope; setShared(next);
+    lastSaved.current = null;
+    saveNow();
+    saveChain.current = saveChain.current.then(() => vaDeleteRow(oldScope, src.key).catch(e => console.error(e)));
+    try { localStorage.removeItem(vaLocalKey(oldScope, src.key)); } catch (_) {}
+    showToast(next ? "チームの人も見られるようにしました" : "自分だけが見られるようにしました");
+  };
+
+  // ---- 再生操作 ----
+  const stepBy = (n) => { const p = eng.player; if (!p) return; p.pause(); p.seek(p.time + n * p.step); };
+  const togglePlay = () => {
+    const p = eng.player; if (!p) return;
+    if (p.paused) { p.play(); if (source?.kind === "yt" && !p.everPlayed) setTimeout(() => { if (!p.everPlayed) setYtNeedsTap(true); }, 1200); }
+    else p.pause();
+  };
+  const changeRate = (r) => { setRate(r); eng.player && eng.player.setRate(r); };
+  const setMode = (m) => {
+    if (m === "draw" && readOnly) return;
+    eng.mode = m;
+    if (m === "draw" && eng.player) eng.player.pause();
+    if (m !== "draw") { eng.finishTraj(); eng.confirm(); }
+    eng.redraw(); rerender();
+  };
+
+  // ---- 毎フレーム：時刻表示・「書き込みの所で一時停止」・再描画 ----
+  const pauseAtRef = useRef(pauseAt); pauseAtRef.current = pauseAt;
+  useEffect(() => {
+    let raf, lastT = null, lastP = null, lastUi = 0;
+    const loop = () => {
+      const p = eng.player;
+      if (p) {
+        let t = p.time; const pd = p.paused;
+        if (!pd && pauseAtRef.current && lastT !== null && t > lastT) {
+          const hit = eng.shapes.filter(s => !(s.type === "traj" && !s.pts.length)).map(s => eng.startOf(s))
+            .filter(st => st > lastT + 0.001 && st <= t).sort((a, b) => a - b)[0];
+          if (hit !== undefined) { p.pause(); p.seek(hit); t = hit; showToast("書き込みの場面で止めました"); }
+        }
+        if (t !== lastT || pd !== lastP) { eng.redraw(); }
+        const nowMs = performance.now();
+        if (t !== lastT || pd !== lastP || nowMs - lastUi > 500) {
+          if (nowMs - lastUi > 80 || pd !== lastP) { setTime(t); setPaused(p.paused); setDuration(p.duration); lastUi = nowMs; }
+        }
+        lastT = t; lastP = pd;
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [eng, showToast]);
+
+  // ---- キャンバスの大きさ合わせ ----
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const calc = () => {
+      const wrap = stageWrapRef.current; if (!wrap) return;
+      const wrapW = wrap.clientWidth, maxH = Math.max(200, window.innerHeight * 0.5);
+      let w = wrapW, h = w / aspect;
+      if (h > maxH) { h = maxH; w = h * aspect; }
+      setStageSize({ w: Math.round(w), h: Math.round(h) });
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, [aspect, source]);
+  useEffect(() => { eng.canvas = canvasRef.current; eng.resize(); }, [stageSize, eng, source]);
+
+  // ---- ほかのボタンを押したら、描いた直後の書き込み・記録中の軌道を確定 ----
+  const panelClickCapture = (e) => {
+    const el = e.target.closest("button, select, input, label, a");
+    if (!el) return;
+    if (el.closest("[data-va-keep]")) return;                       // 選んだ書き込みを編集する欄
+    const trajKeep = el.closest("[data-va-trajkeep]");               // コマ送り・自動送り・1つ戻すなど
+    if (eng.traj && !trajKeep) eng.finishTraj();
+    if (eng.sel && !(eng.selByTap && el.closest("[data-va-swatch]")) && !el.closest("[data-va-undo]")) eng.confirm();
+  };
+
+  // ---- 一覧（書き込みのタイミング） ----
+  const groups = eng.groups();
+  const openGroup = (g) => {
+    eng.finishTraj();
+    eng.player && (eng.player.pause(), eng.player.seek(g.t));
+    eng.sel = null; setOpenKey(g.key); setMemo(g.memo);
+    eng.redraw(); rerender();
+    stageWrapRef.current && stageWrapRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const saveMemo = () => {
+    if (!eng.player) return;
+    eng.finishTraj();
+    const t = eng.now();
+    const g = eng.groups().filter(g => g.items.some(x => eng.isVisible(x, t))).sort((a, b) => Math.abs(a.t - t) - Math.abs(b.t - t))[0];
+    if (!g) { showToast("この時刻に書き込みがありません。先に書き込んでください"); return; }
+    g.items.forEach(x => { delete x.memo; });
+    const m = memo.trim();
+    if (m) g.items[0].memo = m;
+    setOpenKey(g.key); eng.dirty(); showToast(m ? "メモを付けました" : "メモを消しました");
+  };
+  const deleteGroup = (g) => {
+    eng.shapes = eng.shapes.filter(x => !g.items.includes(x));
+    if (g.items.includes(eng.sel)) eng.sel = null;
+    if (openKey === g.key) setOpenKey(null);
+    eng.redraw(); eng.dirty();
+  };
+  const [confirmDelKey, setConfirmDelKey] = useState(null);
+
+  const handleClose = () => { eng.finishTraj(); saveNow(); onClose && onClose(); };
+
+  // ---- 表示 ----
+  const sel = eng.traj || eng.sel;
+  const isDraw = eng.mode === "draw" && !readOnly;
+  const rates = player ? player.rates : [0.1, 0.25, 0.5, 1];
+  const btn = { border:`1px solid ${C.border}`, background:C.white, borderRadius:9, padding:"9px 12px", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer" };
+  const card = { background:C.white, borderRadius:12, padding:12, marginBottom:10, boxShadow:"0 1px 2px rgba(0,0,0,.05)" };
+  const seg = (on) => ({ flex:1, border:"none", background: on ? C.white : "transparent", padding:"9px 6px", borderRadius:8, fontSize:13, fontWeight:700, color: on ? C.text : C.textSec, boxShadow: on ? "0 1px 2px rgba(0,0,0,.12)" : "none", cursor:"pointer" });
+  const savedByKey = Object.fromEntries(savedList.map(r => [r.source_key, r]));
+  const localSaved = savedList.filter(r => r.source_key.startsWith("local:") && Array.isArray(r.shapes) && r.shapes.length);
+  const matchLabel = match ? ([match.tournament_name, match.round].filter(Boolean).join(" ") || "試合") : (shared ? "👥 チームで共有" : "🔒 自分だけ");
+  const toolIcon = {
+    select: <path d="M5 3 L5 19 L9.5 14.5 L12.5 21 L15 19.8 L12 13.5 L18 13.5 Z"/>,
+    traj: <><path d="M3 18 Q9 2 15 12 T22 9"/><circle cx="3" cy="18" r="2" fill="currentColor"/><circle cx="9" cy="8" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="21" cy="9" r="2" fill="currentColor"/></>,
+    aim: <><path d="M3 20 L16 7" strokeDasharray="3 3"/><circle cx="18" cy="5" r="3"/></>,
+    arrow: <path d="M4 20 L19 5 M11 5 H19 V13"/>,
+    circle: <circle cx="12" cy="12" r="8"/>,
+    pen: <path d="M3 17 C6 10 9 20 12 13 S18 8 21 12"/>,
+    player: <><circle cx="12" cy="5" r="2.6"/><path d="M8.5 21 V10.5 Q12 8.5 15.5 10.5 V21 M17 12 L20.5 7.5"/><ellipse cx="21" cy="5.5" rx="1.8" ry="2.4"/></>,
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:500, background:C.gray, overflowY:"auto", WebkitOverflowScrolling:"touch", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ position:"sticky", top:0, zIndex:3, background:C.navy, color:C.white, padding:"calc(10px + env(safe-area-inset-top,0px)) 12px 10px", display:"flex", alignItems:"center", gap:10 }}>
+        <button onClick={handleClose} style={{ background:"rgba(255,255,255,.15)", color:C.white, border:"none", borderRadius:8, padding:"7px 10px", fontSize:13, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:15, fontWeight:800 }}>動画分析</div>
+          <div style={{ fontSize:11, opacity:.8, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{matchLabel}{source ? "　/　" + source.title : ""}</div>
+        </div>
+        {source && !readOnly && (
+          <div style={{ fontSize:10.5, opacity:.85, whiteSpace:"nowrap" }}>
+            {loadingShapes ? "読み込み中…" : saveState === "saving" ? "保存中…" : saveState === "saved" ? "✓ 保存済み" : saveState === "local" ? "⚠ 端末に保存（未送信）" : ""}
+          </div>
+        )}
+      </div>
+
+      <div style={{ maxWidth:820, margin:"0 auto", padding:12, paddingBottom:"calc(40px + env(safe-area-inset-bottom,0px))" }}>
+        {/* 動画を選ぶ */}
+        {!source && match && (
+          <div style={card}>
+            <div style={{ fontSize:13, fontWeight:800, color:C.navy, marginBottom:8 }}>分析する動画を選んでください</div>
+            {videoLinks.length > 0 ? videoLinks.map(v => {
+              const n = (savedByKey["yt:" + v.id]?.shapes || []).length;
+              return (
+                <button key={v.id} onClick={() => openYouTube(v)} style={{ display:"flex", alignItems:"center", gap:10, width:"100%", textAlign:"left", border:`1px solid ${C.border}`, borderRadius:10, padding:8, marginBottom:8, background:C.white, cursor:"pointer" }}>
+                  <img src={youtubeThumbOf(v.id)} alt="" style={{ width:88, height:52, objectFit:"cover", borderRadius:7, background:"#000", flexShrink:0 }}/>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12.5, fontWeight:700, color:C.navy }}>{v.title || "動画"}</div>
+                    <div style={{ fontSize:10.5, color:C.textSec, marginTop:3 }}>YouTube動画{n ? `・描き込み ${n}件` : ""}</div>
+                  </div>
+                </button>
+              );
+            }) : (
+              <div style={{ fontSize:11.5, color:C.textSec, padding:"6px 2px 10px" }}>この試合にはYouTube動画が登録されていません（試合詳細の「動画リンクを貼る」から登録できます）。</div>
+            )}
+            <button onClick={() => fileRef.current && fileRef.current.click()} style={{ ...btn, width:"100%", background:C.navy, color:C.white, border:"none", padding:"12px" }}>📱 スマホの動画を開く</button>
+            <input ref={fileRef} type="file" accept="video/*" style={{ display:"none" }} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; openLocal(f); }} />
+            <div style={{ fontSize:10.5, color:C.textSec, marginTop:6, lineHeight:1.6 }}>スマホ内の動画はアップロードせず、その場で開きます。描き込みだけが保存され、同じ動画ファイルを開くと表示されます。</div>
+            {localSaved.length > 0 && (
+              <div style={{ marginTop:10, fontSize:11, color:C.textSec, lineHeight:1.7 }}>
+                <div style={{ fontWeight:700, color:C.text }}>描き込みが保存されているスマホの動画</div>
+                {localSaved.map(r => <div key={r.source_key}>・{r.source_key.replace(/^local:/, "").replace(/:\d+$/, "")}（{r.shapes.length}件）</div>)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* プレーヤー */}
+        <div style={{ ...card, display: source ? "block" : "none" }} onClickCapture={panelClickCapture}>
+          {source && (
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8, gap:8 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:C.navy, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{source.kind === "yt" ? "▶ " : "📱 "}{source.title}</div>
+              {match
+                ? <button style={{ ...btn, padding:"5px 9px", fontSize:11.5 }} onClick={closeSource}>動画を切り替え</button>
+                : canChangeShare && (
+                  <button style={{ ...btn, padding:"5px 9px", fontSize:11.5, whiteSpace:"nowrap" }} onClick={() => switchShared(!shared)}>
+                    {shared ? "👥 共有中 → 自分だけにする" : "🔒 自分だけ → チームで共有"}
+                  </button>
+                )}
+            </div>
+          )}
+          {ytError && <div style={{ background:C.redL, color:C.red, fontSize:12, borderRadius:8, padding:"7px 9px", marginBottom:8 }}>{ytError}</div>}
+          {source?.kind === "yt" && ytNeedsTap && !ytError && (
+            <div style={{ background:"#fff6dd", border:"1px solid #f1d58a", color:"#6b4e00", fontSize:11.5, borderRadius:8, padding:"7px 9px", marginBottom:8, lineHeight:1.5 }}>
+              最初の1回は、動画の画面を直接タップして再生してください（YouTubeの仕様です）。そのあとはボタンで操作できます。
+            </div>
+          )}
+          <div ref={stageWrapRef} style={{ display:"flex", justifyContent:"center", background:"#000", borderRadius:10, overflow:"hidden" }}>
+            <div style={{ position:"relative", width:stageSize.w || "100%", height:stageSize.h || 200, background:"#000" }}>
+              <video ref={videoRef} playsInline preload="metadata" style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"contain", display: source?.kind === "local" ? "block" : "none" }} />
+              <div ref={ytBoxRef} style={{ position:"absolute", inset:0, display: source?.kind === "yt" ? "block" : "none" }} />
+              <canvas
+                ref={canvasRef}
+                style={{ position:"absolute", inset:0, width:"100%", height:"100%", touchAction: isDraw ? "none" : "manipulation", cursor: isDraw ? "crosshair" : "pointer",
+                  // ★YouTubeは最初の1回だけ動画を直接タップする必要があるので、その間は描き込み面を素通りさせる
+                  pointerEvents: (source?.kind === "yt" && ytNeedsTap && !isDraw) ? "none" : "auto" }}
+                onPointerDown={e => eng.pointerDown(e)}
+                onPointerMove={e => eng.pointerMove(e)}
+                onPointerUp={() => eng.pointerUp()}
+                onPointerCancel={() => eng.pointerUp()}
+              />
+              <div style={{ position:"absolute", top:8, left:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background: isDraw ? "#e65100" : "rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{isDraw ? "描き込み中" : "再生"}</div>
+              <div style={{ position:"absolute", top:8, right:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{rate}x</div>
+            </div>
+          </div>
+
+          {/* 再生バー（書き込みのある位置に印） */}
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:10 }} data-va-trajkeep>
+            <div style={{ flex:1, position:"relative", paddingBottom:8 }}>
+              <input type="range" min="0" max="1" step="0.001" value={duration ? time / duration : 0} style={{ width:"100%", margin:0 }}
+                onChange={e => { const p = eng.player; if (p) { p.seek(+e.target.value * p.duration); setTime(p.time); } }} />
+              <div style={{ position:"absolute", left:8, right:8, bottom:0, height:6, pointerEvents:"none" }}>
+                {duration > 0 && groups.map(g => <i key={g.key} style={{ position:"absolute", bottom:0, left:(g.t / duration * 100) + "%", width:4, height:6, marginLeft:-2, borderRadius:2, background:C.orange }} />)}
+              </div>
+            </div>
+            <span style={{ fontVariantNumeric:"tabular-nums", fontSize:12, color:C.textSec, whiteSpace:"nowrap" }}>{vaFmt(time)} / {vaFmt(duration)}</span>
+          </div>
+
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, marginTop:8, flexWrap:"wrap" }}>
+            <div style={{ display:"flex", gap:6 }} data-va-trajkeep>
+              <button style={{ ...btn, minWidth:58, padding:"10px 8px" }} onClick={() => stepBy(-1)}>◀ {player ? player.stepLabel : "1コマ"}</button>
+              <button style={{ ...btn, minWidth:64, padding:"10px 8px", background:C.navy, color:C.white, border:"none", fontSize:16 }} onClick={togglePlay} data-va-play>{paused ? "▶" : "❚❚"}</button>
+              <button style={{ ...btn, minWidth:58, padding:"10px 8px" }} onClick={() => stepBy(1)}>{player ? player.stepLabel : "1コマ"} ▶</button>
+            </div>
+            <div style={{ display:"flex", gap:5 }} data-va-trajkeep>
+              {rates.map(r => (
+                <button key={r} onClick={() => changeRate(r)} style={{ border:`1px solid ${r === rate ? C.navy : C.border}`, background: r === rate ? C.navy : C.white, color: r === rate ? C.white : C.textSec, borderRadius:999, padding:"7px 9px", fontSize:12, fontWeight:700, cursor:"pointer" }}>{r}x</button>
+              ))}
+            </div>
+          </div>
+          {source?.kind === "yt" && <div style={{ fontSize:10.5, color:C.textSec, marginTop:6 }}>YouTubeの仕様上、スローは0.25倍まで、コマ送りは約0.1秒刻みです。</div>}
+
+          <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap", marginTop:10, fontSize:12.5, color:C.textSec }}>
+            <label style={{ display:"flex", alignItems:"center", gap:5 }}>書き込みの表示（共通）
+              <select value={showDur} onChange={e => { const v = +e.target.value; setShowDurState(v); eng.showDur = v; try { localStorage.setItem("va:showDur", String(v)); } catch (_) {} eng.redraw(); }}
+                style={{ border:`1px solid ${C.border}`, borderRadius:7, padding:5, fontSize:13, background:C.white }}>
+                {[1, 2, 3, 5].map(v => <option key={v} value={v}>{v}秒</option>)}
+              </select>
+            </label>
+            <label style={{ display:"flex", alignItems:"center", gap:5 }}><input type="checkbox" checked={pauseAt} onChange={e => setPauseAt(e.target.checked)} /> 書き込みの所で一時停止</label>
+          </div>
+
+          {!readOnly && (
+            <div style={{ display:"flex", background:"#eceef2", borderRadius:10, padding:3, gap:3, marginTop:10 }}>
+              <button style={seg(!isDraw)} onClick={() => setMode("play")}>▶ 再生モード</button>
+              <button style={seg(isDraw)} onClick={() => setMode("draw")}>✎ 描き込みモード</button>
+            </div>
+          )}
+          {readOnly && <div style={{ fontSize:11, color:C.textSec, marginTop:10 }}>閲覧専用アカウントのため、描き込みの表示のみできます。</div>}
+
+          {isDraw && (
+            <div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6, marginTop:10 }}>
+                {VA_TOOLS.map(t => {
+                  const on = eng.tool === t;
+                  return (
+                    <button key={t} onClick={() => eng.setTool(t)} style={{ border:`1px solid ${on ? C.navy : C.border}`, background: on ? "#e6eefb" : C.white, color: on ? C.navy : C.textSec, borderRadius:10, padding:"8px 2px 6px", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">{toolIcon[t]}</svg>{VA_NAMES[t]}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:10 }}>
+                {VA_COLORS.map(o => (
+                  <button key={o.c} title={o.n} data-va-swatch onClick={() => eng.pickColor(o.c)}
+                    style={{ width:27, height:27, borderRadius:"50%", border:"3px solid #fff", padding:0, background:o.c, cursor:"pointer", boxShadow: eng.color === o.c ? `0 0 0 2px ${C.navy}` : `0 0 0 1px ${C.border}` }} />
+                ))}
+              </div>
+              {sel && (
+                <div data-va-keep style={{ display:"flex", alignItems:"center", gap:8, marginTop:8 }}>
+                  <span style={{ flex:1, minWidth:0, fontSize:12, fontWeight:700, color:C.navy }}>
+                    {eng.traj ? "軌道を記録中（ほかのボタンで確定）" : eng.selByTap ? `選択中：${VA_NAMES[sel.type]}（色をタップで変更）` : `描いた直後：${VA_NAMES[sel.type]}（ほかのボタンで確定）`}
+                  </span>
+                  <button style={{ ...btn, color:C.red, padding:"6px 10px", whiteSpace:"nowrap" }} onClick={() => { if (eng.deleteSelected()) showToast("選択した書き込みを削除しました"); }}>🗑 この書き込みを削除</button>
+                </div>
+              )}
+              {sel && sel.type === "player" && (
+                <div data-va-keep style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, background:"#e6eefb", borderRadius:8, padding:"6px 10px" }}>
+                  <input type="text" value={sel.label || ""} placeholder="名前・役割（例：前衛）" maxLength={12}
+                    onChange={e => { sel.label = e.target.value; eng.redraw(); eng.dirty(); }}
+                    style={{ flex:1, minWidth:0, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 8px", fontSize:13 }} />
+                  <label style={{ display:"flex", alignItems:"center", gap:4, whiteSpace:"nowrap", fontSize:12.5, color:C.textSec }}>
+                    <input type="checkbox" checked={!!sel.ghost} onChange={e => { sel.ghost = e.target.checked; eng.redraw(); eng.dirty(); }} /> 理想の位置
+                  </label>
+                </div>
+              )}
+              {sel && (
+                <div data-va-keep style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, background:"#e6eefb", borderRadius:8, padding:"6px 10px", fontSize:12.5, color:C.textSec }}>
+                  <span style={{ whiteSpace:"nowrap" }}>この書き込みの表示</span>
+                  <select value={sel.dur !== undefined ? String(sel.dur) : ""} onChange={e => { const v = e.target.value; if (v === "") delete sel.dur; else sel.dur = +v; eng.redraw(); eng.dirty(); showToast(v === "" ? "表示の長さを共通に戻しました" : `この書き込みは${v}秒表示します`); }}
+                    style={{ border:`1px solid ${C.border}`, borderRadius:7, padding:5, fontSize:13, background:C.white }}>
+                    <option value="">共通に合わせる（{showDur}秒）</option>
+                    {[0.5, 1, 2, 3, 5, 10].map(v => <option key={v} value={String(v)}>{v}秒</option>)}
+                  </select>
+                </div>
+              )}
+              <div style={{ fontSize:11.5, color:C.textSec, background:"#f7f8fa", borderRadius:8, padding:"8px 10px", marginTop:10, lineHeight:1.6 }}>{VA_HINTS[eng.tool]}</div>
+              {eng.tool === "traj" && (
+                <div data-va-trajkeep style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginTop:8 }}>
+                  <label style={{ fontSize:12.5, color:C.textSec, display:"flex", alignItems:"center", gap:4 }}>
+                    <input type="checkbox" checked={eng.autoStep} onChange={e => { eng.autoStep = e.target.checked; rerender(); }} /> タップ後に自動で進む
+                  </label>
+                  <select value={eng.stepN} onChange={e => { eng.stepN = +e.target.value; rerender(); }} style={{ border:`1px solid ${C.border}`, borderRadius:7, padding:5, fontSize:13, background:C.white }}>
+                    {[1, 2, 3, 5].map(n => <option key={n} value={n}>{n}{player && player.step < 0.05 ? "コマ" : "回分"}</option>)}
+                  </select>
+                  <button style={{ ...btn, marginLeft:"auto", background:C.navy, color:C.white, border:"none" }} onClick={() => { const ok = eng.traj && eng.traj.pts.length >= 2; eng.finishTraj(); if (ok) showToast("軌道を確定しました"); }}>軌道を確定</button>
+                </div>
+              )}
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:8, marginTop:10 }}>
+                <button data-va-trajkeep data-va-undo style={{ ...btn, background:"transparent" }} onClick={() => eng.undo()}>↶ 1つ戻す</button>
+                <button style={{ ...btn, background:"transparent", color:C.red }} onClick={() => { const n = eng.clearNow(); showToast(n ? `${n}個の書き込みを消しました` : "この時刻に書き込みはありません"); }}>この時刻の書き込みを消す</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 書き込みのタイミング一覧 */}
+        {source && (
+          <div style={card}>
+            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:6 }}>書き込みのタイミング</div>
+            <div style={{ fontSize:11.5, color:C.textSec, marginBottom:10, lineHeight:1.6 }}>書き込んだ時刻は自動で記録されます。再生すると、その時刻になったときに線や円が表示されます。</div>
+            {!readOnly && (
+              <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                <input type="text" value={memo} onChange={e => setMemo(e.target.value)} placeholder="この時刻の書き込みにメモ（例：バック側の深いロブを狙いたかった）"
+                  style={{ flex:1, minWidth:0, border:`1px solid ${C.border}`, borderRadius:9, padding:"9px 10px", fontSize:13 }} />
+                <button style={{ ...btn, background:C.navy, color:C.white, border:"none", whiteSpace:"nowrap" }} onClick={saveMemo}>メモを付ける</button>
+              </div>
+            )}
+            {groups.length === 0 ? (
+              <div style={{ fontSize:12.5, color:C.textSec, padding:"6px 2px" }}>まだ書き込みはありません。{readOnly ? "" : "描き込みモードで書き込むと、ここに時刻が並びます。"}</div>
+            ) : groups.map(g => {
+              const counts = {}; g.items.forEach(x => { counts[x.type] = (counts[x.type] || 0) + 1; });
+              const durs = [...new Set(g.items.map(x => eng.durOf(x)))];
+              const sum = Object.entries(counts).map(([k, v]) => VA_NAMES[k] + v).join("・") + "　表示" + durs.join("/") + "秒" + (g.items.some(x => x.dur !== undefined) ? "（個別）" : "");
+              return (
+                <div key={g.key} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 4px", borderTop:`1px solid ${C.border}`, background: g.key === openKey ? "#e6eefb" : "transparent", borderRadius: g.key === openKey ? 8 : 0 }}>
+                  <span style={{ fontVariantNumeric:"tabular-nums", fontWeight:800, color:C.navy, minWidth:62 }}>{vaFmt(g.t)}</span>
+                  <div style={{ flex:1, minWidth:0, fontSize:13 }}>
+                    {g.memo || "（メモなし）"}
+                    <div style={{ fontSize:10.5, color:C.textSec }}>{sum}</div>
+                  </div>
+                  <button style={btn} onClick={() => openGroup(g)}>開く</button>
+                  {!readOnly && (
+                    <button style={{ ...btn, background:"transparent", color:C.red }} onClick={() => {
+                      if (confirmDelKey === g.key) { deleteGroup(g); setConfirmDelKey(null); }
+                      else { setConfirmDelKey(g.key); setTimeout(() => setConfirmDelKey(k => k === g.key ? null : k), 2500); }
+                    }}>{confirmDelKey === g.key ? "本当に削除" : "削除"}</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(24px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", padding:"9px 14px", borderRadius:9, fontSize:13, zIndex:600, pointerEvents:"none", maxWidth:"90vw" }}>{toast}</div>}
+    </div>
+  );
+}
+
+
+// 試合詳細から開くとき用（共有範囲は試合なので ctx は保存の補助情報だけ）
+function VideoAnalysisScreenForMatch(props) {
+  const [ctx, setCtx] = useState({});
+  useEffect(() => { getMyProfile().then(p => setCtx({ schoolId: p?.school_id || null, userId: p?.id || null })); }, []);
+  return <VideoAnalysisScreen {...props} ctx={ctx} />;
+}
+
+// ---------- 「🎬 動画」画面（下のメニューから開く入口） ----------
+function VideoHubScreen({ onNavigate }) {
+  const [profile, setProfile] = useState(null);
+  const [recent, setRecent] = useState(null);          // null = 読み込み中
+  const [matchVideos, setMatchVideos] = useState(null);
+  const [opened, setOpened] = useState(null);           // { initial } または { match }
+  const [ytSheet, setYtSheet] = useState(false);
+  const [ytUrl, setYtUrl] = useState("");
+  const [ytTitle, setYtTitle] = useState("");
+  const [ytShare, setYtShare] = useState(true);
+  const [ytErr, setYtErr] = useState("");
+  const [localShare, setLocalShare] = useState(false);
+  const fileRef = useRef(null);
+  const pendingLocal = useRef(null);                    // 「続きから」でスマホ動画を選び直すときの元の情報
+
+  const isViewer = !!profile?.is_viewer;
+  const ctx = useMemo(() => ({ schoolId: profile?.school_id || null, userId: profile?.id || null }), [profile]);
+
+  const loadRecent = useCallback(() => {
+    vaLoadRecent().then(rows => setRecent(rows || []));
+  }, []);
+  useEffect(() => {
+    getMyProfile().then(p => setProfile(p));
+    loadRecent();
+    // 試合に登録された動画（動画リンクがある試合の新しい順）
+    (async () => {
+      const { data, error } = await supabase.from("matches")
+        .select("id, match_date, tournament_name, round, video_links")
+        .order("match_date", { ascending: false }).limit(150);
+      if (error) { console.error(error); setMatchVideos([]); return; }
+      setMatchVideos((data || []).filter(m => normalizeVideoLinks(m.video_links).length > 0).slice(0, 20));
+    })();
+  }, [loadRecent]);
+
+  const openYt = () => {
+    const id = youtubeIdOf(ytUrl);
+    if (!id) { setYtErr("YouTubeのURLとして読み取れませんでした"); return; }
+    setYtSheet(false); setYtErr("");
+    setOpened({ initial: { kind:"yt", ytId:id, title: ytTitle.trim() || "YouTube動画", shared: ytShare && !!ctx.schoolId } });
+    setYtUrl(""); setYtTitle("");
+  };
+  const onFile = (f) => {
+    if (!f) return;
+    const prev = pendingLocal.current; pendingLocal.current = null;
+    setOpened({ initial: { kind:"local", file:f, shared: prev ? prev.shared : (localShare && !!ctx.schoolId), ownerId: prev?.ownerId, expectKey: prev?.key } });
+  };
+  const openRecent = (r) => {
+    if (r.kind === "yt" || (r.source_key || "").startsWith("yt:")) {
+      setOpened({ initial: { kind:"yt", ytId: r.source_key.slice(3), title: r.title || "YouTube動画", shared: !!r.shared, ownerId: r.owner_id } });
+    } else {
+      pendingLocal.current = { shared: !!r.shared, ownerId: r.owner_id, key: r.source_key };
+      fileRef.current && fileRef.current.click();
+    }
+  };
+  const closeAnalysis = () => { setOpened(null); loadRecent(); };
+
+  const card = { ...S.card, padding:14, marginBottom:12 };
+  const fmtDay = (iso) => { try { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()}`; } catch (_) { return ""; } };
+  const tag = (bg, color, text) => <span style={{ display:"inline-block", fontSize:10, fontWeight:700, borderRadius:5, padding:"2px 6px", marginRight:4, background:bg, color }}>{text}</span>;
+  const thumb = (ytId, icon) => (
+    <div style={{ width:84, height:48, borderRadius:7, background:"#222", flexShrink:0, overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:20 }}>
+      {ytId ? <img src={youtubeThumbOf(ytId)} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : icon}
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ ...S.hdr, color:C.white }}>
+        <div style={{ fontSize:20, fontWeight:800 }}>🎬 動画</div>
+      </div>
+      <div style={{ padding:14 }}>
+        <div style={card}>
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>動画を開く</div>
+          <button style={{ ...S.btn(C.navy), marginBottom:8 }} onClick={() => { pendingLocal.current = null; fileRef.current && fileRef.current.click(); }}>📱 スマホの動画を開く</button>
+          <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}` }} onClick={() => { setYtErr(""); setYtSheet(true); }}>▶ YouTubeのURLを貼って開く</button>
+          {!isViewer && ctx.schoolId && (
+            <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textSec, marginTop:10 }}>
+              <input type="checkbox" checked={localShare} onChange={e => setLocalShare(e.target.checked)} />
+              スマホの動画の描き込みもチームの人が見られるようにする
+            </label>
+          )}
+          <div style={{ fontSize:11.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>試合に登録していない動画でも、そのまま開いてスロー・コマ送り・描き込みができます。スマホの動画はアップロードしません。</div>
+          <input ref={fileRef} type="file" accept="video/*" style={{ display:"none" }} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; onFile(f); }} />
+        </div>
+
+        <div style={card}>
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>続きから（最近分析した動画）</div>
+          {recent === null ? (
+            <div style={{ fontSize:12, color:C.textSec, padding:"8px 2px" }}>読み込み中…</div>
+          ) : recent.length === 0 ? (
+            <div style={{ fontSize:12, color:C.textSec, padding:"8px 2px" }}>まだありません。動画を開いて描き込むと、ここに並びます。</div>
+          ) : recent.map(r => {
+            const isYt = (r.source_key || "").startsWith("yt:");
+            const n = Array.isArray(r.shapes) ? r.shapes.length : 0;
+            const mine = r.owner_id && r.owner_id === ctx.userId;
+            const title = r.title || (isYt ? "YouTube動画" : (r.source_key || "").replace(/^local:/, "").replace(/:\d+$/, ""));
+            return (
+              <div key={r.scope + r.source_key} onClick={() => openRecent(r)} style={{ display:"flex", gap:10, alignItems:"center", padding:"10px 2px", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
+                {thumb(isYt ? r.source_key.slice(3) : null, "📱")}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{title}</div>
+                  <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>
+                    {isYt ? tag("#fde7e7", "#c62828", "YouTube") : tag("#e6f0fb", "#0b5cad", "スマホ")}
+                    {r.shared ? tag("#f3eefc", "#6a3fb5", mine ? "チームで共有" : "チームの人が作成") : tag("#eef0f3", "#555", "自分だけ")}
+                    描き込み{n}件・{fmtDay(r.updated_at)}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {recent && recent.some(r => !(r.source_key || "").startsWith("yt:")) && (
+            <div style={{ fontSize:11, color:C.textSec, marginTop:6 }}>※スマホの動画は、続きを開くときに同じ動画ファイルを選び直します。</div>
+          )}
+        </div>
+
+        {matchVideos && matchVideos.length > 0 && (
+          <div style={card}>
+            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:4 }}>試合に登録された動画から選ぶ</div>
+            {matchVideos.map(m => {
+              const links = normalizeVideoLinks(m.video_links);
+              return (
+                <div key={m.id} onClick={() => setOpened({ match: m })} style={{ display:"flex", gap:10, alignItems:"center", padding:"10px 2px", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
+                  {thumb(links[0]?.id, "▶")}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{[m.tournament_name, m.round].filter(Boolean).join(" ") || "試合"}</div>
+                    <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>{tag("#eef7ee", "#2e7d32", "試合の動画")}{fmtDate(m.match_date)}・動画{links.length}本</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {ytSheet && (
+        <div onClick={e => { if (e.target === e.currentTarget) setYtSheet(false); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:400 }}>
+          <div style={{ background:C.white, width:"100%", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>
+            <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>▶ YouTubeのURLを貼る</div>
+            <input type="text" value={ytUrl} onChange={e => setYtUrl(e.target.value)} placeholder="https://youtu.be/…（限定公開でもOK）" autoFocus
+              style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:14 }} />
+            {ytErr && <div style={{ color:C.red, fontSize:12, marginTop:6 }}>{ytErr}</div>}
+            <input type="text" value={ytTitle} onChange={e => setYtTitle(e.target.value)} placeholder="名前（任意）例：県総体 準決勝"
+              style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:14, marginTop:10 }} />
+            {!isViewer && ctx.schoolId && (
+              <label style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:13, margin:"12px 0", lineHeight:1.5 }}>
+                <input type="checkbox" checked={ytShare} onChange={e => setYtShare(e.target.checked)} />
+                <span>描き込みをチームの人も見られるようにする<br /><span style={{ fontSize:11.5, color:C.textSec }}>オフにすると自分だけが見られます</span></span>
+              </label>
+            )}
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setYtSheet(false)}>やめる</button>
+              <button style={{ ...S.btn(C.navy), flex:2 }} onClick={openYt}>開く</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {opened && (
+        <VideoAnalysisScreen
+          match={opened.match}
+          initial={opened.initial}
+          ctx={ctx}
+          readOnly={isViewer}
+          onClose={closeAnalysis}
+        />
+      )}
+      <NavBar active="video" onNavigate={onNavigate} />
     </div>
   );
 }
@@ -26257,7 +27569,7 @@ export default function App() {
   }
   // ★大会の中から開いた画面（試合・団体戦・ランキングなど）から大会詳細へ戻ったときは、さっきの位置で表示する
   //   （試合一覧・ホーム・分析などのタブから新しく開いたときは、これまで通り一番上から）
-  const TOURNAMENT_FRESH_FROM = new Set(["list","home","personalAnalysis","pairAnalysis","stats","master","aiAnalysisList","tournamentDetail"]);
+  const TOURNAMENT_FRESH_FROM = new Set(["list","home","personalAnalysis","pairAnalysis","stats","master","aiAnalysisList","videoHub","tournamentDetail"]);
   if (screen === "tournamentDetail" && tournamentContext && lastSnapRef.current && !TOURNAMENT_FRESH_FROM.has(lastSnapRef.current.screen)) {
     markTournamentDetailReturn(tournamentContext.id);
   }
@@ -26772,7 +28084,7 @@ export default function App() {
   // ★下部ナビゲーション（ホーム/履歴/分析/マスター）の共通遷移ハンドラ
   function goNav(key) {
     // 現在表示中の画面と同じタブを押しても何もしない
-    const screenMap = { home:"home", list:"list", stats:"personalAnalysis", master:"master", aiAnalysisList:"aiAnalysisList" };
+    const screenMap = { home:"home", list:"list", stats:"personalAnalysis", master:"master", aiAnalysisList:"aiAnalysisList", video:"videoHub", teamStats:"stats" };
     if (screen === screenMap[key]) return;
     setTournamentContext(null); // ボトムナビでの移動時は大会の文脈から抜ける
     if (key==="home") setScreen("home");
@@ -26781,6 +28093,13 @@ export default function App() {
     else if (key==="master") setScreen("master");
     else if (key==="aiAnalysisList") { setAiAnalysisPlayer(null); setScreen("aiAnalysisList"); }
     else if (key==="pairAnalysis") setScreen("pairAnalysis");
+    else if (key==="teamStats") setScreen("stats");
+    else if (key==="video") setScreen("videoHub");
+  }
+  _appGoNav = goNav;
+
+  if (screen==="videoHub") {
+    return <VideoHubScreen onNavigate={goNav} />;
   }
 
   if (screen==="home") {
