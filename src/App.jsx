@@ -26030,9 +26030,11 @@ const VA_COLORS = [
   { c:"#a259ff", n:"紫" }, { c:"#2f9bff", n:"青" }, { c:"#5ce1e6", n:"水色" }, { c:"#34c759", n:"緑" },
   { c:"#ffffff", n:"白" }, { c:"#1c1c1e", n:"黒" },
 ];
-const VA_NAMES = { select:"選択", traj:"軌道", aim:"打ちたい", arrow:"矢印", circle:"円", rect:"四角", pen:"手書き", player:"選手" };
-// ★並び：上の段「選択・手書き・打ちたい・矢印」、下の段「円・四角・軌道・選手」
-const VA_TOOLS = ["select", "pen", "aim", "arrow", "circle", "rect", "traj", "player"];
+const VA_NAMES = { select:"選択", traj:"軌道", aim:"打ちたい", arrow:"矢印", circle:"円", rect:"四角", pen:"手書き", player:"選手", text:"文字" };
+// ★並び：上の段「選択・手書き・打ちたい・矢印・円」、下の段「四角・軌道・選手・文字」
+const VA_TOOLS = ["select", "pen", "aim", "arrow", "circle", "rect", "traj", "player", "text"];
+// ★文字スタンプの言葉（「文字」を選ぶと、ここから1タップで選んで置ける）
+const VA_STAMP_WORDS = [...new Set(["強気","攻める","下半身","足から","タイミング早い","タイミング遅い","ストレート","クロス","センター","ワイド","ロブ","シュート","トップ打ち","ボレー","ツイスト","ドロップ","回り込む","深く打つ","我慢","ポーチに出る","静止","トスが悪い","体重移動","打点は前","テイクバック早く","一歩目遅い","早く戻る","次の準備遅い"])];
 const VA_HINTS = {
   select: "すでにある線・円・選手などをタップすると選べます。ドラッグで移動、色ボタンで色の変更、動画の右下の🗑で削除できます。何もない所をタップすると選択が外れます（時間は進みません）。",
   traj:   "ボールの位置を順にタップすると、点が線でつながって軌道になります。タップするたびに自動で少し進むので、続けてタップするだけでOKです。すでにある線をさわるときは「選択」に切り替えてください。",
@@ -26041,6 +26043,7 @@ const VA_HINTS = {
   circle: "何もない所を中心から外側へなぞると円になります。動かす・大きさを変えるときは「選択」に切り替えてください。",
   rect:   "何もない所を、四角の角から反対の角までなぞると四角になります。動かす・大きさを変えるときは「選択」に切り替えてください（4つの角で大きさ、内側で移動）。",
   pen:    "指でなぞったとおりに線を描きます。動かすときは「選択」に切り替えてください。",
+  text:   "言葉を選んで動画をタップすると文字スタンプを置けます。続けて別の言葉を選んでタップすれば、次々に置けます。終わるときは「✓ 終了」（または「文字」をもう一度）。動かす・大きさを変えるときは「選択」に切り替えてください（右下の白い丸で大きさ）。色ボタンで色も変えられます。",
   player: "タップした所に選手を置きます（タップした位置が足元）。置くときに指をずらすと位置を調整できます。あとで動かす・大きさを変えるときは「選択」に切り替えてください。置いたあとにほかの所をタップすると確定し、もう一度タップすると次の選手を置けます。名前や役割を書いたり、「理想の位置」にすると半透明の点線で「ここに立つべきだった」を表せます。",
 };
 const VA_EPS = 0.02;
@@ -26116,7 +26119,7 @@ class VAEngine {
     this.tool = "select"; this.color = "#ffd400"; this.mode = "play"; this.showDur = 2;
     this.readOnly = false; this.autoStep = true; this.stepN = 3;
     this.onChange = () => {}; this.onDirty = () => {}; this.onTogglePlay = () => {}; this.onStep = () => {}; this.onBusy = () => {};
-    this.loading = false;
+    this.loading = false; this.stamp = VA_STAMP_WORDS[0];
   }
   get W() { return this.canvas ? this.canvas.clientWidth : 1; }
   get H() { return this.canvas ? this.canvas.clientHeight : 1; }
@@ -26151,8 +26154,14 @@ class VAEngine {
     if (t !== "traj") this.finishTraj();
     this.tool = t;
     if (t === "traj" && this.color !== "#ffd400") this.color = "#ffd400";
-    if (t === "aim" && this.color === "#ffd400") this.color = "#ff3b30";
+    if ((t === "aim" || t === "text") && this.color === "#ffd400") this.color = "#ff3b30";
     this.redraw(); this.changed();
+  }
+  // ★文字スタンプの言葉を選ぶ：「選択」で選んでいるスタンプだけ言葉を入れ替える（置いた直後のスタンプは確定してそのまま）
+  pickStamp(w) {
+    this.stamp = w;
+    if (this.tool === "select" && this.sel && this.sel.type === "text" && this.selByTap) { this.sel.text = w; this.redraw(); this.dirty(); }
+    else { this.confirm(); this.changed(); }
   }
   pickColor(c) {
     this.color = c;
@@ -26273,11 +26282,30 @@ class VAEngine {
     }
     return null;
   }
+  // ---- 文字スタンプ：位置 f = 文字の中心、大きさ sz = 文字の高さ（動画の高さに対する割合） ----
+  textBox(s) {
+    const W = this.W, H = this.H, fs = Math.max(10, s.sz * H);
+    let tw = fs * String(s.text || "").length;
+    if (this.ctx) { this.ctx.save(); this.ctx.font = "800 " + fs + "px sans-serif"; tw = this.ctx.measureText(s.text || "").width; this.ctx.restore(); }
+    const w = tw + fs * 0.9, h = fs * 1.5;
+    return { x: s.f[0] * W - w / 2, y: s.f[1] * H - h / 2, w, h, fs };
+  }
+  hitText(p) {
+    const W = this.W, H = this.H, px = p[0] * W, py = p[1] * H;
+    const list = this.shapes.filter(x => x.type === "text" && this.isVisible(x));
+    if (this.sel && list.includes(this.sel)) { list.splice(list.indexOf(this.sel), 1); list.push(this.sel); }
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i], b = this.textBox(s);
+      if (s === this.sel && Math.hypot(px - (b.x + b.w), py - (b.y + b.h)) < 22) return { s, mode: "resize" };
+      if (px > b.x - 6 && px < b.x + b.w + 6 && py > b.y - 6 && py < b.y + b.h + 6) return { s, mode: "move" };
+    }
+    return null;
+  }
   hitAny(p) {
-    const order = [...new Set([this.tool, "player", "circle", "rect", "aim", "arrow", "pen", "traj"])];
+    const order = [...new Set([this.tool, "text", "player", "circle", "rect", "aim", "arrow", "pen", "traj"])];
     for (const t of order) {
       if (!VA_NAMES[t] || t === "select") continue;
-      const h = t === "circle" ? this.hitCircle(p) : t === "player" ? this.hitPlayer(p) : t === "rect" ? this.hitRect(p)
+      const h = t === "circle" ? this.hitCircle(p) : t === "player" ? this.hitPlayer(p) : t === "rect" ? this.hitRect(p) : t === "text" ? this.hitText(p)
               : (t === "pen" || t === "traj") ? this.hitPoly(p, t) : this.hitAB(p, t);
       if (h) return h;
     }
@@ -26303,7 +26331,7 @@ class VAEngine {
       c0: h.c && h.c.slice(), e0: h.e && h.e.slice(), a0: h.a && h.a.slice(), b0: h.b && h.b.slice(),
       pts0: h.type === "pen" ? h.pts.map(q => q.slice()) : null,
       frac: h.type === "pen" ? this.penFractions(h.pts) : null,
-      f0: h.f && h.f.slice(), sz0: h.sz, moved: false };
+      f0: h.f && h.f.slice(), sz0: h.sz, s0: h.type === "text" ? { ...h, f: h.f.slice() } : null, moved: false };
   }
   pointerDown(e) {
     if (!this.player || !this.canvas) return;
@@ -26335,6 +26363,13 @@ class VAEngine {
       this.drag = { mode: "move", s: sh, start: p, f0: p.slice(), sz0: sh.sz, moved: false, created: true };
       this.onDirty(); this.onChange(); return;
     }
+    if (this.tool === "text") {
+      // ★タップするたびに、選んでいる言葉を置く（置くときに指をずらすと位置を調整できる）
+      const sh = { ...base, type: "text", f: p, text: this.stamp, sz: 0.07 };
+      this.shapes.push(sh); this.select(sh);
+      this.drag = { mode: "move", s: sh, start: p, f0: p.slice(), sz0: sh.sz, moved: false, created: true };
+      this.onDirty(); this.onChange(); return;
+    }
     if (this.tool === "pen") this.cur = { ...base, type: "pen", pts: [p] };
     else if (this.tool === "circle") this.cur = { ...base, type: "circle", c: p, e: p };
     else this.cur = { ...base, type: this.tool, a: p, b: p };
@@ -26345,7 +26380,10 @@ class VAEngine {
       const p = this.pos(e), d = this.drag, s = d.s;
       const dx = p[0] - d.start[0], dy = p[1] - d.start[1];
       d.moved = true;
-      if (s.type === "player") {
+      if (s.type === "text") {
+        if (d.mode === "move") s.f = [d.f0[0] + dx, d.f0[1] + dy];
+        else { const b0 = this.textBox(d.s0), ratio = Math.max(0.3, (p[1] * this.H - b0.y) / Math.max(1, b0.h)); s.sz = Math.max(0.03, Math.min(0.25, d.sz0 * ratio)); }
+      } else if (s.type === "player") {
         if (d.mode === "move") s.f = [d.f0[0] + dx, d.f0[1] + dy];
         else s.sz = Math.max(0.05, Math.min(0.9, s.f[1] - p[1]));
       } else if (s.type === "pen") {
@@ -26440,6 +26478,24 @@ class VAEngine {
       o.restore();
     }
   }
+  drawText(s, lw) {
+    const o = this.ctx, b = this.textBox(s);
+    const ink = (() => { const n = parseInt(String(s.color).slice(1), 16) || 0, r = n >> 16, g = (n >> 8) & 255, bb = n & 255; return (r * 299 + g * 587 + bb * 114) / 1000 > 150 ? "#1c1c1e" : "#fff"; })();
+    o.save();
+    o.shadowColor = "rgba(0,0,0,.45)"; o.shadowBlur = 6;
+    o.fillStyle = s.color; o.globalAlpha = .92;
+    o.beginPath(); if (o.roundRect) o.roundRect(b.x, b.y, b.w, b.h, b.h / 2); else o.rect(b.x, b.y, b.w, b.h); o.fill();
+    o.globalAlpha = 1; o.shadowBlur = 0;
+    o.fillStyle = ink; o.font = "800 " + b.fs + "px sans-serif"; o.textAlign = "center"; o.textBaseline = "middle";
+    o.fillText(s.text || "", b.x + b.w / 2, b.y + b.h / 2 + b.fs * 0.04);
+    if (this.showSel(s)) {
+      o.setLineDash([5, 4]); o.strokeStyle = "#fff"; o.lineWidth = 1.5;
+      o.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8); o.setLineDash([]);
+      o.fillStyle = "#fff"; o.strokeStyle = s.color; o.lineWidth = 3;
+      o.beginPath(); o.arc(b.x + b.w, b.y + b.h, lw * 2.2, 0, 7); o.fill(); o.stroke();
+    }
+    o.restore();
+  }
   resize() {
     if (!this.canvas) return;
     const dpr = window.devicePixelRatio || 1;
@@ -26462,7 +26518,9 @@ class VAEngine {
       o.lineWidth = lw; o.lineCap = "round"; o.lineJoin = "round";
       o.shadowColor = "rgba(0,0,0,.6)"; o.shadowBlur = 3;
       if (this.showSel(s) && (s.type === "pen" || s.type === "traj" || s.type === "arrow")) { o.shadowColor = "#fff"; o.shadowBlur = 14; }
-      if (s.type === "player") {
+      if (s.type === "text") {
+        this.drawText(s, lw);
+      } else if (s.type === "player") {
         this.drawPlayer(s, W, H, lw);
       } else if (s.type === "pen") {
         o.beginPath(); s.pts.forEach((p, i) => { const q = X(p); i ? o.lineTo(...q) : o.moveTo(...q); }); o.stroke();
@@ -26632,6 +26690,11 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   const [saveState, setSaveState] = useState("");      // "" | "saving" | "saved" | "local"
   const [toast, setToastMsg] = useState("");
   const toastTimer = useRef(null);
+  // ★全画面（動画を画面いっぱいに広げて、その上で描く）。動画を開くと最初から全画面
+  const [fs, setFs] = useState(false);
+  const fsRef = useRef(false); fsRef.current = fs;
+  const [fsPalette, setFsPalette] = useState(false);
+  const [portrait, setPortrait] = useState(() => window.innerHeight >= window.innerWidth);
   const showToast = useCallback(msg => { setToastMsg(msg); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 1800); }, []);
 
   const videoRef = useRef(null), ytBoxRef = useRef(null), canvasRef = useRef(null), stageWrapRef = useRef(null), fileRef = useRef(null);
@@ -26758,6 +26821,43 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     if (resend) saveSoon();
   }, [eng, rerender, showToast, saveSoon]);
 
+  // ---- 全画面 ----
+  // ★ブラウザの全画面が使える端末（Android など）は上下のバーも隠す。iPhone は画面いっぱいの表示だけ（同じ見た目）
+  const nativeFsRef = useRef(false);
+  const exitFs = useCallback(() => {
+    setFs(false); setFsPalette(false);
+    try {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else if (document.webkitFullscreenElement) document.webkitExitFullscreen();
+    } catch (_) {}
+  }, []);
+  const enterFs = useCallback((withTip) => {
+    setFs(true); setFsPalette(false);
+    const w = stageWrapRef.current;
+    try {
+      const r = w && (w.requestFullscreen ? w.requestFullscreen() : (w.webkitRequestFullscreen && w.webkitRequestFullscreen()));
+      if (r && r.catch) r.catch(() => {});
+    } catch (_) {}
+    if (withTip) showToast("横向きにすると大きく見られます。メモや一覧は右下のボタンで通常画面へ");
+  }, [showToast]);
+  useEffect(() => {
+    const onFs = () => {
+      const el = document.fullscreenElement || document.webkitFullscreenElement;
+      if (el) nativeFsRef.current = true;
+      else if (nativeFsRef.current) { nativeFsRef.current = false; if (fsRef.current) { setFs(false); setFsPalette(false); } }
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs);
+    return () => { document.removeEventListener("fullscreenchange", onFs); document.removeEventListener("webkitfullscreenchange", onFs); };
+  }, []);
+
+  // ★動画を開いたら、最初から全画面・「描く」で始める（閲覧専用は再生のみ）
+  const startView = useCallback(() => {
+    eng.mode = readOnly ? "play" : "draw";
+    enterFs(true);
+    rerender();
+  }, [eng, readOnly, enterFs, rerender]);
+
   const closeSource = useCallback(async () => {
     eng.finishTraj();
     saveNow(); // ★端末への控えはすぐ書かれる。通信の完了は待たずに切り替える
@@ -26767,14 +26867,16 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
       videoRef.current.removeAttribute("src"); try { videoRef.current.load(); } catch (_) {}
     }
     eng.player = null; setPlayer(null); setSource(null); setYtNeedsTap(false); setYtError("");
+    exitFs();
     eng.shapes = []; eng.sel = null; setOpenKey(null); setMemo(""); setSaveState("");
-  }, [eng, saveNow]);
+  }, [eng, saveNow, exitFs]);
 
   const openYouTube = useCallback(async (v) => {
     await closeSource();
     const src = { kind: "yt", key: "yt:" + v.id, title: v.title || "YouTube動画", ytId: v.id };
     setSource(src); sourceRef.current = src; setAspect(16 / 9); setRate(1);
     loadShapesFor(src);
+    startView();
     try {
       const YT = await vaLoadYouTubeApi();
       if (sourceRef.current !== src || !ytBoxRef.current) return;
@@ -26800,7 +26902,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
         },
       });
     } catch (e) { setYtError(e.message || "YouTubeを読み込めませんでした"); }
-  }, [closeSource, eng, loadShapesFor]);
+  }, [closeSource, eng, loadShapesFor, startView]);
 
   const openLocal = useCallback(async (file) => {
     if (!file) return;
@@ -26809,12 +26911,13 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     if (initial?.expectKey && initial.expectKey !== src.key) showToast("前回と違う動画ファイルなので、新しい動画として開きました");
     setSource(src); sourceRef.current = src; setRate(1);
     loadShapesFor(src);
+    startView();
     const el = videoRef.current; if (!el) return;
     el.src = URL.createObjectURL(file);
     el.onloadedmetadata = () => { if (el.videoWidth) setAspect(el.videoWidth / el.videoHeight); };
     const pl = new VALocalPlayer(el);
     eng.player = pl; setPlayer(pl);
-  }, [closeSource, eng, loadShapesFor]);
+  }, [closeSource, eng, loadShapesFor, startView]);
 
   useEffect(() => () => {
     // 画面を閉じるとき
@@ -26914,7 +27017,9 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   useLayoutEffect(() => {
     const calc = () => {
       const wrap = stageWrapRef.current; if (!wrap) return;
-      const wrapW = wrap.clientWidth, maxH = Math.max(200, window.innerHeight * 0.5);
+      setPortrait(window.innerHeight >= window.innerWidth);
+      const wrapW = fs ? window.innerWidth : wrap.clientWidth;
+      const maxH = fs ? window.innerHeight : Math.max(200, window.innerHeight * 0.5);
       let w = wrapW, h = w / aspect;
       if (h > maxH) { h = maxH; w = h * aspect; }
       setStageSize({ w: Math.round(w), h: Math.round(h) });
@@ -26922,8 +27027,8 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     calc();
     window.addEventListener("resize", calc);
     return () => window.removeEventListener("resize", calc);
-  }, [aspect, source]);
-  useEffect(() => { eng.canvas = canvasRef.current; eng.resize(); }, [stageSize, eng, source]);
+  }, [aspect, source, fs]);
+  useEffect(() => { eng.canvas = canvasRef.current; eng.resize(); }, [stageSize, eng, source, fs]);
 
   // ---- ほかのボタンを押したら、描いた直後の書き込み・記録中の軌道を確定 ----
   const panelClickCapture = (e) => {
@@ -26932,7 +27037,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     if (el.closest("[data-va-keep]")) return;                       // 選んだ書き込みを編集する欄
     const trajKeep = el.closest("[data-va-trajkeep]");               // コマ送り・自動送り・1つ戻すなど
     if (eng.traj && !trajKeep) eng.finishTraj();
-    if (eng.sel && !(eng.selByTap && el.closest("[data-va-swatch]")) && !el.closest("[data-va-undo]")) eng.confirm();
+    if (eng.sel && !(eng.selByTap && el.closest("[data-va-swatch]")) && !el.closest("[data-va-undo], [data-va-stamps]")) eng.confirm();
   };
 
   // ---- 一覧（書き込みのタイミング） ----
@@ -26963,7 +27068,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   };
   const [confirmDelKey, setConfirmDelKey] = useState(null);
 
-  const handleClose = () => { eng.finishTraj(); saveNow(); onClose && onClose(); };
+  const handleClose = () => { eng.finishTraj(); saveNow(); exitFs(); onClose && onClose(); };
 
   // ---- 表示 ----
   const sel = eng.traj || eng.sel;
@@ -26978,6 +27083,22 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   const undoIcon = <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 L4 9 L9 4"/><path d="M4 9 H14 a6 6 0 0 1 0 12 H10"/></svg>;
   const redoIcon = <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 14 L20 9 L15 4"/><path d="M20 9 H10 a6 6 0 0 0 0 12 H14"/></svg>;
   const urBtn = (on) => ({ width:50, height:50, flexShrink:0, padding:"2px 0 0", border:"1.5px solid #9fb3cf", background:"#eef3fb", borderRadius:12, color:C.navy, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", opacity: on ? 1 : 0.45, cursor: on ? "pointer" : "default" });
+  const expandIcon = <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 10 L4 4 M4 9 V4 H9"/><path d="M14 14 L20 20 M20 15 V20 H15"/></svg>;
+  const shrinkIcon = <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4 L10 10 M10 5 V10 H5"/><path d="M20 20 L14 14 M14 19 V14 H19"/></svg>;
+  const playIcon = <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M7 4 L20 12 L7 20 Z"/></svg>;
+  const drawIcon = <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20 L5 15 L16 4 L20 8 L9 19 Z"/><path d="M14 6 L18 10"/></svg>;
+  const fsb = { border:"none", background:"rgba(255,255,255,.16)", color:"#fff", borderRadius:9, padding:"8px 10px", fontSize:13, fontWeight:700, whiteSpace:"nowrap", cursor:"pointer" };
+  const fsi = (on = true) => ({ ...fsb, width:40, height:38, padding:0, display:"flex", alignItems:"center", justifyContent:"center", opacity: on ? 1 : 0.35 });
+  // ★「文字」をもう一度押すと終了（「選択」に戻る）
+  const pickTool = (t) => { eng.setTool(t === "text" && eng.tool === "text" ? "select" : t); setFsPalette(false); };
+  const endStamps = () => { eng.confirm(); eng.setTool("select"); };
+  const nextRate = () => { const rs = rates; const i = rs.indexOf(rate); changeRate(rs[(i + 1) % rs.length]); };
+  const stampChip = (w, small) => (
+    <button key={w} onClick={() => eng.pickStamp(w)} style={{ flexShrink:0, border:`1px solid ${w === eng.stamp ? C.navy : C.border}`, background: w === eng.stamp ? C.navy : C.white, color: w === eng.stamp ? C.white : C.text, borderRadius:999, padding: small ? "6px 10px" : "7px 11px", fontSize: small ? 12.5 : 13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>{w}</button>
+  );
+  const stampEndChip = (small) => (
+    <button key="__end" onClick={endStamps} style={{ flexShrink:0, border:"1px solid #1d2330", background:"#1d2330", color:"#fff", borderRadius:999, padding: small ? "6px 10px" : "7px 11px", fontSize: small ? 12.5 : 13, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>✓ 終了</button>
+  );
   const toolIcon = {
     select: <path d="M5 3 L5 19 L9.5 14.5 L12.5 21 L15 19.8 L12 13.5 L18 13.5 Z"/>,
     traj: <><path d="M3 18 Q9 2 15 12 T22 9"/><circle cx="3" cy="18" r="2" fill="currentColor"/><circle cx="9" cy="8" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="21" cy="9" r="2" fill="currentColor"/></>,
@@ -26987,10 +27108,13 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     rect: <rect x="4" y="6" width="16" height="12" rx="1"/>,
     pen: <path d="M3 17 C6 10 9 20 12 13 S18 8 21 12"/>,
     player: <><circle cx="12" cy="5" r="2.6"/><path d="M8.5 21 V10.5 Q12 8.5 15.5 10.5 V21 M17 12 L20.5 7.5"/><ellipse cx="21" cy="5.5" rx="1.8" ry="2.4"/></>,
+    text: <><rect x="2.5" y="6" width="19" height="12" rx="6"/><path d="M8 10 H16 M12 10 V15"/></>,
   };
+  const toastEl = toast && <div style={{ position:"fixed", left:"50%", ...(fs ? { top:"calc(104px + env(safe-area-inset-top,0px))" } : { bottom:"calc(24px + env(safe-area-inset-bottom,0px))" }), transform:"translateX(-50%)", textAlign:"center", background:"#1d2330", color:"#fff", padding:"9px 14px", borderRadius:9, fontSize:13, zIndex:600, pointerEvents:"none", maxWidth:"90vw" }}>{toast}</div>;
+  const ytTapNeeded = source?.kind === "yt" && ytNeedsTap && !ytError;
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:500, background:C.gray, overflowY:"auto", WebkitOverflowScrolling:"touch", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ position:"fixed", inset:0, zIndex:500, background:C.gray, overflowY: fs ? "hidden" : "auto", WebkitOverflowScrolling:"touch", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ position:"sticky", top:0, zIndex:3, background:C.navy, color:C.white, padding:"calc(10px + env(safe-area-inset-top,0px)) 12px 10px", display:"flex", alignItems:"center", gap:10 }}>
         <button onClick={handleClose} style={{ background:"rgba(255,255,255,.15)", color:C.white, border:"none", borderRadius:8, padding:"7px 10px", fontSize:13, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
         <div style={{ flex:1, minWidth:0 }}>
@@ -27055,7 +27179,9 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
               最初の1回は、動画の画面を直接タップして再生してください（YouTubeの仕様です）。そのあとはボタンで操作できます。
             </div>
           )}
-          <div ref={stageWrapRef} style={{ display:"flex", justifyContent:"center", background:"#000", borderRadius:10, overflow:"hidden" }}>
+          <div ref={stageWrapRef} style={fs
+            ? { position:"fixed", inset:0, zIndex:50, display:"flex", justifyContent:"center", alignItems:"center", background:"#000", overflow:"hidden" }
+            : { display:"flex", justifyContent:"center", background:"#000", borderRadius:10, overflow:"hidden" }}>
             <div style={{ position:"relative", width:stageSize.w || "100%", height:stageSize.h || 200, background:"#000" }}>
               <video ref={videoRef} playsInline preload="metadata" style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"contain", display: source?.kind === "local" ? "block" : "none" }} />
               <div ref={ytBoxRef} style={{ position:"absolute", inset:0, display: source?.kind === "yt" ? "block" : "none" }} />
@@ -27063,25 +27189,109 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                 ref={canvasRef}
                 style={{ position:"absolute", inset:0, width:"100%", height:"100%", touchAction: isDraw ? "none" : "manipulation", cursor: isDraw ? "crosshair" : "pointer",
                   // ★YouTubeは最初の1回だけ動画を直接タップする必要があるので、その間は描き込み面を素通りさせる
-                  pointerEvents: (source?.kind === "yt" && ytNeedsTap && !isDraw) ? "none" : "auto" }}
+                  pointerEvents: ytTapNeeded ? "none" : "auto" }}
                 onPointerDown={e => eng.pointerDown(e)}
                 onPointerMove={e => eng.pointerMove(e)}
                 onPointerUp={() => eng.pointerUp()}
                 onPointerCancel={() => eng.pointerUp()}
               />
-              <div style={{ position:"absolute", top:8, left:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background: isDraw ? "#e65100" : "rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{isDraw ? "描き込み中" : "再生"}</div>
-              <div style={{ position:"absolute", top:8, right:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{rate}x</div>
+              {!fs && <div style={{ position:"absolute", top:8, left:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background: isDraw ? "#e65100" : "rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{isDraw ? "描き込み中" : "再生"}</div>}
+              {!fs && <div style={{ position:"absolute", top:8, right:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{rate}x</div>}
+              {/* ★全画面にする（通常画面のとき、動画の右下） */}
+              {!fs && source && (
+                <button aria-label="全画面" title="全画面" data-va-undo data-va-trajkeep onClick={() => enterFs(false)}
+                  onPointerDown={e => e.stopPropagation()}
+                  style={{ position:"absolute", right:8, bottom:8, width:40, height:40, padding:0, border:"none", borderRadius:"50%", background:"rgba(0,0,0,.55)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2, cursor:"pointer" }}>{expandIcon}</button>
+              )}
               {/* ★動画の右下のゴミ箱：「選択」で選んでいる書き込みをボタン1つで消す */}
               {isDraw && eng.tool === "select" && eng.sel && (
                 <button aria-label="選んでいる書き込みを削除" title="削除" data-va-keep
                   onPointerDown={e => e.stopPropagation()}
                   onClick={() => { if (eng.deleteSelected()) showToast("選択した書き込みを削除しました"); }}
-                  style={{ position:"absolute", right:8, bottom:8, width:40, height:40, padding:0, border:"none", borderRadius:"50%", background:"rgba(198,40,40,.92)", color:"#fff", fontSize:19, lineHeight:"40px", textAlign:"center", boxShadow:"0 2px 6px rgba(0,0,0,.35)", zIndex:2, cursor:"pointer" }}>🗑</button>
+                  style={{ position: fs ? "fixed" : "absolute", right: fs ? 12 : 8, bottom: fs ? (portrait ? "calc(160px + env(safe-area-inset-bottom,0px))" : "calc(96px + env(safe-area-inset-bottom,0px))") : 56,
+                    width: fs ? 46 : 40, height: fs ? 46 : 40, padding:0, border:"none", borderRadius:"50%", background:"rgba(198,40,40,.92)", color:"#fff", fontSize: fs ? 22 : 19, lineHeight: fs ? "46px" : "40px", textAlign:"center", boxShadow:"0 2px 6px rgba(0,0,0,.35)", zIndex:4, cursor:"pointer" }}>🗑</button>
               )}
               {skipLabel && (
                 <div style={{ position:"absolute", top:"50%", left: skipLabel.side === "right" ? "75%" : "25%", transform:"translate(-50%,-50%)", fontSize:18, fontWeight:800, color:"#fff", background:"rgba(0,0,0,.55)", padding:"10px 16px", borderRadius:999, pointerEvents:"none", whiteSpace:"nowrap" }}>{skipLabel.text}</div>
               )}
             </div>
+            {/* ★全画面のときだけ出る操作（動画の上に重ねる） */}
+            {fs && (
+              <>
+                <div style={{ position:"absolute", zIndex:3, top:0, left:0, right:0, display:"flex", alignItems:"center", gap:8, padding:"calc(6px + env(safe-area-inset-top,0px)) 10px 6px", background:"linear-gradient(rgba(0,0,0,.65),rgba(0,0,0,0))", color:"#fff" }}>
+                  <button style={fsb} onClick={handleClose}>← 戻る</button>
+                  {!readOnly ? (
+                    <div style={{ display:"flex", background:"rgba(255,255,255,.14)", borderRadius:9, padding:2, gap:2, margin:"0 auto" }}>
+                      {[["play", playIcon, "再生"], ["draw", drawIcon, "描く"]].map(([m, ic, lb]) => {
+                        const on = (m === "draw") === isDraw;
+                        return <button key={m} title={lb} aria-label={lb} onClick={() => { setMode(m); setFsPalette(false); }} style={{ border:"none", background: on ? "#fff" : "transparent", color: on ? C.navy : "#ddd", width:44, height:34, padding:0, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>{ic}</button>;
+                      })}
+                    </div>
+                  ) : <div style={{ flex:1 }} />}
+                  {isDraw && (
+                    <div data-va-undo data-va-trajkeep style={{ display:"flex", gap:6 }}>
+                      <button title="1つ前に戻す" aria-label="1つ前に戻す" disabled={!eng.canUndo()} style={fsi(eng.canUndo())} onClick={() => eng.undo()}>{undoIcon}</button>
+                      <button title="1つ先に進む" aria-label="1つ先に進む" disabled={!eng.canRedo()} style={fsi(eng.canRedo())} onClick={() => eng.redo()}>{redoIcon}</button>
+                    </div>
+                  )}
+                </div>
+
+                {isDraw && (
+                  <div style={portrait
+                    ? { position:"absolute", zIndex:3, display:"grid", gridTemplateColumns:"repeat(10,32px)", gap:3, left:"50%", bottom:"calc(104px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"rgba(0,0,0,.5)", borderRadius:12, padding:5 }
+                    : { position:"absolute", zIndex:3, display:"grid", gridTemplateColumns:"repeat(2,36px)", gap:3, left:"calc(6px + env(safe-area-inset-left,0px))", top:"50%", transform:"translateY(-50%)", background:"rgba(0,0,0,.5)", borderRadius:12, padding:5 }}>
+                    {VA_TOOLS.map(t => {
+                      const on = eng.tool === t, sz = portrait ? 32 : 36;
+                      return <button key={t} title={VA_NAMES[t]} aria-label={VA_NAMES[t]} onClick={() => pickTool(t)} style={{ width:sz, height:sz, border:"none", borderRadius:8, background: on ? "#fff" : "transparent", color: on ? C.navy : "#fff", padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">{toolIcon[t]}</svg>
+                      </button>;
+                    })}
+                    <button title="色" aria-label="色" data-va-swatch onClick={() => setFsPalette(v => !v)} style={{ width: portrait ? 24 : 28, height: portrait ? 24 : 28, margin:4, border:"3px solid #fff", borderRadius:"50%", background:eng.color, padding:0, cursor:"pointer" }} />
+                  </div>
+                )}
+                {isDraw && fsPalette && (
+                  <div style={{ position:"absolute", zIndex:3, display:"flex", flexWrap:"wrap", gap:6, background:"rgba(0,0,0,.6)", borderRadius:12, padding:8,
+                    ...(portrait ? { left:"50%", bottom:"calc(160px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", width:"max-content", maxWidth:"calc(100vw - 20px)", justifyContent:"center" }
+                                 : { left:96, top:"50%", transform:"translateY(-50%)", width:150 }) }}>
+                    {VA_COLORS.map(o => (
+                      <button key={o.c} title={o.n} data-va-swatch onClick={() => { eng.pickColor(o.c); setFsPalette(false); }}
+                        style={{ width:28, height:28, borderRadius:"50%", border:"2px solid #fff", padding:0, background:o.c, cursor:"pointer", boxShadow: eng.color === o.c ? "0 0 0 2px #2f9bff" : "none" }} />
+                    ))}
+                  </div>
+                )}
+                {isDraw && eng.tool === "text" && (
+                  <div data-va-stamps style={{ position:"absolute", zIndex:3, display:"flex", flexWrap:"nowrap", overflowX:"auto", WebkitOverflowScrolling:"touch", gap:6, background:"rgba(0,0,0,.55)", borderRadius:12, padding:6,
+                    ...(portrait ? { left:10, right:10, bottom:"calc(150px + env(safe-area-inset-bottom,0px))" } : { top:"calc(52px + env(safe-area-inset-top,0px))", left:96, right:10 }) }}>
+                    {stampEndChip(true)}
+                    {VA_STAMP_WORDS.map(w => stampChip(w, true))}
+                  </div>
+                )}
+
+                {(ytTapNeeded || ytError) && (
+                  <div style={{ position:"absolute", zIndex:3, top:"calc(56px + env(safe-area-inset-top,0px))", left:"50%", transform:"translateX(-50%)", maxWidth:"86vw", background: ytError ? "rgba(198,40,40,.92)" : "rgba(0,0,0,.7)", color:"#fff", fontSize:12.5, fontWeight:700, padding:"8px 12px", borderRadius:10, pointerEvents:"none", textAlign:"center", lineHeight:1.5 }}>
+                    {ytError || "最初の1回は、動画の画面を直接タップして再生してください（YouTubeの仕様です）"}
+                  </div>
+                )}
+
+                <div style={{ position:"absolute", zIndex:3, bottom:0, left:0, right:0, display:"flex", flexDirection:"column", gap:4, padding:"6px 10px calc(6px + env(safe-area-inset-bottom,0px))", background:"linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.7))", color:"#fff" }} data-va-trajkeep>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <input type="range" min="0" max="1" step="0.001" value={duration ? time / duration : 0} style={{ flex:1, margin:0 }}
+                      onChange={e => { const p = eng.player; if (p) { p.seek(+e.target.value * p.duration); setTime(p.time); } }} />
+                    <span style={{ fontSize:12, fontVariantNumeric:"tabular-nums", whiteSpace:"nowrap" }}>{vaFmt(time)} / {vaFmt(duration)}</span>
+                  </div>
+                  <div style={{ display:"flex", gap:6, justifyContent:"center" }}>
+                    <button style={fsb} onClick={() => skip(-10)}>⏪10秒</button>
+                    <button style={fsb} aria-label="1つ戻す" onClick={() => stepBy(-1)}>◀</button>
+                    <button style={{ ...fsb, minWidth:56, background:"#2a5ca8", fontSize:16 }} onClick={togglePlay} data-va-play>{paused ? "▶" : "❚❚"}</button>
+                    <button style={fsb} aria-label="1つ進む" onClick={() => stepBy(1)}>▶</button>
+                    <button style={fsb} onClick={() => skip(10)}>10秒⏩</button>
+                    <button style={fsb} onClick={nextRate} title="速さ">{rate}x</button>
+                    <button title="通常画面に戻す" aria-label="通常画面に戻す" data-va-undo style={{ ...fsi(), borderRadius:"50%", marginLeft:4 }} onClick={exitFs}>{shrinkIcon}</button>
+                  </div>
+                </div>
+                {toastEl}
+              </>
+            )}
           </div>
 
           {/* 再生バー（書き込みのある位置に印） */}
@@ -27141,16 +27351,23 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
 
           {isDraw && (
             <div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6, marginTop:10 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:5, marginTop:10 }}>
                 {VA_TOOLS.map(t => {
                   const on = eng.tool === t;
                   return (
-                    <button key={t} onClick={() => eng.setTool(t)} style={{ border:`1px solid ${on ? C.navy : C.border}`, background: on ? "#e6eefb" : C.white, color: on ? C.navy : C.textSec, borderRadius:10, padding:"8px 2px 6px", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:11, fontWeight:700, cursor:"pointer" }}>
+                    <button key={t} onClick={() => pickTool(t)} style={{ border:`1px solid ${on ? C.navy : C.border}`, background: on ? "#e6eefb" : C.white, color: on ? C.navy : C.textSec, borderRadius:10, padding:"8px 2px 6px", display:"flex", flexDirection:"column", alignItems:"center", gap:3, fontSize:11, fontWeight:700, cursor:"pointer" }}>
                       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">{toolIcon[t]}</svg>{VA_NAMES[t]}
                     </button>
                   );
                 })}
               </div>
+              {/* ★文字スタンプ：「文字」のときだけ出す。言葉を選んで動画をタップすると置ける */}
+              {eng.tool === "text" && (
+                <div data-va-stamps style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:10 }}>
+                  {stampEndChip(false)}
+                  {VA_STAMP_WORDS.map(w => stampChip(w, false))}
+                </div>
+              )}
               <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:10 }}>
                 {VA_COLORS.map(o => (
                   <button key={o.c} title={o.n} data-va-swatch onClick={() => eng.pickColor(o.c)}
@@ -27239,7 +27456,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
           </div>
         )}
       </div>
-      {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(24px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", padding:"9px 14px", borderRadius:9, fontSize:13, zIndex:600, pointerEvents:"none", maxWidth:"90vw" }}>{toast}</div>}
+      {!fs && toastEl}
     </div>
   );
 }
