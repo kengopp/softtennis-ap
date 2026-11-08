@@ -28004,7 +28004,7 @@ class TBEngine {
   addStep() {
     this.snapshot(); const st = this.b.steps[this.step];
     this.b.steps.splice(this.step + 1, 0, { pos: tbClone(st.pos), paths: {}, draw: [] });
-    this.step++; this.tool = "move"; this.draw(); this.onChange(); this.onToast(`${this.step + 1}コマ目を作りました。選手やボールを動かしてください`);
+    this.step++; this.tool = "move"; this.draw(); this.onChange();   // ★コマを作ったときのメッセージは出さない
   }
   delStep() { if (this.b.steps.length <= 1) return; this.snapshot(); this.b.steps.splice(this.step, 1); if (this.step > 0) this.step--; this.draw(); this.onChange(); this.onToast("このコマを削除しました（↶で戻せます）"); }
   go(d) { const n = this.step + d; if (n < 0 || n >= this.b.steps.length) return; this.step = n; this.draw(); this.onChange(); }
