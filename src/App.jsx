@@ -28065,8 +28065,6 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
 
   const b = eng.b, n = b.steps.length;
   const stepNow = eng.playing ? eng.shownStep : eng.step;
-  const hint = eng.playing || readOnly ? "" : eng.tool === "pen" ? "指でなぞって線・矢印を書きます（このコマだけに表示）"
-    : n === 1 ? "選手とボールを動かして最初の形を作り、「＋コマ」で次の動きへ" : eng.step > 0 ? "指でなぞって動かすと、その道すじどおりに動きます" : "";
 
   const back = () => {
     if (!readOnly && eng.dirty && !backAsk.current) {
@@ -28136,7 +28134,6 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
         <div style={{ position:"absolute", left:8, bottom:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:12, fontWeight:800, borderRadius:999, padding:"3px 9px" }}>{stepNow + 1} / {n}</div>
-        {hint && <div style={{ position:"absolute", left:"50%", top:8, transform:"translateX(-50%)", background:"rgba(29,35,48,.85)", color:"#fff", fontSize:12, borderRadius:9, padding:"6px 10px", whiteSpace:"nowrap", pointerEvents:"none", maxWidth:"94%", overflow:"hidden", textOverflow:"ellipsis" }}>{hint}</div>}
         {readOnly && <div style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
       </div>
 
