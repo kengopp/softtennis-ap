@@ -4689,7 +4689,7 @@ function NavBar({ active, onNavigate }) {
   const items = [
     ["home",   "🏠", "ホーム"],
     ["list",   "📋", "試合"],
-    ["video",  "🎬", "動画"],   // ★AI分析は「📊 分析」のタブ（🤖 AI）へ移した
+    ["video",  "🎬", "戦略"],   // ★「動画分析」と「作戦ボード」の入口（AI分析は「📊 分析」のタブ（🤖 AI）へ移した）
     ["stats",  "📊", "分析"],
     ["master", "🗂",  "設定"],
   ];
@@ -28497,7 +28497,7 @@ function VideoHubScreen({ onNavigate }) {
   return (
     <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
-        <div style={{ fontSize:20, fontWeight:800 }}>🎬 動画</div>
+        <div style={{ fontSize:20, fontWeight:800 }}>🎬 戦略</div>
       </div>
       <div style={{ display:"flex", gap:6, padding:"12px 14px 0" }}>
         {[["video", "🎥 動画分析"], ["board", "🧩 作戦ボード"]].map(([k, l]) => (
