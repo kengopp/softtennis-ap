@@ -26044,7 +26044,7 @@ const VA_HINTS = {
   rect:   "何もない所を、四角の角から反対の角までなぞると四角になります。動かす・大きさを変えるときは「選択」に切り替えてください（4つの角で大きさ、内側で移動）。",
   pen:    "指でなぞったとおりに線を描きます。動かすときは「選択」に切り替えてください。",
   text:   "言葉を選んで動画をタップすると文字スタンプを置けます。続けて別の言葉を選んでタップすれば、次々に置けます。終わるときは「✓ 終了」（または「文字」をもう一度）。動かす・大きさを変えるときは「選択」に切り替えてください（右下の白い丸で大きさ）。色ボタンで色も変えられます。",
-  player: "タップした所に選手を置きます（タップした位置が足元）。置くときに指をずらすと位置を調整できます。あとで動かす・大きさを変えるときは「選択」に切り替えてください。置いたあとにほかの所をタップすると確定し、もう一度タップすると次の選手を置けます。名前や役割を書いたり、「理想の位置」にすると半透明の点線で「ここに立つべきだった」を表せます。",
+  player: "タップした所に選手を置きます（タップした位置が足元）。置いてそのまま指をすべらせると、その道すじが選手の動きになり、再生すると選手がなぞったとおりに動きます（置いた直後の選手から指をすべらせると、なぞり直し）。あとで動かす・大きさを変えるときは「選択」に切り替えてください。置いたあとにほかの所をタップすると確定し、もう一度タップすると次の選手を置けます。名前や役割を書いたり、「理想の位置」にすると半透明の点線で「ここに立つべきだった」を表せます。",
 };
 const VA_EPS = 0.02;
 const VA_ANIM_TYPES = ["pen", "arrow", "aim"];   // ★「動く線」にできる書き込み
@@ -26146,7 +26146,8 @@ class VAEngine {
   lw() { return Math.max(2.5, this.W * 0.006); }
   startOf(s) { return s.type === "traj" ? (s.pts[0] ? s.pts[0].t : 0) : s.t; }
   durOf(s) { return s.dur !== undefined ? s.dur : this.showDur; }
-  endOf(s) { return (s.type === "traj" ? s.pts[s.pts.length - 1].t : s.t) + this.durOf(s); }
+  // ★動きのある選手は、動き終わってから「表示の長さ」だけ残る
+  endOf(s) { return (s.type === "traj" ? s.pts[s.pts.length - 1].t : s.t) + (s.type === "player" && s.route ? (s.moveDur || 2) : 0) + this.durOf(s); }
   isVisible(s, t = this.now()) {
     if (s === this.traj || s === this.cur) return true;
     if (s.type === "traj" && !s.pts.length) return false;
@@ -26309,12 +26310,43 @@ class VAEngine {
     }
     return null;
   }
+  // ★選手の今の足元：動きがあれば、動画の時刻に合わせて道すじの上を進む（選んでいるときは最初の位置）
+  playerFoot(s, tNow = this.now()) {
+    if (!s.route || s.route.length < 2 || this.sel === s) return s.f;
+    const k = Math.max(0, Math.min(1, (tNow - s.t) / (s.moveDur || 2)));
+    const pts = vaCutPath(s.route, k);
+    return pts[pts.length - 1];
+  }
+  // 道すじ：通ったところを点線で残す（選んでいるときは全部を白い点線＋行き先の矢じりで見せる）
+  drawRoute(s, W, H, lw, tNow) {
+    const o = this.ctx;
+    const rec = this.routeRec && this.routeRec.s === s ? this.routeRec.pts : null;
+    const src = rec || s.route;
+    if (!src || src.length < 2) return;
+    const all = src.map(q => [q[0] * W, q[1] * H]);
+    const full = !!rec || this.sel === s;
+    const pts = full ? all : vaCutPath(all, Math.max(0, Math.min(1, (tNow - s.t) / (s.moveDur || 2))));
+    if (pts.length < 2) return;
+    o.save(); o.shadowBlur = 0;
+    o.setLineDash([lw * 1.6, lw * 1.4]); o.lineWidth = lw * 0.9; o.lineCap = "round";
+    o.strokeStyle = rec ? "#ffb74d" : full ? "#fff" : s.color; o.globalAlpha = full ? .95 : .75;
+    o.beginPath(); pts.forEach((q, i) => i ? o.lineTo(...q) : o.moveTo(...q)); o.stroke();
+    o.setLineDash([]);
+    if (full && !rec) {
+      const b = all[all.length - 1], a = all[Math.max(0, all.length - 4)], ang = Math.atan2(b[1] - a[1], b[0] - a[0]), h = lw * 4;
+      o.fillStyle = "#fff"; o.beginPath(); o.moveTo(...b);
+      o.lineTo(b[0] - h * Math.cos(ang - 0.5), b[1] - h * Math.sin(ang - 0.5)); o.lineTo(b[0] - h * Math.cos(ang + 0.5), b[1] - h * Math.sin(ang + 0.5)); o.closePath(); o.fill();
+    }
+    o.restore();
+  }
+  setMoveDur(v) { const t = this.sel; if (t && t.route) { t.moveDur = v; this.redraw(); this.dirty(); } }
+  clearRoute() { const t = this.sel; if (t && t.route) { delete t.route; delete t.moveDur; this.redraw(); this.dirty(); } }
   hitPlayer(p) {
     const W = this.W, H = this.H, px = p[0] * W, py = p[1] * H;
     const list = this.shapes.filter(x => x.type === "player" && this.isVisible(x));
     if (this.sel && list.includes(this.sel)) { list.splice(list.indexOf(this.sel), 1); list.push(this.sel); }
     for (let i = list.length - 1; i >= 0; i--) {
-      const s = list[i], fx = s.f[0] * W, fy = s.f[1] * H, h = s.sz * H, w = h * 0.5;
+      const s = list[i], ft = this.playerFoot(s), fx = ft[0] * W, fy = ft[1] * H, h = s.sz * H, w = h * 0.5;
       if (s === this.sel && Math.hypot(px - (fx + h * 0.374), py - (fy - h - 4)) < 22) return { s, mode: "resize" };
       if (px > fx - w / 2 - 6 && px < fx + w / 2 + 6 && py > fy - h - 6 && py < fy + 8) return { s, mode: "move" };
     }
@@ -26384,7 +26416,8 @@ class VAEngine {
       c0: h.c && h.c.slice(), e0: h.e && h.e.slice(), a0: h.a && h.a.slice(), b0: h.b && h.b.slice(),
       pts0: h.type === "pen" ? h.pts.map(q => q.slice()) : null,
       frac: h.type === "pen" ? this.penFractions(h.pts) : null,
-      f0: h.f && h.f.slice(), sz0: h.sz, s0: h.type === "text" ? { ...h, f: h.f.slice() } : null, moved: false };
+      f0: h.f && h.f.slice(), sz0: h.sz, s0: h.type === "text" ? { ...h, f: h.f.slice() } : null,
+      route0: h.route ? h.route.map(q => q.slice()) : null, moved: false };
   }
   pointerDown(e) {
     if (!this.player || !this.canvas) return;
@@ -26406,14 +26439,23 @@ class VAEngine {
       return;
     }
     // ★選手を置いた直後に、ほかの所をタップ ＝ 確定するだけ（もう1人は置かない。次のタップでまた置ける）
-    if (this.tool === "player" && this.sel && this.sel.type === "player" && !this.selByTap) { this.confirm(); return; }
+    if (this.tool === "player" && this.sel && this.sel.type === "player" && !this.selByTap) {
+      // ★置いた直後の選手から指をすべらせる ＝ 動きをなぞり直す。ほかの所 ＝ 確定するだけ
+      const h = this.hitPlayer(p);
+      if (h && h.s === this.sel) {
+        try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+        this.routeRec = { s: this.sel, pts: [this.sel.f.slice()] }; this.redraw(); return;
+      }
+      this.confirm(); return;
+    }
     this.confirm();   // 描いた直後の書き込みは、次を描き始めたら確定
     try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
     const base = { id: vaNewId(), t: this.now(), color: this.color };
     if (this.tool === "player") {
       const sh = { ...base, type: "player", f: p, sz: 0.12 + 0.16 * Math.max(0, Math.min(1, p[1])), label: "", ghost: false };
       this.shapes.push(sh); this.select(sh);
-      this.drag = { mode: "move", s: sh, start: p, f0: p.slice(), sz0: sh.sz, moved: false, created: true };
+      // ★置いてそのまま指をすべらせると、その道すじが選手の動きになる（タップだけなら動きなし）
+      this.routeRec = { s: sh, pts: [p.slice()], placing: true };
       this.onDirty(); this.onChange(); return;
     }
     if (this.tool === "text") {
@@ -26430,6 +26472,11 @@ class VAEngine {
     this.redraw();
   }
   pointerMove(e) {
+    if (this.routeRec) {
+      const p = this.pos(e), r = this.routeRec, last = r.pts[r.pts.length - 1];
+      if (Math.hypot((p[0] - last[0]) * this.W, (p[1] - last[1]) * this.H) > 3) { r.pts.push(p); this.redraw(); }
+      return;
+    }
     if (this.drag) {
       const p = this.pos(e), d = this.drag, s = d.s;
       const dx = p[0] - d.start[0], dy = p[1] - d.start[1];
@@ -26438,7 +26485,10 @@ class VAEngine {
         if (d.mode === "move") s.f = [d.f0[0] + dx, d.f0[1] + dy];
         else { const b0 = this.textBox(d.s0), ratio = Math.max(0.3, (p[1] * this.H - b0.y) / Math.max(1, b0.h)); s.sz = Math.max(0.03, Math.min(0.25, d.sz0 * ratio)); }
       } else if (s.type === "player") {
-        if (d.mode === "move") s.f = [d.f0[0] + dx, d.f0[1] + dy];
+        if (d.mode === "move") {
+          s.f = [d.f0[0] + dx, d.f0[1] + dy];
+          if (d.route0) s.route = d.route0.map(q => [q[0] + dx, q[1] + dy]);   // 動きの道すじもいっしょに動かす
+        }
         else s.sz = Math.max(0.05, Math.min(0.9, s.f[1] - p[1]));
       } else if (s.type === "pen") {
         // 全体＝平行移動／始点・終点＝その端ほど大きく動かして形をなめらかに保つ
@@ -26470,6 +26520,14 @@ class VAEngine {
     this.redraw();
   }
   pointerUp() {
+    if (this.routeRec) {
+      const r = this.routeRec; this.routeRec = null;
+      let len = 0;
+      for (let i = 1; i < r.pts.length; i++) len += Math.hypot((r.pts[i][0] - r.pts[i - 1][0]) * this.W, (r.pts[i][1] - r.pts[i - 1][1]) * this.H);
+      if (len > 20) { r.s.route = r.pts; if (!r.s.moveDur) r.s.moveDur = 2; this.onToast && this.onToast(`動きを付けました。再生すると${r.s.moveDur}秒でこの道すじを動きます`); }
+      else if (!r.placing) this.onToast && this.onToast("なぞる距離が短いので、動きは変えませんでした");
+      this.redraw(); this.dirty(); return;
+    }
     if (this.drag) { const d = this.drag; this.drag = null; this.redraw(); if (d.moved || d.created) this.dirty(); return; }
     if (!this.cur) return;
     const s = this.cur; this.cur = null;
@@ -26575,7 +26633,10 @@ class VAEngine {
       if (s.type === "text") {
         this.drawText(s, lw);
       } else if (s.type === "player") {
-        this.drawPlayer(s, W, H, lw);
+        this.drawRoute(s, W, H, lw, tNow);
+        // 奥へ行くほど小さく、手前ほど大きく（置いたときと同じ遠近の付け方）
+        const ft = this.playerFoot(s, tNow), depth = y => 0.12 + 0.16 * Math.max(0, Math.min(1, y));
+        this.drawPlayer(ft === s.f ? s : { ...s, f: ft, sz: s.sz * depth(ft[1]) / depth(s.f[1]) }, W, H, lw);
       } else if (s.type === "pen") {
         // ★動く線：再生がこの場面に来たら、描いた道すじどおりに伸びていく（先端に玉）
         const k = this.animProg(s, tNow);
@@ -26810,6 +26871,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   const [toast, setToastMsg] = useState("");
   const toastTimer = useRef(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [iosTip, setIosTip] = useState(false);   // iPhoneだけ：動画を選ぶ前の案内
   // ★全画面（動画を画面いっぱいに広げて、その上で描く）。動画を開くと最初から全画面
   const [fs, setFs] = useState(false);
   const fsRef = useRef(false); fsRef.current = fs;
@@ -26899,6 +26961,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     eng.onTogglePlay = () => { const p = eng.player; if (!p) return; if (p.paused) p.play(); else p.pause(); };
     eng.onStep = n => stepBy(n);
     eng.onBusy = () => showToast("描き込みを読み込み中です。少し待ってください");
+    eng.onToast = (m) => showToast(m);
   });
   eng.showDur = showDur;
 
@@ -27279,7 +27342,8 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
             }) : (
               <div style={{ fontSize:11.5, color:C.textSec, padding:"6px 2px 10px" }}>この試合にはYouTube動画が登録されていません（試合詳細の「動画リンクを貼る」から登録できます）。</div>
             )}
-            <button onClick={() => fileRef.current && fileRef.current.click()} style={{ ...btn, width:"100%", background:C.navy, color:C.white, border:"none", padding:"12px" }}>📱 スマホの動画を開く</button>
+            <button onClick={() => { if (vaNeedIosTip()) setIosTip(true); else fileRef.current && fileRef.current.click(); }} style={{ ...btn, width:"100%", background:C.navy, color:C.white, border:"none", padding:"12px" }}>📱 スマホの動画を開く</button>
+            {iosTip && <VAIosPickTip onCancel={() => setIosTip(false)} onGo={() => { setIosTip(false); fileRef.current && fileRef.current.click(); }} />}
             <input ref={fileRef} type="file" accept="video/*" style={{ display:"none" }} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; openLocal(f); }} />
             <div style={{ fontSize:10.5, color:C.textSec, marginTop:6, lineHeight:1.6 }}>スマホ内の動画はアップロードせず、その場で開きます。描き込みだけが保存され、同じ動画ファイルを開くと表示されます。</div>
             {localSaved.length > 0 && (
@@ -27524,6 +27588,18 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                   </label>
                 </div>
               )}
+              {/* ★選手の動き：置いて指をすべらせた道すじを、再生したとき選手が動く */}
+              {sel && sel.type === "player" && sel.route && (
+                <div data-va-keep style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, background:"#e6eefb", borderRadius:8, padding:"6px 10px", fontSize:12.5, color:C.textSec }}>
+                  <span style={{ whiteSpace:"nowrap" }}>選手の動き</span>
+                  <select value={String(sel.moveDur || 2)} onChange={e => { const v = +e.target.value; eng.setMoveDur(v); showToast(`再生すると${v}秒で動きます`); }}
+                    style={{ border:`1px solid ${C.border}`, borderRadius:7, padding:5, fontSize:13, background:C.white }}>
+                    {[1, 2, 3, 5].map(v => <option key={v} value={String(v)}>{v}秒で動く</option>)}
+                  </select>
+                  <button style={{ ...btn, marginLeft:"auto", whiteSpace:"nowrap", color:C.red, padding:"5px 9px", fontSize:12 }}
+                    onClick={() => { eng.clearRoute(); showToast("選手の動きを消しました"); }}>動きを消す</button>
+                </div>
+              )}
               {/* ★動く線：再生がその場面に来たら、線が描いた向きに沿って伸びていく */}
               {sel && !eng.traj && VA_ANIM_TYPES.includes(sel.type) && (
                 <div data-va-keep style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, background:"#e6eefb", borderRadius:8, padding:"6px 10px", fontSize:12.5, color:C.textSec }}>
@@ -27626,7 +27702,649 @@ function VideoAnalysisScreenForMatch(props) {
   return <VideoAnalysisScreen {...props} ctx={ctx} />;
 }
 
+// ============================================================
+// ★作戦ボード（シミュレーション）
+//   ・「🎬 動画」画面のタブ「🧩 作戦ボード」から使う
+//   ・ソフトテニスのコートに、味方（青）・相手（赤）の前衛／後衛とボールを置き、コマごとに動かす
+//   ・2コマ目からは、指でなぞった道すじどおりに動く。▶ で最初のコマから続けて再生
+//   ・ペン（線／矢印・色）はそのコマだけに表示
+//   ・保存先：tactic_boards テーブル（自分だけ／チームで共有）
+// ============================================================
+const TB_COURT = { W: 10.97, L: 23.77, net: 11.885, svc: 6.40, sgl: 1.37 };   // ソフトテニスのコート（m）
+const TB_MX = 2.2, TB_MY = 3.4;                                                 // コートの外の余白（m）
+const TB_VW = TB_COURT.W + TB_MX * 2, TB_VH = TB_COURT.L + TB_MY * 2;
+const TB_COLORS = [["#2f6fd6", "青"], ["#d64545", "赤"], ["#ffd400", "黄"], ["#ffffff", "白"], ["#1d2330", "黒"]];
+const TB_PIECES = [
+  { id: "m1", side: "me", label: "前", name: "味方 前衛" }, { id: "m2", side: "me", label: "後", name: "味方 後衛" },
+  { id: "o1", side: "op", label: "前", name: "相手 前衛" }, { id: "o2", side: "op", label: "後", name: "相手 後衛" },
+  { id: "b", side: "ball", label: "", name: "ボール" },
+];
+const TB_START_D = { m1: [3.2, 15.4], m2: [7.6, 24.6], o1: [7.8, 8.4], o2: [3.4, -0.8], b: [7.0, 24.0] };
+const TB_START_S = { m2: [5.5, 24.6], o2: [5.5, -0.8], b: [5.0, 24.0] };
+const TB_STEP_SEC = 1.2, TB_HOLD_SEC = 0.5;
+const tbClone = o => JSON.parse(JSON.stringify(o));
+const tbUuid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+  : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
+function tbNewBoard(mode) {
+  return { id: tbUuid(), title: "", mode, shared: false, owner_id: null, names: {},
+    steps: [{ pos: tbClone(mode === "single" ? TB_START_S : TB_START_D), paths: {}, draw: [] }] };
+}
+function tbRowToBoard(r) {
+  let d = r.data; if (typeof d === "string") { try { d = JSON.parse(d); } catch (_) { d = null; } }
+  d = d || {};
+  return { id: r.id, title: r.title || "", mode: r.mode === "single" ? "single" : "double", shared: !!r.shared, owner_id: r.owner_id || null,
+    updated_at: r.updated_at, names: d.names || {},
+    steps: Array.isArray(d.steps) && d.steps.length ? d.steps : tbNewBoard(r.mode === "single" ? "single" : "double").steps };
+}
+const tbTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+async function tbLoadList() {
+  try {
+    const { data, error } = await tbTimeout(supabase.from("tactic_boards")
+      .select("id, title, mode, shared, owner_id, updated_at, data").order("updated_at", { ascending: false }).limit(100), 10000);
+    if (error) { console.error(error); return { rows: [], error }; }
+    return { rows: (data || []).map(tbRowToBoard), error: null };
+  } catch (e) { console.error(e); return { rows: [], error: e }; }
+}
+async function tbSaveBoard(b, schoolId) {
+  const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
+    data: { steps: b.steps, names: b.names || {} }, updated_at: new Date().toISOString() };
+  try {
+    const { error } = await tbTimeout(supabase.from("tactic_boards").upsert(row, { onConflict: "id" }), 10000);
+    if (error) { console.error(error); return false; }
+    return true;
+  } catch (e) { console.error(e); return false; }
+}
+async function tbDeleteBoard(id) {
+  try {
+    const { error } = await tbTimeout(supabase.from("tactic_boards").delete().eq("id", id), 10000);
+    if (error) { console.error(error); return false; }
+    return true;
+  } catch (e) { console.error(e); return false; }
+}
+function tbLen(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
+function tbCut(pts, k) {
+  if (k >= 1 || pts.length < 2) return pts.slice();
+  let left = tbLen(pts) * k; const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (left >= d) { out.push(pts[i]); left -= d; continue; }
+    const r = d ? left / d : 0;
+    out.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * r, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * r]); break;
+  }
+  return out;
+}
+// 一覧の小さなコート図
+function tbDrawMini(c, b) {
+  if (!c || !b) return;
+  const o = c.getContext("2d"), sx = c.width / TB_VW, sy = c.height / TB_VH;
+  o.fillStyle = "#7d9cc6"; o.fillRect(0, 0, c.width, c.height);
+  o.fillStyle = "#4f7fbf"; o.fillRect(TB_MX * sx, TB_MY * sy, TB_COURT.W * sx, TB_COURT.L * sy);
+  o.strokeStyle = "#fff"; o.lineWidth = 1; o.strokeRect(TB_MX * sx, TB_MY * sy, TB_COURT.W * sx, TB_COURT.L * sy);
+  o.beginPath(); o.moveTo(TB_MX * sx - 2, (TB_MY + TB_COURT.net) * sy); o.lineTo((TB_MX + TB_COURT.W) * sx + 2, (TB_MY + TB_COURT.net) * sy); o.stroke();
+  const pos = b.steps[0].pos;
+  TB_PIECES.forEach(p => {
+    const q = pos[p.id]; if (!q) return;
+    o.fillStyle = p.side === "me" ? "#2f6fd6" : p.side === "op" ? "#d64545" : "#ffe14d";
+    o.beginPath(); o.arc((q[0] + TB_MX) * sx, (q[1] + TB_MY) * sy, p.side === "ball" ? 3 : 5, 0, 7); o.fill();
+  });
+}
+
+// ---------- ボードの描画とタッチ（画面の外で持つ） ----------
+class TBEngine {
+  constructor() {
+    this.b = null; this.step = 0; this.tool = "move"; this.penKind = "arrow"; this.penColor = "#ffd400";
+    this.hist = []; this.fut = []; this.playing = false; this.playT = 0; this.speed = 1; this.dirty = false; this.readOnly = false;
+    this.drag = null; this.penCur = null; this.canvas = null; this.ctx = null; this.scale = 20; this.CW = 0; this.CH = 0;
+    this.raf = 0; this.last = 0; this.shownStep = 0;
+    this.onChange = () => {}; this.onToast = () => {};
+  }
+  X(m) { return (m + TB_MX) * this.scale; }
+  Y(m) { return (m + TB_MY) * this.scale; }
+  pieces() { return TB_PIECES.filter(p => this.b.steps[0].pos[p.id]); }
+  attach(canvas, box) {
+    if (!canvas || !box) return;
+    this.canvas = canvas; this.ctx = canvas.getContext("2d");
+    const r = box.getBoundingClientRect();
+    this.scale = Math.max(4, Math.min((r.width - 8) / TB_VW, (r.height - 8) / TB_VH));
+    this.CW = TB_VW * this.scale; this.CH = TB_VH * this.scale;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(this.CW * dpr); canvas.height = Math.round(this.CH * dpr);
+    canvas.style.width = this.CW + "px"; canvas.style.height = this.CH + "px";
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.draw();
+  }
+  toM(e) { const r = this.canvas.getBoundingClientRect(); return [(e.clientX - r.left) / this.scale - TB_MX, (e.clientY - r.top) / this.scale - TB_MY]; }
+  snapshot() { this.hist.push(JSON.stringify(this.b.steps)); if (this.hist.length > 80) this.hist.shift(); this.fut = []; this.dirty = true; }
+  undo() { if (!this.hist.length) return; this.fut.push(JSON.stringify(this.b.steps)); this.b.steps = JSON.parse(this.hist.pop()); this.step = Math.min(this.step, this.b.steps.length - 1); this.dirty = true; this.draw(); this.onChange(); }
+  redo() { if (!this.fut.length) return; this.hist.push(JSON.stringify(this.b.steps)); this.b.steps = JSON.parse(this.fut.pop()); this.step = Math.min(this.step, this.b.steps.length - 1); this.dirty = true; this.draw(); this.onChange(); }
+  // コマ i の動き：前のコマの位置から、なぞった道すじ（なければまっすぐ）
+  moveOf(i, id) {
+    const st = this.b.steps[i], pv = this.b.steps[i - 1];
+    if (!pv || !pv.pos[id] || !st.pos[id]) return null;
+    const a = pv.pos[id], b = st.pos[id];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05) return null;
+    return st.paths && st.paths[id] && st.paths[id].length > 1 ? st.paths[id] : [a, b];
+  }
+  // ---- 描画 ----
+  drawCourt() {
+    const o = this.ctx, C = TB_COURT, X = v => this.X(v), Y = v => this.Y(v), s = this.scale;
+    o.fillStyle = "#86a6cf"; o.fillRect(0, 0, this.CW, this.CH);
+    o.fillStyle = "#4f7fbf"; o.fillRect(X(0), Y(0), C.W * s, C.L * s);
+    o.strokeStyle = "#fff"; o.lineWidth = 2; o.strokeRect(X(0), Y(0), C.W * s, C.L * s);
+    const line = (x1, y1, x2, y2) => { o.beginPath(); o.moveTo(X(x1), Y(y1)); o.lineTo(X(x2), Y(y2)); o.stroke(); };
+    line(C.sgl, 0, C.sgl, C.L); line(C.W - C.sgl, 0, C.W - C.sgl, C.L);
+    const s1 = C.net - C.svc, s2 = C.net + C.svc;
+    line(C.sgl, s1, C.W - C.sgl, s1); line(C.sgl, s2, C.W - C.sgl, s2);
+    line(C.W / 2, s1, C.W / 2, s2);
+    line(C.W / 2, 0, C.W / 2, 0.25); line(C.W / 2, C.L - 0.25, C.W / 2, C.L);
+    o.strokeStyle = "#1d2330"; o.lineWidth = 3; line(-0.9, C.net, C.W + 0.9, C.net);
+    o.fillStyle = "#1d2330"; [-0.9, C.W + 0.9].forEach(x => { o.beginPath(); o.arc(X(x), Y(C.net), 3.5, 0, 7); o.fill(); });
+    o.fillStyle = "rgba(255,255,255,.75)"; o.font = "700 11px sans-serif"; o.textAlign = "center"; o.textBaseline = "alphabetic";
+    o.fillText("相手", X(C.W / 2), Y(-TB_MY) + 14); o.fillText("味方", X(C.W / 2), Y(C.L + TB_MY) - 6);
+  }
+  arrowLine(pts, color, w, dashed, head = true) {
+    const o = this.ctx, X = v => this.X(v), Y = v => this.Y(v);
+    if (!pts || pts.length < 2) return;
+    o.save(); o.strokeStyle = color; o.fillStyle = color; o.lineWidth = w; o.lineCap = "round"; o.lineJoin = "round";
+    if (dashed) o.setLineDash([w * 2.2, w * 1.8]);
+    o.beginPath(); pts.forEach((q, i) => i ? o.lineTo(X(q[0]), Y(q[1])) : o.moveTo(X(q[0]), Y(q[1]))); o.stroke(); o.setLineDash([]);
+    if (head) {
+      const b = pts[pts.length - 1]; let a = pts[pts.length - 2];
+      for (let i = pts.length - 2; i >= 0; i--) { a = pts[i]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.6) break; }
+      const ang = Math.atan2(Y(b[1]) - Y(a[1]), X(b[0]) - X(a[0])), h = w * 3.6;
+      o.beginPath(); o.moveTo(X(b[0]), Y(b[1]));
+      o.lineTo(X(b[0]) - h * Math.cos(ang - 0.45), Y(b[1]) - h * Math.sin(ang - 0.45));
+      o.lineTo(X(b[0]) - h * Math.cos(ang + 0.45), Y(b[1]) - h * Math.sin(ang + 0.45)); o.closePath(); o.fill();
+    }
+    o.restore();
+  }
+  drawPiece(p, q, opt = {}) {
+    if (!q) return;
+    const o = this.ctx, x = this.X(q[0]), y = this.Y(q[1]);
+    o.save(); if (opt.ghost) o.globalAlpha = .33;
+    if (p.side === "ball") {
+      const lift = opt.lift || 0, r = 7 * (1 + lift * 0.6);
+      o.fillStyle = "rgba(0,0,0,.25)"; o.beginPath(); o.ellipse(x, y + 3 + lift * 10, 6, 2.5, 0, 0, 7); o.fill();
+      o.fillStyle = "#ffe14d"; o.strokeStyle = "#a88a00"; o.lineWidth = 1.5;
+      o.beginPath(); o.arc(x, y - lift * 12, r, 0, 7); o.fill(); o.stroke();
+    } else {
+      const r = 13;
+      o.shadowColor = "rgba(0,0,0,.35)"; o.shadowBlur = opt.ghost ? 0 : 5;
+      o.fillStyle = p.side === "me" ? "#2f6fd6" : "#d64545";
+      o.beginPath(); o.arc(x, y, r, 0, 7); o.fill(); o.shadowBlur = 0;
+      o.strokeStyle = opt.active ? "#ffe14d" : "#fff"; o.lineWidth = opt.active ? 3.5 : 2.2; o.stroke();
+      o.fillStyle = "#fff"; o.font = "800 13px sans-serif"; o.textAlign = "center"; o.textBaseline = "middle"; o.fillText(p.label, x, y + 0.5);
+      // 名前（設定で入れたとき）：選手の下に小さく
+      const nm = (this.b.names || {})[p.id];
+      if (nm && !opt.ghost) {
+        o.font = "800 11px sans-serif"; const w = o.measureText(nm).width + 10;
+        o.fillStyle = "rgba(20,28,44,.78)"; o.beginPath();
+        if (o.roundRect) o.roundRect(x - w / 2, y + r + 3, w, 16, 8); else o.rect(x - w / 2, y + r + 3, w, 16);
+        o.fill(); o.fillStyle = "#fff"; o.fillText(nm, x, y + r + 11.5);
+      }
+    }
+    o.restore();
+  }
+  drawPen(d) {
+    const w = 3.2;
+    if (d.color === "#ffffff" || d.color === "#ffd400") this.arrowLine(d.pts, "rgba(0,0,0,.35)", w + 2.4, false, d.kind === "arrow");
+    this.arrowLine(d.pts, d.color, w, false, d.kind === "arrow");
+  }
+  draw() {
+    if (!this.ctx || !this.b) return;
+    this.ctx.clearRect(0, 0, this.CW, this.CH); this.drawCourt();
+    if (this.playing) { this.drawPlaying(); return; }
+    const st = this.b.steps[this.step];
+    // 前のコマからの動き：うすい選手（前の位置）と道すじの矢印
+    if (this.step > 0) {
+      this.pieces().forEach(p => {
+        const m = this.moveOf(this.step, p.id); if (!m) return;
+        this.drawPiece(p, this.b.steps[this.step - 1].pos[p.id], { ghost: true });
+        this.arrowLine(m, p.side === "ball" ? "#ffe14d" : p.side === "me" ? "#9cc0ff" : "#ffb3b3", 2.6, true);
+      });
+    }
+    (st.draw || []).forEach(d => this.drawPen(d));
+    if (this.penCur) this.drawPen(this.penCur);
+    this.pieces().forEach(p => { if (p.side !== "ball") this.drawPiece(p, st.pos[p.id], { active: this.drag && this.drag.id === p.id }); });
+    this.pieces().forEach(p => { if (p.side === "ball") this.drawPiece(p, st.pos[p.id]); });
+  }
+  // ---- 再生：コマからコマへ、なぞった道すじどおりに動く ----
+  playIndex() { const n = this.b.steps.length; return Math.min(n - 1, Math.floor(this.playT / (TB_STEP_SEC + TB_HOLD_SEC)) + 1); }
+  drawPlaying() {
+    const seg = TB_STEP_SEC + TB_HOLD_SEC, i = this.playIndex();
+    const local = this.playT - (i - 1) * seg, k = Math.max(0, Math.min(1, local / TB_STEP_SEC));
+    const ease = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    const arrived = k >= 1;
+    if (arrived) (this.b.steps[i].draw || []).forEach(d => this.drawPen(d));
+    const at = id => { const m = this.moveOf(i, id); if (!m) return this.b.steps[i].pos[id] || this.b.steps[i - 1].pos[id]; const c = tbCut(m, ease); return c[c.length - 1]; };
+    this.pieces().forEach(p => { const m = this.moveOf(i, p.id); if (m) this.arrowLine(tbCut(m, ease), p.side === "ball" ? "rgba(255,225,77,.7)" : p.side === "me" ? "rgba(156,192,255,.8)" : "rgba(255,179,179,.8)", 2.2, true, false); });
+    this.pieces().forEach(p => { if (p.side !== "ball") this.drawPiece(p, at(p.id)); });
+    this.pieces().forEach(p => { if (p.side === "ball") { const m = this.moveOf(i, p.id); this.drawPiece(p, at(p.id), { lift: m && tbLen(m) > 4 && !arrived ? Math.sin(Math.PI * ease) : 0 }); } });
+  }
+  play() {
+    if (this.b.steps.length < 2) { this.onToast("「＋コマ」で2コマ以上にすると再生できます"); return; }
+    this.playing = true; this.playT = 0; this.shownStep = 1; this.last = performance.now(); this.onChange();
+    const loop = (now) => {
+      this.playT += (now - this.last) / 1000 * this.speed; this.last = now;
+      const total = (this.b.steps.length - 1) * (TB_STEP_SEC + TB_HOLD_SEC);
+      if (this.playT >= total) { this.stop(true); return; }
+      const i = this.playIndex(); if (i !== this.shownStep) { this.shownStep = i; this.onChange(); }
+      this.draw(); this.raf = requestAnimationFrame(loop);
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+  stop(end) { cancelAnimationFrame(this.raf); this.playing = false; if (end) this.step = this.b.steps.length - 1; this.draw(); this.onChange(); }
+  // ---- さわる ----
+  hitPiece(q) {
+    const st = this.b.steps[this.step]; let best = null, bd = 1.5;
+    [...this.pieces()].reverse().forEach(p => { const v = st.pos[p.id]; if (!v) return; const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; best = p; } });
+    return best;
+  }
+  down(e) {
+    if (this.playing || this.readOnly || !this.b) return;
+    const q = this.toM(e);
+    try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    if (this.tool === "pen") { this.snapshot(); this.penCur = { kind: this.penKind, color: this.penColor, pts: [q] }; this.draw(); return; }
+    const p = this.hitPiece(q); if (!p) return;
+    this.snapshot();
+    const st = this.b.steps[this.step];
+    // 2コマ目から：なぞった道すじを記録（前のコマの位置から続ける）
+    let path = null;
+    if (this.step > 0) {
+      const prev = this.b.steps[this.step - 1].pos[p.id];
+      const moved = Math.hypot(prev[0] - st.pos[p.id][0], prev[1] - st.pos[p.id][1]) > 0.05;
+      path = moved && st.paths[p.id] ? st.paths[p.id].slice() : moved ? [prev.slice(), st.pos[p.id].slice()] : [prev.slice()];
+    }
+    this.drag = { id: p.id, off: [st.pos[p.id][0] - q[0], st.pos[p.id][1] - q[1]], path, moved: false };
+    this.draw();
+  }
+  move(e) {
+    if (this.penCur) { const q = this.toM(e), l = this.penCur.pts[this.penCur.pts.length - 1]; if (Math.hypot(q[0] - l[0], q[1] - l[1]) > 0.15) { this.penCur.pts.push(q); this.draw(); } return; }
+    if (!this.drag) return;
+    const q = this.toM(e), st = this.b.steps[this.step], d = this.drag;
+    const np = [Math.max(-TB_MX + 0.4, Math.min(TB_COURT.W + TB_MX - 0.4, q[0] + d.off[0])), Math.max(-TB_MY + 0.4, Math.min(TB_COURT.L + TB_MY - 0.4, q[1] + d.off[1]))];
+    st.pos[d.id] = np; d.moved = true;
+    if (d.path) { const l = d.path[d.path.length - 1]; if (Math.hypot(np[0] - l[0], np[1] - l[1]) > 0.25) d.path.push(np.slice()); }
+    this.draw();
+  }
+  up() {
+    if (this.penCur) {
+      const c = this.penCur; this.penCur = null;
+      if (tbLen(c.pts) > 0.6) { const st = this.b.steps[this.step]; st.draw = st.draw || []; st.draw.push(c); } else this.hist.pop();
+      this.draw(); this.onChange(); return;
+    }
+    if (!this.drag) return;
+    const d = this.drag, st = this.b.steps[this.step]; this.drag = null;
+    if (!d.moved) { this.hist.pop(); this.draw(); return; }
+    if (d.path) {
+      const end = st.pos[d.id], l = d.path[d.path.length - 1];
+      if (Math.hypot(end[0] - l[0], end[1] - l[1]) > 0.01) d.path.push(end.slice());
+      // ほぼまっすぐなら道すじは持たない（まっすぐ動く）
+      const straight = Math.hypot(end[0] - d.path[0][0], end[1] - d.path[0][1]);
+      st.paths = st.paths || {};
+      if (d.path.length > 2 && tbLen(d.path) > straight * 1.03) st.paths[d.id] = d.path; else delete st.paths[d.id];
+    }
+    this.draw(); this.onChange();
+  }
+  // ---- ボタン ----
+  wipe() { const st = this.b.steps[this.step]; if (!st.draw || !st.draw.length) { this.onToast("このコマに線はありません"); return; } this.snapshot(); st.draw = []; this.draw(); this.onChange(); this.onToast("このコマの線を消しました（↶で戻せます）"); }
+  reset() {
+    this.snapshot(); const st = this.b.steps[this.step];
+    if (this.step === 0) { st.pos = tbClone(this.b.mode === "single" ? TB_START_S : TB_START_D); this.onToast("最初の形に戻しました"); }
+    else { st.pos = tbClone(this.b.steps[this.step - 1].pos); st.paths = {}; this.onToast("このコマの動きを取り消しました"); }
+    this.draw(); this.onChange();
+  }
+  addStep() {
+    this.snapshot(); const st = this.b.steps[this.step];
+    this.b.steps.splice(this.step + 1, 0, { pos: tbClone(st.pos), paths: {}, draw: [] });
+    this.step++; this.tool = "move"; this.draw(); this.onChange(); this.onToast(`${this.step + 1}コマ目を作りました。選手やボールを動かしてください`);
+  }
+  delStep() { if (this.b.steps.length <= 1) return; this.snapshot(); this.b.steps.splice(this.step, 1); if (this.step > 0) this.step--; this.draw(); this.onChange(); this.onToast("このコマを削除しました（↶で戻せます）"); }
+  go(d) { const n = this.step + d; if (n < 0 || n >= this.b.steps.length) return; this.step = n; this.draw(); this.onChange(); }
+}
+
+const TB_ICON = {
+  move: <path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />,
+  pen: <><path d="M4 20l1-5L16 4l4 4L9 19z" /><path d="M14 6l4 4" /></>,
+  wipe: <><path d="M8 20L3.5 15.5a1.5 1.5 0 0 1 0-2.1L13 3.9a1.5 1.5 0 0 1 2.1 0L20.1 8.9a1.5 1.5 0 0 1 0 2.1L11 20z" /><path d="M8.5 9L15 15.5M8 20h13" /></>,
+  undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></>,
+  redo: <><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 0 0 0 12h3" /></>,
+  reset: <><path d="M20 12a8 8 0 1 1-2.3-5.7" /><path d="M20 4v5h-5" /></>,
+  gear: <><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></>,
+};
+
+// ---------- 下から出る小さな画面（共通） ----------
+function TBSheet({ onBg, children }) {
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onBg(); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:700 }}>
+      <div style={{ background:C.white, width:"100%", maxHeight:"92vh", overflowY:"auto", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>{children}</div>
+    </div>
+  );
+}
+
+// ---------- ボード画面 ----------
+function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
+  const engRef = useRef(null);
+  if (!engRef.current) { const e = new TBEngine(); e.b = tbClone(board); e.readOnly = readOnly; engRef.current = e; }
+  const eng = engRef.current;
+  const [, setTick] = useState(0);
+  const rerender = useCallback(() => setTick(t => t + 1), []);
+  const canvasRef = useRef(null), boxRef = useRef(null);
+  const [toast, setToastMsg] = useState("");
+  const toastTimer = useRef(null);
+  const showToast = useCallback(m => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 2400); }, []);
+  const [sheet, setSheet] = useState(null);   // { type:"name"|"save"|"settings", ... }
+  const [saving, setSaving] = useState(false);
+  const backAsk = useRef(false);
+  const mine = !board.owner_id || board.owner_id === ctx.userId;
+
+  useEffect(() => { eng.onChange = rerender; eng.onToast = showToast; return () => { cancelAnimationFrame(eng.raf); }; }, [eng, rerender, showToast]);
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  // コートの大きさを画面に合わせる
+  useEffect(() => {
+    const fit = () => { if (!eng.playing) eng.attach(canvasRef.current, boxRef.current); };
+    fit(); const t = setTimeout(fit, 60);
+    window.addEventListener("resize", fit);
+    return () => { clearTimeout(t); window.removeEventListener("resize", fit); };
+  }, [eng, sheet]);
+  useEffect(() => { if (eng.tool === "pen" || !eng.playing) eng.attach(canvasRef.current, boxRef.current); }, [eng, eng.tool, readOnly]);
+
+  const b = eng.b, n = b.steps.length;
+  const stepNow = eng.playing ? eng.shownStep : eng.step;
+  const hint = eng.playing || readOnly ? "" : eng.tool === "pen" ? "指でなぞって線・矢印を書きます（このコマだけに表示）"
+    : n === 1 ? "選手とボールを動かして最初の形を作り、「＋コマ」で次の動きへ" : eng.step > 0 ? "指でなぞって動かすと、その道すじどおりに動きます" : "";
+
+  const back = () => {
+    if (!readOnly && eng.dirty && !backAsk.current) {
+      backAsk.current = true; showToast("保存していない変更があります。もう一度「戻る」で保存せずに戻ります");
+      setTimeout(() => { backAsk.current = false; }, 2500); return;
+    }
+    if (eng.playing) eng.stop();
+    onClose(false);
+  };
+  const doSave = async (title, shared) => {
+    setSaving(true);
+    b.title = title; if (mine) b.shared = !!(shared && ctx.schoolId);
+    const ok = await tbSaveBoard(b, ctx.schoolId);
+    setSaving(false);
+    if (ok) { eng.dirty = false; setSheet(null); showToast("保存しました（「保存した作戦」から開けます）"); rerender(); }
+    else showToast("保存できませんでした。電波の良い所でもう一度「保存」を押してください");
+  };
+
+  const tool = (key, label, icon, onClick, opts = {}) => (
+    <button key={key} disabled={opts.disabled} onClick={onClick}
+      style={{ flex:1, border:"none", background: opts.on ? "#e3ebf8" : "transparent", borderRadius:9, padding:"4px 0 3px", fontSize:10, fontWeight:800, color: opts.on ? C.navy : "#4a5568",
+        display:"flex", flexDirection:"column", alignItems:"center", gap:1, opacity: opts.disabled ? .35 : 1, cursor:"pointer" }}>
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">{icon}</svg>{label}
+    </button>
+  );
+  const sb = (key, label, onClick, disabled, extra = {}) => (
+    <button key={key} disabled={disabled} onClick={onClick}
+      style={{ border:`1px solid ${C.border}`, background:C.white, borderRadius:9, height:40, minWidth:40, fontSize:15, fontWeight:800, color:C.navy, padding:"0 8px", whiteSpace:"nowrap", opacity: disabled ? .35 : 1, cursor:"pointer", ...extra }}>{label}</button>
+  );
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:600, background:"#eef1f6", display:"flex", flexDirection:"column", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+      <div style={{ background:C.navy, color:C.white, padding:"calc(10px + env(safe-area-inset-top,0px)) 12px 10px", display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
+        <button onClick={back} style={{ border:"none", background:"rgba(255,255,255,.14)", color:"#fff", borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:700, whiteSpace:"nowrap" }}>← 戻る</button>
+        <div onClick={() => !readOnly && setSheet({ type:"name", value:b.title })} style={{ flex:1, minWidth:0, fontSize:16, fontWeight:800, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor: readOnly ? "default" : "pointer" }}>{b.title || "名前なしの作戦"}</div>
+        {!readOnly && <button onClick={() => setSheet({ type:"save", value:b.title, shared: !!b.shared })} style={{ border:"none", background:"#2e9e5b", color:"#fff", borderRadius:9, padding:"7px 12px", fontSize:13, fontWeight:800 }}>保存</button>}
+      </div>
+
+      {!readOnly && (
+        <div style={{ display:"flex", gap:4, padding:"8px 8px 6px", background:C.white, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+          {tool("move", "動かす", TB_ICON.move, () => { eng.tool = "move"; rerender(); }, { on: eng.tool === "move" })}
+          {tool("pen", "ペン", TB_ICON.pen, () => { eng.tool = "pen"; rerender(); }, { on: eng.tool === "pen" })}
+          {tool("wipe", "線を消す", TB_ICON.wipe, () => eng.wipe(), { disabled: eng.playing })}
+          {tool("undo", "戻す", TB_ICON.undo, () => eng.undo(), { disabled: !eng.hist.length || eng.playing })}
+          {tool("redo", "進む", TB_ICON.redo, () => eng.redo(), { disabled: !eng.fut.length || eng.playing })}
+          {tool("reset", eng.step ? "前のコマに" : "最初の形", TB_ICON.reset, () => eng.reset(), { disabled: eng.playing })}
+          {tool("gear", "設定", TB_ICON.gear, () => setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}) }), { disabled: eng.playing })}
+        </div>
+      )}
+      {!readOnly && eng.tool === "pen" && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 10px", background:"#f7f9fc", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+          {[["line", <path key="l" d="M3 6h24" />], ["arrow", <path key="a" d="M3 6h22M19 1l6 5-6 5" />]].map(([k, d]) => (
+            <button key={k} title={k === "line" ? "線" : "矢印"} onClick={() => { eng.penKind = k; rerender(); }}
+              style={{ border: eng.penKind === k ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:8, width:46, height:30, padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <svg width="30" height="12" fill="none" stroke="#1d2330" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+            </button>
+          ))}
+          <span style={{ width:1, height:24, background:C.border }} />
+          {TB_COLORS.map(([c, nm]) => (
+            <button key={c} title={nm} onClick={() => { eng.penColor = c; rerender(); }}
+              style={{ width:26, height:26, borderRadius:"50%", border:"2px solid #fff", padding:0, background:c, boxShadow: eng.penColor === c ? `0 0 0 2px ${C.navy}` : "0 0 0 1px #c5ccd8" }} />
+          ))}
+        </div>
+      )}
+
+      <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#9fb3cc", position:"relative" }}>
+        <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
+          onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
+        <div style={{ position:"absolute", left:8, bottom:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:12, fontWeight:800, borderRadius:999, padding:"3px 9px" }}>{stepNow + 1} / {n}</div>
+        {hint && <div style={{ position:"absolute", left:"50%", top:8, transform:"translateX(-50%)", background:"rgba(29,35,48,.85)", color:"#fff", fontSize:12, borderRadius:9, padding:"6px 10px", whiteSpace:"nowrap", pointerEvents:"none", maxWidth:"94%", overflow:"hidden", textOverflow:"ellipsis" }}>{hint}</div>}
+        {readOnly && <div style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
+      </div>
+
+      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 10px calc(10px + env(safe-area-inset-bottom,0px))", background:C.white, borderTop:`1px solid ${C.border}`, flexShrink:0 }}>
+        {sb("prev", "◀", () => eng.go(-1), eng.step === 0 || eng.playing)}
+        <div style={{ fontSize:14, fontWeight:800, color:C.navy, minWidth:44, textAlign:"center" }}>{stepNow + 1}/{n}</div>
+        {sb("next", "▶", () => eng.go(1), eng.step >= n - 1 || eng.playing)}
+        {!readOnly && sb("add", "＋コマ", () => eng.addStep(), eng.playing, { fontSize:12 })}
+        {!readOnly && sb("del", "−コマ", () => eng.delStep(), n <= 1 || eng.playing, { fontSize:12 })}
+        {sb("play", eng.playing ? "■ 止める" : "▶ 再生", () => (eng.playing ? eng.stop() : eng.play()), false, { marginLeft:"auto", background:"#2a5ca8", color:"#fff", borderColor:"#2a5ca8", minWidth:64 })}
+      </div>
+
+      {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(76px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", fontSize:12.5, borderRadius:9, padding:"8px 12px", zIndex:800, pointerEvents:"none", maxWidth:"92vw", textAlign:"center" }}>{toast}</div>}
+
+      {sheet && (sheet.type === "name" || sheet.type === "save") && (
+        <TBSheet onBg={() => setSheet(null)}>
+          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>{sheet.type === "save" ? "作戦を保存" : "名前を変える"}</div>
+          <input type="text" autoComplete="off" value={sheet.value} onChange={e => setSheet({ ...sheet, value:e.target.value })} placeholder="例：ロブで前衛を抜かれたとき" maxLength={40}
+            style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:15 }} />
+          {sheet.type === "save" && mine && ctx.schoolId && (
+            <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:13, margin:"10px 0 2px" }}>
+              <input type="checkbox" checked={!!sheet.shared} onChange={e => setSheet({ ...sheet, shared:e.target.checked })} /> チームの人も見られるようにする
+            </label>
+          )}
+          <div style={{ display:"flex", gap:8, marginTop:12 }}>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
+            <button disabled={saving} style={{ ...S.btn(C.navy), flex:2, opacity: saving ? .6 : 1 }}
+              onClick={() => {
+                const v = (sheet.value || "").trim();
+                if (sheet.type === "save") doSave(v, sheet.shared);
+                else { b.title = v; eng.dirty = true; setSheet(null); }
+              }}>{sheet.type === "save" ? (saving ? "保存中…" : "保存する") : "変更する"}</button>
+          </div>
+        </TBSheet>
+      )}
+      {sheet && sheet.type === "settings" && (
+        <TBSheet onBg={() => setSheet(null)}>
+          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>⚙ 設定</div>
+          <div style={{ fontSize:12, color:C.textSec }}>再生の速さ</div>
+          <div style={{ display:"flex", gap:6, margin:"6px 0 12px" }}>
+            {[[0.5, "ゆっくり"], [1, "ふつう"], [2, "速い"]].map(([v, l]) => (
+              <button key={v} onClick={() => setSheet({ ...sheet, speed:v })} style={{ flex:1, border: sheet.speed === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:9, fontSize:13, fontWeight:800, color: sheet.speed === v ? C.navy : C.textSec }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ fontSize:12, color:C.textSec }}>選手の名前（味方・相手どちらも。空でもOK）</div>
+          <div style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:"6px 8px", alignItems:"center", margin:"6px 0 12px" }}>
+            {TB_PIECES.filter(p => p.side !== "ball" && b.steps[0].pos[p.id]).map(p => (
+              <Fragment key={p.id}>
+                <span style={{ display:"flex", alignItems:"center", gap:5, fontSize:12.5, fontWeight:800, whiteSpace:"nowrap" }}>
+                  <span style={{ width:20, height:20, borderRadius:"50%", background: p.side === "me" ? "#2f6fd6" : "#d64545", color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.label}</span>{p.name}
+                </span>
+                <input type="text" autoComplete="off" value={sheet.names[p.id] || ""} maxLength={10}
+                  placeholder={p.side === "me" ? (p.label === "前" ? "例：田中" : "例：佐藤") : (p.label === "前" ? "例：〇〇高 山本" : "例：〇〇高 中村")}
+                  onChange={e => { const nm = { ...sheet.names }; const v = e.target.value; if (v.trim()) nm[p.id] = v; else delete nm[p.id]; setSheet({ ...sheet, names:nm }); }}
+                  style={{ border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 8px", fontSize:14, minWidth:0 }} />
+              </Fragment>
+            ))}
+          </div>
+          <div style={{ fontSize:12, color:C.textSec }}>ダブルス／シングルス（変えると最初の形に戻ります）</div>
+          <div style={{ display:"flex", gap:6, margin:"6px 0 12px" }}>
+            {[["double", "ダブルス"], ["single", "シングルス"]].map(([v, l]) => (
+              <button key={v} onClick={() => setSheet({ ...sheet, mode:v })} style={{ flex:1, border: sheet.mode === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:9, fontSize:13, fontWeight:800, color: sheet.mode === v ? C.navy : C.textSec }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
+            <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
+              // ★設定は「保存」を押したときだけ反映（「キャンセル」なら何も変わらない）
+              eng.snapshot(); eng.speed = sheet.speed;
+              const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
+              if (sheet.mode !== b.mode) { const nb = tbNewBoard(sheet.mode); b.mode = nb.mode; b.steps = nb.steps; eng.step = 0; }
+              setSheet(null); eng.draw(); showToast("設定を保存しました");
+            }}>保存</button>
+          </div>
+        </TBSheet>
+      )}
+    </div>
+  );
+}
+
+// ---------- 「🧩 作戦ボード」タブ（一覧） ----------
+function TacticsPanel({ ctx, isViewer }) {
+  const [list, setList] = useState(null);   // null = 読み込み中
+  const [loadErr, setLoadErr] = useState(false);
+  const [opened, setOpened] = useState(null);   // { board, isNew, readOnly }
+  const [menu, setMenu] = useState(null);       // board
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [rename, setRename] = useState(null);   // { board, value }
+  const [toast, setToastMsg] = useState("");
+  const toastTimer = useRef(null);
+  const showToast = m => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 2400); };
+  const load = useCallback(async () => { const r = await tbLoadList(); setList(r.rows); setLoadErr(!!r.error); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const mineOf = b => !b.owner_id || b.owner_id === ctx.userId;
+  const fmt = iso => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`; };
+  const chip = (bg, color, t) => <span style={{ display:"inline-block", fontSize:10.5, fontWeight:700, borderRadius:5, padding:"1px 6px", marginRight:4, background:bg, color }}>{t}</span>;
+
+  const copy = async (b) => {
+    setMenu(null);
+    const c = tbClone(b); c.id = tbUuid(); c.title = (b.title || "名前なし") + " のコピー"; c.shared = false; c.owner_id = ctx.userId;
+    const ok = await tbSaveBoard(c, ctx.schoolId);
+    if (ok) { showToast("コピーしました"); load(); } else showToast("コピーできませんでした。もう一度お試しください");
+  };
+  const del = async (b) => {
+    if (!confirmDel) { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3000); return; }
+    setConfirmDel(false); setMenu(null);
+    const ok = await tbDeleteBoard(b.id);
+    if (ok) { setList(l => (l || []).filter(x => x.id !== b.id)); showToast("作戦を削除しました"); } else showToast("削除できませんでした。もう一度お試しください");
+  };
+  const doRename = async () => {
+    const b = { ...rename.board, title: (rename.value || "").trim() }; setRename(null);
+    const ok = await tbSaveBoard(b, ctx.schoolId);
+    if (ok) { showToast("名前を変えました"); load(); } else showToast("変更できませんでした。もう一度お試しください");
+  };
+  const menuBtn = (label, onClick, danger, ask) => (
+    <button onClick={onClick} style={{ display:"flex", alignItems:"center", justifyContent: ask ? "center" : "flex-start", gap:10, width:"100%", border:"none", borderTop:`1px solid #eef0f4`, background: ask ? C.red : C.white,
+      borderRadius: ask ? 10 : 0, padding:"14px 4px", fontSize:15, fontWeight:700, color: ask ? "#fff" : danger ? C.red : C.text, textAlign:"left", cursor:"pointer" }}>{label}</button>
+  );
+
+  return (
+    <div style={{ padding:14 }}>
+      {!isViewer && (
+        <div style={{ background:C.white, borderRadius:14, padding:14, marginBottom:12, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+          <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>作戦を作る</div>
+          <button style={{ ...S.btn(C.navy), marginBottom:8 }} onClick={() => setOpened({ board: tbNewBoard("double"), isNew: true, readOnly: false })}>＋ 新しい作戦（ダブルス）</button>
+          <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}` }} onClick={() => setOpened({ board: tbNewBoard("single"), isNew: true, readOnly: false })}>＋ 新しい作戦（シングルス）</button>
+          <div style={{ fontSize:11.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>コートの上で選手とボールを動かして、作戦や動き方をコマ送りで作れます。▶ で動きを再生できます。</div>
+        </div>
+      )}
+      <div style={{ background:C.white, borderRadius:14, padding:14, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+        <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:6 }}>保存した作戦</div>
+        {list === null ? <div style={{ fontSize:12.5, color:C.textSec }}>読み込み中…</div>
+          : loadErr && !list.length ? <div style={{ fontSize:12.5, color:C.red, lineHeight:1.6 }}>読み込めませんでした。電波の良い所で開き直してください。</div>
+          : !list.length ? <div style={{ fontSize:12.5, color:C.textSec }}>まだありません。{isViewer ? "" : "「新しい作戦」から作れます。"}</div>
+          : list.map((b, i) => (
+            <div key={b.id} onClick={() => setOpened({ board: b, isNew: false, readOnly: isViewer })}
+              style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderTop: i ? "1px solid #eef0f4" : "none", cursor:"pointer" }}>
+              <canvas width="92" height="140" ref={c => tbDrawMini(c, b)} style={{ width:46, height:70, borderRadius:6, flexShrink:0 }} />
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, fontWeight:800, color:C.navy, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden", lineHeight:1.35, wordBreak:"break-all" }}>{b.title || "名前なし"}</div>
+                <div style={{ fontSize:11.5, color:C.textSec, marginTop:3 }}>
+                  {chip("#eef3ff", "#2a4fa8", b.mode === "single" ? "シングルス" : "ダブルス")}
+                  {mineOf(b) ? chip(b.shared ? "#f3e8ff" : "#f1f2f5", b.shared ? "#6b21a8" : "#6b7280", b.shared ? "チームで共有" : "自分だけ") : chip("#f3e8ff", "#6b21a8", "チームの人が作成")}
+                  {fmt(b.updated_at)}
+                </div>
+              </div>
+              {!isViewer && (
+                <button title="その他" aria-label="その他" onClick={e => { e.stopPropagation(); setConfirmDel(false); setMenu(b); }}
+                  style={{ border:`1px solid ${C.border}`, background:C.white, borderRadius:8, width:36, height:34, fontSize:20, fontWeight:900, color:"#4a5568", lineHeight:1, padding:0, flexShrink:0 }}>⋯</button>
+              )}
+            </div>
+          ))}
+      </div>
+
+      {/* ★「⋯」のメニュー：名前を変える・コピー・削除（削除は2回押し）。チームの人が作った作戦は、コピーだけ */}
+      {menu && (
+        <TBSheet onBg={() => setMenu(null)}>
+          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:8, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{menu.title || "名前なし"}</div>
+          {mineOf(menu) && menuBtn("✏️ 名前を変える", () => { setRename({ board: menu, value: menu.title }); setMenu(null); })}
+          {menuBtn("📄 コピーする", () => copy(menu))}
+          {mineOf(menu) && menuBtn(confirmDel ? "もう一度押すと削除します" : "🗑 削除する", () => del(menu), true, confirmDel)}
+          <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}`, marginTop:8 }} onClick={() => setMenu(null)}>キャンセル</button>
+        </TBSheet>
+      )}
+      {rename && (
+        <TBSheet onBg={() => setRename(null)}>
+          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>名前を変える</div>
+          <input type="text" autoComplete="off" value={rename.value} onChange={e => setRename({ ...rename, value:e.target.value })} maxLength={40}
+            style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:15 }} />
+          <div style={{ display:"flex", gap:8, marginTop:12 }}>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setRename(null)}>キャンセル</button>
+            <button style={{ ...S.btn(C.navy), flex:2 }} onClick={doRename}>変更する</button>
+          </div>
+        </TBSheet>
+      )}
+      {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(96px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", fontSize:12.5, borderRadius:9, padding:"8px 12px", zIndex:800, pointerEvents:"none", maxWidth:"92vw" }}>{toast}</div>}
+
+      {opened && (
+        <TacticBoardScreen board={opened.board} isNew={opened.isNew} ctx={ctx} readOnly={opened.readOnly}
+          onClose={() => { setOpened(null); load(); }} />
+      )}
+    </div>
+  );
+}
+
 // ---------- 「🎬 動画」画面（下のメニューから開く入口） ----------
+// ★iPhone（iPad）だけ：動画を選ぶ画面に「完了」ボタンがなく、選んだあと準備（変換）に時間がかかるので、先に案内する。
+//   「次から表示しない」にすると、その端末では出さない
+const vaNeedIosTip = () => { if (!VA_IS_IOS) return false; try { return localStorage.getItem("va:iosPickTip") !== "off"; } catch (_) { return true; } };
+function VAIosPickTip({ onGo, onCancel }) {
+  const [off, setOff] = useState(false);
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onCancel(); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:700 }}>
+      <div style={{ background:C.white, width:"100%", maxHeight:"92vh", overflowY:"auto", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>
+        <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:8 }}>📱 iPhoneで動画を選ぶときは</div>
+        <ol style={{ margin:"0 0 10px", paddingLeft:20, fontSize:13.5, lineHeight:1.8, color:C.text }}>
+          <li>次の画面で、分析したい動画を<b>1回タップ</b>します（「完了」ボタンはありません）</li>
+          <li>動画の真ん中に<b>丸いマーク</b>が出ます（準備中です）</li>
+          <li>マークが消えて<b>画面が自動で閉じるまで</b>待ちます</li>
+        </ol>
+        <div style={{ background:"#fff3e0", border:"1px solid #ffcc80", color:"#8a4b00", fontSize:12.5, borderRadius:9, padding:"9px 10px", lineHeight:1.6, marginBottom:10 }}>
+          長い試合動画は、準備に1分以上かかることがあります。途中で左上の「×」を押すと取り消しになります。
+        </div>
+        <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:13, marginBottom:12, color:C.text }}>
+          <input type="checkbox" checked={off} onChange={e => setOff(e.target.checked)} /> 次から表示しない
+        </label>
+        <div style={{ display:"flex", gap:8 }}>
+          <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={onCancel}>やめる</button>
+          <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
+            if (off) { try { localStorage.setItem("va:iosPickTip", "off"); } catch (_) {} }
+            onGo();   // ★ボタンを押したその場で動画の選択画面を開く（iPhoneは、押した直後でないと開けない）
+          }}>動画を選ぶ</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VideoHubScreen({ onNavigate }) {
   const [profile, setProfile] = useState(null);
   const [recent, setRecent] = useState(null);          // null = 読み込み中
@@ -27642,7 +28360,11 @@ function VideoHubScreen({ onNavigate }) {
   const fileRef = useRef(null);
   const pendingLocal = useRef(null);                    // 「続きから」でスマホ動画を選び直すときの元の情報
   const [guide, setGuide] = useState(null);             // 選び直す前の案内（「続きから」の行）
+  const [iosTip, setIosTip] = useState(false);          // iPhoneだけの案内
   const [mismatch, setMismatch] = useState(null);       // 違う動画を選んだとき { prev, row, file, info }
+  // ★タブ：🎥 動画分析 ／ 🧩 作戦ボード（最後に開いたほうを覚える）
+  const [hubTab, setHubTab] = useState(() => { try { return localStorage.getItem("va:hubTab") === "board" ? "board" : "video"; } catch (_) { return "video"; } });
+  const pickTab = t => { setHubTab(t); try { localStorage.setItem("va:hubTab", t); } catch (_) {} };
 
   const isViewer = !!profile?.is_viewer;
   const ctx = useMemo(() => ({ schoolId: profile?.school_id || null, userId: profile?.id || null }), [profile]);
@@ -27701,6 +28423,7 @@ function VideoHubScreen({ onNavigate }) {
   const pickAgain = (prev) => {
     setGuide(null); setMismatch(null);
     pendingLocal.current = prev;
+    if (vaNeedIosTip()) { setIosTip(true); return; }
     fileRef.current && fileRef.current.click();
   };
   const openAsNew = () => {
@@ -27768,10 +28491,17 @@ function VideoHubScreen({ onNavigate }) {
       <div style={{ ...S.hdr, color:C.white }}>
         <div style={{ fontSize:20, fontWeight:800 }}>🎬 動画</div>
       </div>
+      <div style={{ display:"flex", gap:6, padding:"12px 14px 0" }}>
+        {[["video", "🎥 動画分析"], ["board", "🧩 作戦ボード"]].map(([k, l]) => (
+          <button key={k} onClick={() => pickTab(k)} style={{ flex:1, border:`1px solid ${hubTab === k ? C.navy : C.border}`, background: hubTab === k ? C.navy : C.white, color: hubTab === k ? C.white : C.textSec,
+            borderRadius:10, padding:9, fontSize:13.5, fontWeight:800, cursor:"pointer" }}>{l}</button>
+        ))}
+      </div>
+      {hubTab === "board" ? <TacticsPanel ctx={ctx} isViewer={isViewer} /> : (
       <div style={{ padding:14 }}>
         <div style={card}>
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>動画を開く</div>
-          <button style={{ ...S.btn(C.navy), marginBottom:8 }} onClick={() => { pendingLocal.current = null; fileRef.current && fileRef.current.click(); }}>📱 スマホの動画を開く</button>
+          <button style={{ ...S.btn(C.navy), marginBottom:8 }} onClick={() => pickAgain(null)}>📱 スマホの動画を開く</button>
           <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}` }} onClick={() => { setYtErr(""); setYtSheet(true); }}>▶ YouTubeのURLを貼って開く</button>
           {!isViewer && ctx.schoolId && (
             <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textSec, marginTop:10 }}>
@@ -27855,6 +28585,7 @@ function VideoHubScreen({ onNavigate }) {
           </div>
         )}
       </div>
+      )}
 
       {ytSheet && (
         <div onClick={e => { if (e.target === e.currentTarget) setYtSheet(false); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:400 }}>
@@ -27879,6 +28610,7 @@ function VideoHubScreen({ onNavigate }) {
         </div>
       )}
 
+      {iosTip && <VAIosPickTip onCancel={() => { setIosTip(false); pendingLocal.current = null; }} onGo={() => { setIosTip(false); fileRef.current && fileRef.current.click(); }} />}
       {/* ★スマホの動画の「続きから」：選び直す前に、どの動画かの目印を見せる */}
       {guide && (() => {
         const info = vaGetThumb(guide.source_key);
