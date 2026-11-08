@@ -27804,8 +27804,10 @@ class TBEngine {
   attach(canvas, box) {
     if (!canvas || !box) return;
     this.canvas = canvas; this.ctx = canvas.getContext("2d");
-    const r = box.getBoundingClientRect();
-    this.scale = Math.max(4, Math.min((r.width - 8) / TB_VW, (r.height - 8) / TB_VH));
+    // 枠の大きさは clientWidth/clientHeight（拡大・縮小の影響を受けない）で測る
+    const bw = box.clientWidth, bh = box.clientHeight;
+    if (!bw || !bh) return;
+    this.scale = Math.max(4, Math.min((bw - 8) / TB_VW, (bh - 8) / TB_VH));
     this.CW = TB_VW * this.scale; this.CH = TB_VH * this.scale;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(this.CW * dpr); canvas.height = Math.round(this.CH * dpr);
@@ -27813,7 +27815,12 @@ class TBEngine {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.draw();
   }
-  toM(e) { const r = this.canvas.getBoundingClientRect(); return [(e.clientX - r.left) / this.scale - TB_MX, (e.clientY - r.top) / this.scale - TB_MY]; }
+  // 指の位置 → コートの位置（m）。画面の拡大・縮小があってもずれないよう、見えている大きさとの比で直す
+  toM(e) {
+    const r = this.canvas.getBoundingClientRect();
+    const fx = r.width ? this.CW / r.width : 1, fy = r.height ? this.CH / r.height : 1;
+    return [(e.clientX - r.left) * fx / this.scale - TB_MX, (e.clientY - r.top) * fy / this.scale - TB_MY];
+  }
   snapshot() { this.hist.push(JSON.stringify(this.b.steps)); if (this.hist.length > 80) this.hist.shift(); this.fut = []; this.dirty = true; }
   undo() { if (!this.hist.length) return; this.fut.push(JSON.stringify(this.b.steps)); this.b.steps = JSON.parse(this.hist.pop()); this.step = Math.min(this.step, this.b.steps.length - 1); this.dirty = true; this.draw(); this.onChange(); }
   redo() { if (!this.fut.length) return; this.hist.push(JSON.stringify(this.b.steps)); this.b.steps = JSON.parse(this.fut.pop()); this.step = Math.min(this.step, this.b.steps.length - 1); this.dirty = true; this.draw(); this.onChange(); }
@@ -28039,16 +28046,20 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
   const mine = !board.owner_id || board.owner_id === ctx.userId;
 
   useEffect(() => { eng.onChange = rerender; eng.onToast = showToast; return () => { cancelAnimationFrame(eng.raf); }; }, [eng, rerender, showToast]);
+  // ★アプリ全体の「文字の大きさ」(zoom) を、この画面を開いている間だけ解除する。
+  //   zoom がかかったままだと、iPhone ではコートが大きくはみ出したり、指で触った位置がずれて選手が動かせなくなるため。
   useEffect(() => {
-    const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
+    const html = document.documentElement;
+    const prevZoom = html.style.zoom, prev = document.body.style.overflow;
+    html.style.zoom = ""; document.body.style.overflow = "hidden";
+    return () => { html.style.zoom = prevZoom; document.body.style.overflow = prev; };
   }, []);
   // コートの大きさを画面に合わせる
   useEffect(() => {
     const fit = () => { if (!eng.playing) eng.attach(canvasRef.current, boxRef.current); };
-    fit(); const t = setTimeout(fit, 60);
+    fit(); const t = setTimeout(fit, 60), t2 = setTimeout(fit, 350);   // iPhone は画面の大きさが決まるのが少し遅いので、もう一度合わせる
     window.addEventListener("resize", fit);
-    return () => { clearTimeout(t); window.removeEventListener("resize", fit); };
+    return () => { clearTimeout(t); clearTimeout(t2); window.removeEventListener("resize", fit); };
   }, [eng, sheet]);
   useEffect(() => { if (eng.tool === "pen" || !eng.playing) eng.attach(canvasRef.current, boxRef.current); }, [eng, eng.tool, readOnly]);
 
@@ -28121,7 +28132,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         </div>
       )}
 
-      <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#9fb3cc", position:"relative" }}>
+      <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#9fb3cc", position:"relative", overflow:"hidden" }}>
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
         <div style={{ position:"absolute", left:8, bottom:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:12, fontWeight:800, borderRadius:999, padding:"3px 9px" }}>{stepNow + 1} / {n}</div>
