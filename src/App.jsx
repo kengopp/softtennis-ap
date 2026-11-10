@@ -27704,11 +27704,15 @@ function VideoAnalysisScreenForMatch(props) {
 
 // ============================================================
 // ★作戦ボード（シミュレーション）
-//   ・「🎬 動画」画面のタブ「🧩 作戦ボード」から使う
-//   ・ソフトテニスのコートに、味方（青）・相手（赤）の前衛／後衛とボールを置き、コマごとに動かす
-//   ・2コマ目からは、指でなぞった道すじどおりに動く。▶ で最初のコマから続けて再生
-//   ・ペン（線／矢印・色）はそのコマだけに表示
+//   ・「🎬 戦略」画面のタブ「🧩 作戦ボード」から使う
+//   ・ソフトテニスのコートに、味方（青）・相手（赤）の前衛／後衛を置き、ボールはオン／オフで出したり消したりする
+//   ・コマは使わず、ボールや選手を動かすたびに「動かした順」に記録（①②③…）。▶ で最初の並びから順に再生
+//   ・「同時」オンの間に動かしたものは、1つ前の動きといっしょに再生
+//   ・ペン（線／矢印・色）はいつも表示（順番には入らない）
 //   ・保存先：tactic_boards テーブル（自分だけ／チームで共有）
+//   ・データ：data = { start:{位置}, moves:[動き], draw:[ペンの線], names, ballColor, ballTrail, playerTrail }
+//       動き = { id, pts:[[x,y]…] }（動いた道すじ）／{ id:"b", show:[x,y] }（ボールを出す）／{ id:"b", hide:true }（消す）、with:true で同時
+//     （前の形「コマ（steps）」で保存した作戦は、開くときに自動でこの形に変える）
 // ============================================================
 const TB_COURT = { W: 10.97, L: 23.77, net: 11.885, svc: 6.40, sgl: 1.37 };   // ソフトテニスのコート（m）
 const TB_MX = 2.2, TB_MY = 3.4;                                                 // コートの外の余白（m）
@@ -27719,22 +27723,44 @@ const TB_PIECES = [
   { id: "o1", side: "op", label: "前", name: "相手 前衛" }, { id: "o2", side: "op", label: "後", name: "相手 後衛" },
   { id: "b", side: "ball", label: "", name: "ボール" },
 ];
-const TB_START_D = { m1: [3.2, 15.4], m2: [7.6, 24.6], o1: [7.8, 8.4], o2: [3.4, -0.8], b: [7.0, 24.0] };
-const TB_START_S = { m2: [5.5, 24.6], o2: [5.5, -0.8], b: [5.0, 24.0] };
-const TB_STEP_SEC = 1.2, TB_HOLD_SEC = 0.5;
+const TB_START_D = { m1: [3.2, 15.4], m2: [7.6, 24.6], o1: [7.8, 8.4], o2: [3.4, -0.8] };   // ボールは最初は出さない
+const TB_START_S = { m2: [5.5, 24.6], o2: [5.5, -0.8] };
+const TB_MOVE_SEC = 1.0, TB_HOLD_SEC = 0.35, TB_LEAD_SEC = 0.8;   // 1つの動き・次までの間・最初の並びを見せる時間（ふつうの速さ）
+const TB_BALL = { yellow: { fill: "#ffe14d", edge: "#a88a00", path: "#ffe14d" }, white: { fill: "#ffffff", edge: "#7b8494", path: "#ffffff" } };
+const TB_TRAIL_COLOR = { me: "#9cc0ff", op: "#ffb3b3" };
 const tbClone = o => JSON.parse(JSON.stringify(o));
 const tbUuid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
   : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
+const tbPieceOf = id => TB_PIECES.find(p => p.id === id);
 function tbNewBoard(mode) {
-  return { id: tbUuid(), title: "", mode, shared: false, owner_id: null, names: {},
-    steps: [{ pos: tbClone(mode === "single" ? TB_START_S : TB_START_D), paths: {}, draw: [] }] };
+  return { id: tbUuid(), title: "", mode, shared: false, owner_id: null, names: {}, ballColor: "yellow", ballTrail: true, playerTrail: true,
+    start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
+}
+// 前の形（コマ）→ 動かした順の形（コマの中の動きは同時、コマの順に再生）
+function tbFromSteps(steps) {
+  const st = Array.isArray(steps) && steps.length ? steps : [{ pos: tbClone(TB_START_D), paths: {}, draw: [] }];
+  const out = { start: tbClone(st[0].pos || {}), moves: [], draw: [] };
+  st.forEach(s => (s.draw || []).forEach(d => out.draw.push(d)));
+  for (let i = 1; i < st.length; i++) {
+    let first = true;
+    const add = m => { out.moves.push({ ...m, with: !first }); first = false; };
+    TB_PIECES.forEach(p => {
+      const a = (st[i - 1].pos || {})[p.id], c = (st[i].pos || {})[p.id];
+      if (a && c && Math.hypot(a[0] - c[0], a[1] - c[1]) > 0.05) add({ id: p.id, pts: (st[i].paths && st[i].paths[p.id]) || [a, c] });
+      else if (!a && c) add({ id: p.id, show: c });
+      else if (a && !c) add({ id: p.id, hide: true });
+    });
+  }
+  return out;
 }
 function tbRowToBoard(r) {
   let d = r.data; if (typeof d === "string") { try { d = JSON.parse(d); } catch (_) { d = null; } }
   d = d || {};
-  return { id: r.id, title: r.title || "", mode: r.mode === "single" ? "single" : "double", shared: !!r.shared, owner_id: r.owner_id || null,
-    updated_at: r.updated_at, names: d.names || {},
-    steps: Array.isArray(d.steps) && d.steps.length ? d.steps : tbNewBoard(r.mode === "single" ? "single" : "double").steps };
+  const mode = r.mode === "single" ? "single" : "double";
+  const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [] }
+    : d.steps ? tbFromSteps(d.steps) : { start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
+  return { id: r.id, title: r.title || "", mode, shared: !!r.shared, owner_id: r.owner_id || null, updated_at: r.updated_at,
+    names: d.names || {}, ballColor: d.ballColor === "white" ? "white" : "yellow", ballTrail: d.ballTrail !== false, playerTrail: d.playerTrail !== false, ...body };
 }
 const tbTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 async function tbLoadList() {
@@ -27747,7 +27773,8 @@ async function tbLoadList() {
 }
 async function tbSaveBoard(b, schoolId) {
   const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
-    data: { steps: b.steps, names: b.names || {} }, updated_at: new Date().toISOString() };
+    data: { start: b.start, moves: b.moves, draw: b.draw, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false },
+    updated_at: new Date().toISOString() };
   try {
     const { error } = await tbTimeout(supabase.from("tactic_boards").upsert(row, { onConflict: "id" }), 10000);
     if (error) { console.error(error); return false; }
@@ -27773,7 +27800,10 @@ function tbCut(pts, k) {
   }
   return out;
 }
-// 一覧の小さなコート図
+// 動きのまとまり（同時に動くものを1つに）
+function tbGroups(moves) { const g = []; (moves || []).forEach(m => { if (m.with && g.length) g[g.length - 1].push(m); else g.push([m]); }); return g; }
+function tbApply(pos, m) { if (m.pts) pos[m.id] = m.pts[m.pts.length - 1].slice(); else if (m.show) pos[m.id] = m.show.slice(); else if (m.hide) delete pos[m.id]; }
+// 一覧の小さなコート図（最初の並び）
 function tbDrawMini(c, b) {
   if (!c || !b) return;
   const o = c.getContext("2d"), sx = c.width / TB_VW, sy = c.height / TB_VH;
@@ -27781,26 +27811,31 @@ function tbDrawMini(c, b) {
   o.fillStyle = "#4f7fbf"; o.fillRect(TB_MX * sx, TB_MY * sy, TB_COURT.W * sx, TB_COURT.L * sy);
   o.strokeStyle = "#fff"; o.lineWidth = 1; o.strokeRect(TB_MX * sx, TB_MY * sy, TB_COURT.W * sx, TB_COURT.L * sy);
   o.beginPath(); o.moveTo(TB_MX * sx - 2, (TB_MY + TB_COURT.net) * sy); o.lineTo((TB_MX + TB_COURT.W) * sx + 2, (TB_MY + TB_COURT.net) * sy); o.stroke();
-  const pos = b.steps[0].pos;
+  const pos = b.start || {};
   TB_PIECES.forEach(p => {
     const q = pos[p.id]; if (!q) return;
-    o.fillStyle = p.side === "me" ? "#2f6fd6" : p.side === "op" ? "#d64545" : "#ffe14d";
-    o.beginPath(); o.arc((q[0] + TB_MX) * sx, (q[1] + TB_MY) * sy, p.side === "ball" ? 3 : 5, 0, 7); o.fill();
+    o.fillStyle = p.side === "me" ? "#2f6fd6" : p.side === "op" ? "#d64545" : (b.ballColor === "white" ? "#fff" : "#ffe14d");
+    o.beginPath(); o.arc((q[0] + TB_MX) * sx, (q[1] + TB_MY) * sy, p.side === "ball" ? 3.5 : 5, 0, 7); o.fill();
   });
 }
 
 // ---------- ボードの描画とタッチ（画面の外で持つ） ----------
 class TBEngine {
   constructor() {
-    this.b = null; this.step = 0; this.tool = "move"; this.penKind = "arrow"; this.penColor = "#ffd400";
+    this.b = null; this.tool = "move"; this.penKind = "arrow"; this.penColor = "#ffd400"; this.sim = false;
     this.hist = []; this.fut = []; this.playing = false; this.playT = 0; this.speed = 1; this.dirty = false; this.readOnly = false;
     this.drag = null; this.penCur = null; this.canvas = null; this.ctx = null; this.scale = 20; this.CW = 0; this.CH = 0;
-    this.raf = 0; this.last = 0; this.shownStep = 0;
+    this.raf = 0; this.last = 0; this.shown = 0;
     this.onChange = () => {}; this.onToast = () => {};
   }
   X(m) { return (m + TB_MX) * this.scale; }
   Y(m) { return (m + TB_MY) * this.scale; }
-  pieces() { return TB_PIECES.filter(p => this.b.steps[0].pos[p.id]); }
+  groups() { return tbGroups(this.b.moves); }
+  posAfter(n) { const pos = tbClone(this.b.start); this.groups().slice(0, n).forEach(g => g.forEach(m => tbApply(pos, m))); return pos; }
+  nowPos() { return this.posAfter(Infinity); }
+  ballOn() { return !!this.nowPos().b; }
+  ballStyle() { return TB_BALL[this.b.ballColor === "white" ? "white" : "yellow"]; }
+  trailFor(side) { return side === "ball" ? this.b.ballTrail !== false : this.b.playerTrail !== false; }
   attach(canvas, box) {
     if (!canvas || !box) return;
     this.canvas = canvas; this.ctx = canvas.getContext("2d");
@@ -27821,17 +27856,11 @@ class TBEngine {
     const fx = r.width ? this.CW / r.width : 1, fy = r.height ? this.CH / r.height : 1;
     return [(e.clientX - r.left) * fx / this.scale - TB_MX, (e.clientY - r.top) * fy / this.scale - TB_MY];
   }
-  snapshot() { this.hist.push(JSON.stringify(this.b.steps)); if (this.hist.length > 80) this.hist.shift(); this.fut = []; this.dirty = true; }
-  undo() { if (!this.hist.length) return; this.fut.push(JSON.stringify(this.b.steps)); this.b.steps = JSON.parse(this.hist.pop()); this.step = Math.min(this.step, this.b.steps.length - 1); this.dirty = true; this.draw(); this.onChange(); }
-  redo() { if (!this.fut.length) return; this.hist.push(JSON.stringify(this.b.steps)); this.b.steps = JSON.parse(this.fut.pop()); this.step = Math.min(this.step, this.b.steps.length - 1); this.dirty = true; this.draw(); this.onChange(); }
-  // コマ i の動き：前のコマの位置から、なぞった道すじ（なければまっすぐ）
-  moveOf(i, id) {
-    const st = this.b.steps[i], pv = this.b.steps[i - 1];
-    if (!pv || !pv.pos[id] || !st.pos[id]) return null;
-    const a = pv.pos[id], b = st.pos[id];
-    if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05) return null;
-    return st.paths && st.paths[id] && st.paths[id].length > 1 ? st.paths[id] : [a, b];
-  }
+  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw }); }
+  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; }
+  snapshot() { this.hist.push(this.cur()); if (this.hist.length > 100) this.hist.shift(); this.fut = []; this.dirty = true; }
+  undo() { if (!this.hist.length) return; this.fut.push(this.cur()); this.restore(this.hist.pop()); this.dirty = true; this.draw(); this.onChange(); }
+  redo() { if (!this.fut.length) return; this.hist.push(this.cur()); this.restore(this.fut.pop()); this.dirty = true; this.draw(); this.onChange(); }
   // ---- 描画 ----
   drawCourt() {
     const o = this.ctx, C = TB_COURT, X = v => this.X(v), Y = v => this.Y(v), s = this.scale;
@@ -27841,8 +27870,7 @@ class TBEngine {
     const line = (x1, y1, x2, y2) => { o.beginPath(); o.moveTo(X(x1), Y(y1)); o.lineTo(X(x2), Y(y2)); o.stroke(); };
     line(C.sgl, 0, C.sgl, C.L); line(C.W - C.sgl, 0, C.W - C.sgl, C.L);
     const s1 = C.net - C.svc, s2 = C.net + C.svc;
-    line(C.sgl, s1, C.W - C.sgl, s1); line(C.sgl, s2, C.W - C.sgl, s2);
-    line(C.W / 2, s1, C.W / 2, s2);
+    line(C.sgl, s1, C.W - C.sgl, s1); line(C.sgl, s2, C.W - C.sgl, s2); line(C.W / 2, s1, C.W / 2, s2);
     line(C.W / 2, 0, C.W / 2, 0.25); line(C.W / 2, C.L - 0.25, C.W / 2, C.L);
     o.strokeStyle = "#1d2330"; o.lineWidth = 3; line(-0.9, C.net, C.W + 0.9, C.net);
     o.fillStyle = "#1d2330"; [-0.9, C.W + 0.9].forEach(x => { o.beginPath(); o.arc(X(x), Y(C.net), 3.5, 0, 7); o.fill(); });
@@ -27858,32 +27886,60 @@ class TBEngine {
     if (head) {
       const b = pts[pts.length - 1]; let a = pts[pts.length - 2];
       for (let i = pts.length - 2; i >= 0; i--) { a = pts[i]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.6) break; }
-      const ang = Math.atan2(Y(b[1]) - Y(a[1]), X(b[0]) - X(a[0])), h = w * 3.6;
+      const ang = Math.atan2(Y(b[1]) - Y(a[1]), X(b[0]) - X(a[0])), h = Math.max(9, w * 3.6);
       o.beginPath(); o.moveTo(X(b[0]), Y(b[1]));
       o.lineTo(X(b[0]) - h * Math.cos(ang - 0.45), Y(b[1]) - h * Math.sin(ang - 0.45));
       o.lineTo(X(b[0]) - h * Math.cos(ang + 0.45), Y(b[1]) - h * Math.sin(ang + 0.45)); o.closePath(); o.fill();
     }
     o.restore();
   }
+  numBadge(x, y, num, color) {
+    const o = this.ctx; o.save();
+    o.fillStyle = color; o.beginPath(); o.arc(x, y, 8, 0, 7); o.fill();
+    o.strokeStyle = "#fff"; o.lineWidth = 1.5; o.stroke();
+    o.fillStyle = "#fff"; o.font = "800 10px sans-serif"; o.textAlign = "center"; o.textBaseline = "middle"; o.fillText(String(num), x, y + 0.5);
+    o.restore();
+  }
+  // 動いた跡（軌跡）：ボールはボールの色、選手は青／赤のうすい色。番号を道すじの途中に
+  drawTrail(m, num, k = 1) {
+    const p = tbPieceOf(m.id); if (!p || !m.pts || !this.trailFor(p.side)) return;
+    let pts = tbCut(m.pts, k);
+    if (p.side !== "ball") { const L = tbLen(pts); if (L > 1.2) pts = tbCut(pts, (L - 0.75) / L); }   // 選手の丸に矢じりが隠れないよう少し手前で止める
+    if (pts.length < 2 || tbLen(pts) < 0.3) return;
+    this.arrowLine(pts, "rgba(0,0,0,.3)", 4.6, true, k >= 1);
+    this.arrowLine(pts, p.side === "ball" ? this.ballStyle().path : TB_TRAIL_COLOR[p.side], 2.8, true, k >= 1);
+    if (num && k >= 1) {
+      const mid = tbCut(m.pts, 0.5), q = mid[mid.length - 1];
+      this.numBadge(this.X(q[0]) + 9, this.Y(q[1]) - 9, num, p.side === "ball" ? "#1d2330" : p.side === "me" ? "#2f6fd6" : "#d64545");
+    }
+  }
+  // ボールを出した／消した動き：その場所に点線の丸と番号
+  drawBallEvent(q, num, hide) {
+    const o = this.ctx, x = this.X(q[0]), y = this.Y(q[1]);
+    o.save(); o.setLineDash([4, 3]); o.strokeStyle = hide ? "rgba(255,255,255,.85)" : this.ballStyle().path; o.lineWidth = 2;
+    o.beginPath(); o.arc(x, y, 14, 0, 7); o.stroke(); o.setLineDash([]);
+    if (hide) { o.strokeStyle = "rgba(255,255,255,.9)"; o.lineWidth = 2.2; o.beginPath(); o.moveTo(x - 6, y - 6); o.lineTo(x + 6, y + 6); o.moveTo(x + 6, y - 6); o.lineTo(x - 6, y + 6); o.stroke(); }
+    o.restore();
+    this.numBadge(x + 14, y - 13, num, "#1d2330");
+  }
   drawPiece(p, q, opt = {}) {
     if (!q) return;
     const o = this.ctx, x = this.X(q[0]), y = this.Y(q[1]);
-    o.save(); if (opt.ghost) o.globalAlpha = .33;
+    o.save(); if (opt.alpha !== undefined) o.globalAlpha = Math.max(0, Math.min(1, opt.alpha));
     if (p.side === "ball") {
-      const lift = opt.lift || 0, r = 7 * (1 + lift * 0.6);
-      o.fillStyle = "rgba(0,0,0,.25)"; o.beginPath(); o.ellipse(x, y + 3 + lift * 10, 6, 2.5, 0, 0, 7); o.fill();
-      o.fillStyle = "#ffe14d"; o.strokeStyle = "#a88a00"; o.lineWidth = 1.5;
+      const lift = opt.lift || 0, r = 10 * (1 + lift * 0.5), bs = this.ballStyle();
+      o.fillStyle = "rgba(0,0,0,.28)"; o.beginPath(); o.ellipse(x, y + 4 + lift * 12, 8.5, 3.4, 0, 0, 7); o.fill();
+      o.fillStyle = bs.fill; o.strokeStyle = bs.edge; o.lineWidth = 2;
       o.beginPath(); o.arc(x, y - lift * 12, r, 0, 7); o.fill(); o.stroke();
     } else {
       const r = 13;
-      o.shadowColor = "rgba(0,0,0,.35)"; o.shadowBlur = opt.ghost ? 0 : 5;
+      o.shadowColor = "rgba(0,0,0,.35)"; o.shadowBlur = 5;
       o.fillStyle = p.side === "me" ? "#2f6fd6" : "#d64545";
       o.beginPath(); o.arc(x, y, r, 0, 7); o.fill(); o.shadowBlur = 0;
       o.strokeStyle = opt.active ? "#ffe14d" : "#fff"; o.lineWidth = opt.active ? 3.5 : 2.2; o.stroke();
       o.fillStyle = "#fff"; o.font = "800 13px sans-serif"; o.textAlign = "center"; o.textBaseline = "middle"; o.fillText(p.label, x, y + 0.5);
-      // 名前（設定で入れたとき）：選手の下に小さく
       const nm = (this.b.names || {})[p.id];
-      if (nm && !opt.ghost) {
+      if (nm) {
         o.font = "800 11px sans-serif"; const w = o.measureText(nm).width + 10;
         o.fillStyle = "rgba(20,28,44,.78)"; o.beginPath();
         if (o.roundRect) o.roundRect(x - w / 2, y + r + 3, w, 16, 8); else o.rect(x - w / 2, y + r + 3, w, 16);
@@ -27897,126 +27953,137 @@ class TBEngine {
     if (d.color === "#ffffff" || d.color === "#ffd400") this.arrowLine(d.pts, "rgba(0,0,0,.35)", w + 2.4, false, d.kind === "arrow");
     this.arrowLine(d.pts, d.color, w, false, d.kind === "arrow");
   }
+  drawPieces(pos, opt = {}) {
+    TB_PIECES.forEach(p => { if (p.side !== "ball" && pos[p.id]) this.drawPiece(p, pos[p.id], { active: this.drag && this.drag.id === p.id }); });
+    if (pos.b) this.drawPiece(tbPieceOf("b"), pos.b, { lift: opt.lift || 0, alpha: opt.ballAlpha });
+  }
+  // 先頭から n 個のまとまりの跡（線と番号）。ボールを出す／消すは、その場所に印
+  drawHistory(n) {
+    const pos = tbClone(this.b.start);
+    this.groups().slice(0, n).forEach((g, gi) => g.forEach(m => {
+      if (m.pts) this.drawTrail(m, gi + 1);
+      else if (m.show && this.trailFor("ball")) this.drawBallEvent(m.show, gi + 1, false);
+      else if (m.hide && pos.b && this.trailFor("ball")) this.drawBallEvent(pos.b, gi + 1, true);
+      tbApply(pos, m);
+    }));
+  }
   draw() {
     if (!this.ctx || !this.b) return;
     this.ctx.clearRect(0, 0, this.CW, this.CH); this.drawCourt();
     if (this.playing) { this.drawPlaying(); return; }
-    const st = this.b.steps[this.step];
-    // 前のコマからの動き：うすい選手（前の位置）と道すじの矢印
-    if (this.step > 0) {
-      this.pieces().forEach(p => {
-        const m = this.moveOf(this.step, p.id); if (!m) return;
-        this.drawPiece(p, this.b.steps[this.step - 1].pos[p.id], { ghost: true });
-        this.arrowLine(m, p.side === "ball" ? "#ffe14d" : p.side === "me" ? "#9cc0ff" : "#ffb3b3", 2.6, true);
-      });
-    }
-    (st.draw || []).forEach(d => this.drawPen(d));
+    (this.b.draw || []).forEach(d => this.drawPen(d));
     if (this.penCur) this.drawPen(this.penCur);
-    this.pieces().forEach(p => { if (p.side !== "ball") this.drawPiece(p, st.pos[p.id], { active: this.drag && this.drag.id === p.id }); });
-    this.pieces().forEach(p => { if (p.side === "ball") this.drawPiece(p, st.pos[p.id]); });
+    this.drawHistory(Infinity);
+    if (this.drag && this.drag.pts && this.drag.pts.length > 1) this.drawTrail({ id: this.drag.id, pts: this.drag.pts }, 0);
+    const pos = this.nowPos();
+    if (this.drag && this.drag.last) pos[this.drag.id] = this.drag.last;
+    this.drawPieces(pos);
   }
-  // ---- 再生：コマからコマへ、なぞった道すじどおりに動く ----
-  playIndex() { const n = this.b.steps.length; return Math.min(n - 1, Math.floor(this.playT / (TB_STEP_SEC + TB_HOLD_SEC)) + 1); }
+  // ---- 再生：最初の並びを少し見せてから、動かした順に1つずつ ----
+  playIndex() { const t = this.playT - TB_LEAD_SEC; return t < 0 ? -1 : Math.min(this.groups().length - 1, Math.floor(t / (TB_MOVE_SEC + TB_HOLD_SEC))); }
   drawPlaying() {
-    const seg = TB_STEP_SEC + TB_HOLD_SEC, i = this.playIndex();
-    const local = this.playT - (i - 1) * seg, k = Math.max(0, Math.min(1, local / TB_STEP_SEC));
+    const gs = this.groups();
+    (this.b.draw || []).forEach(d => this.drawPen(d));
+    const gi = this.playIndex();
+    if (gi < 0) { this.drawPieces(tbClone(this.b.start)); return; }
+    const t = this.playT - TB_LEAD_SEC;
+    const k = Math.max(0, Math.min(1, (t - gi * (TB_MOVE_SEC + TB_HOLD_SEC)) / TB_MOVE_SEC));
     const ease = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-    const arrived = k >= 1;
-    if (arrived) (this.b.steps[i].draw || []).forEach(d => this.drawPen(d));
-    const at = id => { const m = this.moveOf(i, id); if (!m) return this.b.steps[i].pos[id] || this.b.steps[i - 1].pos[id]; const c = tbCut(m, ease); return c[c.length - 1]; };
-    this.pieces().forEach(p => { const m = this.moveOf(i, p.id); if (m) this.arrowLine(tbCut(m, ease), p.side === "ball" ? "rgba(255,225,77,.7)" : p.side === "me" ? "rgba(156,192,255,.8)" : "rgba(255,179,179,.8)", 2.2, true, false); });
-    this.pieces().forEach(p => { if (p.side !== "ball") this.drawPiece(p, at(p.id)); });
-    this.pieces().forEach(p => { if (p.side === "ball") { const m = this.moveOf(i, p.id); this.drawPiece(p, at(p.id), { lift: m && tbLen(m) > 4 && !arrived ? Math.sin(Math.PI * ease) : 0 }); } });
+    this.drawHistory(gi);
+    gs[gi].forEach(m => this.drawTrail(m, gi + 1, ease));
+    const pos = this.posAfter(gi); let lift = 0, ballAlpha;
+    gs[gi].forEach(m => {
+      if (m.pts) { const c = tbCut(m.pts, ease); pos[m.id] = c[c.length - 1]; if (m.id === "b" && tbLen(m.pts) > 4 && k < 1) lift = Math.sin(Math.PI * ease); }
+      else if (m.show) { pos.b = m.show; ballAlpha = ease; }
+      else if (m.hide) { ballAlpha = 1 - ease; if (k >= 1) delete pos.b; }
+    });
+    this.drawPieces(pos, { lift, ballAlpha });
   }
   play() {
-    if (this.b.steps.length < 2) { this.onToast("「＋コマ」で2コマ以上にすると再生できます"); return; }
-    this.playing = true; this.playT = 0; this.shownStep = 1; this.last = performance.now(); this.onChange();
-    const loop = (now) => {
-      this.playT += (now - this.last) / 1000 * this.speed; this.last = now;
-      const total = (this.b.steps.length - 1) * (TB_STEP_SEC + TB_HOLD_SEC);
-      if (this.playT >= total) { this.stop(true); return; }
-      const i = this.playIndex(); if (i !== this.shownStep) { this.shownStep = i; this.onChange(); }
+    if (!this.b.moves.length) { this.onToast("選手やボールを動かすと、動かした順に再生できます"); return; }
+    this.playing = true; this.playT = 0; this.shown = -1; this.onChange(); this.last = performance.now();
+    const total = TB_LEAD_SEC + this.groups().length * (TB_MOVE_SEC + TB_HOLD_SEC);
+    const loop = () => {
+      const now = performance.now();   // 端末によって時間がずれないよう、毎回ここで測る
+      this.playT += Math.max(0, Math.min(0.1, (now - this.last) / 1000)) * this.speed; this.last = now;
+      if (this.playT >= total) { this.stop(); return; }
+      const i = this.playIndex(); if (i !== this.shown) { this.shown = i; this.onChange(); }
       this.draw(); this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
   }
-  stop(end) { cancelAnimationFrame(this.raf); this.playing = false; if (end) this.step = this.b.steps.length - 1; this.draw(); this.onChange(); }
+  stop() { cancelAnimationFrame(this.raf); this.playing = false; this.draw(); this.onChange(); }
   // ---- さわる ----
-  hitPiece(q) {
-    const st = this.b.steps[this.step]; let best = null, bd = 1.5;
-    [...this.pieces()].reverse().forEach(p => { const v = st.pos[p.id]; if (!v) return; const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; best = p; } });
+  hitPiece(q, pos) {
+    let best = null, bd = 1.5;
+    [...TB_PIECES].reverse().forEach(p => { const v = pos[p.id]; if (!v) return; const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; best = p; } });
     return best;
   }
   down(e) {
     if (this.playing || this.readOnly || !this.b) return;
     const q = this.toM(e);
     try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    if (this.tool === "pen") { this.snapshot(); this.penCur = { kind: this.penKind, color: this.penColor, pts: [q] }; this.draw(); return; }
-    const p = this.hitPiece(q); if (!p) return;
-    this.snapshot();
-    const st = this.b.steps[this.step];
-    // 2コマ目から：なぞった道すじを記録（前のコマの位置から続ける）
-    let path = null;
-    if (this.step > 0) {
-      const prev = this.b.steps[this.step - 1].pos[p.id];
-      const moved = Math.hypot(prev[0] - st.pos[p.id][0], prev[1] - st.pos[p.id][1]) > 0.05;
-      path = moved && st.paths[p.id] ? st.paths[p.id].slice() : moved ? [prev.slice(), st.pos[p.id].slice()] : [prev.slice()];
-    }
-    this.drag = { id: p.id, off: [st.pos[p.id][0] - q[0], st.pos[p.id][1] - q[1]], path, moved: false };
+    if (this.tool === "pen") { this.penCur = { kind: this.penKind, color: this.penColor, pts: [q] }; this.draw(); return; }
+    const pos = this.nowPos(), p = this.hitPiece(q, pos); if (!p) return;
+    this.drag = { id: p.id, off: [pos[p.id][0] - q[0], pos[p.id][1] - q[1]], pts: [pos[p.id].slice()], last: null };
     this.draw();
   }
   move(e) {
     if (this.penCur) { const q = this.toM(e), l = this.penCur.pts[this.penCur.pts.length - 1]; if (Math.hypot(q[0] - l[0], q[1] - l[1]) > 0.15) { this.penCur.pts.push(q); this.draw(); } return; }
     if (!this.drag) return;
-    const q = this.toM(e), st = this.b.steps[this.step], d = this.drag;
+    const q = this.toM(e), d = this.drag;
     const np = [Math.max(-TB_MX + 0.4, Math.min(TB_COURT.W + TB_MX - 0.4, q[0] + d.off[0])), Math.max(-TB_MY + 0.4, Math.min(TB_COURT.L + TB_MY - 0.4, q[1] + d.off[1]))];
-    st.pos[d.id] = np; d.moved = true;
-    if (d.path) { const l = d.path[d.path.length - 1]; if (Math.hypot(np[0] - l[0], np[1] - l[1]) > 0.25) d.path.push(np.slice()); }
-    this.draw();
+    const l = d.pts[d.pts.length - 1]; if (Math.hypot(np[0] - l[0], np[1] - l[1]) > 0.2) d.pts.push(np);
+    d.last = np; this.draw();
   }
   up() {
     if (this.penCur) {
       const c = this.penCur; this.penCur = null;
-      if (tbLen(c.pts) > 0.6) { const st = this.b.steps[this.step]; st.draw = st.draw || []; st.draw.push(c); } else this.hist.pop();
+      if (tbLen(c.pts) > 0.6) { this.snapshot(); this.b.draw.push(c); }
       this.draw(); this.onChange(); return;
     }
     if (!this.drag) return;
-    const d = this.drag, st = this.b.steps[this.step]; this.drag = null;
-    if (!d.moved) { this.hist.pop(); this.draw(); return; }
-    if (d.path) {
-      const end = st.pos[d.id], l = d.path[d.path.length - 1];
-      if (Math.hypot(end[0] - l[0], end[1] - l[1]) > 0.01) d.path.push(end.slice());
-      // ほぼまっすぐなら道すじは持たない（まっすぐ動く）
-      const straight = Math.hypot(end[0] - d.path[0][0], end[1] - d.path[0][1]);
-      st.paths = st.paths || {};
-      if (d.path.length > 2 && tbLen(d.path) > straight * 1.03) st.paths[d.id] = d.path; else delete st.paths[d.id];
-    }
+    const d = this.drag; this.drag = null;
+    if (d.last) { const l = d.pts[d.pts.length - 1]; if (Math.hypot(d.last[0] - l[0], d.last[1] - l[1]) > 0.01) d.pts.push(d.last); }
+    const end = d.pts[d.pts.length - 1], straight = Math.hypot(end[0] - d.pts[0][0], end[1] - d.pts[0][1]);
+    if (straight < 0.2 && tbLen(d.pts) < 0.4) { this.draw(); return; }   // ほとんど動いていない
+    const pts = tbLen(d.pts) > straight * 1.03 ? d.pts : [d.pts[0], end];
+    this.snapshot();
+    // ★動かすたびに、順番に記録（「同時」オンなら1つ前の動きと同時）
+    this.b.moves.push({ id: d.id, pts, with: this.sim && this.b.moves.length > 0 });
     this.draw(); this.onChange();
   }
   // ---- ボタン ----
-  wipe() { const st = this.b.steps[this.step]; if (!st.draw || !st.draw.length) { this.onToast("このコマに線はありません"); return; } this.snapshot(); st.draw = []; this.draw(); this.onChange(); this.onToast("このコマの線を消しました（↶で戻せます）"); }
-  reset() {
-    this.snapshot(); const st = this.b.steps[this.step];
-    if (this.step === 0) { st.pos = tbClone(this.b.mode === "single" ? TB_START_S : TB_START_D); this.onToast("最初の形に戻しました"); }
-    else { st.pos = tbClone(this.b.steps[this.step - 1].pos); st.paths = {}; this.onToast("このコマの動きを取り消しました"); }
+  ballSpot(pos) { const m = pos.m2 || [5.5, 24.6]; return [Math.max(0.6, m[0] - 0.9), Math.max(-TB_MY + 0.6, m[1] - 0.7)]; }
+  // ★ボールのオン／オフ。動きの記録がまだなければ最初の並びに、あれば順番の1つとして記録
+  toggleBall() {
+    this.snapshot();
+    const pos = this.nowPos(), b = this.b;
+    if (!b.moves.length) { if (b.start.b) delete b.start.b; else b.start.b = this.ballSpot(pos); }
+    else if (pos.b) b.moves.push({ id: "b", hide: true, with: this.sim });
+    else b.moves.push({ id: "b", show: this.ballSpot(pos), with: this.sim });
     this.draw(); this.onChange();
   }
-  addStep() {
-    this.snapshot(); const st = this.b.steps[this.step];
-    this.b.steps.splice(this.step + 1, 0, { pos: tbClone(st.pos), paths: {}, draw: [] });
-    this.step++; this.tool = "move"; this.draw(); this.onChange();   // ★コマを作ったときのメッセージは出さない
+  wipe() { if (!this.b.draw.length) { this.onToast("ペンの線はありません"); return; } this.snapshot(); this.b.draw = []; this.draw(); this.onChange(); this.onToast("ペンの線を消しました（↶で戻せます）"); }
+  // ★今の並びを最初にする：それまでの動きの記録を消して、今の位置をスタートに
+  setStart() { this.snapshot(); this.b.start = this.nowPos(); this.b.moves = []; this.draw(); this.onChange(); this.onToast("今の並びを最初にしました（↶で戻せます）"); }
+  // ★初期配置：選手を最初の位置に戻し、動きの記録も消す（ボールが出ていれば後衛の足元に）
+  toDefault() {
+    this.snapshot(); const hadBall = !!this.nowPos().b;
+    this.b.start = tbClone(this.b.mode === "single" ? TB_START_S : TB_START_D);
+    if (hadBall) this.b.start.b = this.ballSpot(this.b.start);
+    this.b.moves = []; this.draw(); this.onChange(); this.onToast("初期配置に戻しました（↶で戻せます）");
   }
-  delStep() { if (this.b.steps.length <= 1) return; this.snapshot(); this.b.steps.splice(this.step, 1); if (this.step > 0) this.step--; this.draw(); this.onChange(); this.onToast("このコマを削除しました（↶で戻せます）"); }
-  go(d) { const n = this.step + d; if (n < 0 || n >= this.b.steps.length) return; this.step = n; this.draw(); this.onChange(); }
 }
 
 const TB_ICON = {
   move: <path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />,
   pen: <><path d="M4 20l1-5L16 4l4 4L9 19z" /><path d="M14 6l4 4" /></>,
+  ball: <><circle cx="12" cy="12" r="8" /><path d="M5.5 8.5c3 1.5 4 5 3 9M18.5 15.5c-3-1.5-4-5-3-9" /></>,
+  sim: <path d="M4 8h12M4 16h12M13 5l3 3-3 3M13 13l3 3-3 3" />,
   wipe: <><path d="M8 20L3.5 15.5a1.5 1.5 0 0 1 0-2.1L13 3.9a1.5 1.5 0 0 1 2.1 0L20.1 8.9a1.5 1.5 0 0 1 0 2.1L11 20z" /><path d="M8.5 9L15 15.5M8 20h13" /></>,
   undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></>,
   redo: <><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 0 0 0 12h3" /></>,
-  reset: <><path d="M20 12a8 8 0 1 1-2.3-5.7" /><path d="M20 4v5h-5" /></>,
   gear: <><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></>,
 };
 
@@ -28026,6 +28093,17 @@ function TBSheet({ onBg, children }) {
     <div onClick={e => { if (e.target === e.currentTarget) onBg(); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:700 }}>
       <div style={{ background:C.white, width:"100%", maxHeight:"92vh", overflowY:"auto", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>{children}</div>
     </div>
+  );
+}
+function TBSwitch({ label, on, onClick }) {
+  return (
+    <button onClick={onClick} style={{ display:"flex", alignItems:"center", gap:10, width:"100%", border:`1px solid ${C.border}`, background:C.white, borderRadius:10, padding:"10px 12px", margin:"6px 0 0", textAlign:"left", cursor:"pointer" }}>
+      <b style={{ flex:1, fontSize:13.5, color:C.text }}>{label}</b>
+      <span style={{ fontSize:12, fontWeight:800, color: on ? "#2e9e5b" : C.textSec }}>{on ? "オン" : "オフ"}</span>
+      <span style={{ width:46, height:28, borderRadius:14, background: on ? "#2e9e5b" : "#c9cfd9", position:"relative", flexShrink:0 }}>
+        <span style={{ position:"absolute", top:3, left: on ? 21 : 3, width:22, height:22, borderRadius:"50%", background:"#fff", boxShadow:"0 1px 3px rgba(0,0,0,.3)" }} />
+      </span>
+    </button>
   );
 }
 
@@ -28061,11 +28139,9 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
     window.addEventListener("resize", fit);
     return () => { clearTimeout(t); clearTimeout(t2); window.removeEventListener("resize", fit); };
   }, [eng, sheet]);
-  useEffect(() => { if (eng.tool === "pen" || !eng.playing) eng.attach(canvasRef.current, boxRef.current); }, [eng, eng.tool, readOnly]);
+  useEffect(() => { if (!eng.playing) eng.attach(canvasRef.current, boxRef.current); }, [eng, eng.tool, readOnly]);
 
-  const b = eng.b, n = b.steps.length;
-  const stepNow = eng.playing ? eng.shownStep : eng.step;
-
+  const b = eng.b, ng = eng.groups().length, ballOn = eng.ballOn();
   const back = () => {
     if (!readOnly && eng.dirty && !backAsk.current) {
       backAsk.current = true; showToast("保存していない変更があります。もう一度「戻る」で保存せずに戻ります");
@@ -28085,14 +28161,15 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
 
   const tool = (key, label, icon, onClick, opts = {}) => (
     <button key={key} disabled={opts.disabled} onClick={onClick}
-      style={{ flex:1, border:"none", background: opts.on ? "#e3ebf8" : "transparent", borderRadius:9, padding:"4px 0 3px", fontSize:10, fontWeight:800, color: opts.on ? C.navy : "#4a5568",
+      style={{ flex:1, minWidth:0, border:"none", background: opts.bg || (opts.on ? "#e3ebf8" : "transparent"), borderRadius:9, padding:"4px 0 3px", fontSize:10, fontWeight:800, color: opts.color || (opts.on ? C.navy : "#4a5568"),
         display:"flex", flexDirection:"column", alignItems:"center", gap:1, opacity: opts.disabled ? .35 : 1, cursor:"pointer" }}>
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">{icon}</svg>{label}
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">{icon}</svg>
+      <span style={{ lineHeight:1.15, textAlign:"center", whiteSpace:"pre-line" }}>{label}</span>
     </button>
   );
-  const sb = (key, label, onClick, disabled, extra = {}) => (
+  const bb = (key, label, onClick, disabled, extra = {}) => (
     <button key={key} disabled={disabled} onClick={onClick}
-      style={{ border:`1px solid ${C.border}`, background:C.white, borderRadius:9, height:40, minWidth:40, fontSize:15, fontWeight:800, color:C.navy, padding:"0 8px", whiteSpace:"nowrap", opacity: disabled ? .35 : 1, cursor:"pointer", ...extra }}>{label}</button>
+      style={{ border:`1px solid ${C.border}`, background:C.white, borderRadius:9, height:40, fontSize:12.5, fontWeight:800, color:C.navy, padding:"0 10px", whiteSpace:"nowrap", opacity: disabled ? .35 : 1, cursor:"pointer", ...extra }}>{label}</button>
   );
 
   return (
@@ -28104,14 +28181,15 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
       </div>
 
       {!readOnly && (
-        <div style={{ display:"flex", gap:4, padding:"8px 8px 6px", background:C.white, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+        <div style={{ display:"flex", gap:3, padding:"8px 6px 6px", background:C.white, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
           {tool("move", "動かす", TB_ICON.move, () => { eng.tool = "move"; rerender(); }, { on: eng.tool === "move" })}
           {tool("pen", "ペン", TB_ICON.pen, () => { eng.tool = "pen"; rerender(); }, { on: eng.tool === "pen" })}
+          {tool("ball", `ボール\n${ballOn ? "オン" : "オフ"}`, TB_ICON.ball, () => eng.toggleBall(), { disabled: eng.playing, bg: ballOn ? "#fff4c2" : undefined, color: ballOn ? "#7a5b00" : undefined })}
+          {tool("sim", `同時\n${eng.sim ? "オン" : "オフ"}`, TB_ICON.sim, () => { eng.sim = !eng.sim; rerender(); }, { disabled: eng.playing, bg: eng.sim ? "#e8f5ec" : undefined, color: eng.sim ? "#1f7a45" : undefined })}
           {tool("wipe", "線を消す", TB_ICON.wipe, () => eng.wipe(), { disabled: eng.playing })}
           {tool("undo", "戻す", TB_ICON.undo, () => eng.undo(), { disabled: !eng.hist.length || eng.playing })}
           {tool("redo", "進む", TB_ICON.redo, () => eng.redo(), { disabled: !eng.fut.length || eng.playing })}
-          {tool("reset", eng.step ? "前のコマに" : "最初の形", TB_ICON.reset, () => eng.reset(), { disabled: eng.playing })}
-          {tool("gear", "設定", TB_ICON.gear, () => setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}) }), { disabled: eng.playing })}
+          {tool("gear", "設定", TB_ICON.gear, () => setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}), ball: b.ballColor === "white" ? "white" : "yellow", trail: b.ballTrail !== false, ptrail: b.playerTrail !== false }), { disabled: eng.playing })}
         </div>
       )}
       {!readOnly && eng.tool === "pen" && (
@@ -28133,17 +28211,16 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
       <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#9fb3cc", position:"relative", overflow:"hidden" }}>
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
-        <div style={{ position:"absolute", left:8, bottom:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:12, fontWeight:800, borderRadius:999, padding:"3px 9px" }}>{stepNow + 1} / {n}</div>
         {readOnly && <div style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
       </div>
 
       <div style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 10px calc(10px + env(safe-area-inset-bottom,0px))", background:C.white, borderTop:`1px solid ${C.border}`, flexShrink:0 }}>
-        {sb("prev", "◀", () => eng.go(-1), eng.step === 0 || eng.playing)}
-        <div style={{ fontSize:14, fontWeight:800, color:C.navy, minWidth:44, textAlign:"center" }}>{stepNow + 1}/{n}</div>
-        {sb("next", "▶", () => eng.go(1), eng.step >= n - 1 || eng.playing)}
-        {!readOnly && sb("add", "＋コマ", () => eng.addStep(), eng.playing, { fontSize:12 })}
-        {!readOnly && sb("del", "−コマ", () => eng.delStep(), n <= 1 || eng.playing, { fontSize:12 })}
-        {sb("play", eng.playing ? "■ 止める" : "▶ 再生", () => (eng.playing ? eng.stop() : eng.play()), false, { marginLeft:"auto", background:"#2a5ca8", color:"#fff", borderColor:"#2a5ca8", minWidth:64 })}
+        {!readOnly && bb("def", "↺ 初期配置", () => eng.toDefault(), eng.playing)}
+        {!readOnly && bb("start", "📍 今を最初に", () => eng.setStart(), eng.playing || !b.moves.length)}
+        <span style={{ fontSize:12, color:C.textSec, fontWeight:700, whiteSpace:"nowrap" }}>
+          {eng.playing ? (eng.shown >= 0 ? `${eng.shown + 1} / ${ng}` : "") : ng ? `動き ${ng}` : ""}
+        </span>
+        {bb("play", eng.playing ? "■ 止める" : "▶ 再生", () => (eng.playing ? eng.stop() : eng.play()), false, { marginLeft:"auto", background:"#2a5ca8", color:"#fff", borderColor:"#2a5ca8", fontSize:15, minWidth:86 })}
       </div>
 
       {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(76px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", fontSize:12.5, borderRadius:9, padding:"8px 12px", zIndex:800, pointerEvents:"none", maxWidth:"92vw", textAlign:"center" }}>{toast}</div>}
@@ -28180,7 +28257,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           </div>
           <div style={{ fontSize:12, color:C.textSec }}>選手の名前（味方・相手どちらも。空でもOK）</div>
           <div style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:"6px 8px", alignItems:"center", margin:"6px 0 12px" }}>
-            {TB_PIECES.filter(p => p.side !== "ball" && b.steps[0].pos[p.id]).map(p => (
+            {TB_PIECES.filter(p => p.side !== "ball" && (b.start[p.id] || eng.nowPos()[p.id])).map(p => (
               <Fragment key={p.id}>
                 <span style={{ display:"flex", alignItems:"center", gap:5, fontSize:12.5, fontWeight:800, whiteSpace:"nowrap" }}>
                   <span style={{ width:20, height:20, borderRadius:"50%", background: p.side === "me" ? "#2f6fd6" : "#d64545", color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.label}</span>{p.name}
@@ -28192,7 +28269,17 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
               </Fragment>
             ))}
           </div>
-          <div style={{ fontSize:12, color:C.textSec }}>ダブルス／シングルス（変えると最初の形に戻ります）</div>
+          <div style={{ fontSize:12, color:C.textSec }}>ボールの色</div>
+          <div style={{ display:"flex", gap:6, margin:"6px 0 6px" }}>
+            {[["yellow", "黄色", "#ffe14d"], ["white", "白", "#ffffff"]].map(([v, l, c]) => (
+              <button key={v} onClick={() => setSheet({ ...sheet, ball:v })} style={{ flex:1, border: sheet.ball === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:9, fontSize:13, fontWeight:800, color: sheet.ball === v ? C.navy : C.textSec, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                <span style={{ width:16, height:16, borderRadius:"50%", background:c, border:"1.5px solid #8a93a3" }} />{l}
+              </button>
+            ))}
+          </div>
+          <TBSwitch label="ボールの軌跡" on={sheet.trail} onClick={() => setSheet({ ...sheet, trail: !sheet.trail })} />
+          <TBSwitch label="選手の軌跡" on={sheet.ptrail} onClick={() => setSheet({ ...sheet, ptrail: !sheet.ptrail })} />
+          <div style={{ fontSize:12, color:C.textSec, marginTop:12 }}>ダブルス／シングルス（変えると初期配置に戻ります）</div>
           <div style={{ display:"flex", gap:6, margin:"6px 0 12px" }}>
             {[["double", "ダブルス"], ["single", "シングルス"]].map(([v, l]) => (
               <button key={v} onClick={() => setSheet({ ...sheet, mode:v })} style={{ flex:1, border: sheet.mode === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:9, fontSize:13, fontWeight:800, color: sheet.mode === v ? C.navy : C.textSec }}>{l}</button>
@@ -28202,10 +28289,11 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
             <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
               // ★設定は「保存」を押したときだけ反映（「キャンセル」なら何も変わらない）
-              eng.snapshot(); eng.speed = sheet.speed;
+              if (sheet.mode !== b.mode) { eng.snapshot(); const nb = tbNewBoard(sheet.mode); b.mode = nb.mode; b.start = nb.start; b.moves = []; }
+              eng.speed = sheet.speed;
               const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
-              if (sheet.mode !== b.mode) { const nb = tbNewBoard(sheet.mode); b.mode = nb.mode; b.steps = nb.steps; eng.step = 0; }
-              setSheet(null); eng.draw(); showToast("設定を保存しました");
+              b.ballColor = sheet.ball; b.ballTrail = !!sheet.trail; b.playerTrail = !!sheet.ptrail;
+              eng.dirty = true; setSheet(null); eng.draw(); showToast("設定を保存しました");
             }}>保存</button>
           </div>
         </TBSheet>
