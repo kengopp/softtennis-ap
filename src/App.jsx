@@ -341,12 +341,32 @@ function invalidateMatchCaches(matchId) {
 // ★ログイン中のユーザー。supabase.auth.getUser()は毎回サーバーに問い合わせるため、
 //   画面表示の判定用には端末内に保存されているセッションから読む（通信なし）。
 //   データの読み書きの権限は、これまで通りサーバー側（RLS）で守られている。
+// ★2026-11 修正：スマホを長く置いたあと（朝いちばん等）にアプリへ戻った直後は、
+//   ログインの有効期限が切れていて裏で更新中だったり、通信がまだつながっていなかったりする。
+//   そのタイミングで保存すると、ログインしているのに「ログインしていません」と出てしまうことがあった。
+//   → 端末内のセッションを見る → 無ければ更新を1回試す → サーバーに確認、を最大3回（少し待って）くり返す。
 async function getAuthUserFast() {
-  const { data } = await supabase.auth.getSession();
-  if (data?.session?.user) return data.session.user;
-  const { data: { user } } = await supabase.auth.getUser();
-  return user ?? null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 600 * attempt));
+    try {
+      const { data } = await supabase.auth.getSession(); // 期限切れなら、ここで自動的に更新される
+      if (data?.session?.user) return data.session.user;
+    } catch (e) { console.warn("セッション確認に失敗（再試行します）:", e); }
+    try {
+      const { data } = await supabase.auth.refreshSession();
+      if (data?.session?.user) return data.session.user;
+    } catch (e) { console.warn("セッション更新に失敗（再試行します）:", e); }
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (data?.user) return data.user;
+      // 通信エラー以外（本当にログインしていない）なら、くり返しても同じなのでやめる
+      if (error && error.status && error.status >= 400 && error.status < 500) break;
+    } catch (e) { console.warn("ユーザー確認に失敗（再試行します）:", e); }
+  }
+  return null;
 }
+// ★保存時にログイン確認ができなかったときのメッセージ（本当にログアウトしているとは限らないため）
+const NOT_LOGGED_IN_MSG = "ログインの確認ができませんでした。通信状態を確認して、もう一度保存してください（何度も出る場合は、いったんアプリを開き直してください）";
 
 // ★スマホ本体の「戻る」で読み込み直されたときに、一個前の画面を開き直すための控え（App 内の「読み込み直し対策」参照）
 const NAV_BOUNCE_KEY = "stNavBounceV1";
@@ -1738,7 +1758,7 @@ async function saveMatch(match, { isNew = false, incremental = false } = {}) {
   invalidateMatchCaches(match?.id); // ★分析画面のキャッシュに古い内容が残らないように
   // ★ログイン確認は端末内の情報で行う（以前は毎回サーバーに問い合わせていた。書き込みの権限はRLSで守られている）
   const user = await getAuthUserFast();
-  if (!user) throw new Error("ログインしていません");
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
 
   const matchRow = {
     id: match.id, created_by: (match.created_by && match.created_by !== "me") ? match.created_by : user.id,
@@ -2181,8 +2201,8 @@ async function getMyProfileFresh() {
 
 // プロフィール画像（LINEのような丸アイコン）
 async function uploadAvatarImage(file) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
   const path = `${user.id}/${uid()}.${ext}`;
   const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true, contentType: file.type || "image/jpeg" });
@@ -2192,16 +2212,16 @@ async function uploadAvatarImage(file) {
 }
 async function updateMyAvatar(avatarUrl) {
   _profileCache = null;
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const { error } = await supabase.from("users").update({ avatar_url: avatarUrl }).eq("id", user.id);
   if (error) throw error;
 }
 
 // 大会要項（PDF）アップロード
 async function uploadTournamentGuideline(file) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
   const path = `${user.id}/${uid()}.${ext}`;
   // ★対戦表は写真（画像）も添付できるため、ファイルの種類はそのまま使う
@@ -2214,8 +2234,8 @@ async function uploadTournamentGuideline(file) {
 async function saveMyProfile(profile) {
   _profileCache = null;
   invalidateRosterCache(); // ★承認状態が変わると見える選手が変わるため
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   if (!profile.school_id) throw new Error("学校を選択してください。");
 
   // ★usersテーブルの school_name は NOT NULL 制約があるため、school_id から必ず引いてセットする。
@@ -2332,7 +2352,7 @@ async function reissueViewerInviteCode(schoolId) {
 
 // 承認済みメンバー一覧を取得（移譲先選択用）
 async function getApprovedMembers() {
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserFast();
   if (!user) return [];
   const { data, error } = await supabase.from("users").select("id, name").eq("is_approved", true);
   if (error) { console.error(error); return []; }
@@ -2524,7 +2544,7 @@ async function autoRegisterPlayersToRoster(entries) {
 async function savePlayer(player) {
   invalidateRosterCache();
   const user = await getAuthUserFast();
-  if (!user) throw new Error("ログインしていません");
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   // school_id / gender_category は呼び出し元から明示的に渡された値を優先する
   // （新規登録フローでは、この時点でまだ自分のプロフィールがDBに保存されていないことがあるため）
   let schoolId = player.school_id;
@@ -2878,8 +2898,8 @@ async function getTeamMatchChangeSignature(teamMatchId, matchIds) {
 
 async function saveTeamMatch(tm) {
   clearMatchListPrefetch();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const row = {
     id: tm.id || uid(),
     created_by: tm.created_by || user.id,
@@ -3064,8 +3084,8 @@ async function getPracticeDrills() {
 }
 
 async function savePracticeDrill(drill) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const row = {
     id: drill.id || uid(),
     created_by: user.id,
@@ -3097,8 +3117,8 @@ async function getPracticeLogs(fromDate, toDate) {
 }
 
 async function savePracticeLog(log) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const row = {
     id: uid(),
     drill_id: log.drillId,
@@ -3144,8 +3164,8 @@ async function getDeletedTournaments() {
 
 async function saveTournament(t) {
   clearMatchListPrefetch();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const row = {
     id: t.id || uid(),
     created_by: t.created_by || user.id,
@@ -3646,8 +3666,8 @@ async function getTournamentPairs(tournamentId) {
 }
 
 async function saveTournamentPair(p) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("ログインしていません");
+  const user = await getAuthUserFast();
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const row = {
     id: p.id || uid(),
     created_by: p.created_by || user.id,
@@ -11942,7 +11962,7 @@ const TERMS_SECTIONS = [
 // ★同意を記録する（自分のusers行に日時と版を保存）
 async function agreeToTerms() {
   const user = await getAuthUserFast();
-  if (!user) throw new Error("ログインしていません");
+  if (!user) throw new Error(NOT_LOGGED_IN_MSG);
   const { error } = await supabase.from("users")
     .update({ terms_agreed_at: new Date().toISOString(), terms_version: TERMS_VERSION })
     .eq("id", user.id);
@@ -12148,7 +12168,7 @@ async function getTournamentEquipmentMap(schoolId) {
 }
 async function saveTournamentEquipmentPlan(tournamentId, plan) {
   clearMatchListPrefetch();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUserFast();
   const p = await getMyProfile();
   if (!p?.school_id) throw new Error("学校情報が未設定のため保存できません");
   const { data, error } = await supabase.from("tournament_equipment")
@@ -20857,7 +20877,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
               style={{ ...S.btn(C.navy), fontSize:12, padding:"9px", marginTop:8 }}
               onClick={async ()=>{
                 try {
-                  const { data:{ user } } = await supabase.auth.getUser();
+                  const user = await getAuthUserFast();
                   const profile = await getMyProfile();
                   if (teamMatchId) {
                     const { data: tmg } = await supabase.from("team_match_games").select("id").eq("match_id", match.id).maybeSingle();
@@ -20899,7 +20919,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 const msg = "スコアをリセットして、ここからポイントを記録し直しますか？";
                 if (!window.confirm(msg)) return;
                 try {
-                  const { data:{ user } } = await supabase.auth.getUser();
+                  const user = await getAuthUserFast();
                   const profile = await getMyProfile();
                   await resetMatchToUnrecorded(match.id);
                   if (teamMatchId) {
@@ -28839,7 +28859,10 @@ export default function App() {
   const [inAuthFlow, setInAuthFlow] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data }) => {
+    // ★2026-11 修正：起動時の確認も getAuthUserFast で行う（以前は毎回サーバーに問い合わせていたため、
+    //   電波の弱い場所や復帰直後に通信が失敗すると、ログイン済みなのにログイン画面が出ることがあった）
+    getAuthUserFast().then(async (authUser) => {
+      const data = { user: authUser };
       setUser(data.user ?? null);
       setAuthChecked(true);
       if (!data.user) {
@@ -28859,8 +28882,19 @@ export default function App() {
         console.error("登録状態の確認に失敗:", e);
       }
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        // ★同じ人のままなら、入れ物（オブジェクト）を差し替えない（画面の作り直しを防ぐ）
+        setUser(prev => (prev && prev.id === session.user.id) ? prev : session.user);
+        return;
+      }
+      // ★2026-11 修正：セッションが空で届いても、すぐにはログアウト扱いにしない。
+      //   アプリ復帰直後のログイン更新の行き違い（タブを複数開いているとき等）で、一瞬だけ空になることがあり、
+      //   そのたびに画面がログイン画面→元の画面と作り直されて、開いていた画面（大会の詳細など）が閉じてしまっていた。
+      //   本当にログアウトしたのか、もう一度確かめてから反映する。
+      getAuthUserFast().then(u => {
+        setUser(prev => u ? ((prev && prev.id === u.id) ? prev : u) : null);
+      });
     });
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -29463,7 +29497,7 @@ export default function App() {
         }}
         onStartMatch={async (matchId, orderNum, existingGame, firstServer, orderA, orderB, recvA, recvB)=>{
           // サーブ選択済み → 試合開始
-          const { data:{ user } } = await supabase.auth.getUser();
+          const user = await getAuthUserFast();
           const profile = await getMyProfile();
           await startScheduledMatch(matchId, firstServer, orderA, orderB, recvA, recvB);
           await updateTeamMatchGame(existingGame.id, { status:"active", recorder_id: user?.id, recorder_name: profile?.name || "" });
@@ -29498,7 +29532,7 @@ export default function App() {
         teamMatchId={teamMatchId}
         orderNum={teamMatchOrderNum}
         onSave={async (matchId)=>{
-          const { data: { user } } = await supabase.auth.getUser();
+          const user = await getAuthUserFast();
           const profile = await getMyProfile();
           const existingGame = (await getTeamMatch(teamMatchId))?.games?.find(g=>g.order_num===teamMatchOrderNum);
           if (existingGame) {
@@ -29513,7 +29547,7 @@ export default function App() {
         }}
         onSavePairOnly={async (matchId, pairInfo)=>{
           // ペアのみ登録してteamMatchDetailへ戻る（試合開始しない）
-          const { data: { user } } = await supabase.auth.getUser();
+          const user = await getAuthUserFast();
           const existingGame = (await getTeamMatch(teamMatchId))?.games?.find(g=>g.order_num===teamMatchOrderNum);
           if (existingGame) {
             await updateTeamMatchGame(existingGame.id, { match_id: matchId, status:"waiting", recorder_id: null, recorder_name: null });
