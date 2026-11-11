@@ -5808,7 +5808,10 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
             const candidates = (!kw || picked) ? tournaments : tournaments.filter(t => t.name.toLowerCase().includes(kw.toLowerCase()));
             const pick = (name) => { setTournamentSearch(name); setTournamentDropdownOpen(false); };
             return (
-          <div style={{ position:"relative", margin:"10px 14px 8px" }}>
+          // ★2026-11 修正：検索欄が zIndex:21 のままページ全体の重なり順に参加していたため、下にスクロールすると
+          //   上に固定されたヘッダー（zIndex:10）より手前に出て、ヘッダーに重なって表示されていた。
+          //   検索欄と大会の候補一覧をこの枠（zIndex:9＝ヘッダーや下のメニューより奥、試合カードより手前）の中に閉じ込める。
+          <div style={{ position:"relative", zIndex:9, margin:"10px 14px 8px" }}>
             <div style={{ position:"relative", zIndex:21, display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px" }}>
               <span style={{ fontSize:14, color:C.textSec }}>🔍</span>
               <input
