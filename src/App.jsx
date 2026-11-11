@@ -4853,7 +4853,7 @@ function PointEditModal({ mode="edit", point, players, teamALabel, teamBLabel, o
           {head(3, "この得点は？")}
           <div style={{ display:"flex", gap:8 }}>
             <KindButton onClick={()=>pickKind("winner")} style={{ ...btn, ...sel(kind==="winner") }} label="決めた" note={`（${U.teamName(team)}の得点）`} />
-            <KindButton onClick={()=>pickKind("error")} style={{ ...btn, ...sel(kind==="error","#d8645c") }} label="ミスした" note={`（${U.teamName(team==="A"?"B":"A")}のミス）`} />
+            <KindButton onClick={()=>pickKind("error")} style={{ ...btn, ...sel(kind==="error","#d8645c") }} label="相手のミス" note={`（${U.teamName(team)}の得点）`} />
             <KindButton onClick={()=>pickKind("net_in")} style={{ ...btn, ...sel(kind==="net_in") }} label="ネットイン" note="（運の得点）" />
             <KindButton onClick={()=>pickKind("direct")} style={{ ...btn, ...sel(kind==="direct") }} label="ダイレクト" note="（体に当てた）" />
           </div>
@@ -20430,7 +20430,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           {head(1, "この得点は？")}
           <div style={{ display:"flex", gap:8 }}>
             <KindButton onClick={()=>{ if(kind!=="winner") setLastPointFields(gameId, { result_type:"winner", player_name:null, miss_type:null, ...(lp.play_type==="touch_net"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="winner") }} label="決めた" note={`（${osTeamName(scoreTeam)}の得点）`} />
-            <KindButton onClick={()=>{ if(kind!=="error") setLastPointFields(gameId, { result_type:"error", player_name:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="error","#d8645c") }} label="ミスした" note={`（${osTeamName(osOther(scoreTeam))}のミス）`} />
+            <KindButton onClick={()=>{ if(kind!=="error") setLastPointFields(gameId, { result_type:"error", player_name:null, ...(lp.play_type==="serve"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="error","#d8645c") }} label="相手のミス" note={`（${osTeamName(scoreTeam)}の得点）`} />
             <KindButton onClick={()=>{ if(kind!=="net_in") setLastPointFields(gameId, { result_type:"net_in", player_name:null, miss_type:null, side_type:null, course_type:null, ...((lp.play_type==="serve" || lp.play_type==="touch_net")?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="net_in") }} label="ネットイン" note="（運の得点）" />
             <KindButton onClick={()=>{ if(kind!=="direct") setLastPointFields(gameId, { result_type:"direct", player_name:null, miss_type:null, side_type:null, course_type:null, ...(lp.play_type==="touch_net"?{ play_type:null }:{}) }); }} style={{ ...btn, ...sel(kind==="direct") }} label="ダイレクト" note="（体に当てた）" />
           </div>
@@ -21831,7 +21831,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                     {head(3, !!osKind, "この得点は？")}
                     <div ref={osRefs.kind} style={{ display:"flex", gap:8 }}>
                       <KindButton onClick={()=>osPickKind("winner")} style={{ ...btnBase, ...selStyle(osKind==="winner") }} label="決めた" note={`（${osTeam ? osTeamName(osTeam)+"の" : ""}得点）`} />
-                      <KindButton onClick={()=>osPickKind("error")} style={{ ...btnBase, ...selStyle(osKind==="error","#d8645c") }} label="ミスした" note={`（${osTeam ? osTeamName(osOther(osTeam)) : "相手"}のミス）`} />
+                      <KindButton onClick={()=>osPickKind("error")} style={{ ...btnBase, ...selStyle(osKind==="error","#d8645c") }} label="相手のミス" note={`（${osTeam ? osTeamName(osTeam)+"の" : ""}得点）`} />
                       <KindButton onClick={()=>osPickKind("net_in")} style={{ ...btnBase, ...selStyle(osKind==="net_in") }} label="ネットイン" note="（運の得点）" />
                       <KindButton onClick={()=>osPickKind("direct")} style={{ ...btnBase, ...selStyle(osKind==="direct") }} label="ダイレクト" note="（体に当てた）" />
                     </div>
