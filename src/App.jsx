@@ -4705,11 +4705,24 @@ function FullScreenSheet({ title, onClose, children }) {
   );
 }
 
+// ★「戦略」メニューのアイコン（2026-11：C案「コースを狙う」）。奥から見たコートと、狙いの的に向かう打球の線。
+//   ぴったり合う絵文字が無いため専用に描いている。ほかのメニューの絵文字と同じくらいの大きさ・色合いにしている。
+function StrategyIcon({ size = 24, style }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true" style={{ display:"block", ...style }}>
+      <path d="M14 10 H34 L42 42 H6 Z" fill="#1D9E75" />
+      <line x1="11" y1="24" x2="37" y2="24" stroke="#fff" strokeWidth="3" />
+      <circle cx="31" cy="16" r="5" fill="none" stroke="#FAC775" strokeWidth="2.6" />
+      <path d="M16 36 C18 28, 24 21, 29 18" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function NavBar({ active, onNavigate }) {
   const items = [
     ["home",   "🏠", "ホーム"],
     ["list",   "📋", "試合"],
-    ["video",  "🎬", "戦略"],   // ★「動画分析」と「作戦ボード」の入口（AI分析は「📊 分析」のタブ（🤖 AI）へ移した）
+    ["video",  <StrategyIcon size={24} />, "戦略"],   // ★「動画分析」と「作戦ボード」の入口（AI分析は「📊 分析」のタブ（🤖 AI）へ移した）
     ["stats",  "📊", "分析"],
     ["master", "🗂",  "設定"],
   ];
@@ -4717,7 +4730,7 @@ function NavBar({ active, onNavigate }) {
     <div style={{ position:"fixed",bottom:0,left:0,right:0,background:C.white,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:10 }}>
       {items.map(([key,icon,label])=>(
         <div key={key} onClick={()=>onNavigate&&onNavigate(key)} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"6px 0 4px",fontSize:12,fontWeight:700,color:active===key?C.accent:C.textSec,cursor:"pointer",userSelect:"none",WebkitUserSelect:"none",WebkitTouchCallout:"none" }}>
-          <span style={{ fontSize:20 }}>{icon}</span>{label}
+          <span style={{ fontSize:20, height:26, display:"flex", alignItems:"center", justifyContent:"center" }}>{icon}</span>{label}
         </div>
       ))}
     </div>
@@ -28605,7 +28618,7 @@ function VideoHubScreen({ onNavigate }) {
   return (
     <div style={{ minHeight:"calc(100vh / var(--app-zoom, 1))", background:C.gray, paddingBottom:90, fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       <div style={{ ...S.hdr, color:C.white }}>
-        <div style={{ fontSize:20, fontWeight:800 }}>🎬 戦略</div>
+        <div style={{ fontSize:20, fontWeight:800, display:"flex", alignItems:"center", gap:6 }}><StrategyIcon size={24} />戦略</div>
       </div>
       <div style={{ display:"flex", gap:6, padding:"12px 14px 0" }}>
         {[["video", "🎥 動画分析"], ["board", "🧩 作戦ボード"]].map(([k, l]) => (
