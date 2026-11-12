@@ -28647,7 +28647,12 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         const wakeOk = !!(navigator.wakeLock && navigator.wakeLock.request);
         return (
         <TBSheet onBg={() => setSheet(null)}>
-          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:2 }}>⚙ 設定</div>
+          {/* ★右上の×で閉じる（「キャンセル」と同じ：変更は反映しない）。下にスクロールしても見えるように上に固定 */}
+          <div style={{ position:"sticky", top:-16, zIndex:2, background:C.white, margin:"-16px -16px 2px", padding:"14px 10px 8px 16px", display:"flex", alignItems:"center", borderBottom:`1px solid ${C.border}` }}>
+            <div style={{ flex:1, fontSize:15, fontWeight:800, color:C.navy }}>⚙ 設定</div>
+            <button aria-label="閉じる" title="閉じる" onClick={() => setSheet(null)}
+              style={{ width:38, height:38, border:"none", borderRadius:"50%", background:"#f0f2f5", color:C.text, fontSize:20, lineHeight:"38px", padding:0, cursor:"pointer", flexShrink:0 }}>✕</button>
+          </div>
 
           {sec("一般（この端末だけの設定）")}
           <TBSwitch label="画面を消さない（この画面を開いている間）" on={sheet.wake} onClick={() => setSheet({ ...sheet, wake: !sheet.wake })} />
