@@ -27085,6 +27085,9 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   const fsRef = useRef(false); fsRef.current = fs;
   const [fsPalette, setFsPalette] = useState(false);
   const [portrait, setPortrait] = useState(() => window.innerHeight >= window.innerWidth);
+  // ★全画面の上のすき間：Androidの全画面ではカメラの穴（パンチホール）の分が取れず、ボタンがカメラと重なることがあるため、
+  //   縦向きのときは最低でも34pxあける（上は動画の外の黒い部分なので、下げても動画は隠れない）
+  const fsTopInset = portrait ? "max(env(safe-area-inset-top,0px), 34px)" : "env(safe-area-inset-top,0px)";
   const showToast = useCallback(msg => { setToastMsg(msg); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 1800); }, []);
 
   const videoRef = useRef(null), ytBoxRef = useRef(null), canvasRef = useRef(null), stageWrapRef = useRef(null), fileRef = useRef(null);
@@ -27543,7 +27546,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     player: <><circle cx="12" cy="5" r="2.6"/><path d="M8.5 21 V10.5 Q12 8.5 15.5 10.5 V21 M17 12 L20.5 7.5"/><ellipse cx="21" cy="5.5" rx="1.8" ry="2.4"/></>,
     text: <><rect x="2.5" y="6" width="19" height="12" rx="6"/><path d="M8 10 H16 M12 10 V15"/></>,
   };
-  const toastEl = toast && <div style={{ position:"fixed", left:"50%", ...(fs ? { top:"calc(104px + env(safe-area-inset-top,0px))" } : { bottom:"calc(24px + env(safe-area-inset-bottom,0px))" }), transform:"translateX(-50%)", textAlign:"center", background:"#1d2330", color:"#fff", padding:"9px 14px", borderRadius:9, fontSize:13, zIndex:600, pointerEvents:"none", maxWidth:"90vw" }}>{toast}</div>;
+  const toastEl = toast && <div style={{ position:"fixed", left:"50%", ...(fs ? { top:`calc(104px + ${fsTopInset})` } : { bottom:"calc(24px + env(safe-area-inset-bottom,0px))" }), transform:"translateX(-50%)", textAlign:"center", background:"#1d2330", color:"#fff", padding:"9px 14px", borderRadius:9, fontSize:13, zIndex:600, pointerEvents:"none", maxWidth:"90vw" }}>{toast}</div>;
   const ytTapNeeded = source?.kind === "yt" && ytNeedsTap && !ytError;
   // ★動画の右下のゴミ箱：「選択」で選んでいる書き込みをボタン1つで消す
   const trashBtn = isDraw && eng.tool === "select" && eng.sel && (
@@ -27657,7 +27660,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                 onPointerCancel={() => eng.pointerUp()}
               />
               {/* ★試合の動画で「自分だけ」の描き込みを出しているときの目印（全画面のときも分かるように） */}
-              {layerPrivate && <div style={{ position:"absolute", left:8, top: fs ? "calc(58px + env(safe-area-inset-top,0px))" : 34, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(55,65,81,.85)", color:"#fff", pointerEvents:"none", zIndex:2 }}>🔒 自分だけの描き込み</div>}
+              {layerPrivate && <div style={{ position:"absolute", left:8, top: fs ? `calc(58px + ${fsTopInset})` : 34, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(55,65,81,.85)", color:"#fff", pointerEvents:"none", zIndex:2 }}>🔒 自分だけの描き込み</div>}
               {!fs && <div style={{ position:"absolute", top:8, left:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background: isDraw ? "#e65100" : "rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{isDraw ? "描き込み中" : "再生"}</div>}
               {!fs && <div style={{ position:"absolute", top:8, right:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{rate}x</div>}
               {/* ★全画面にする（通常画面のとき、動画の右下） */}
@@ -27678,7 +27681,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
               //   ボタンをまとめた層を別の重なり（translateZ）にして、必ず動画より手前に出す
               <div style={{ position:"absolute", inset:0, zIndex:3, pointerEvents:"none", transform:"translateZ(0)", WebkitTransform:"translateZ(0)" }}>
                 {trashBtn}
-                <div style={{ position:"absolute", pointerEvents:"auto", zIndex:3, top:0, left:0, right:0, display:"flex", alignItems:"center", gap:8, padding:"calc(6px + env(safe-area-inset-top,0px)) 10px 6px", background:"linear-gradient(rgba(0,0,0,.65),rgba(0,0,0,0))", color:"#fff" }}>
+                <div style={{ position:"absolute", pointerEvents:"auto", zIndex:3, top:0, left:0, right:0, display:"flex", alignItems:"center", gap:8, padding:`calc(6px + ${fsTopInset}) 10px 6px`, background:"linear-gradient(rgba(0,0,0,.65),rgba(0,0,0,0))", color:"#fff" }}>
                   <button style={fsb} onClick={handleClose}>← 戻る</button>
                   {!readOnly ? (
                     <div style={{ display:"flex", background:"rgba(255,255,255,.14)", borderRadius:9, padding:2, gap:2, margin:"0 auto" }}>
@@ -27729,7 +27732,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                 )}
 
                 {(ytTapNeeded || ytError) && (
-                  <div style={{ position:"absolute", zIndex:3, top:"calc(56px + env(safe-area-inset-top,0px))", left:"50%", transform:"translateX(-50%)", maxWidth:"86vw", background: ytError ? "rgba(198,40,40,.92)" : "rgba(0,0,0,.7)", color:"#fff", fontSize:12.5, fontWeight:700, padding:"8px 12px", borderRadius:10, pointerEvents:"none", textAlign:"center", lineHeight:1.5 }}>
+                  <div style={{ position:"absolute", zIndex:3, top:`calc(56px + ${fsTopInset})`, left:"50%", transform:"translateX(-50%)", maxWidth:"86vw", background: ytError ? "rgba(198,40,40,.92)" : "rgba(0,0,0,.7)", color:"#fff", fontSize:12.5, fontWeight:700, padding:"8px 12px", borderRadius:10, pointerEvents:"none", textAlign:"center", lineHeight:1.5 }}>
                     {ytError || "最初の1回は、動画の画面を直接タップして再生してください（YouTubeの仕様です）"}
                   </div>
                 )}
