@@ -28036,12 +28036,36 @@ const tbClone = o => JSON.parse(JSON.stringify(o));
 const tbUuid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
   : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
 const tbPieceOf = id => TB_PIECES.find(p => p.id === id);
+// ★最初の状態（2026-11-13）：新しく作る作戦の「ボールを最初から出すか」と「いつもの配置」。この端末に覚えておく
+//   { ballOn: bool, double: {m1,m2,o1,o2[,b]}, single: {m2,o2[,b]} }（配置はダブルス・シングルスで別々）
+const TB_START_KEY = "tbStartV1";
+function tbLoadStart() { try { const o = JSON.parse(localStorage.getItem(TB_START_KEY) || "{}"); return (o && typeof o === "object") ? o : {}; } catch (_) { return {}; } }
+function tbSaveStart(o) { try { localStorage.setItem(TB_START_KEY, JSON.stringify(o)); return true; } catch (_) { return false; } }
+const tbBaseStart = mode => (mode === "single" ? TB_START_S : TB_START_D);
+// ボールを出すときの場所（味方後衛の足元）
+function tbBallSpot(pos) { const m = (pos && pos.m2) || [5.5, 24.6]; return [Math.max(0.6, m[0] - 0.9), Math.max(-TB_MY + 0.6, m[1] - 0.7)]; }
+// 保存してある配置が使えるか（その種目の選手が全部そろっているか）
+function tbSavedLayout(mode) {
+  const st = tbLoadStart(), lay = st[mode === "single" ? "single" : "double"];
+  if (!lay || typeof lay !== "object") return null;
+  const ok = Object.keys(tbBaseStart(mode)).every(k => Array.isArray(lay[k]) && lay[k].length === 2 && lay[k].every(Number.isFinite));
+  return ok ? lay : null;
+}
+// その種目の最初の並び。withBall: true/false で必ずボールあり/なし、undefined なら「ボールを最初から出す」の設定どおり
+function tbStartFor(mode, withBall) {
+  const lay = tbSavedLayout(mode), base = tbBaseStart(mode), out = {};
+  Object.keys(base).forEach(k => { out[k] = (lay ? lay[k] : base[k]).slice(); });
+  const ball = withBall === undefined ? !!tbLoadStart().ballOn : !!withBall;
+  if (ball) out.b = (lay && Array.isArray(lay.b) && lay.b.length === 2) ? lay.b.slice() : tbBallSpot(out);
+  return out;
+}
+
 function tbNewBoard(mode) {
   const df = tbLoadDefaults() || {};   // ★「いつもの設定」があれば最初から使う
   return { id: tbUuid(), title: "", mode, shared: false, owner_id: null, names: {},
     ballColor: df.ballColor === "white" ? "white" : "yellow", ballTrail: df.ballTrail !== false, playerTrail: df.playerTrail !== false,
     court: TB_COURTS[df.court] ? df.court : "hard", colors: { ...TB_DEF_COLORS, ...(df.colors || {}) },
-    start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
+    start: tbStartFor(mode), moves: [], draw: [] };   // ★いつもの配置（＋ボールを最初から出す設定）
 }
 // 前の形（コマ）→ 動かした順の形（コマの中の動きは同時、コマの順に再生）
 function tbFromSteps(steps) {
@@ -28382,7 +28406,7 @@ class TBEngine {
     this.draw(); this.onChange();
   }
   // ---- ボタン ----
-  ballSpot(pos) { const m = pos.m2 || [5.5, 24.6]; return [Math.max(0.6, m[0] - 0.9), Math.max(-TB_MY + 0.6, m[1] - 0.7)]; }
+  ballSpot(pos) { return tbBallSpot(pos); }
   // ★ボールのオン／オフ。動きの記録がまだなければ最初の並びに、あれば順番の1つとして記録
   toggleBall() {
     this.snapshot();
@@ -28398,9 +28422,9 @@ class TBEngine {
   // ★初期配置：選手を最初の位置に戻し、動きの記録も消す（ボールが出ていれば後衛の足元に）
   toDefault() {
     this.snapshot(); const hadBall = !!this.nowPos().b;
-    this.b.start = tbClone(this.b.mode === "single" ? TB_START_S : TB_START_D);
-    if (hadBall) this.b.start.b = this.ballSpot(this.b.start);
-    this.b.moves = []; this.draw(); this.onChange(); this.onToast("初期配置に戻しました（↶で戻せます）");
+    this.b.start = tbStartFor(this.b.mode, hadBall);   // ★いつもの配置があればそれに戻す
+    const custom = !!tbSavedLayout(this.b.mode);
+    this.b.moves = []; this.draw(); this.onChange(); this.onToast(custom ? "いつもの配置に戻しました（↶で戻せます）" : "初期配置に戻しました（↶で戻せます）");
   }
 }
 
@@ -28551,7 +28575,8 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           {tool("undo", "戻す", TB_ICON.undo, () => eng.undo(), { disabled: !eng.hist.length || eng.playing })}
           {tool("redo", "進む", TB_ICON.redo, () => eng.redo(), { disabled: !eng.fut.length || eng.playing })}
           {tool("gear", "設定", TB_ICON.gear, () => setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}), ball: b.ballColor === "white" ? "white" : "yellow", trail: b.ballTrail !== false, ptrail: b.playerTrail !== false,
-            court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) }, psize: dev.pieceSize, bsize: dev.ballSize, wake: !!dev.wake, lp: dev.longPress !== false, asDefault: false }), { disabled: eng.playing })}
+            court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) }, psize: dev.pieceSize, bsize: dev.ballSize, wake: !!dev.wake, lp: dev.longPress !== false, asDefault: false,
+            startBall: !!tbLoadStart().ballOn, layTick: 0 }), { disabled: eng.playing })}
         </div>
       )}
       {!readOnly && eng.tool === "pen" && (
@@ -28627,6 +28652,40 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           {sec("一般（この端末だけの設定）")}
           <TBSwitch label="画面を消さない（この画面を開いている間）" on={sheet.wake} onClick={() => setSheet({ ...sheet, wake: !sheet.wake })} />
           {sheet.wake && !wakeOk && <div style={{ fontSize:11.5, color:"#c0392b", marginTop:4 }}>この端末・ブラウザでは使えないことがあります（iPhoneはiOS 16.4以降）</div>}
+
+          {sec("最初の状態（新しく作る作戦）")}
+          <TBSwitch label="ボールを最初から出す" on={sheet.startBall} onClick={() => setSheet({ ...sheet, startBall: !sheet.startBall })} />
+          {(() => {
+            const md = b.mode === "single" ? "single" : "double", has = !!tbSavedLayout(md);
+            const prev = { ...b, start: tbStartFor(md, sheet.startBall), moves: [], draw: [] };
+            const saveLay = () => {
+              const now = eng.nowPos(), lay = {};
+              Object.keys(tbBaseStart(md)).forEach(k => { if (now[k]) lay[k] = now[k].slice(); });
+              if (now.b) lay.b = now.b.slice();
+              const st = tbLoadStart(); st[md] = lay;
+              if (tbSaveStart(st)) { showToast("今の配置をいつもの配置にしました"); setSheet({ ...sheet, layTick: sheet.layTick + 1 }); }
+              else showToast("保存できませんでした");
+            };
+            const resetLay = () => {
+              const st = tbLoadStart(); delete st[md]; tbSaveStart(st);
+              showToast("元の配置に戻しました"); setSheet({ ...sheet, layTick: sheet.layTick + 1 });
+            };
+            return (
+              <>
+                {sub(`選手の最初の配置（${md === "single" ? "シングルス" : "ダブルス"}）${has ? "：いつもの配置" : "：元の配置"}`)}
+                <div style={{ display:"flex", gap:12, alignItems:"center", margin:"6px 0 0" }}>
+                  <canvas key={`${md}_${sheet.layTick}_${sheet.startBall}_${sheet.court}`} width="92" height="140" ref={c => tbDrawMini(c, { ...prev, court: sheet.court, colors: sheet.colors, ballColor: sheet.ball })}
+                    style={{ width:70, height:106, borderRadius:7, flexShrink:0 }} />
+                  <div style={{ fontSize:11.5, color:C.textSec, lineHeight:1.6 }}>
+                    今のボードの選手の位置（ボールが出ていればボールも）を、新しく作る作戦の最初の配置にできます。ダブルス・シングルスで別々に覚えます。
+                  </div>
+                </div>
+                <button onClick={saveLay} style={{ ...S.btn(C.navy), marginTop:8, fontSize:13, padding:"10px" }}>📍 今の配置をいつもの配置にする</button>
+                {has && <button onClick={resetLay} style={{ ...S.btn("#fff"), color:C.textSec, border:`1px solid ${C.border}`, marginTop:6, fontSize:12.5, padding:"9px" }}>元の配置（アプリの最初の配置）に戻す</button>}
+                <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>この端末に覚えておきます。今まで作った作戦は変わりません。</div>
+              </>
+            );
+          })()}
 
           {sec("コート")}
           <div style={{ display:"flex", gap:6, margin:"6px 0 0" }}>
@@ -28721,13 +28780,14 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
             <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
               // ★設定は「保存」を押したときだけ反映（「キャンセル」なら何も変わらない）
-              if (sheet.mode !== b.mode) { eng.snapshot(); const nb = tbNewBoard(sheet.mode); b.mode = nb.mode; b.start = nb.start; b.moves = []; }
+              if (sheet.mode !== b.mode) { eng.snapshot(); const hadBall = !!eng.nowPos().b; b.mode = sheet.mode; b.start = tbStartFor(sheet.mode, hadBall || !!sheet.startBall); b.moves = []; }
               eng.speed = sheet.speed;
               const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
               b.ballColor = sheet.ball; b.ballTrail = !!sheet.trail; b.playerTrail = !!sheet.ptrail;
               b.court = sheet.court; b.colors = { ...sheet.colors };
               const nd = { ...dev, pieceSize: sheet.psize, ballSize: sheet.bsize, wake: !!sheet.wake, longPress: !!sheet.lp };
               tbSaveDev(nd); setDev(nd);
+              { const st = tbLoadStart(); st.ballOn = !!sheet.startBall; tbSaveStart(st); }   // ★ボールを最初から出す
               eng.pieceK = tbSizeK(nd.pieceSize); eng.ballK = tbSizeK(nd.ballSize); eng.longPress = nd.longPress;
               if (sheet.asDefault) tbSaveDefaults({ court: sheet.court, colors: { ...sheet.colors }, ballColor: sheet.ball, ballTrail: !!sheet.trail, playerTrail: !!sheet.ptrail, speed: sheet.speed });
               eng.dirty = true; setSheet(null); eng.draw();
