@@ -26971,7 +26971,8 @@ function vaScopeOf({ matchId, shared, schoolId, userId }) {
 }
 const vaLocalKey = (scope, sourceKey) => `va:${scope}:${sourceKey}`;
 const vaIsPrivateScope = (scope) => String(scope || "").startsWith("user:") || String(scope || "").includes(":user:");
-// ★試合の動画を開いたとき、最初に表示する描き込み（"team"＝チームで共有／"me"＝自分だけ）。この端末に覚えておく
+// ★描き込みを「チームで共有」「自分だけ」のどちらにするか（"team"／"me"）。この端末に覚えておく
+//   2026-11-13：スマホの動画・YouTube・試合の動画で共通の1つの設定にまとめた（戦略画面の「動画を開く」のいちばん上）
 const VA_MATCH_LAYER_KEY = "va:matchLayer";
 function vaGetMatchLayer() { try { return localStorage.getItem(VA_MATCH_LAYER_KEY) === "me" ? "me" : "team"; } catch (_) { return "team"; } }
 function vaSetMatchLayer(v) { try { localStorage.setItem(VA_MATCH_LAYER_KEY, v === "me" ? "me" : "team"); } catch (_) {} }
@@ -28924,9 +28925,7 @@ function VideoHubScreen({ onNavigate }) {
   const [ytSheet, setYtSheet] = useState(false);
   const [ytUrl, setYtUrl] = useState("");
   const [ytTitle, setYtTitle] = useState("");
-  const [ytShare, setYtShare] = useState(true);
   const [ytErr, setYtErr] = useState("");
-  const [localShare, setLocalShare] = useState(false);
   const fileRef = useRef(null);
   const pendingLocal = useRef(null);                    // 「続きから」でスマホ動画を選び直すときの元の情報
   const [guide, setGuide] = useState(null);             // 選び直す前の案内（「続きから」の行）
@@ -28945,6 +28944,8 @@ function VideoHubScreen({ onNavigate }) {
   // ★試合の動画に書き込みがあるか。「👥 チーム」と「🔒 自分だけ（自分の分）」を分けて調べる
   const [drawnMine, setDrawnMine] = useState(new Set());
   const [matchLayer, setMatchLayerState] = useState(vaGetMatchLayer);
+  // 新しく開く動画（試合に登録していない動画）を共有にするか。学校に入っていないときは共有できないので自分だけ
+  const shareNew = matchLayer === "team" && !!ctx.schoolId;
   const loadDrawn = useCallback(async (list) => {
     if (!list || !list.length) { setDrawnMatches(new Set()); setDrawnMine(new Set()); return; }
     try {
@@ -28982,7 +28983,11 @@ function VideoHubScreen({ onNavigate }) {
     const id = youtubeIdOf(ytUrl);
     if (!id) { setYtErr("YouTubeのURLとして読み取れませんでした"); return; }
     setYtSheet(false); setYtErr("");
-    setOpened({ initial: { kind:"yt", ytId:id, title: ytTitle.trim() || "YouTube動画", shared: ytShare && !!ctx.schoolId } });
+    // すでに描き込みがある動画は、その動画で決めた方（共有／自分だけ）のまま開く
+    const had = (recent || []).find(r => r.source_key === "yt:" + id);
+    setOpened({ initial: had
+      ? { kind:"yt", ytId:id, title: ytTitle.trim() || had.title || "YouTube動画", shared: !!had.shared, ownerId: had.owner_id }
+      : { kind:"yt", ytId:id, title: ytTitle.trim() || "YouTube動画", shared: shareNew } });
     setYtUrl(""); setYtTitle("");
   };
   const onFile = (f) => {
@@ -28994,7 +28999,7 @@ function VideoHubScreen({ onNavigate }) {
       vaReadVideoInfo(f).then(info => setMismatch(m => (m && m.file === f) ? { ...m, info } : m));
       return;
     }
-    setOpened({ initial: { kind:"local", file:f, shared: prev ? prev.shared : (localShare && !!ctx.schoolId), ownerId: prev?.ownerId, expectKey: prev?.key } });
+    setOpened({ initial: { kind:"local", file:f, shared: prev ? prev.shared : shareNew, ownerId: prev?.ownerId, expectKey: prev?.key } });
   };
   const pickAgain = (prev) => {
     setGuide(null); setMismatch(null);
@@ -29004,7 +29009,7 @@ function VideoHubScreen({ onNavigate }) {
   };
   const openAsNew = () => {
     const f = mismatch && mismatch.file; setMismatch(null);
-    if (f) setOpened({ initial: { kind:"local", file:f, shared: localShare && !!ctx.schoolId } });
+    if (f) setOpened({ initial: { kind:"local", file:f, shared: shareNew } });
   };
   const openRecent = (r) => {
     if (r.kind === "yt" || (r.source_key || "").startsWith("yt:")) {
@@ -29077,28 +29082,28 @@ function VideoHubScreen({ onNavigate }) {
       <div style={{ padding:14 }}>
         <div style={card}>
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>動画を開く</div>
-          <button style={{ ...S.btn(C.navy), marginBottom:8 }} onClick={() => pickAgain(null)}>📱 スマホの動画を開く</button>
-          <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}` }} onClick={() => { setYtErr(""); setYtSheet(true); }}>▶ YouTubeのURLを貼って開く</button>
-          {!isViewer && ctx.schoolId && (
-            <label style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textSec, marginTop:10 }}>
-              <input type="checkbox" checked={localShare} onChange={e => setLocalShare(e.target.checked)} />
-              スマホの動画の描き込みもチームの人が見られるようにする
-            </label>
-          )}
-          {/* ★試合に登録された動画を開いたとき、最初に出す描き込み（開いたあとでも切り替えられる） */}
+          {/* ★描き込みを「チームで共有」「自分だけ」：スマホ・YouTube・試合の動画すべてで共通（開いたあとでも切り替えられる） */}
           {!isViewer && (
-            <div style={{ marginTop:10 }}>
-              <div style={{ fontSize:12, color:C.textSec }}>試合に登録された動画を開いたとき、最初に表示する描き込み</div>
-              <div style={{ display:"flex", gap:6, marginTop:5 }}>
-                {[["team", "👥 チームで共有"], ["me", "🔒 自分だけ"]].map(([v, l]) => (
-                  <button key={v} onClick={() => { vaSetMatchLayer(v); setMatchLayerState(v); }}
-                    style={{ flex:1, border: matchLayer === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:"8px 4px", fontSize:12.5, fontWeight:800, color: matchLayer === v ? C.navy : C.textSec, cursor:"pointer" }}>{l}</button>
-                ))}
+            <div style={{ marginBottom:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:12, fontWeight:800, color:C.navy, whiteSpace:"nowrap" }}>描き込みを</span>
+                <div style={{ flex:1, display:"flex", background:"#eef1f6", borderRadius:10, padding:3, gap:3 }}>
+                  {[["team", "👥 チームで共有"], ["me", "🔒 自分だけ"]].map(([v, l]) => {
+                    const on = matchLayer === v;
+                    return <button key={v} onClick={() => { vaSetMatchLayer(v); setMatchLayerState(v); }}
+                      style={{ flex:1, border:"none", background: on ? C.white : "transparent", borderRadius:8, padding:"8px 2px", fontSize:12.5, fontWeight:800, color: on ? C.navy : C.textSec, boxShadow: on ? "0 1px 2px rgba(0,0,0,.12)" : "none", cursor:"pointer", whiteSpace:"nowrap" }}>{l}</button>;
+                  })}
+                </div>
               </div>
-              <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>開いたあとでも、動画の画面の上でいつでも切り替えられます</div>
+              <div style={{ fontSize:11, color:C.textSec, marginTop:4, lineHeight:1.5 }}>
+                スマホ・YouTube・試合の動画のすべてで使います（開いたあとでも切り替えOK）
+                {matchLayer === "team" && !ctx.schoolId && <><br />※学校に入っていないため、試合に登録していない動画は自分だけになります</>}
+              </div>
             </div>
           )}
-          <div style={{ fontSize:11.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>試合に登録していない動画でも、そのまま開いてスロー・コマ送り・描き込みができます。スマホの動画はアップロードしません。</div>
+          <button style={{ ...S.btn(C.navy), marginBottom:8 }} onClick={() => pickAgain(null)}>📱 スマホの動画を開く</button>
+          <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}` }} onClick={() => { setYtErr(""); setYtSheet(true); }}>▶ YouTubeのURLを貼って開く</button>
+          <div style={{ fontSize:11.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>スマホの動画はアップロードしません。</div>
           <input ref={fileRef} type="file" accept="video/*" style={{ display:"none" }} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; onFile(f); }} />
         </div>
 
@@ -29190,11 +29195,8 @@ function VideoHubScreen({ onNavigate }) {
             {ytErr && <div style={{ color:C.red, fontSize:12, marginTop:6 }}>{ytErr}</div>}
             <input type="text" value={ytTitle} onChange={e => setYtTitle(e.target.value)} placeholder="名前（任意）例：県総体 準決勝"
               style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:14, marginTop:10 }} />
-            {!isViewer && ctx.schoolId && (
-              <label style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:13, margin:"12px 0", lineHeight:1.5 }}>
-                <input type="checkbox" checked={ytShare} onChange={e => setYtShare(e.target.checked)} />
-                <span>描き込みをチームの人も見られるようにする<br /><span style={{ fontSize:11.5, color:C.textSec }}>オフにすると自分だけが見られます</span></span>
-              </label>
+            {!isViewer && (
+              <div style={{ fontSize:12, color:C.textSec, margin:"12px 0 0", lineHeight:1.5 }}>描き込み：<b style={{ color:C.navy }}>{shareNew ? "👥 チームで共有" : "🔒 自分だけ"}</b>（「動画を開く」の上で切り替えられます）</div>
             )}
             <div style={{ display:"flex", gap:8, marginTop:10 }}>
               <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setYtSheet(false)}>やめる</button>
