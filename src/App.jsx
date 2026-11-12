@@ -1107,6 +1107,7 @@ async function getOpponentNotes(schoolId, pairKey) {
   return data ?? [];
 }
 async function saveOpponentNote({ id, school_id, opponent_club, pair_key, pair_label, note_text, match_id }) {
+  if (isPracticeId(match_id)) throw new Error(PRACTICE_BLOCK_MSG);   // ★相手メモはチームで共有されるため、練習では保存しない
   const payload = {
     id: id || uid(), school_id, opponent_club: opponent_club || "",
     pair_key, pair_label, note_text: note_text.trim(),
@@ -1457,7 +1458,57 @@ async function getHomeScreenData(linkedPlayerName) {
 }
 
 // 試合1件を、関連テーブルすべて含めて取得
+// ============================================================
+// ★練習モード（2026-11）
+//   使い方を練習したい人のための試合。試合・ゲーム・ポイントは「このスマホの中（localStorage）」だけに保存し、
+//   サーバーには送らない。→ チームの人には見えず、正式な試合一覧・分析にも入らない。
+//   選手マスター・学校マスター・大会は、いつもどおり読むだけ（練習中に入れた新しい選手はマスターに登録しない）。
+//   ・練習の試合かどうかは「この端末の練習一覧に入っているID」で見分ける（isPracticeId）
+//   ・試合作成画面を「練習」で開いている間だけ PRACTICE_MODE.creating が true（新しく作る試合を練習として保存）
+// ============================================================
+const PRACTICE_KEY = "practiceMatchesV1";
+const PRACTICE_MODE = { creating: false };
+let _practiceCache = null;
+function practiceAll() {
+  if (_practiceCache) return _practiceCache;
+  try { const o = JSON.parse(localStorage.getItem(PRACTICE_KEY) || "{}"); _practiceCache = (o && typeof o === "object") ? o : {}; }
+  catch (_) { _practiceCache = {}; }
+  return _practiceCache;
+}
+function practiceWriteAll(o) {
+  // 容量オーバーなどで保存できないときは、そのままエラーにする（記録画面の「保存できません」に出る）
+  localStorage.setItem(PRACTICE_KEY, JSON.stringify(o));
+  _practiceCache = o;
+  try { window.dispatchEvent(new Event("practice-changed")); } catch (_) {}
+}
+function isPracticeId(id) { return !!id && Object.prototype.hasOwnProperty.call(practiceAll(), id); }
+function practiceGet(id) { const m = practiceAll()[id]; return m ? JSON.parse(JSON.stringify(m)) : null; }
+function practicePut(m) { const all = { ...practiceAll() }; all[m.id] = JSON.parse(JSON.stringify(m)); practiceWriteAll(all); }
+function practiceUpdate(id, patch) { const m = practiceGet(id); if (m) practicePut({ ...m, ...patch, updated_at: new Date().toISOString() }); }
+function practiceDelete(id) { const all = { ...practiceAll() }; delete all[id]; practiceWriteAll(all); }
+function practiceDeleteAll() { practiceWriteAll({}); }
+function practiceList() {
+  return Object.values(practiceAll()).sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+}
+async function practiceSaveMatch(match) {
+  const user = await getAuthUserFast();
+  let name = null; try { name = (await getMyProfile())?.name || null; } catch (_) {}
+  const prev = practiceGet(match.id);
+  const now = new Date().toISOString();
+  const { _videoLinksEdited, ...rest } = match || {};
+  const row = {
+    ...rest,
+    created_by: (match.created_by && match.created_by !== "me") ? match.created_by : (user?.id || "me"),
+    recorder_id: user?.id || null, recorder_name: name,   // 練習は自分だけなので、いつも自分が記録者
+    created_at: prev?.created_at || now, updated_at: now, is_practice: true,
+  };
+  practicePut(row);
+  return { id: row.id, created_by: row.created_by, recorder_id: row.recorder_id, recorder_name: row.recorder_name };
+}
+const PRACTICE_BLOCK_MSG = "練習の試合では使えません（練習の記録はこのスマホの中だけに保存しています）";
+
 async function getMatch(id) {
+  if (isPracticeId(id)) return practiceGet(id);   // ★練習の試合はこのスマホの中から
   if (!id) return null;
   // ★試合本体と明細（選手・ゲーム・ポイント・フォルト）を同時に取得する。
   //   以前は試合本体を取ってから明細を取っていたため、通信の往復が2回かかっていた。
@@ -1755,6 +1806,8 @@ async function saveMatchIncremental(match, matchRow, snap) {
 //   その場合は「既存の行の確認・削除」を全部省き、試合と選手を入れるだけにする（通信が約10往復→2往復）。
 // ★incremental: 記録中の1点ごとの保存。保存済みの控えがあれば、変わった行だけを送る（控えが無いときは全部保存）。
 async function saveMatch(match, { isNew = false, incremental = false } = {}) {
+  // ★練習の試合（練習で新しく作る試合・すでにある練習の試合）は、このスマホの中だけに保存する
+  if ((PRACTICE_MODE.creating && isNew) || isPracticeId(match?.id)) return practiceSaveMatch(match);
   invalidateMatchCaches(match?.id); // ★分析画面のキャッシュに古い内容が残らないように
   // ★ログイン確認は端末内の情報で行う（以前は毎回サーバーに問い合わせていた。書き込みの権限はRLSで守られている）
   const user = await getAuthUserFast();
@@ -1936,6 +1989,7 @@ function notifyRestored(kind, id) {
   try { window.dispatchEvent(new CustomEvent("st:restored", { detail: { kind, id } })); } catch (e) {}
 }
 async function deleteMatch(id) {
+  if (isPracticeId(id)) { practiceDelete(id); return; }
   invalidateMatchCaches(id);
   dropSavedSnapshot(id);
   const { error } = await supabase.from("matches").update({ deleted_at: new Date().toISOString() }).eq("id", id);
@@ -1946,6 +2000,7 @@ async function deleteMatch(id) {
 // ★「結果だけ記録」で終えた試合を、後からポイントごとの詳細記録に切り替えたい時に使う。
 //   既存のgames/points/faultsを消し、スコアと状態を未開始に戻す（recorder_idも解放する）。
 async function resetMatchToUnrecorded(matchId) {
+  if (isPracticeId(matchId)) { const m = practiceGet(matchId); if (m) practicePut({ ...m, games:[], match_score_a:0, match_score_b:0, status:"waiting", updated_at:new Date().toISOString() }); return; }
   invalidateMatchCaches(matchId);
   dropSavedSnapshot(matchId);
   const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", matchId);
@@ -2000,6 +2055,7 @@ async function getAiAnalyses(matchIds) {
   return rows;
 }
 async function saveAiAnalysis({ id, match_id, youtube_url, comment_text }) {
+  if (isPracticeId(match_id)) throw new Error(PRACTICE_BLOCK_MSG);
   const payload = {
     id: id || uid(), match_id,
     youtube_url: youtube_url ? youtube_url.trim() : null,
@@ -2061,6 +2117,15 @@ async function getAiAnalysesWithMatches(sinceDate) {
 
 // 予定 → 進行中に切り替え
 async function startScheduledMatch(id, firstServer, orderA, orderB, recvA, recvB) {
+  if (isPracticeId(id)) {
+    const patch = { status:"active" };
+    if (firstServer) patch.first_server = firstServer;
+    if (orderA) patch.order_a = orderA; if (orderB) patch.order_b = orderB;
+    if (recvA) patch.receive_order_a = recvA; if (recvB) patch.receive_order_b = recvB;
+    practiceUpdate(id, patch);
+    if (firstServer) markAutoStart(id);
+    return;
+  }
   invalidateMatchCaches(id);
   const updates = { status:"active" };
   if (firstServer) updates.first_server = firstServer;
@@ -2082,6 +2147,7 @@ async function startScheduledMatch(id, firstServer, orderA, orderB, recvA, recvB
 
 // ★記録者ロックを外す（試合終了・中断・途中終了のとき）
 async function releaseMatchRecorder(id) {
+  if (isPracticeId(id)) return;
   const { error } = await supabase.from("matches").update({ recorder_id:null, recorder_name:null }).eq("id", id);
   if (error) console.error(error);
 }
@@ -5030,7 +5096,93 @@ let _matchListViewState = null;
 let _matchListRestoreUntil = 0;
 function markMatchListReturn() { if (_matchListViewState) _matchListRestoreUntil = Date.now() + 3000; }
 
-function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis, onModeChange }) {
+// ---------- ★練習モードの画面部品 ----------
+const PRACTICE_COLOR = { bg:"#fff4c2", border:"#f0d77a", text:"#7a5b00", strong:"#8a6400" };
+function PracticeBand({ text }) {
+  return (
+    <div style={{ background:PRACTICE_COLOR.bg, borderBottom:`1px solid ${PRACTICE_COLOR.border}`, color:PRACTICE_COLOR.text, fontSize:12, fontWeight:700, lineHeight:1.5, padding:"7px 12px", display:"flex", gap:6, alignItems:"flex-start" }}>
+      <span style={{ flexShrink:0 }}>🔰</span><span>{text}</span>
+    </div>
+  );
+}
+// 試合一覧の「🔰 練習」タブの中身：このスマホの練習の試合だけを並べる
+function PracticeMatchList({ onOpen, onNew }) {
+  const [list, setList] = useState(() => practiceList());
+  const [confirm, setConfirm] = useState(null);   // { id } | { all:true }
+  useEffect(() => {
+    const re = () => { _practiceCache = null; setList(practiceList()); };
+    re(); window.addEventListener("practice-changed", re); window.addEventListener("storage", re);
+    return () => { window.removeEventListener("practice-changed", re); window.removeEventListener("storage", re); };
+  }, []);
+  const statusLabel = m => {
+    const st = m.status;
+    if (st === "finished") {
+      const a = m.match_score_a ?? 0, b = m.match_score_b ?? 0;
+      return { t: `${a}-${b} ${a > b ? "勝ち" : a < b ? "負け" : ""}（終了）`, c: C.textSec, cont:false };
+    }
+    if (st === "scheduled" || st === "waiting") return { t: "これから（▶ はじめる）", c: C.accent, cont:true };
+    if (st === "suspended" || st === "abandoned") return { t: `${m.match_score_a ?? 0}-${m.match_score_b ?? 0}（中断・▶ 続きから）`, c: "#b45309", cont:true };
+    return { t: `${m.match_score_a ?? 0}-${m.match_score_b ?? 0}（途中・▶ 続きから）`, c: C.accent, cont:true };
+  };
+  const names = (m, team) => (m.players || []).filter(p => p.team === team).sort((x, y) => (x.order_num || 0) - (y.order_num || 0))
+    .map(p => String(p.player_name || "").trim().split(/[\s　]+/)[0]).filter(Boolean).join("・");
+  const club = (m, team) => ((m.players || []).find(p => p.team === team && p.club_name) || {}).club_name || "";
+  const when = m => { const d = new Date(m.updated_at || m.created_at || Date.now()); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  const doDelete = () => {
+    try { if (confirm.all) practiceDeleteAll(); else practiceDelete(confirm.id); } catch (e) { alert("削除できませんでした: " + (e.message || e)); }
+    setConfirm(null);
+  };
+  return (
+    <div style={{ padding:"10px 14px 110px" }}>
+      <div style={{ background:PRACTICE_COLOR.bg, border:`1px solid ${PRACTICE_COLOR.border}`, color:PRACTICE_COLOR.text, borderRadius:10, padding:"9px 12px", fontSize:12, fontWeight:700, lineHeight:1.6, marginBottom:10 }}>
+        🔒 練習の試合は<b>このスマホの中だけ</b>に保存します。チームの人には見えず、正式な記録・分析にも入りません。<br />
+        <span style={{ fontWeight:500 }}>右下の「＋」で、いつもと同じ手順で試合を作って記録の練習ができます。ブラウザのデータを消すと練習の記録も消えます。</span>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ ...S.card, padding:"28px 16px", textAlign:"center", color:C.textSec, fontSize:13, lineHeight:1.7 }}>
+          まだ練習の試合はありません。<br />
+          <button onClick={onNew} style={{ ...S.btn(PRACTICE_COLOR.strong), width:"auto", display:"inline-block", padding:"10px 18px", marginTop:12, fontSize:14 }}>＋ 練習の試合を作る</button>
+        </div>
+      ) : (
+        <div style={{ ...S.card, padding:"2px 12px" }}>
+          {list.map((m, i) => {
+            const st = statusLabel(m), a = names(m, "A"), b = names(m, "B"), cb = club(m, "B");
+            return (
+              <div key={m.id} onClick={() => onOpen(m.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"11px 0", borderTop: i ? `1px solid ${C.border}` : "none", cursor:"pointer" }}>
+                <span style={{ flexShrink:0, fontSize:10.5, fontWeight:800, borderRadius:5, padding:"2px 6px", background:PRACTICE_COLOR.bg, color:PRACTICE_COLOR.text }}>練習</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:14, fontWeight:800, color:C.text, overflowWrap:"anywhere" }}>{a || "自チーム"} vs {b || "相手"}{cb ? `（${cb}）` : ""}</div>
+                  <div style={{ fontSize:12, color:C.textSec, marginTop:2 }}>{when(m)}　{m.tournament_name ? `${m.tournament_name}　` : ""}<span style={{ color:st.c, fontWeight:700 }}>{st.t}</span></div>
+                </div>
+                <button onClick={e => { e.stopPropagation(); setConfirm({ id:m.id }); }} style={{ border:"none", background:"none", color:C.red, fontSize:12.5, fontWeight:700, padding:"6px 2px", cursor:"pointer", flexShrink:0 }}>削除</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {list.length > 0 && (
+        <button onClick={() => setConfirm({ all:true })} style={{ ...S.btn("#fff"), color:C.red, border:`1px solid ${C.border}`, fontSize:13, marginTop:10 }}>練習の試合をすべて削除</button>
+      )}
+      <button aria-label="練習の試合を作る" onClick={onNew}
+        style={{ padding:0, position:"fixed", bottom:80, right:20, width:56, height:56, borderRadius:"50%", background:PRACTICE_COLOR.strong, color:C.white, border:"none", fontSize:30, lineHeight:1, cursor:"pointer", boxShadow:"0 4px 14px rgba(0,0,0,0.25)", zIndex:20 }}>＋</button>
+      {confirm && (
+        <Modal onClose={() => setConfirm(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:6 }}>🗑</div>
+            <h3 style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>{confirm.all ? "練習の試合をすべて削除しますか？" : "この練習の試合を削除しますか？"}</h3>
+            <p style={{ fontSize:12, color:C.textSec, marginBottom:18 }}>練習の記録はゴミ箱に入らず、元に戻せません。正式な試合には影響しません。</p>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <button style={{ padding:11, background:"#f0f0f0", color:C.text, border:"none", borderRadius:10, fontSize:13, fontWeight:700 }} onClick={() => setConfirm(null)}>キャンセル</button>
+              <button style={{ padding:11, background:C.red, color:C.white, border:"none", borderRadius:10, fontSize:13, fontWeight:700 }} onClick={doDelete}>削除する</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function MatchList({ onNew, onNewPractice, onOpenPractice, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, onNavigate, onStartScheduled, initialFilter, initialToast, onOpenTeamMatch, onNewTeamMatch, onCopyTeamMatch, initialMatchMode, onOpenTournament, initialShowTrash, onTrashConsumed, onOpenAiAnalysis, onModeChange }) {
   const [timeTab, setTimeTab] = useState(initialMatchMode || "tournament"); // tournament | team | individual
   // ★「戻る」で戻ってきたときは、前に見ていた状態（同じタブのときだけ）で表示する
   const restoreViewRef = useRef(
@@ -5628,13 +5780,17 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
       {/* 上段：大会 / 団体戦 / 個人戦 タブ */}
       <div style={{ display:"flex", alignItems:"center", gap:8, margin:"10px 14px 0" }}>
         <div style={{ flex:1, display:"flex", background:"#f0f2f6", padding:3, borderRadius:10 }}>
-          {[["tournament","📋 大会"],["team","団体戦"],["individual","個人戦"]].map(([v,l])=>(
-            <button key={v} style={{ flex:1, padding:9, border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, background:timeTab===v||(!["tournament","individual","team"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?C.navy:C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); onModeChange && onModeChange(v); /* ★アプリ全体にも今のタブを伝える（試合から戻ったとき同じタブで開くため） */ if (v!=="individual") { setFilterHasVideo(false); setFilterHasAi(false); } }}><TypeLabel v={v} label={l}/></button>
+          {[["tournament","📋 大会"],["team","団体戦"],["individual","個人戦"],["practice","🔰 練習"]].map(([v,l])=>(
+            <button key={v} style={{ flex:1, minWidth:0, padding:"9px 2px", border:"none", cursor:"pointer", borderRadius:8, fontSize:13, fontWeight:700, whiteSpace:"nowrap", background:timeTab===v||(!["tournament","individual","team","practice"].includes(timeTab)&&v==="tournament")?C.white:"transparent", color:timeTab===v?(v==="practice"?PRACTICE_COLOR.text:C.navy):C.textSec, boxShadow:timeTab===v?"0 1px 4px rgba(0,0,0,0.1)":"none" }} onClick={()=>{ setTimeTab(v); onModeChange && onModeChange(v); /* ★アプリ全体にも今のタブを伝える（試合から戻ったとき同じタブで開くため） */ if (v!=="individual") { setFilterHasVideo(false); setFilterHasAi(false); } }}><TypeLabel v={v} label={l}/></button>
           ))}
         </div>
       </div>
 
+      {/* ★練習タブ：このスマホの練習の試合だけ */}
+      {timeTab === "practice" && <PracticeMatchList onOpen={id => onOpenPractice && onOpenPractice(id)} onNew={() => onNewPractice && onNewPractice()} />}
+
       {/* 共通絞り込みUI（大会タブでは検索欄のみ非表示。ステータス・日付絞り込みは大会タブにも表示） */}
+      {timeTab !== "practice" && (
       <div style={{ padding:"10px 14px 0" }}>
         {timeTab !== "tournament" && (
         <div style={{ display:"flex", alignItems:"center", background:C.white, border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", marginBottom:8 }}>
@@ -5794,6 +5950,7 @@ function MatchList({ onNew, onOpen, onCopy, onProfile, onRoster, onSchoolAdmin, 
           );
         })()}
       </div>
+      )}
 
       {/* 大会タブ */}
       {timeTab === "tournament" && (
@@ -19038,7 +19195,7 @@ function SchoolIdSearchField({ value, onChange, schools, prefFilter, placeholder
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
+function MatchSetup({ practice, onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -19073,10 +19230,12 @@ function MatchSetup({ onSave, onCancel, sourceMatchId, editMatchId, initialMatch
   // ★key を付けて、編集対象・コピー元が変わったら必ず作り直す。
   //   付けないと前回開いたときの入力内容や「予定として登録済みのID」が残ったままになり、
   //   別の試合を上書きしてしまう恐れがある。
-  return <MatchSetupForm key={`${editMatchId || "new"}_${sourceMatchId || "none"}`} onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} tournamentParticipantIds={tournamentParticipantIds} />;
+  return <MatchSetupForm key={`${editMatchId || "new"}_${sourceMatchId || "none"}`} practice={!!practice} onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} tournamentParticipantIds={tournamentParticipantIds} />;
 }
 
-function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
+function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
+  // ★練習モードで開いている間だけ「新しく作る試合＝練習（このスマホの中だけ）」にする。閉じたら必ず戻す
+  useEffect(() => { PRACTICE_MODE.creating = !!practice; return () => { PRACTICE_MODE.creating = false; }; }, [practice]);
   const base    = editing || source;
 
   // 試合開始済み（active/finished）の場合のみ形式設定をロック
@@ -19422,7 +19581,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       if (opts.simpleResult) markAutoSimple(mid); // ★「結果のみ登録する」：記録画面ですぐ結果の入力を出す
       // 選手マスターに自動登録（直接入力された選手のみ。マスター未登録の場合）
       // ★完了を待たずに記録画面へ進む（以前は4人分の登録が終わるまで画面が切り替わらなかった）
-      autoRegisterPlayersToRoster([
+      if (!practice) autoRegisterPlayersToRoster([   // ★練習では選手マスターに登録しない
         { name: fAP1, teamName: fAClub.trim(), isOwnTeam: true },
         ...(isDoubles && fAP2.trim() ? [{ name: fAP2, teamName: fAClub.trim(), isOwnTeam: true }] : []),
         ...(fBP1.trim() ? [{ name: fBP1, teamName: fBClub.trim(), isOwnTeam: false }] : []),
@@ -19450,9 +19609,10 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
       <div style={S.hdr}>
         <div style={{ display:"flex",alignItems:"center",gap:12 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onCancel}>←</button>
-          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{headerLabel || (editing?"試合情報を編集":source?"試合をコピー":"新規試合")}</span>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{headerLabel || (practice ? (editing ? "🔰 練習の試合を編集" : "🔰 練習の試合を作成") : editing?"試合情報を編集":source?"試合をコピー":"新規試合")}</span>
         </div>
       </div>
+      {practice && <PracticeBand text="練習モード：この試合はこのスマホの中だけに保存します。チームの人には見えず、正式な記録・分析にも入りません。ここで新しく入れた選手は、選手マスターに登録されません" />}
       {source && (
         <div style={{ background:"#fff8e6",borderBottom:"1px solid #f5d99b",padding:"10px 14px",fontSize:12,color:"#7a5800" }}>
           📋 「{source.tournament_name || "前の試合"}」の情報をコピーしました。内容を確認・変更してください（スコアはコピーされません）。
@@ -19695,7 +19855,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
           disabled={!canSave || saving}
           onClick={editing ? ()=>handleSave(null) : handleSaveWithServeSelect}
         >
-          {saving ? "保存中..." : (editing ? "保存する 💾" : isTeamMatchGame ? "ペアを登録して試合開始 🎾" : "試合を開始する 🎾")}
+          {saving ? "保存中..." : (editing ? "保存する 💾" : isTeamMatchGame ? "ペアを登録して試合開始 🎾" : practice ? "練習をはじめる 🔰" : "試合を開始する 🎾")}
         </button>
         {/* 団体戦ペア登録モード：ペアだけ保存して戻るボタン */}
         {isTeamMatchGame && onSavePairOnly && (
@@ -19734,7 +19894,7 @@ function MatchSetupForm({ onSave, onCancel, editing, source, initialMatchType, o
             {saving ? "保存中..." : "💾 ペアを登録して戻る"}
           </button>
         )}
-        {!editing && !isTeamMatchGame && (
+        {!editing && !isTeamMatchGame && !practice && (
           <button
             style={{ ...S.btn(canSchedule ? "linear-gradient(135deg,#7b1fa2,#9c27b0)" : C.border, canSchedule ? C.white : C.textSec), marginTop:4 }}
             disabled={!canSchedule || saving}
@@ -19825,6 +19985,7 @@ function canViewAiAnalysisFor(match, viewer) {
 }
 
 function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenAiAnalysis, initialTab }) {
+  const practice = isPracticeId(matchId);   // ★練習の試合（このスマホの中だけ）
   const [initialMatch, setInitialMatch] = useState(null);
   const [loadKey, setLoadKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -19920,8 +20081,9 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
         onRefresh={handleRefresh}
         refreshing={refreshing}
         onNavigate={onNavigate}
-        viewOnly={viewOnly || isViewer}
-        isViewer={isViewer}
+        viewOnly={practice ? false : (viewOnly || isViewer)}
+        isViewer={practice ? false : isViewer}
+        practice={practice}
         teamMatchId={teamMatchId}
         onOpenAiAnalysis={onOpenAiAnalysis}
       />
@@ -19929,7 +20091,7 @@ function ScoreRecord({ matchId, onBack, onEdit, onNavigate, teamMatchId, onOpenA
   );
 }
 
-function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, isViewer, teamMatchId, onOpenAiAnalysis, initialTab }) {
+function ScoreRecordInner({ practice, initialMatch, onBack, onEdit, onReload, onClaimRecorder, onRefresh, refreshing, onNavigate, viewOnly, isViewer, teamMatchId, onOpenAiAnalysis, initialTab }) {
   const [match,  setMatch]  = useState(initialMatch);
   // ★観戦モード（閲覧のみ）では、親から渡されるinitialMatchが「最新に更新」で
   // 　差し替わった時にこの内部stateへ反映されないと画面が更新されない。
@@ -20734,6 +20896,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
           <button style={{ background:"none", border:"none", color:"#8a5a00", fontWeight:700, fontSize:13, cursor:"pointer" }} onClick={()=>setRestoredNotice(false)}>✕</button>
         </div>
       )}
+      {practice && <PracticeBand text="練習中：このスマホの中だけに保存しています。チームの人には見えず、正式な記録・分析にも入りません" />}
       {/* スコアボードヘッダー */}
       <div style={{ background:`linear-gradient(135deg,${C.navy},${C.navyMid})`, padding:"10px 14px" }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
@@ -20747,7 +20910,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                 background: syncStatus==="synced" ? "rgba(46,204,113,0.2)" : syncStatus==="error" ? "rgba(255,255,255,0.15)" : "rgba(249,115,22,0.2)",
                 color: syncStatus==="synced" ? "#7CF0B0" : syncStatus==="error" ? "#ffb199" : "#ffcf8f" }}>
                 {syncStatus==="synced"
-                  ? "🟢 同期済み"
+                  ? (practice ? "🔰 このスマホに保存済み" : "🟢 同期済み")
                   : syncStatus==="error"
                     ? (navigator.onLine ? "🔴 保存できません（タップで原因）" : "🔴 未同期（電波待ち・記録は端末に保存済み）")
                     : "🟡 保存中…"}
@@ -22242,6 +22405,7 @@ function ScoreRecordInner({ initialMatch, onBack, onEdit, onReload, onClaimRecor
                   const updated = { ...match, games:[], match_score_a:0, match_score_b:0, status:"scheduled", first_server:null, walkover_winner:null };
                   setMatch({...updated});
                   dropSavedSnapshot(match.id); // ★差分保存の控えも捨てる（DBを直接書き換えるため）
+                  if (isPracticeId(match.id)) { try { practicePut({ ...updated, updated_at:new Date().toISOString() }); } catch(e) { alert("リセットに失敗しました: "+(e.message||e)); } return; }
                   try {
                     const { data: existingGames } = await supabase.from("games").select("id").eq("match_id", match.id);
                     const gameIds = (existingGames ?? []).map(g => g.id);
@@ -26869,6 +27033,7 @@ async function vaLoadShapes(scope, sourceKey) {
   return data ? (Array.isArray(data.shapes) ? data.shapes : []) : null;
 }
 async function vaSaveRow(row) {
+  if (isPracticeId(row?.match_id) || (String(row?.scope || "").startsWith("match:") && isPracticeId(String(row.scope).slice(6)))) throw new Error(PRACTICE_BLOCK_MSG);
   const { error } = await supabase.from("video_annotations").upsert(row, { onConflict: "scope,source_key" });
   if (error) throw error;
 }
@@ -29158,6 +29323,8 @@ export default function App() {
   const [teamMatchGameEditMatchId, setTeamMatchGameEditMatchId] = useState(null); // ★番手の選手編集の対象
   const [teamMatchCopyId, setTeamMatchCopyId] = useState(null); // コピー元の団体戦ID
   const [listMatchMode, setListMatchMode] = useState("tournament");
+  const [practiceSetup, setPracticeSetup] = useState(false);   // ★試合作成を「練習」で開いているか
+  useEffect(() => { if (screen !== "setup") setPracticeSetup(false); }, [screen]);
   const [pendingOpenTrash, setPendingOpenTrash] = useState(false); // ★設定画面からゴミ箱を開く指示
   // 大会関連
   const [tournamentContext, setTournamentContext] = useState(null); // 大会詳細画面から試合作成に入った際の大会情報 {id,name,start_date,end_date}
@@ -29979,6 +30146,7 @@ export default function App() {
   if (screen==="setup") {
     return (
       <MatchSetup
+        practice={practiceSetup || isPracticeId(editTargetId) || isPracticeId(copySourceId)}
         sourceMatchId={copySourceId}
         editMatchId={editTargetId}
         initialMatchType={initMatchType}
@@ -30014,8 +30182,9 @@ export default function App() {
           // ★大会の個人戦一覧から開いた試合を、記録画面の「✏️ 編集」経由で編集した場合も
           // 　大会の文脈を保つ（creatingFromTournamentは新規作成時のみ立つフラグなので、
           // 　既存試合の編集ではprevScreenの方で判定する）
-          const fromTournament = (creatingFromTournament || prevScreen === "tournamentDetail") && tournamentContext;
-          if (!fromTournament) setListMatchMode("individual"); // ★個人戦タブに戻れるようにする
+          const fromTournament = !isPracticeId(id) && (creatingFromTournament || prevScreen === "tournamentDetail") && tournamentContext;
+          if (!fromTournament) setListMatchMode(isPracticeId(id) ? "practice" : "individual"); // ★個人戦タブ（練習なら練習タブ）に戻れるようにする
+          setPracticeSetup(false);
           setPrevScreen(fromTournament ? "tournamentDetail" : "list");
           setCreatingFromTournament(false);
           setRecordInitialTab(null);
@@ -30142,6 +30311,8 @@ export default function App() {
   return (
     <MatchList
       key={tick}
+      onNewPractice={()=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setPracticeSetup(true); setPrevScreen("list"); setScreen("setup"); }}
+      onOpenPractice={id=>{ setTournamentContext(null); setMatchId(id); setListMatchMode("practice"); setPrevScreen("list"); setRecordInitialTab(null); setScreen("record"); }}
       onNew={f=>{ setTournamentContext(null); setCopySourceId(null); setEditTargetId(null); setInitMatchType(f && f!=="all" && f!=="scheduled" ? f : null); setPrevScreen("list"); setScreen("setup"); }}
       onOpen={id=>openMatchSmart(id, { prevScreen:"list", listMatchMode:"individual" })}
       onCopy={id=>{ setCopySourceId(id); setEditTargetId(null); setInitMatchType(null); setPrevScreen("list"); setScreen("setup"); }}
