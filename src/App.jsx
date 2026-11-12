@@ -27764,12 +27764,46 @@ const TB_START_S = { m2: [5.5, 24.6], o2: [5.5, -0.8] };
 const TB_MOVE_SEC = 1.0, TB_HOLD_SEC = 0.35, TB_LEAD_SEC = 0.8;   // 1つの動き・次までの間・最初の並びを見せる時間（ふつうの速さ）
 const TB_BALL = { yellow: { fill: "#ffe14d", edge: "#a88a00", path: "#ffe14d" }, white: { fill: "#ffffff", edge: "#7b8494", path: "#ffffff" } };
 const TB_TRAIL_COLOR = { me: "#9cc0ff", op: "#ffb3b3" };
+// ★2026-11 設定の強化（コートの種類・チームの色・選手とボールの大きさ・画面を消さない・長押しで名前・いつもの設定）
+//   コートの種類：ソフトテニスでよく使うコート。外の色も合わせて変わる（以前からの作戦は「ハード（青）」のまま）
+const TB_COURTS = {
+  omni: { name: "砂入り人工芝", court: "#4f8a55", out: "#88ad89", box: "#a9c3aa" },
+  clay: { name: "クレー",       court: "#b8774c", out: "#d3a684", box: "#e0c0a6" },
+  hard: { name: "ハード",       court: "#4f7fbf", out: "#86a6cf", box: "#9fb3cc" },
+};
+const TB_COURT_KEYS = ["omni", "clay", "hard"];
+const tbCourtOf = b => TB_COURTS[b && b.court] || TB_COURTS.hard;
+// チームの色（味方・相手で同じ色は選べない）
+const TB_TEAM_COLORS = [["#2f6fd6", "青"], ["#d64545", "赤"], ["#2e9e5b", "緑"], ["#f08a24", "オレンジ"], ["#8e5bd6", "紫"], ["#e0559a", "ピンク"], ["#1d2330", "黒"]];
+const TB_DEF_COLORS = { me: "#2f6fd6", op: "#d64545" };
+const tbColorOf = (b, side) => ((b && b.colors && b.colors[side]) || TB_DEF_COLORS[side]);
+// うすい色（選手の軌跡用）：白と混ぜる
+function tbLight(hex, k = 0.55) {
+  const h = String(hex || "#888888").replace("#", ""); const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, bl = n & 255, m = v => Math.round(v + (255 - v) * k);
+  return `rgb(${m(r)},${m(g)},${m(bl)})`;
+}
+// 選手・ボールの大きさ（アプリの「文字の大きさ」と同じ呼び方）
+const TB_SIZES = [["s", "小", 0.8], ["m", "標準", 1], ["l", "大", 1.25], ["xl", "特大", 1.5], ["xxl", "超特大", 1.8]];
+const tbSizeK = key => (TB_SIZES.find(z => z[0] === key) || TB_SIZES[1])[2];
+// この端末だけの設定（大きさ・画面を消さない・長押しで名前）。共有した相手の画面は変えない
+const TB_DEV_KEY = "tbDeviceV1";
+const TB_DEV_DEF = { pieceSize: "m", ballSize: "m", wake: false, longPress: true };
+function tbLoadDev() { try { return { ...TB_DEV_DEF, ...(JSON.parse(localStorage.getItem(TB_DEV_KEY) || "{}") || {}) }; } catch (_) { return { ...TB_DEV_DEF }; } }
+function tbSaveDev(d) { try { localStorage.setItem(TB_DEV_KEY, JSON.stringify(d)); } catch (_) {} }
+// いつもの設定（新しく作る作戦の最初の設定）
+const TB_DEFAULTS_KEY = "tbDefaultsV1";
+function tbLoadDefaults() { try { return JSON.parse(localStorage.getItem(TB_DEFAULTS_KEY) || "null") || null; } catch (_) { return null; } }
+function tbSaveDefaults(d) { try { localStorage.setItem(TB_DEFAULTS_KEY, JSON.stringify(d)); return true; } catch (_) { return false; } }
 const tbClone = o => JSON.parse(JSON.stringify(o));
 const tbUuid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
   : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
 const tbPieceOf = id => TB_PIECES.find(p => p.id === id);
 function tbNewBoard(mode) {
-  return { id: tbUuid(), title: "", mode, shared: false, owner_id: null, names: {}, ballColor: "yellow", ballTrail: true, playerTrail: true,
+  const df = tbLoadDefaults() || {};   // ★「いつもの設定」があれば最初から使う
+  return { id: tbUuid(), title: "", mode, shared: false, owner_id: null, names: {},
+    ballColor: df.ballColor === "white" ? "white" : "yellow", ballTrail: df.ballTrail !== false, playerTrail: df.playerTrail !== false,
+    court: TB_COURTS[df.court] ? df.court : "hard", colors: { ...TB_DEF_COLORS, ...(df.colors || {}) },
     start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
 }
 // 前の形（コマ）→ 動かした順の形（コマの中の動きは同時、コマの順に再生）
@@ -27796,7 +27830,8 @@ function tbRowToBoard(r) {
   const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [] }
     : d.steps ? tbFromSteps(d.steps) : { start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
   return { id: r.id, title: r.title || "", mode, shared: !!r.shared, owner_id: r.owner_id || null, updated_at: r.updated_at,
-    names: d.names || {}, ballColor: d.ballColor === "white" ? "white" : "yellow", ballTrail: d.ballTrail !== false, playerTrail: d.playerTrail !== false, ...body };
+    names: d.names || {}, ballColor: d.ballColor === "white" ? "white" : "yellow", ballTrail: d.ballTrail !== false, playerTrail: d.playerTrail !== false,
+    court: TB_COURTS[d.court] ? d.court : "hard", colors: { ...TB_DEF_COLORS, ...(d.colors || {}) }, ...body };
 }
 const tbTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 async function tbLoadList() {
@@ -27809,7 +27844,8 @@ async function tbLoadList() {
 }
 async function tbSaveBoard(b, schoolId) {
   const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
-    data: { start: b.start, moves: b.moves, draw: b.draw, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false },
+    data: { start: b.start, moves: b.moves, draw: b.draw, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
+      court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) } },
     updated_at: new Date().toISOString() };
   try {
     const { error } = await tbTimeout(supabase.from("tactic_boards").upsert(row, { onConflict: "id" }), 10000);
@@ -27843,14 +27879,15 @@ function tbApply(pos, m) { if (m.pts) pos[m.id] = m.pts[m.pts.length - 1].slice(
 function tbDrawMini(c, b) {
   if (!c || !b) return;
   const o = c.getContext("2d"), sx = c.width / TB_VW, sy = c.height / TB_VH;
-  o.fillStyle = "#7d9cc6"; o.fillRect(0, 0, c.width, c.height);
-  o.fillStyle = "#4f7fbf"; o.fillRect(TB_MX * sx, TB_MY * sy, TB_COURT.W * sx, TB_COURT.L * sy);
+  const ct = tbCourtOf(b);
+  o.fillStyle = ct.out; o.fillRect(0, 0, c.width, c.height);
+  o.fillStyle = ct.court; o.fillRect(TB_MX * sx, TB_MY * sy, TB_COURT.W * sx, TB_COURT.L * sy);
   o.strokeStyle = "#fff"; o.lineWidth = 1; o.strokeRect(TB_MX * sx, TB_MY * sy, TB_COURT.W * sx, TB_COURT.L * sy);
   o.beginPath(); o.moveTo(TB_MX * sx - 2, (TB_MY + TB_COURT.net) * sy); o.lineTo((TB_MX + TB_COURT.W) * sx + 2, (TB_MY + TB_COURT.net) * sy); o.stroke();
   const pos = b.start || {};
   TB_PIECES.forEach(p => {
     const q = pos[p.id]; if (!q) return;
-    o.fillStyle = p.side === "me" ? "#2f6fd6" : p.side === "op" ? "#d64545" : (b.ballColor === "white" ? "#fff" : "#ffe14d");
+    o.fillStyle = p.side === "me" || p.side === "op" ? tbColorOf(b, p.side) : (b.ballColor === "white" ? "#fff" : "#ffe14d");
     o.beginPath(); o.arc((q[0] + TB_MX) * sx, (q[1] + TB_MY) * sy, p.side === "ball" ? 3.5 : 5, 0, 7); o.fill();
   });
 }
@@ -27862,7 +27899,8 @@ class TBEngine {
     this.hist = []; this.fut = []; this.playing = false; this.playT = 0; this.speed = 1; this.dirty = false; this.readOnly = false;
     this.drag = null; this.penCur = null; this.canvas = null; this.ctx = null; this.scale = 20; this.CW = 0; this.CH = 0;
     this.raf = 0; this.last = 0; this.shown = 0;
-    this.onChange = () => {}; this.onToast = () => {};
+    this.pieceK = 1; this.ballK = 1; this.longPress = true; this.lpTimer = 0;   // ★大きさ（この端末だけの設定）・長押しで名前
+    this.onChange = () => {}; this.onToast = () => {}; this.onLongPress = () => {};
   }
   X(m) { return (m + TB_MX) * this.scale; }
   Y(m) { return (m + TB_MY) * this.scale; }
@@ -27871,6 +27909,7 @@ class TBEngine {
   nowPos() { return this.posAfter(Infinity); }
   ballOn() { return !!this.nowPos().b; }
   ballStyle() { return TB_BALL[this.b.ballColor === "white" ? "white" : "yellow"]; }
+  colorOf(side) { return tbColorOf(this.b, side); }
   trailFor(side) { return side === "ball" ? this.b.ballTrail !== false : this.b.playerTrail !== false; }
   attach(canvas, box) {
     if (!canvas || !box) return;
@@ -27900,8 +27939,9 @@ class TBEngine {
   // ---- 描画 ----
   drawCourt() {
     const o = this.ctx, C = TB_COURT, X = v => this.X(v), Y = v => this.Y(v), s = this.scale;
-    o.fillStyle = "#86a6cf"; o.fillRect(0, 0, this.CW, this.CH);
-    o.fillStyle = "#4f7fbf"; o.fillRect(X(0), Y(0), C.W * s, C.L * s);
+    const ct = tbCourtOf(this.b);
+    o.fillStyle = ct.out; o.fillRect(0, 0, this.CW, this.CH);
+    o.fillStyle = ct.court; o.fillRect(X(0), Y(0), C.W * s, C.L * s);
     o.strokeStyle = "#fff"; o.lineWidth = 2; o.strokeRect(X(0), Y(0), C.W * s, C.L * s);
     const line = (x1, y1, x2, y2) => { o.beginPath(); o.moveTo(X(x1), Y(y1)); o.lineTo(X(x2), Y(y2)); o.stroke(); };
     line(C.sgl, 0, C.sgl, C.L); line(C.W - C.sgl, 0, C.W - C.sgl, C.L);
@@ -27943,10 +27983,10 @@ class TBEngine {
     if (p.side !== "ball") { const L = tbLen(pts); if (L > 1.2) pts = tbCut(pts, (L - 0.75) / L); }   // 選手の丸に矢じりが隠れないよう少し手前で止める
     if (pts.length < 2 || tbLen(pts) < 0.3) return;
     this.arrowLine(pts, "rgba(0,0,0,.3)", 4.6, true, k >= 1);
-    this.arrowLine(pts, p.side === "ball" ? this.ballStyle().path : TB_TRAIL_COLOR[p.side], 2.8, true, k >= 1);
+    this.arrowLine(pts, p.side === "ball" ? this.ballStyle().path : tbLight(this.colorOf(p.side)), 2.8, true, k >= 1);
     if (num && k >= 1) {
       const mid = tbCut(m.pts, 0.5), q = mid[mid.length - 1];
-      this.numBadge(this.X(q[0]) + 9, this.Y(q[1]) - 9, num, p.side === "ball" ? "#1d2330" : p.side === "me" ? "#2f6fd6" : "#d64545");
+      this.numBadge(this.X(q[0]) + 9, this.Y(q[1]) - 9, num, p.side === "ball" ? "#1d2330" : this.colorOf(p.side));
     }
   }
   // ボールを出した／消した動き：その場所に点線の丸と番号
@@ -27963,23 +28003,24 @@ class TBEngine {
     const o = this.ctx, x = this.X(q[0]), y = this.Y(q[1]);
     o.save(); if (opt.alpha !== undefined) o.globalAlpha = Math.max(0, Math.min(1, opt.alpha));
     if (p.side === "ball") {
-      const lift = opt.lift || 0, r = 10 * (1 + lift * 0.5), bs = this.ballStyle();
-      o.fillStyle = "rgba(0,0,0,.28)"; o.beginPath(); o.ellipse(x, y + 4 + lift * 12, 8.5, 3.4, 0, 0, 7); o.fill();
+      const K = this.ballK || 1, lift = opt.lift || 0, r = 10 * K * (1 + lift * 0.5), bs = this.ballStyle();
+      o.fillStyle = "rgba(0,0,0,.28)"; o.beginPath(); o.ellipse(x, y + 4 * K + lift * 12, 8.5 * K, 3.4 * K, 0, 0, 7); o.fill();
       o.fillStyle = bs.fill; o.strokeStyle = bs.edge; o.lineWidth = 2;
       o.beginPath(); o.arc(x, y - lift * 12, r, 0, 7); o.fill(); o.stroke();
     } else {
-      const r = 13;
+      const K = this.pieceK || 1, r = 13 * K, nk = Math.max(0.9, Math.min(1.5, K));   // 名前の文字は大きくしすぎない
       o.shadowColor = "rgba(0,0,0,.35)"; o.shadowBlur = 5;
-      o.fillStyle = p.side === "me" ? "#2f6fd6" : "#d64545";
+      o.fillStyle = this.colorOf(p.side);
       o.beginPath(); o.arc(x, y, r, 0, 7); o.fill(); o.shadowBlur = 0;
       o.strokeStyle = opt.active ? "#ffe14d" : "#fff"; o.lineWidth = opt.active ? 3.5 : 2.2; o.stroke();
-      o.fillStyle = "#fff"; o.font = "800 13px sans-serif"; o.textAlign = "center"; o.textBaseline = "middle"; o.fillText(p.label, x, y + 0.5);
+      o.fillStyle = "#fff"; o.font = `800 ${Math.round(13 * K)}px sans-serif`; o.textAlign = "center"; o.textBaseline = "middle"; o.fillText(p.label, x, y + 0.5);
       const nm = (this.b.names || {})[p.id];
       if (nm) {
-        o.font = "800 11px sans-serif"; const w = o.measureText(nm).width + 10;
+        const fh = 16 * nk;
+        o.font = `800 ${Math.round(11 * nk)}px sans-serif`; const w = o.measureText(nm).width + 10 * nk;
         o.fillStyle = "rgba(20,28,44,.78)"; o.beginPath();
-        if (o.roundRect) o.roundRect(x - w / 2, y + r + 3, w, 16, 8); else o.rect(x - w / 2, y + r + 3, w, 16);
-        o.fill(); o.fillStyle = "#fff"; o.fillText(nm, x, y + r + 11.5);
+        if (o.roundRect) o.roundRect(x - w / 2, y + r + 3, w, fh, fh / 2); else o.rect(x - w / 2, y + r + 3, w, fh);
+        o.fill(); o.fillStyle = "#fff"; o.fillText(nm, x, y + r + 3 + fh / 2 + 0.5);
       }
     }
     o.restore();
@@ -28051,7 +28092,7 @@ class TBEngine {
   stop() { cancelAnimationFrame(this.raf); this.playing = false; this.draw(); this.onChange(); }
   // ---- さわる ----
   hitPiece(q, pos) {
-    let best = null, bd = 1.5;
+    let best = null, bd = 1.5 * Math.max(1, this.pieceK || 1, this.ballK || 1);   // ★大きくした分、さわれる範囲も広げる
     [...TB_PIECES].reverse().forEach(p => { const v = pos[p.id]; if (!v) return; const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; best = p; } });
     return best;
   }
@@ -28062,6 +28103,18 @@ class TBEngine {
     if (this.tool === "pen") { this.penCur = { kind: this.penKind, color: this.penColor, pts: [q] }; this.draw(); return; }
     const pos = this.nowPos(), p = this.hitPiece(q, pos); if (!p) return;
     this.drag = { id: p.id, off: [pos[p.id][0] - q[0], pos[p.id][1] - q[1]], pts: [pos[p.id].slice()], last: null };
+    // ★選手を動かさずに長押し → 名前を入れる画面
+    clearTimeout(this.lpTimer);
+    if (this.longPress && p.side !== "ball") {
+      const id = p.id;
+      this.lpTimer = setTimeout(() => {
+        const d = this.drag;
+        if (!d || d.id !== id || (d.last && Math.hypot(d.last[0] - d.pts[0][0], d.last[1] - d.pts[0][1]) > 0.3)) return;
+        this.drag = null; this.draw();
+        try { navigator.vibrate && navigator.vibrate(15); } catch (_) {}
+        this.onLongPress(id);
+      }, 550);
+    }
     this.draw();
   }
   move(e) {
@@ -28070,9 +28123,11 @@ class TBEngine {
     const q = this.toM(e), d = this.drag;
     const np = [Math.max(-TB_MX + 0.4, Math.min(TB_COURT.W + TB_MX - 0.4, q[0] + d.off[0])), Math.max(-TB_MY + 0.4, Math.min(TB_COURT.L + TB_MY - 0.4, q[1] + d.off[1]))];
     const l = d.pts[d.pts.length - 1]; if (Math.hypot(np[0] - l[0], np[1] - l[1]) > 0.2) d.pts.push(np);
+    if (Math.hypot(np[0] - d.pts[0][0], np[1] - d.pts[0][1]) > 0.3) clearTimeout(this.lpTimer);   // 動かし始めたら長押しではない
     d.last = np; this.draw();
   }
   up() {
+    clearTimeout(this.lpTimer);
     if (this.penCur) {
       const c = this.penCur; this.penCur = null;
       if (tbLen(c.pts) > 0.6) { this.snapshot(); this.b.draw.push(c); }
@@ -28146,7 +28201,11 @@ function TBSwitch({ label, on, onClick }) {
 // ---------- ボード画面 ----------
 function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
   const engRef = useRef(null);
-  if (!engRef.current) { const e = new TBEngine(); e.b = tbClone(board); e.readOnly = readOnly; engRef.current = e; }
+  if (!engRef.current) {
+    const e = new TBEngine(); e.b = tbClone(board); e.readOnly = readOnly;
+    const df = tbLoadDefaults(); if (df && [0.5, 1, 2].includes(df.speed)) e.speed = df.speed;   // ★いつもの再生の速さ
+    engRef.current = e;
+  }
   const eng = engRef.current;
   const [, setTick] = useState(0);
   const rerender = useCallback(() => setTick(t => t + 1), []);
@@ -28158,8 +28217,37 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
   const [saving, setSaving] = useState(false);
   const backAsk = useRef(false);
   const mine = !board.owner_id || board.owner_id === ctx.userId;
-
-  useEffect(() => { eng.onChange = rerender; eng.onToast = showToast; return () => { cancelAnimationFrame(eng.raf); }; }, [eng, rerender, showToast]);
+  // ★この端末だけの設定（選手・ボールの大きさ／画面を消さない／長押しで名前）
+  const [dev, setDev] = useState(tbLoadDev);
+  eng.pieceK = tbSizeK(dev.pieceSize); eng.ballK = tbSizeK(dev.ballSize); eng.longPress = dev.longPress !== false;
+  // ★選手マスター（名前を選ぶ候補）。味方＝自チームの選手、相手＝自チーム以外として登録した選手
+  const [roster, setRoster] = useState([]);
+  useEffect(() => { if (readOnly) return; let off = false; getPlayerRoster().then(r => { if (!off) setRoster((r || []).filter(x => !x.deleted_at && x.player_name)); }).catch(() => {}); return () => { off = true; }; }, [readOnly]);
+  const nameChoices = useMemo(() => {
+    const mk = list => {
+      const full = [...new Set(list.map(x => String(x.player_name).trim()).filter(Boolean))];
+      const sur = n => n.split(/[\s　]+/)[0];
+      const cnt = {}; full.forEach(n => { cnt[sur(n)] = (cnt[sur(n)] || 0) + 1; });
+      // 名字だけで区別できる人は名字、同じ名字がいる人はフルネーム（コートの上で短く見せるため）
+      return full.map(n => ({ full: n, label: (cnt[sur(n)] === 1 ? sur(n) : n.replace(/[\s　]+/g, "")).slice(0, 10) }));
+    };
+    return { me: mk(roster.filter(x => x.is_own_team !== false)), op: mk(roster.filter(x => x.is_own_team === false)) };
+  }, [roster]);
+  // ★画面を消さない（スリープ防止）：この画面を開いている間だけ。アプリに戻ってきたらもう一度お願いする
+  useEffect(() => {
+    if (!dev.wake || !(navigator.wakeLock && navigator.wakeLock.request)) return;
+    let lock = null, alive = true;
+    const req = async () => { try { if (alive && document.visibilityState === "visible") { lock = await navigator.wakeLock.request("screen"); } } catch (_) {} };
+    const onVis = () => { if (document.visibilityState === "visible") req(); };
+    req(); document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVis); try { lock && lock.release(); } catch (_) {} };
+  }, [dev.wake]);
+  useEffect(() => {
+    eng.onChange = rerender; eng.onToast = showToast;
+    eng.onLongPress = id => setSheet({ type:"pname", id, value: (eng.b.names || {})[id] || "" });
+    return () => { cancelAnimationFrame(eng.raf); clearTimeout(eng.lpTimer); };
+  }, [eng, rerender, showToast]);
+  useEffect(() => { eng.draw(); }, [eng, dev]);
   // ★アプリ全体の「文字の大きさ」(zoom) を、この画面を開いている間だけ解除する。
   //   zoom がかかったままだと、iPhone ではコートが大きくはみ出したり、指で触った位置がずれて選手が動かせなくなるため。
   useEffect(() => {
@@ -28225,7 +28313,8 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           {tool("wipe", "線を消す", TB_ICON.wipe, () => eng.wipe(), { disabled: eng.playing })}
           {tool("undo", "戻す", TB_ICON.undo, () => eng.undo(), { disabled: !eng.hist.length || eng.playing })}
           {tool("redo", "進む", TB_ICON.redo, () => eng.redo(), { disabled: !eng.fut.length || eng.playing })}
-          {tool("gear", "設定", TB_ICON.gear, () => setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}), ball: b.ballColor === "white" ? "white" : "yellow", trail: b.ballTrail !== false, ptrail: b.playerTrail !== false }), { disabled: eng.playing })}
+          {tool("gear", "設定", TB_ICON.gear, () => setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}), ball: b.ballColor === "white" ? "white" : "yellow", trail: b.ballTrail !== false, ptrail: b.playerTrail !== false,
+            court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) }, psize: dev.pieceSize, bsize: dev.ballSize, wake: !!dev.wake, lp: dev.longPress !== false, asDefault: false }), { disabled: eng.playing })}
         </div>
       )}
       {!readOnly && eng.tool === "pen" && (
@@ -28244,7 +28333,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         </div>
       )}
 
-      <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background:"#9fb3cc", position:"relative", overflow:"hidden" }}>
+      <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background: tbCourtOf(b).box, position:"relative", overflow:"hidden" }}>
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
         {readOnly && <div style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
@@ -28282,46 +28371,116 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           </div>
         </TBSheet>
       )}
-      {sheet && sheet.type === "settings" && (
+      {sheet && sheet.type === "settings" && (() => {
+        const sec = t => <div style={{ fontSize:12.5, fontWeight:800, color:C.navy, margin:"16px 0 4px", paddingTop:10, borderTop:`1px solid ${C.border}` }}>{t}</div>;
+        const sub = t => <div style={{ fontSize:12, color:C.textSec, margin:"8px 0 0" }}>{t}</div>;
+        const pick = (on) => ({ flex:1, border: on ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:"8px 2px", fontSize:12.5, fontWeight:800, color: on ? C.navy : C.textSec, cursor:"pointer", minWidth:0 });
+        const sizeRow = (key, set) => (
+          <div style={{ display:"flex", gap:4, margin:"6px 0 0" }}>
+            {TB_SIZES.map(([v, l]) => <button key={v} onClick={() => set(v)} style={{ ...pick(key === v), padding:"8px 0", fontSize: l.length > 2 ? 11.5 : 12.5 }}>{l}</button>)}
+          </div>
+        );
+        const pk = tbSizeK(sheet.psize), bk = tbSizeK(sheet.bsize), bc = TB_BALL[sheet.ball] || TB_BALL.yellow;
+        const ct = TB_COURTS[sheet.court] || TB_COURTS.hard;
+        const wakeOk = !!(navigator.wakeLock && navigator.wakeLock.request);
+        return (
         <TBSheet onBg={() => setSheet(null)}>
-          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>⚙ 設定</div>
-          <div style={{ fontSize:12, color:C.textSec }}>再生の速さ</div>
-          <div style={{ display:"flex", gap:6, margin:"6px 0 12px" }}>
-            {[[0.5, "ゆっくり"], [1, "ふつう"], [2, "速い"]].map(([v, l]) => (
-              <button key={v} onClick={() => setSheet({ ...sheet, speed:v })} style={{ flex:1, border: sheet.speed === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:9, fontSize:13, fontWeight:800, color: sheet.speed === v ? C.navy : C.textSec }}>{l}</button>
+          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:2 }}>⚙ 設定</div>
+
+          {sec("一般（この端末だけの設定）")}
+          <TBSwitch label="画面を消さない（この画面を開いている間）" on={sheet.wake} onClick={() => setSheet({ ...sheet, wake: !sheet.wake })} />
+          {sheet.wake && !wakeOk && <div style={{ fontSize:11.5, color:"#c0392b", marginTop:4 }}>この端末・ブラウザでは使えないことがあります（iPhoneはiOS 16.4以降）</div>}
+
+          {sec("コート")}
+          <div style={{ display:"flex", gap:6, margin:"6px 0 0" }}>
+            {TB_COURT_KEYS.map(k => { const c = TB_COURTS[k]; return (
+              <button key={k} onClick={() => setSheet({ ...sheet, court:k })} style={{ ...pick(sheet.court === k), padding:6, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                <span style={{ display:"block", width:"100%", height:30, borderRadius:5, background:c.court, border:`4px solid ${c.out}`, boxSizing:"border-box", position:"relative" }}>
+                  <span style={{ position:"absolute", left:0, right:0, top:"50%", height:2, marginTop:-1, background:"#fff" }} />
+                </span>
+                <span style={{ fontSize:11.5 }}>{c.name}</span>
+              </button>); })}
+          </div>
+
+          {sec("チームの色")}
+          {[["me", "味方"], ["op", "相手"]].map(([side, l]) => (
+            <div key={side} style={{ display:"flex", alignItems:"center", gap:6, margin:"8px 0 0" }}>
+              <b style={{ width:34, fontSize:13, color:C.text, flexShrink:0 }}>{l}</b>
+              <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                {TB_TEAM_COLORS.map(([c, nm]) => {
+                  const other = sheet.colors[side === "me" ? "op" : "me"], on = sheet.colors[side] === c, ng = other === c;
+                  return <button key={c} title={nm} aria-label={`${l}：${nm}`} disabled={ng} onClick={() => setSheet({ ...sheet, colors:{ ...sheet.colors, [side]:c } })}
+                    style={{ width:30, height:30, borderRadius:"50%", padding:0, border:"2px solid #fff", background:c, opacity: ng ? .2 : 1, cursor: ng ? "default" : "pointer",
+                      boxShadow: on ? `0 0 0 2.5px ${C.navy}` : "0 0 0 1px #c5ccd8" }} />;
+                })}
+              </div>
+            </div>
+          ))}
+
+          {sec("選手")}
+          {sub("大きさ（この端末だけ）")}
+          {sizeRow(sheet.psize, v => setSheet({ ...sheet, psize:v }))}
+          <div style={{ display:"flex", justifyContent:"center", alignItems:"flex-start", gap:22, background:ct.court, borderRadius:10, padding:"12px 0 10px", margin:"8px 0 0", minHeight:70 }}>
+            {[["me", "前", sheet.names.m1 || "味方"], ["op", "後", sheet.names.o2 || "相手"]].map(([side, lb, nm]) => (
+              <div key={side} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <span style={{ width:26 * pk, height:26 * pk, borderRadius:"50%", background:sheet.colors[side], border:"2px solid #fff", color:"#fff", fontWeight:800, fontSize:Math.round(13 * pk), display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 1px 4px rgba(0,0,0,.35)" }}>{lb}</span>
+                <span style={{ background:"rgba(20,28,44,.78)", color:"#fff", fontWeight:800, fontSize:Math.round(11 * Math.max(0.9, Math.min(1.5, pk))), borderRadius:8, padding:"1px 6px" }}>{nm}</span>
+              </div>
             ))}
           </div>
-          <div style={{ fontSize:12, color:C.textSec }}>選手の名前（味方・相手どちらも。空でもOK）</div>
-          <div style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:"6px 8px", alignItems:"center", margin:"6px 0 12px" }}>
+          <TBSwitch label="選手を長押しして名前を入れる" on={sheet.lp} onClick={() => setSheet({ ...sheet, lp: !sheet.lp })} />
+          {sub("選手の名前（空でもOK。選手マスターの名前から選べます）")}
+          <datalist id="tb-names-me">{nameChoices.me.map(c => <option key={c.full} value={c.label}>{c.full}</option>)}</datalist>
+          <datalist id="tb-names-op">{nameChoices.op.map(c => <option key={c.full} value={c.label}>{c.full}</option>)}</datalist>
+          <div style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:"6px 8px", alignItems:"center", margin:"6px 0 0" }}>
             {TB_PIECES.filter(p => p.side !== "ball" && (b.start[p.id] || eng.nowPos()[p.id])).map(p => (
               <Fragment key={p.id}>
                 <span style={{ display:"flex", alignItems:"center", gap:5, fontSize:12.5, fontWeight:800, whiteSpace:"nowrap" }}>
-                  <span style={{ width:20, height:20, borderRadius:"50%", background: p.side === "me" ? "#2f6fd6" : "#d64545", color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.label}</span>{p.name}
+                  <span style={{ width:20, height:20, borderRadius:"50%", background: sheet.colors[p.side], color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.label}</span>{p.name}
                 </span>
-                <input type="text" autoComplete="off" value={sheet.names[p.id] || ""} maxLength={10}
+                <input type="text" autoComplete="off" list={`tb-names-${p.side}`} value={sheet.names[p.id] || ""} maxLength={10}
                   placeholder={p.side === "me" ? (p.label === "前" ? "例：田中" : "例：佐藤") : (p.label === "前" ? "例：〇〇高 山本" : "例：〇〇高 中村")}
                   onChange={e => { const nm = { ...sheet.names }; const v = e.target.value; if (v.trim()) nm[p.id] = v; else delete nm[p.id]; setSheet({ ...sheet, names:nm }); }}
                   style={{ border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 8px", fontSize:14, minWidth:0 }} />
               </Fragment>
             ))}
           </div>
-          <div style={{ fontSize:12, color:C.textSec }}>ボールの色</div>
-          <div style={{ display:"flex", gap:6, margin:"6px 0 6px" }}>
+
+          {sec("ボール")}
+          {sub("大きさ（この端末だけ）")}
+          {sizeRow(sheet.bsize, v => setSheet({ ...sheet, bsize:v }))}
+          <div style={{ display:"flex", justifyContent:"center", alignItems:"center", background:ct.court, borderRadius:10, height:60, margin:"8px 0 0" }}>
+            <span style={{ width:20 * bk, height:20 * bk, borderRadius:"50%", background:bc.fill, border:`2px solid ${bc.edge}`, boxShadow:"0 2px 3px rgba(0,0,0,.3)" }} />
+          </div>
+          {sub("ボールの色")}
+          <div style={{ display:"flex", gap:6, margin:"6px 0 0" }}>
             {[["yellow", "黄色", "#ffe14d"], ["white", "白", "#ffffff"]].map(([v, l, c]) => (
-              <button key={v} onClick={() => setSheet({ ...sheet, ball:v })} style={{ flex:1, border: sheet.ball === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:9, fontSize:13, fontWeight:800, color: sheet.ball === v ? C.navy : C.textSec, display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+              <button key={v} onClick={() => setSheet({ ...sheet, ball:v })} style={{ ...pick(sheet.ball === v), display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
                 <span style={{ width:16, height:16, borderRadius:"50%", background:c, border:"1.5px solid #8a93a3" }} />{l}
               </button>
             ))}
           </div>
           <TBSwitch label="ボールの軌跡" on={sheet.trail} onClick={() => setSheet({ ...sheet, trail: !sheet.trail })} />
-          <TBSwitch label="選手の軌跡" on={sheet.ptrail} onClick={() => setSheet({ ...sheet, ptrail: !sheet.ptrail })} />
-          <div style={{ fontSize:12, color:C.textSec, marginTop:12 }}>ダブルス／シングルス（変えると初期配置に戻ります）</div>
-          <div style={{ display:"flex", gap:6, margin:"6px 0 12px" }}>
-            {[["double", "ダブルス"], ["single", "シングルス"]].map(([v, l]) => (
-              <button key={v} onClick={() => setSheet({ ...sheet, mode:v })} style={{ flex:1, border: sheet.mode === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:9, fontSize:13, fontWeight:800, color: sheet.mode === v ? C.navy : C.textSec }}>{l}</button>
+
+          {sec("再生")}
+          {sub("再生の速さ")}
+          <div style={{ display:"flex", gap:6, margin:"6px 0 0" }}>
+            {[[0.5, "ゆっくり"], [1, "ふつう"], [2, "速い"]].map(([v, l]) => (
+              <button key={v} onClick={() => setSheet({ ...sheet, speed:v })} style={pick(sheet.speed === v)}>{l}</button>
             ))}
           </div>
-          <div style={{ display:"flex", gap:8 }}>
+          <TBSwitch label="選手の軌跡" on={sheet.ptrail} onClick={() => setSheet({ ...sheet, ptrail: !sheet.ptrail })} />
+          {sub("ダブルス／シングルス（変えると初期配置に戻ります）")}
+          <div style={{ display:"flex", gap:6, margin:"6px 0 0" }}>
+            {[["double", "ダブルス"], ["single", "シングルス"]].map(([v, l]) => (
+              <button key={v} onClick={() => setSheet({ ...sheet, mode:v })} style={pick(sheet.mode === v)}>{l}</button>
+            ))}
+          </div>
+
+          <div style={{ marginTop:16, paddingTop:10, borderTop:`1px solid ${C.border}` }}>
+            <TBSwitch label="いつもの設定にする（次に作る作戦でも、コート・色・ボール・軌跡・速さを使う）" on={sheet.asDefault} onClick={() => setSheet({ ...sheet, asDefault: !sheet.asDefault })} />
+          </div>
+          <div style={{ display:"flex", gap:8, marginTop:12 }}>
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
             <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
               // ★設定は「保存」を押したときだけ反映（「キャンセル」なら何も変わらない）
@@ -28329,15 +28488,58 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
               eng.speed = sheet.speed;
               const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
               b.ballColor = sheet.ball; b.ballTrail = !!sheet.trail; b.playerTrail = !!sheet.ptrail;
-              eng.dirty = true; setSheet(null); eng.draw(); showToast("設定を保存しました");
+              b.court = sheet.court; b.colors = { ...sheet.colors };
+              const nd = { ...dev, pieceSize: sheet.psize, ballSize: sheet.bsize, wake: !!sheet.wake, longPress: !!sheet.lp };
+              tbSaveDev(nd); setDev(nd);
+              eng.pieceK = tbSizeK(nd.pieceSize); eng.ballK = tbSizeK(nd.ballSize); eng.longPress = nd.longPress;
+              if (sheet.asDefault) tbSaveDefaults({ court: sheet.court, colors: { ...sheet.colors }, ballColor: sheet.ball, ballTrail: !!sheet.trail, playerTrail: !!sheet.ptrail, speed: sheet.speed });
+              eng.dirty = true; setSheet(null); eng.draw();
+              showToast(sheet.asDefault ? "設定を保存しました（いつもの設定にもしました）" : "設定を保存しました");
             }}>保存</button>
           </div>
         </TBSheet>
-      )}
+        );
+      })()}
+      {/* ★選手を長押ししたとき：名前を入れる（選手マスターから選べる） */}
+      {sheet && sheet.type === "pname" && (() => {
+        const p = tbPieceOf(sheet.id); if (!p) return null;
+        const kw = (sheet.value || "").trim();
+        const list = (nameChoices[p.side] || []).filter(c => !kw || c.full.includes(kw) || c.label.includes(kw)).slice(0, 40);
+        const apply = (v) => {
+          const nm = { ...(b.names || {}) }; const t = String(v || "").trim().slice(0, 10);
+          if (t) nm[p.id] = t; else delete nm[p.id];
+          b.names = nm; eng.dirty = true; setSheet(null); eng.draw(); rerender();
+        };
+        return (
+          <TBSheet onBg={() => setSheet(null)}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+              <span style={{ width:24, height:24, borderRadius:"50%", background: eng.colorOf(p.side), color:"#fff", fontSize:12, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.label}</span>
+              <span style={{ fontSize:15, fontWeight:800, color:C.navy }}>{p.name} の名前</span>
+            </div>
+            <input type="text" autoComplete="off" value={sheet.value} maxLength={10} onChange={e => setSheet({ ...sheet, value:e.target.value })}
+              placeholder={p.side === "me" ? "名前を入力、または下から選ぶ" : "例：〇〇高 山本"}
+              style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:15 }} />
+            {list.length > 0 && (
+              <>
+                <div style={{ fontSize:11.5, color:C.textSec, margin:"10px 0 4px" }}>{p.side === "me" ? "選手マスター（自チーム）" : "選手マスター（相手校の選手）"}から選ぶ</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, maxHeight:180, overflowY:"auto" }}>
+                  {list.map(c => (
+                    <button key={c.full} onClick={() => apply(c.label)} style={{ border:`1px solid ${C.border}`, background:C.white, borderRadius:16, padding:"6px 11px", fontSize:13, fontWeight:700, color:C.text, cursor:"pointer" }}>{c.full}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            <div style={{ display:"flex", gap:8, marginTop:14 }}>
+              {(b.names || {})[p.id] && <button style={{ ...S.btn("#fff"), color:"#c0392b", border:`1px solid ${C.border}`, flex:1 }} onClick={() => apply("")}>名前を消す</button>}
+              <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
+              <button style={{ ...S.btn(C.navy), flex:1.4 }} onClick={() => apply(sheet.value)}>決定</button>
+            </div>
+          </TBSheet>
+        );
+      })()}
     </div>
   );
 }
-
 // ---------- 「🧩 作戦ボード」タブ（一覧） ----------
 function TacticsPanel({ ctx, isViewer }) {
   const [list, setList] = useState(null);   // null = 読み込み中
