@@ -26221,7 +26221,9 @@ function AiAnalysisPlayerPicker({ currentSelection, onSelect, onBack }) {
 //   ・対象：スマホ内の動画（アップロードはしない）／YouTubeのURL（試合に登録していなくてもOK）
 //   ・描き込みは「動画の時刻」付きで保存し、再生するとその時刻に表示する
 //   ・保存先：Supabase の video_annotations（共有範囲 scope＋動画ごとに1行、shapes に JSON 配列）
-//       scope = 'match:<試合ID>'（試合の動画）／'school:<学校ID>'（チームで共有）／'user:<ユーザーID>'（自分だけ）
+//       scope = 'match:<試合ID>'（試合の動画・チームで共有）／'match:<試合ID>:user:<ユーザーID>'（試合の動画・自分だけ）
+//               'school:<学校ID>'（チームで共有）／'user:<ユーザーID>'（自分だけ）
+//     ★2026-11：試合の動画も「👥 チームで共有」と「🔒 自分だけ」を別々に持てるようにした（切り替えても消えない）
 //     通信できないときに備えて、端末（localStorage）にも控えを残す
 //   ・閲覧専用アカウントは見るだけ（描き込み・メモはできない）
 // ============================================================
@@ -26963,11 +26965,16 @@ class VAEngine {
 
 // ---------- 保存（Supabase＋端末の控え） ----------
 function vaScopeOf({ matchId, shared, schoolId, userId }) {
-  if (matchId) return "match:" + matchId;
+  if (matchId) return (shared || !userId) ? "match:" + matchId : `match:${matchId}:user:${userId}`;
   if (shared && schoolId) return "school:" + schoolId;
   return "user:" + (userId || "me");
 }
 const vaLocalKey = (scope, sourceKey) => `va:${scope}:${sourceKey}`;
+const vaIsPrivateScope = (scope) => String(scope || "").startsWith("user:") || String(scope || "").includes(":user:");
+// ★試合の動画を開いたとき、最初に表示する描き込み（"team"＝チームで共有／"me"＝自分だけ）。この端末に覚えておく
+const VA_MATCH_LAYER_KEY = "va:matchLayer";
+function vaGetMatchLayer() { try { return localStorage.getItem(VA_MATCH_LAYER_KEY) === "me" ? "me" : "team"; } catch (_) { return "team"; } }
+function vaSetMatchLayer(v) { try { localStorage.setItem(VA_MATCH_LAYER_KEY, v === "me" ? "me" : "team"); } catch (_) {} }
 // ★スマホの動画の目印（1コマ目の小さな画像と長さ）。「続きから」で同じ動画を選び直すときの手がかり。
 //   動画そのものと同じく、この端末の中だけに保存する（データベースには送らない）
 const vaThumbKey = (sourceKey) => "va:thumb:" + sourceKey;
@@ -27015,8 +27022,8 @@ function vaSerialize(shapes) {
   );
 }
 const VA_LIST_COLS = "scope, source_key, title, kind, shared, match_id, owner_id, shapes, updated_at";
-async function vaLoadList(matchId) {
-  const { data, error } = await supabase.from("video_annotations").select("source_key, shapes, updated_at").eq("scope", "match:" + matchId);
+async function vaLoadList(scope) {
+  const { data, error } = await supabase.from("video_annotations").select("source_key, shapes, updated_at").eq("scope", scope);
   if (error) { console.error(error); return null; }
   return data ?? [];
 }
@@ -27087,10 +27094,13 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
 
   const videoLinks = useMemo(() => normalizeVideoLinks(match?.video_links), [match]);
   // ★共有範囲（試合の動画以外）：チームで共有／自分だけ
-  const [shared, setShared] = useState(() => initial ? initial.shared !== false : true);
+  //   試合の動画は「チームで共有」と「自分だけ」を別々に持ち、上のボタンで切り替える（閲覧専用はチームのものだけ見る）
+  const [shared, setShared] = useState(() => initial ? initial.shared !== false : (match && !readOnly ? vaGetMatchLayer() !== "me" : true));
   const scopeRef = useRef(null);
   scopeRef.current = vaScopeOf({ matchId: match?.id, shared, schoolId: ctx.schoolId, userId: ctx.userId });
   const canChangeShare = !match && !readOnly && !!ctx.schoolId && (!initial?.ownerId || initial.ownerId === ctx.userId);
+  const canSwitchLayer = !!match && !readOnly && !!ctx.userId;
+  const layerPrivate = !!match && vaIsPrivateScope(scopeRef.current);
 
   // ★アプリ全体の「文字の大きさ」(zoom) を、この画面を開いている間だけ解除する。
   //   zoom がかかったままだと、指で触った位置と描き込みの位置がずれる端末があるため。
@@ -27105,9 +27115,10 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
   useEffect(() => {
     if (!match) return;
     let alive = true;
-    vaLoadList(match.id).then(list => { if (alive && list) setSavedList(list); });
+    setSavedList([]);
+    vaLoadList(vaScopeOf({ matchId: match.id, shared, schoolId: ctx.schoolId, userId: ctx.userId })).then(list => { if (alive && list) setSavedList(list); });
     return () => { alive = false; };
-  }, [match?.id]);
+  }, [match?.id, shared, ctx.userId]);
 
   // ---- 保存 ----
   // ★保存の流れ：端末の控え（未送信の印つき）をすぐ書く → Supabaseへ順番に送る → 送れたら印を外す。
@@ -27120,8 +27131,9 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     if (json === lastSaved.current) return;
     const scope = scopeRef.current;
     const lkey = vaLocalKey(scope, src.key);
-    const row = { scope, source_key: src.key, title: src.title || null, kind: src.kind, shared: !scope.startsWith("user:"),
-      match_id: match?.id ?? null, school_id: ctx.schoolId ?? null, shapes: JSON.parse(json), updated_at: new Date().toISOString() };
+    const row = { scope, source_key: src.key, title: src.title || null, kind: src.kind, shared: !vaIsPrivateScope(scope),
+      match_id: match?.id ?? null, school_id: ctx.schoolId ?? null, shapes: JSON.parse(json), updated_at: new Date().toISOString(),
+      ...(match && vaIsPrivateScope(scope) && ctx.userId ? { owner_id: ctx.userId } : {}) };   // ★試合の動画の「自分だけ」は持ち主をはっきり送る
     try { localStorage.setItem(lkey, JSON.stringify({ shapes: json, pending: true })); } catch (_) {}
     lastSaved.current = json;
     setSaveState("saving");
@@ -27142,7 +27154,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
         if (sourceRef.current === src && lastSaved.current === json) { lastSaved.current = null; setSaveState("local"); } // 次の変更・画面を閉じるときに送り直す
       }
     });
-  }, [eng, match, shared, ctx.schoolId]);
+  }, [eng, match, shared, ctx.schoolId, ctx.userId]);
   const saveSoon = useCallback(() => {
     if (eng.readOnly || saveTimer.current) return;  // ★予約済みなら先送りしない（再生中でも必ず保存される）
     saveTimer.current = setTimeout(saveNow, 800);
@@ -27337,6 +27349,39 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
     showToast(next ? "チームの人も見られるようにしました" : "自分だけが見られるようにしました");
   };
 
+  // ★試合の動画：「👥 チームで共有」⇔「🔒 自分だけ」の表示を切り替える（データは動かさない。2つは別々に保存）
+  const switchLayer = (toShared) => {
+    if (!match || toShared === shared) return;
+    eng.finishTraj();
+    saveNow();   // 今の描き込みを、今の側に保存してから切り替える
+    const next = vaScopeOf({ matchId: match.id, shared: toShared, schoolId: ctx.schoolId, userId: ctx.userId });
+    scopeRef.current = next; setShared(toShared); vaSetMatchLayer(toShared ? "team" : "me");
+    const src = sourceRef.current;
+    if (src) loadShapesFor(src);
+    showToast(toShared ? "👥 チームで共有の描き込みを表示しています" : "🔒 自分だけの描き込みを表示しています（ほかの人には見えません）");
+  };
+  // ★自分だけの描き込みを、チームで共有の描き込みに足す（自分だけの方もそのまま残る）
+  const [copying, setCopying] = useState(false);
+  const copyToTeam = async () => {
+    const src = sourceRef.current; if (!match || !src || shared || copying) return;
+    eng.finishTraj();
+    const mine = JSON.parse(vaSerialize(eng.shapes));
+    if (!mine.length) { showToast("コピーする描き込みがありません"); return; }
+    setCopying(true);
+    try {
+      saveNow();
+      const teamScope = vaScopeOf({ matchId: match.id, shared: true, schoolId: ctx.schoolId, userId: ctx.userId });
+      const team = (await vaLoadShapes(teamScope, src.key)) || [];
+      const ids = new Set(team.map(x => x && x.id));
+      const add = mine.map(x => (x && ids.has(x.id)) ? { ...x, id: vaNewId() } : x);
+      await vaSaveRow({ scope: teamScope, source_key: src.key, title: src.title || null, kind: src.kind, shared: true,
+        match_id: match.id, school_id: ctx.schoolId ?? null, shapes: [...team, ...add], updated_at: new Date().toISOString() });
+      try { localStorage.removeItem(vaLocalKey(teamScope, src.key)); } catch (_) {}
+      showToast(`チームで共有の描き込みに${add.length}件コピーしました`);
+    } catch (e) { console.error(e); showToast("コピーできませんでした。電波の良い所でもう一度お試しください"); }
+    finally { setCopying(false); }
+  };
+
   // ---- 再生操作 ----
   const stepBy = (n) => { const p = eng.player; if (!p) return; p.pause(); p.seek(p.time + n * p.step); };
   // ★10秒とばし：押した回数だけ続けてとぶ（3回で30秒）。再生中なら再生したまま。
@@ -27515,7 +27560,7 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
         <button onClick={handleClose} style={{ background:"rgba(255,255,255,.15)", color:C.white, border:"none", borderRadius:8, padding:"7px 10px", fontSize:13, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontSize:15, fontWeight:800 }}>動画分析</div>
-          <div style={{ fontSize:11, opacity:.8, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{matchLabel}{source ? "　/　" + source.title : ""}</div>
+          <div style={{ fontSize:11, opacity:.8, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{matchLabel}{match ? (layerPrivate ? "（🔒 自分だけ）" : "（👥 チーム）") : ""}{source ? "　/　" + source.title : ""}</div>
         </div>
         {source && !readOnly && (
           <div style={{ fontSize:10.5, opacity:.85, whiteSpace:"nowrap" }}>
@@ -27525,6 +27570,25 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
       </div>
 
       <div style={{ maxWidth:820, margin:"0 auto", padding:12, paddingBottom:"calc(40px + env(safe-area-inset-bottom,0px))" }}>
+        {/* ★試合の動画：チームで共有／自分だけ の切り替え（2つは別々に保存） */}
+        {match && canSwitchLayer && (
+          <div style={{ ...card, padding:10 }}>
+            <div style={{ display:"flex", background:"#eef1f6", borderRadius:10, padding:3, gap:3 }}>
+              {[[true, "👥 チームで共有"], [false, "🔒 自分だけ"]].map(([v, l]) => (
+                <button key={String(v)} onClick={() => switchLayer(v)} disabled={loadingShapes}
+                  style={{ ...seg(shared === v), padding:"9px 4px", color: shared === v ? (v ? C.navy : "#374151") : C.textSec }}>{l}</button>
+              ))}
+            </div>
+            <div style={{ fontSize:11, color:C.textSec, lineHeight:1.6, marginTop:6 }}>
+              {shared ? "この試合を見られる人みんなが見て、書き足せる描き込みです。" : "自分だけのメモ用の描き込みです。ほかの人には見えません。"}2つは別々に保存されるので、切り替えても消えません。
+            </div>
+            {!shared && source && (
+              <button onClick={copyToTeam} disabled={copying || loadingShapes} style={{ ...btn, width:"100%", marginTop:8, padding:"8px 10px", fontSize:12.5, color:C.navy, opacity: copying ? .6 : 1 }}>
+                {copying ? "コピー中…" : "👥 この描き込みをチームで共有の方にコピー"}
+              </button>
+            )}
+          </div>
+        )}
         {/* 動画を選ぶ */}
         {!source && match && (
           <div style={card}>
@@ -27592,6 +27656,8 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
                 onPointerUp={() => eng.pointerUp()}
                 onPointerCancel={() => eng.pointerUp()}
               />
+              {/* ★試合の動画で「自分だけ」の描き込みを出しているときの目印（全画面のときも分かるように） */}
+              {layerPrivate && <div style={{ position:"absolute", left:8, top: fs ? "calc(58px + env(safe-area-inset-top,0px))" : 34, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(55,65,81,.85)", color:"#fff", pointerEvents:"none", zIndex:2 }}>🔒 自分だけの描き込み</div>}
               {!fs && <div style={{ position:"absolute", top:8, left:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background: isDraw ? "#e65100" : "rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{isDraw ? "描き込み中" : "再生"}</div>}
               {!fs && <div style={{ position:"absolute", top:8, right:8, fontSize:11, fontWeight:700, padding:"3px 7px", borderRadius:5, background:"rgba(0,0,0,.55)", color:"#fff", pointerEvents:"none" }}>{rate}x</div>}
               {/* ★全画面にする（通常画面のとき、動画の右下） */}
@@ -27898,8 +27964,10 @@ function VideoAnalysisScreen({ match, initial, ctx = {}, readOnly, onClose }) {
 
 // 試合詳細から開くとき用（共有範囲は試合なので ctx は保存の補助情報だけ）
 function VideoAnalysisScreenForMatch(props) {
-  const [ctx, setCtx] = useState({});
-  useEffect(() => { getMyProfile().then(p => setCtx({ schoolId: p?.school_id || null, userId: p?.id || null })); }, []);
+  const [ctx, setCtx] = useState(null);
+  useEffect(() => { getMyProfile().then(p => setCtx({ schoolId: p?.school_id || null, userId: p?.id || null })).catch(() => setCtx({})); }, []);
+  // ★だれが開いたか分かってから開く（「🔒 自分だけ」の描き込みを、その人の分として読み書きするため）
+  if (!ctx) return <div style={{ position:"fixed", inset:0, zIndex:500, background:C.gray, display:"flex", alignItems:"center", justifyContent:"center", color:C.textSec, fontSize:13 }}>読み込み中…</div>;
   return <VideoAnalysisScreen {...props} ctx={ctx} />;
 }
 
@@ -28871,19 +28939,25 @@ function VideoHubScreen({ onNavigate }) {
   const loadRecent = useCallback(() => {
     vaLoadRecent().then(rows => setRecent(rows || []));
   }, []);
-  // ★試合の動画に書き込みがあるか（見られる書き込みが1つでもあれば「書き込みあり」）
+  // ★試合の動画に書き込みがあるか。「👥 チーム」と「🔒 自分だけ（自分の分）」を分けて調べる
+  const [drawnMine, setDrawnMine] = useState(new Set());
+  const [matchLayer, setMatchLayerState] = useState(vaGetMatchLayer);
   const loadDrawn = useCallback(async (list) => {
-    if (!list || !list.length) { setDrawnMatches(new Set()); return; }
+    if (!list || !list.length) { setDrawnMatches(new Set()); setDrawnMine(new Set()); return; }
     try {
-      const { data, error } = await supabase.from("video_annotations").select("match_id, scope, shapes")
-        .in("scope", list.map(m => "match:" + m.id));
+      const me = (await getAuthUserFast())?.id || null;
+      const scopes = list.map(m => "match:" + m.id);
+      if (me) list.forEach(m => scopes.push(`match:${m.id}:user:${me}`));
+      const { data, error } = await supabase.from("video_annotations").select("match_id, scope, shapes").in("scope", scopes);
       if (error) { console.error(error); return; }
-      const ids = new Set();
+      const team = new Set(), mine = new Set();
       (data || []).forEach(r => {
         let sh = r.shapes; if (typeof sh === "string") { try { sh = JSON.parse(sh); } catch (_) { sh = []; } }
-        if (Array.isArray(sh) && sh.length) ids.add(r.match_id || String(r.scope).replace(/^match:/, ""));
+        if (!Array.isArray(sh) || !sh.length) return;
+        const mid = r.match_id || String(r.scope).replace(/^match:/, "").replace(/:user:.*$/, "");
+        if (vaIsPrivateScope(r.scope)) mine.add(mid); else team.add(mid);
       });
-      setDrawnMatches(ids);
+      setDrawnMatches(team); setDrawnMine(mine);
     } catch (e) { console.error(e); }
   }, []);
   useEffect(() => {
@@ -29008,6 +29082,19 @@ function VideoHubScreen({ onNavigate }) {
               スマホの動画の描き込みもチームの人が見られるようにする
             </label>
           )}
+          {/* ★試合に登録された動画を開いたとき、最初に出す描き込み（開いたあとでも切り替えられる） */}
+          {!isViewer && (
+            <div style={{ marginTop:10 }}>
+              <div style={{ fontSize:12, color:C.textSec }}>試合に登録された動画を開いたとき、最初に表示する描き込み</div>
+              <div style={{ display:"flex", gap:6, marginTop:5 }}>
+                {[["team", "👥 チームで共有"], ["me", "🔒 自分だけ"]].map(([v, l]) => (
+                  <button key={v} onClick={() => { vaSetMatchLayer(v); setMatchLayerState(v); }}
+                    style={{ flex:1, border: matchLayer === v ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:9, padding:"8px 4px", fontSize:12.5, fontWeight:800, color: matchLayer === v ? C.navy : C.textSec, cursor:"pointer" }}>{l}</button>
+                ))}
+              </div>
+              <div style={{ fontSize:11, color:C.textSec, marginTop:4 }}>開いたあとでも、動画の画面の上でいつでも切り替えられます</div>
+            </div>
+          )}
           <div style={{ fontSize:11.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>試合に登録していない動画でも、そのまま開いてスロー・コマ送り・描き込みができます。スマホの動画はアップロードしません。</div>
           <input ref={fileRef} type="file" accept="video/*" style={{ display:"none" }} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; onFile(f); }} />
         </div>
@@ -29070,13 +29157,18 @@ function VideoHubScreen({ onNavigate }) {
                 <div key={m.id} onClick={() => setOpened({ match: m })} style={{ display:"flex", gap:10, alignItems:"center", padding:"10px 2px", borderTop:`1px solid ${C.border}`, cursor:"pointer" }}>
                   <div style={{ position:"relative", flexShrink:0 }}>
                     {thumb(links[0]?.id, "▶")}
-                    {drawnMatches.has(m.id) && <span style={{ position:"absolute", left:3, top:3, width:22, height:22, borderRadius:"50%", background:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, boxShadow:"0 1px 3px rgba(0,0,0,.35)" }}>✏️</span>}
+                    {(drawnMatches.has(m.id) || drawnMine.has(m.id)) && <span style={{ position:"absolute", left:3, top:3, width:22, height:22, borderRadius:"50%", background:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, boxShadow:"0 1px 3px rgba(0,0,0,.35)" }}>✏️</span>}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:700, color:C.navy, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{matchTitle(m)}</div>
                     <div style={{ fontSize:11, color:C.textSec, marginTop:3 }}>{tag("#eef7ee", "#2e7d32", "試合の動画")}{fmtDate(m.match_date)}・動画{links.length}本</div>
                     {/* ★線などを描いた動画だけ「書き込みあり」 */}
-                    {drawnMatches.has(m.id) && <div style={{ marginTop:4 }}><span style={{ display:"inline-block", fontSize:10.5, fontWeight:700, borderRadius:5, padding:"2px 6px", background:"#fff1d6", color:"#9a5b00", border:"1px solid #f3c97a" }}>✏️ 書き込みあり</span></div>}
+                    {(drawnMatches.has(m.id) || drawnMine.has(m.id)) && (
+                      <div style={{ marginTop:4, display:"flex", gap:4, flexWrap:"wrap" }}>
+                        {drawnMatches.has(m.id) && <span style={{ display:"inline-block", fontSize:10.5, fontWeight:700, borderRadius:5, padding:"2px 6px", background:"#fff1d6", color:"#9a5b00", border:"1px solid #f3c97a" }}>👥 チームの書き込みあり</span>}
+                        {drawnMine.has(m.id) && <span style={{ display:"inline-block", fontSize:10.5, fontWeight:700, borderRadius:5, padding:"2px 6px", background:"#f1f2f5", color:"#4b5563", border:"1px solid #d5d9e0" }}>🔒 自分の書き込みあり</span>}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
