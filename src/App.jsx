@@ -28089,7 +28089,7 @@ function tbRowToBoard(r) {
   let d = r.data; if (typeof d === "string") { try { d = JSON.parse(d); } catch (_) { d = null; } }
   d = d || {};
   const mode = r.mode === "single" ? "single" : "double";
-  const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [], free: d.free || null }
+  const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [], fstart: d.fstart || d.free || null, fmoves: d.fstart ? (d.fmoves || []) : d.free ? [] : null }
     : d.steps ? tbFromSteps(d.steps) : { start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
   return { id: r.id, title: r.title || "", mode, shared: !!r.shared, owner_id: r.owner_id || null, updated_at: r.updated_at,
     names: d.names || {}, ballColor: d.ballColor === "white" ? "white" : "yellow", ballTrail: d.ballTrail !== false, playerTrail: d.playerTrail !== false,
@@ -28106,7 +28106,7 @@ async function tbLoadList() {
 }
 async function tbSaveBoard(b, schoolId) {
   const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
-    data: { start: b.start, moves: b.moves, draw: b.draw, free: b.free || null, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
+    data: { start: b.start, moves: b.moves, draw: b.draw, fstart: b.fstart || null, fmoves: b.fstart ? (b.fmoves || []) : null, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
       court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) } },
     updated_at: new Date().toISOString() };
   try {
@@ -28173,7 +28173,12 @@ class TBEngine {
   posAfter(n) { const pos = tbClone(this.b.start); this.groups().slice(0, n).forEach(g => g.forEach(m => tbApply(pos, m))); return pos; }
   nowPos() { return this.posAfter(Infinity); }
   // ★今コートに見えている並び：録画中は録画の最後、ふだんは自由に動かした並び（まだ動かしていなければ録画の最後）
-  viewPos() { return (!this.rec && this.b.free) ? tbClone(this.b.free) : this.nowPos(); }
+  // ふだん（録画していないとき）の並びと動き。まだなければ録画と同じものから始める（線と番号もそのまま見える）
+  ensureFree() { const b = this.b; if (!b.fstart) { b.fstart = tbClone(b.start); b.fmoves = tbClone(b.moves || []); } if (!b.fmoves) b.fmoves = []; }
+  // 今さわっている方：録画中は録画、ふだんは自由に動かした分（どちらも同じ仕組みで線と番号を出す）
+  act() { if (this.rec) return { start: this.b.start, moves: this.b.moves }; this.ensureFree(); return { start: this.b.fstart, moves: this.b.fmoves }; }
+  setAct(start, moves) { if (this.rec) { this.b.start = start; this.b.moves = moves; } else { this.b.fstart = start; this.b.fmoves = moves; } }
+  viewPos() { const A = this.act(), pos = tbClone(A.start); (A.moves || []).forEach(m => tbApply(pos, m)); return pos; }
   ballOn() { return !!this.viewPos().b; }
   ballStyle() { return TB_BALL[this.b.ballColor === "white" ? "white" : "yellow"]; }
   colorOf(side) { return tbColorOf(this.b, side); }
@@ -28198,8 +28203,8 @@ class TBEngine {
     const fx = r.width ? this.CW / r.width : 1, fy = r.height ? this.CH / r.height : 1;
     return [(e.clientX - r.left) * fx / this.scale - TB_MX, (e.clientY - r.top) * fy / this.scale - TB_MY];
   }
-  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, free: this.b.free || null, rec: this.rec }); }
-  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.free = o.free || null; this.rec = !!o.rec; }
+  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, fstart: this.b.fstart || null, fmoves: this.b.fmoves || null, rec: this.rec }); }
+  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.fstart = o.fstart || null; this.b.fmoves = o.fmoves || null; this.rec = !!o.rec; }
   snapshot(markDirty = true) { this.hist.push(this.cur()); if (this.hist.length > 100) this.hist.shift(); this.fut = []; if (markDirty) this.dirty = true; }
   undo() { if (!this.hist.length) return; this.fut.push(this.cur()); this.restore(this.hist.pop()); this.dirty = true; this.draw(); this.onChange(); }
   redo() { if (!this.fut.length) return; this.hist.push(this.cur()); this.restore(this.fut.pop()); this.dirty = true; this.draw(); this.onChange(); }
@@ -28302,9 +28307,9 @@ class TBEngine {
     if (pos.b) this.drawPiece(tbPieceOf("b"), pos.b, { lift: opt.lift || 0, alpha: opt.ballAlpha });
   }
   // 先頭から n 個のまとまりの跡（線と番号）。ボールを出す／消すは、その場所に印
-  drawHistory(n) {
-    const pos = tbClone(this.b.start);
-    this.groups().slice(0, n).forEach((g, gi) => g.forEach(m => {
+  drawHistory(n, start = this.b.start, moves = this.b.moves) {
+    const pos = tbClone(start);
+    tbGroups(moves).slice(0, n).forEach((g, gi) => g.forEach(m => {
       if (m.pts) this.drawTrail(m, gi + 1);
       else if (m.show && this.trailFor("ball")) this.drawBallEvent(m.show, gi + 1, false);
       else if (m.hide && pos.b && this.trailFor("ball")) this.drawBallEvent(pos.b, gi + 1, true);
@@ -28317,10 +28322,8 @@ class TBEngine {
     if (this.playing) { this.drawPlaying(); return; }
     (this.b.draw || []).forEach(d => this.drawPen(d));
     if (this.penCur) this.drawPen(this.penCur);
-    if (this.rec) {   // ★線と番号は録画中だけ
-      this.drawHistory(Infinity);
-      if (this.drag && this.drag.pts && this.drag.pts.length > 1) this.drawTrail({ id: this.drag.id, pts: this.drag.pts }, 0);
-    }
+    { const A = this.act(); this.drawHistory(Infinity, A.start, A.moves); }   // ★線と番号は録画のあるなしに関係なく同じ（設定の「軌跡」で出す／出さない）
+    if (this.drag && this.drag.pts && this.drag.pts.length > 1) this.drawTrail({ id: this.drag.id, pts: this.drag.pts }, 0);
     const pos = this.viewPos();
     if (this.drag && this.drag.last) pos[this.drag.id] = this.drag.last;
     this.drawPieces(pos);
@@ -28428,12 +28431,9 @@ class TBEngine {
     if (straight < 0.2 && tbLen(d.pts) < 0.4) { this.draw(); return; }   // ほとんど動いていない
     const pts = tbLen(d.pts) > straight * 1.03 ? d.pts : [d.pts[0], end];
     this.snapshot(this.rec);   // ★ふだん自由に動かすだけなら「保存していない変更」にはしない
-    if (!this.rec) {   // ★ふだん：位置が変わるだけ（線も番号も残さない）
-      const f = this.viewPos(); f[d.id] = end.slice(); this.b.free = f;
-      this.draw(); this.onChange(); return;
-    }
-    // ★動かすたびに、順番に記録（「同時」オンなら1つ前の動きと同時）
-    this.b.moves.push({ id: d.id, pts, with: this.sim && this.b.moves.length > 0 });
+    // ★動かすたびに、順番に記録（「同時」オンなら1つ前の動きと同時）。録画していないときは、ふだんの動きとして残す
+    const A = this.act();
+    A.moves.push({ id: d.id, pts, with: this.sim && A.moves.length > 0 });
     this.draw(); this.onChange();
   }
   // ---- ボタン ----
@@ -28442,15 +28442,10 @@ class TBEngine {
   toggleBall() {
     if (this.playing) this.stop();
     this.snapshot(this.rec);
-    const b = this.b;
-    if (!this.rec) {   // ★ふだん：その場で出す／消すだけ
-      const f = this.viewPos(); if (f.b) delete f.b; else f.b = this.ballSpot(f); b.free = f;
-      this.draw(); this.onChange(); return;
-    }
-    const pos = this.nowPos();
-    if (!b.moves.length) { if (b.start.b) delete b.start.b; else b.start.b = this.ballSpot(pos); }
-    else if (pos.b) b.moves.push({ id: "b", hide: true, with: this.sim });
-    else b.moves.push({ id: "b", show: this.ballSpot(pos), with: this.sim });
+    const A = this.act(), pos = this.viewPos();
+    if (!A.moves.length) { if (A.start.b) delete A.start.b; else A.start.b = this.ballSpot(pos); }
+    else if (pos.b) A.moves.push({ id: "b", hide: true, with: this.sim });
+    else A.moves.push({ id: "b", show: this.ballSpot(pos), with: this.sim });
     this.draw(); this.onChange();
   }
   wipe() { if (!this.b.draw.length) { this.onToast("ペンの線はありません"); return; } this.snapshot(); this.b.draw = []; this.draw(); this.onChange(); this.onToast("ペンの線を消しました（↶で戻せます）"); }
@@ -28458,7 +28453,7 @@ class TBEngine {
   toggleRec() {
     if (this.playing) this.stop();
     if (this.rec) {
-      this.rec = false; this.b.free = null;   // 録画の最後の並びから、また自由に動かせる
+      this.rec = false; this.b.fstart = tbClone(this.b.start); this.b.fmoves = tbClone(this.b.moves);   // 録画したものが見えたまま、続けて自由に動かせる
       this.draw(); this.onChange();
       this.onToast(this.b.moves.length ? "録画しました。▶で再生できます" : "録画を終えました");
       return;
@@ -28468,7 +28463,7 @@ class TBEngine {
     }
     this.recAsk = 0;
     this.snapshot();
-    this.b.start = this.viewPos(); this.b.moves = []; this.b.free = null; this.rec = true;
+    this.b.start = this.viewPos(); this.b.moves = []; this.rec = true;
     this.draw(); this.onChange(); this.onToast("録画中：動かした順に記録します");
   }
   // ★初期配置：ふだんは並びだけ戻す（録画は残す）。録画中は、初期配置から録画し直し
@@ -28477,8 +28472,7 @@ class TBEngine {
     this.snapshot(this.rec); const hadBall = !!this.viewPos().b;
     const st = tbStartFor(this.b.mode, hadBall);   // ★いつもの配置があればそれに戻す
     const custom = !!tbSavedLayout(this.b.mode);
-    if (this.rec) { this.b.start = st; this.b.moves = []; }
-    else this.b.free = st;
+    this.setAct(st, []);   // 録画中なら録画し直し、ふだんなら並びと線だけ戻す（録画は残る）
     this.draw(); this.onChange(); this.onToast(custom ? "いつもの配置に戻しました（↶で戻せます）" : "初期配置に戻しました（↶で戻せます）");
   }
 }
@@ -28883,7 +28877,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
             <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
               // ★設定は「保存」を押したときだけ反映（「キャンセル」なら何も変わらない）
-              if (sheet.mode !== b.mode) { eng.snapshot(); const hadBall = !!eng.viewPos().b; b.mode = sheet.mode; b.start = tbStartFor(sheet.mode, hadBall || !!sheet.startBall); b.moves = []; b.free = null; }
+              if (sheet.mode !== b.mode) { eng.snapshot(); const hadBall = !!eng.viewPos().b; b.mode = sheet.mode; b.start = tbStartFor(sheet.mode, hadBall || !!sheet.startBall); b.moves = []; b.fstart = null; b.fmoves = null; }
               eng.speed = sheet.speed;
               const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
               b.ballColor = sheet.ball; b.ballTrail = !!sheet.trail; b.playerTrail = !!sheet.ptrail;
