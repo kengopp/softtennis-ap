@@ -28490,9 +28490,26 @@ const TB_ICON = {
 
 // ---------- 下から出る小さな画面（共通） ----------
 function TBSheet({ onBg, children }) {
+  // ★キーボードが出ると、Android の Chrome などでは画面の下がキーボードに隠れる（入力欄が見えない）。
+  //   実際に見えている範囲（visualViewport）に合わせて、この小さな画面を置き直す。
+  const [vv, setVv] = useState(null);
+  const boxRef = useRef(null);
+  useEffect(() => {
+    const v = window.visualViewport; if (!v) return;
+    const upd = () => {
+      const kb = window.innerHeight - v.height > 80;   // キーボードが出ている
+      setVv(kb ? { top: v.offsetTop, h: v.height } : null);
+      if (kb) setTimeout(() => {   // 入力中の欄が見えるところまで動かす
+        const el = document.activeElement;
+        if (el && boxRef.current && boxRef.current.contains(el) && el.scrollIntoView) { try { el.scrollIntoView({ block: "center" }); } catch (_) {} }
+      }, 50);
+    };
+    upd(); v.addEventListener("resize", upd); v.addEventListener("scroll", upd);
+    return () => { v.removeEventListener("resize", upd); v.removeEventListener("scroll", upd); };
+  }, []);
   return (
-    <div onClick={e => { if (e.target === e.currentTarget) onBg(); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:700 }}>
-      <div style={{ background:C.white, width:"100%", maxHeight:"92vh", overflowY:"auto", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>{children}</div>
+    <div onClick={e => { if (e.target === e.currentTarget) onBg(); }} style={{ position:"fixed", left:0, right:0, top: vv ? vv.top : 0, height: vv ? vv.h : "100%", background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:700 }}>
+      <div ref={boxRef} style={{ background:C.white, width:"100%", maxHeight: vv ? vv.h - 8 : "92vh", boxSizing:"border-box", overflowY:"auto", borderRadius:"16px 16px 0 0", padding:"16px 16px calc(22px + env(safe-area-inset-bottom,0px))" }}>{children}</div>
     </div>
   );
 }
