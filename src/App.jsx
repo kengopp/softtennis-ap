@@ -1127,6 +1127,7 @@ async function deleteOpponentNote(id) {
 //   同じ日に何試合もある大会で、試合を正しい順番に並べるために使う。
 function roundProgressRank(round) {
   if (!round) return 999;
+  round = roundCore(round);
   const idx = ROUND_OPTIONS.indexOf(round);
   if (idx >= 0) return idx;
   const m = String(round).match(/(\d+)\s*回戦/);
@@ -7176,6 +7177,7 @@ function TournamentDetail({ tournament, onBack, onSaved, onOpenMatch, onOpenTeam
   //   「N回戦」の数字から近い順位を推定する。回戦が未入力の試合は一番下に表示する。
   function roundSortRank(round) {
     if (!round) return -1;
+    round = roundCore(round);
     const idx = ROUND_OPTIONS.indexOf(round);
     if (idx !== -1) return idx;
     const m = round.match(/(\d+)\s*回戦/);
@@ -14298,9 +14300,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
         </FormSec>
 
         <FormSec title="試合詳細">
-          <FormRow label="何回戦（任意）">
-            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
-          </FormRow>
+          <RoundFields value={round} onChange={setRound} placeholder="例：準々決勝"/>
           <FormRow label="コート番号（任意）">
             <VenueField value={courtNumber} onChange={setCourtNumber} venues={pastCourtNumbers} placeholder="例：3番コート"/>
           </FormRow>
@@ -18965,32 +18965,62 @@ const ROUND_OPTIONS = [
   "1回戦","2回戦","3回戦","4回戦","5回戦",
   "準々決勝","準決勝","3位決定戦","決勝",
 ];
-function RoundField({ value, onChange, placeholder }) {
-  const isPreset = ROUND_OPTIONS.includes(value);
-  const [customMode, setCustomMode] = useState(!!value && !isPreset);
+// ★形式（リーグ／トーナメント）と何回戦は別々に選ぶ。保存は今までどおり「回戦」の1つの欄に「トーナメント 準決勝」のようにまとめる
+const ROUND_FORMATS = ["リーグ", "トーナメント"];
+const ROUND_PICKS = ROUND_OPTIONS.filter(r => !ROUND_FORMATS.includes(r));
+function splitRound(v) {
+  const t = String(v ?? "").trim();
+  for (const f of ROUND_FORMATS) {
+    if (t === f) return { fmt: f, rnd: "" };
+    if (t.startsWith(f + " ") || t.startsWith(f + "　") || t.startsWith(f + "・")) return { fmt: f, rnd: t.slice(f.length + 1).trim() };
+  }
+  return { fmt: "", rnd: t };
+}
+const joinRound = (fmt, rnd) => [fmt, String(rnd ?? "").trim()].filter(Boolean).join(" ");
+// 並び順を決めるときは、形式をのぞいた「何回戦」で比べる（形式だけのときは今までどおり）
+function roundCore(v) { const { fmt, rnd } = splitRound(v); return rnd || fmt; }
+function RoundFields({ value, onChange, placeholder }) {
+  const { fmt, rnd } = splitRound(value);
+  const [customMode, setCustomMode] = useState(!!rnd && !ROUND_PICKS.includes(rnd));
+  const radio = (f) => {
+    const on = fmt === f;
+    return (
+      <button key={f} type="button" role="radio" aria-checked={on} onClick={() => onChange(joinRound(on ? "" : f, rnd))}
+        style={{ flex:1, display:"flex", alignItems:"center", gap:8, padding:"10px 12px", borderRadius:10, cursor:"pointer", fontSize:15, fontWeight:700,
+          border:`1.5px solid ${on ? C.navy : C.border}`, background: on ? "#eef2fa" : C.white, color:C.navy }}>
+        <span style={{ width:18, height:18, borderRadius:"50%", boxSizing:"border-box", flexShrink:0, border: on ? `5px solid ${C.navy}` : "2px solid #9aa4b5", background:C.white }} />{f}
+      </button>
+    );
+  };
   return (
-    <div>
-      <select
-        style={S.inp}
-        value={customMode ? "__custom__" : (value || "")}
-        onChange={e => {
-          if (e.target.value === "__custom__") { setCustomMode(true); onChange(""); }
-          else { setCustomMode(false); onChange(e.target.value); }
-        }}
-      >
-        <option value="">リストから選択</option>
-        <option value="__custom__">✏️ 自由入力する</option>
-        {ROUND_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-      </select>
-      {customMode && (
-        <input
-          style={{ ...S.inp, marginTop:8 }}
-          placeholder={placeholder || "例：準々決勝"}
-          value={value ?? ""}
-          onChange={e => onChange(e.target.value)}
-        />
-      )}
-    </div>
+    <>
+      <FormRow label="形式（任意）">
+        <div role="radiogroup" aria-label="形式" style={{ display:"flex", gap:8, marginTop:4 }}>{ROUND_FORMATS.map(radio)}</div>
+        <div style={{ fontSize:11.5, color:C.textSec, marginTop:6 }}>選んだものをもう一度押すと、選ばない状態に戻ります</div>
+      </FormRow>
+      <FormRow label="何回戦（任意）">
+        <select
+          style={S.inp}
+          value={customMode ? "__custom__" : (rnd || "")}
+          onChange={e => {
+            if (e.target.value === "__custom__") { setCustomMode(true); onChange(joinRound(fmt, "")); }
+            else { setCustomMode(false); onChange(joinRound(fmt, e.target.value)); }
+          }}
+        >
+          <option value="">リストから選択</option>
+          <option value="__custom__">✏️ 自由入力する</option>
+          {ROUND_PICKS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        {customMode && (
+          <input
+            style={{ ...S.inp, marginTop:8 }}
+            placeholder={placeholder || "例：準々決勝"}
+            value={rnd}
+            onChange={e => { const t = e.target.value; onChange(fmt ? (t ? fmt + " " + t : fmt) : t); }}
+          />
+        )}
+      </FormRow>
+    </>
   );
 }
 
@@ -19798,9 +19828,7 @@ function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMa
         </FormSec>
 
         <FormSec title="試合詳細">
-          <FormRow label="何回戦（任意）">
-            <RoundField value={round} onChange={setRound} placeholder="例：準々決勝"/>
-          </FormRow>
+          <RoundFields value={round} onChange={setRound} placeholder="例：準々決勝"/>
           <FormRow label="何試合目（任意）">
             <input style={S.inp} placeholder="例：1" inputMode="numeric" value={matchNumber} onChange={e => setMatchNumber(e.target.value)}/>
           </FormRow>
