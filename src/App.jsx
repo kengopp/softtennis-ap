@@ -28161,7 +28161,8 @@ class TBEngine {
     this.drag = null; this.penCur = null; this.canvas = null; this.ctx = null; this.scale = 20; this.CW = 0; this.CH = 0;
     this.raf = 0; this.last = 0; this.shown = 0;
     this.pieceK = 1; this.ballK = 1; this.longPress = true; this.lpTimer = 0;   // ★大きさ（この端末だけの設定）・長押しで名前
-    this.onChange = () => {}; this.onToast = () => {}; this.onLongPress = () => {};
+    this.running = false;   // ★playing＝再生バーで途中の場面を見ている（編集できない）、running＝今まさに動いている
+    this.onChange = () => {}; this.onToast = () => {}; this.onLongPress = () => {}; this.onTick = () => {};
   }
   X(m) { return (m + TB_MX) * this.scale; }
   Y(m) { return (m + TB_MY) * this.scale; }
@@ -28337,20 +28338,38 @@ class TBEngine {
     });
     this.drawPieces(pos, { lift, ballAlpha });
   }
+  total() { return TB_LEAD_SEC + this.groups().length * (TB_MOVE_SEC + TB_HOLD_SEC); }
+  // 再生バーの位置（0＝スタート、1＝最後の並び）
+  progress() { return this.playing ? Math.max(0, Math.min(1, this.playT / this.total())) : 1; }
+  // ▶：一時停止中ならそこから続き、それ以外は最初から
   play() {
     if (!this.b.moves.length) { this.onToast("選手やボールを動かすと、動かした順に再生できます"); return; }
-    this.playing = true; this.playT = 0; this.shown = -1; this.onChange(); this.last = performance.now();
-    const total = TB_LEAD_SEC + this.groups().length * (TB_MOVE_SEC + TB_HOLD_SEC);
+    const total = this.total();
+    if (!this.playing || this.playT >= total) { this.playT = 0; this.shown = -1; }
+    cancelAnimationFrame(this.raf);
+    this.playing = true; this.running = true; this.onChange(); this.last = performance.now();
     const loop = () => {
       const now = performance.now();   // 端末によって時間がずれないよう、毎回ここで測る
       this.playT += Math.max(0, Math.min(0.1, (now - this.last) / 1000)) * this.speed; this.last = now;
       if (this.playT >= total) { this.stop(); return; }
       const i = this.playIndex(); if (i !== this.shown) { this.shown = i; this.onChange(); }
-      this.draw(); this.raf = requestAnimationFrame(loop);
+      this.draw(); this.onTick(); this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
   }
-  stop() { cancelAnimationFrame(this.raf); this.playing = false; this.draw(); this.onChange(); }
+  // ❚❚：その場面のまま止める
+  pause() { cancelAnimationFrame(this.raf); this.running = false; this.draw(); this.onChange(); this.onTick(); }
+  // 再生バーを指で動かしたとき。右はしまで行ったら、いつもの（編集できる）最後の並びに戻る
+  seek(f) {
+    if (!this.b.moves.length) return;
+    const wasPlaying = this.playing, wasRunning = this.running, wasShown = this.shown;
+    cancelAnimationFrame(this.raf); this.running = false;
+    if (f >= 0.995) { this.playing = false; this.playT = 0; }
+    else { this.playing = true; this.playT = Math.max(0, f) * this.total(); this.shown = this.playIndex(); }
+    this.draw(); this.onTick();
+    if (wasPlaying !== this.playing || wasRunning || wasShown !== this.shown) this.onChange();
+  }
+  stop() { cancelAnimationFrame(this.raf); this.playing = false; this.running = false; this.draw(); this.onChange(); this.onTick(); }
   // ---- さわる ----
   hitPiece(q, pos) {
     let best = null, bd = 1.5 * Math.max(1, this.pieceK || 1, this.ballK || 1);   // ★大きくした分、さわれる範囲も広げる
@@ -28358,6 +28377,7 @@ class TBEngine {
     return best;
   }
   down(e) {
+    if (this.playing && !this.running && !this.readOnly) { this.onToast("再生バーを右はしまで動かすと、また選手を動かせます"); return; }
     if (this.playing || this.readOnly || !this.b) return;
     const q = this.toM(e);
     try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
@@ -28503,7 +28523,21 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
     req(); document.addEventListener("visibilitychange", onVis);
     return () => { alive = false; document.removeEventListener("visibilitychange", onVis); try { lock && lock.release(); } catch (_) {} };
   }, [dev.wake]);
+  // ★再生バー：毎フレームの位置は画面を作り直さずに直接動かす（スマホでも重くならないように）
+  const seekTrack = useRef(null), seekFill = useRef(null), seekKnob = useRef(null), seekDrag = useRef(false);
+  const paintSeek = useCallback(() => {
+    const pc = (eng.progress() * 100) + "%";
+    if (seekFill.current) seekFill.current.style.width = pc;
+    if (seekKnob.current) seekKnob.current.style.left = pc;
+  }, [eng]);
+  useEffect(() => { paintSeek(); });
+  const seekAt = e => {
+    const el = seekTrack.current; if (!el) return;
+    const r = el.getBoundingClientRect(); if (!r.width) return;
+    eng.seek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+  };
   useEffect(() => {
+    eng.onTick = paintSeek;
     eng.onChange = rerender; eng.onToast = showToast;
     eng.onLongPress = id => setSheet({ type:"pname", id, value: (eng.b.names || {})[id] || "" });
     return () => { cancelAnimationFrame(eng.raf); clearTimeout(eng.lpTimer); };
@@ -28567,8 +28601,8 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
 
       {!readOnly && (
         <div style={{ display:"flex", gap:3, padding:"8px 6px 6px", background:C.white, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
-          {tool("move", "動かす", TB_ICON.move, () => { eng.tool = "move"; rerender(); }, { on: eng.tool === "move" })}
-          {tool("pen", "ペン", TB_ICON.pen, () => { eng.tool = "pen"; rerender(); }, { on: eng.tool === "pen" })}
+          {tool("move", "動かす", TB_ICON.move, () => { eng.tool = "move"; rerender(); }, { on: eng.tool === "move", disabled: eng.playing })}
+          {tool("pen", "ペン", TB_ICON.pen, () => { eng.tool = "pen"; rerender(); }, { on: eng.tool === "pen", disabled: eng.playing })}
           {tool("ball", `ボール\n${ballOn ? "オン" : "オフ"}`, TB_ICON.ball, () => eng.toggleBall(), { disabled: eng.playing, bg: ballOn ? "#fff4c2" : undefined, color: ballOn ? "#7a5b00" : undefined })}
           {tool("sim", `同時\n${eng.sim ? "オン" : "オフ"}`, TB_ICON.sim, () => { eng.sim = !eng.sim; rerender(); }, { disabled: eng.playing, bg: eng.sim ? "#e8f5ec" : undefined, color: eng.sim ? "#1f7a45" : undefined })}
           {tool("wipe", "線を消す", TB_ICON.wipe, () => eng.wipe(), { disabled: eng.playing })}
@@ -28601,16 +28635,34 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         {readOnly && <div style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
       </div>
 
-      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 10px calc(10px + env(safe-area-inset-bottom,0px))", background:C.white, borderTop:`1px solid ${C.border}`, flexShrink:0 }}>
-        {!readOnly && bb("def", "↺ 初期配置", () => eng.toDefault(), eng.playing)}
-        {!readOnly && bb("start", "📍 今を最初に", () => eng.setStart(), eng.playing || !b.moves.length)}
-        <span style={{ fontSize:12, color:C.textSec, fontWeight:700, whiteSpace:"nowrap" }}>
-          {eng.playing ? (eng.shown >= 0 ? `${eng.shown + 1} / ${ng}` : "") : ng ? `動き ${ng}` : ""}
-        </span>
-        {bb("play", eng.playing ? "■ 止める" : "▶ 再生", () => (eng.playing ? eng.stop() : eng.play()), false, { marginLeft:"auto", background:"#2a5ca8", color:"#fff", borderColor:"#2a5ca8", fontSize:15, minWidth:86 })}
+      <div style={{ background:C.white, borderTop:`1px solid ${C.border}`, flexShrink:0, padding:`8px 10px ${readOnly ? "calc(10px + env(safe-area-inset-bottom,0px))" : "4px"}` }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <button aria-label={eng.running ? "一時停止" : "再生"} onClick={() => (eng.running ? eng.pause() : eng.play())}
+            style={{ width:52, height:42, flexShrink:0, border:"none", borderRadius:10, background:"#2a5ca8", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", padding:0 }}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff">{eng.running
+              ? <g><rect x="5" y="4" width="5" height="16" rx="1.2" /><rect x="14" y="4" width="5" height="16" rx="1.2" /></g>
+              : <path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z" />}</svg>
+          </button>
+          <div aria-label="再生バー" role="slider" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(eng.progress() * 100)}
+            onPointerDown={e => { if (!ng) return; seekDrag.current = true; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} seekAt(e); }}
+            onPointerMove={e => { if (seekDrag.current) seekAt(e); }}
+            onPointerUp={() => { seekDrag.current = false; }} onPointerCancel={() => { seekDrag.current = false; }}
+            style={{ flex:1, height:44, display:"flex", alignItems:"center", touchAction:"none", cursor: ng ? "pointer" : "default", opacity: ng ? 1 : .4, padding:"0 12px 0 2px" }}>
+            <div ref={seekTrack} style={{ flex:1, height:6, borderRadius:3, background:"#d5dbe5", position:"relative" }}>
+              <div ref={seekFill} style={{ position:"absolute", left:0, top:0, bottom:0, width:"100%", borderRadius:3, background:"#2a5ca8" }} />
+              <div ref={seekKnob} style={{ position:"absolute", top:"50%", left:"100%", width:22, height:22, margin:"-11px 0 0 -11px", borderRadius:"50%", background:"#fff", border:"3px solid #2a5ca8", boxSizing:"border-box", boxShadow:"0 1px 4px rgba(0,0,0,.3)" }} />
+            </div>
+          </div>
+        </div>
+        {!readOnly && (
+          <div style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 0 calc(6px + env(safe-area-inset-bottom,0px))" }}>
+            {bb("def", "↺ 初期配置", () => eng.toDefault(), eng.playing)}
+            {bb("start", "📍 今を最初に", () => eng.setStart(), eng.playing || !b.moves.length)}
+          </div>
+        )}
       </div>
 
-      {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(76px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", fontSize:12.5, borderRadius:9, padding:"8px 12px", zIndex:800, pointerEvents:"none", maxWidth:"92vw", textAlign:"center" }}>{toast}</div>}
+      {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(118px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", fontSize:12.5, borderRadius:9, padding:"8px 12px", zIndex:800, pointerEvents:"none", maxWidth:"92vw", textAlign:"center" }}>{toast}</div>}
 
       {sheet && (sheet.type === "name" || sheet.type === "save") && (
         <TBSheet onBg={() => setSheet(null)}>
