@@ -14329,6 +14329,7 @@ function TeamMatchSetup({ editId, copyId, onSave, onCancel, prefillTournament, p
         >
           {saving ? "保存中..." : "💾 保存する"}
         </button>
+        <button style={{ ...S.btn("transparent", C.textSec), marginTop:4 }} disabled={saving} onClick={onCancel}>キャンセル</button>
       </div>
 
       {/* 自チーム変更確認ポップ */}
