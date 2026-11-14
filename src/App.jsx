@@ -28088,7 +28088,7 @@ function tbRowToBoard(r) {
   let d = r.data; if (typeof d === "string") { try { d = JSON.parse(d); } catch (_) { d = null; } }
   d = d || {};
   const mode = r.mode === "single" ? "single" : "double";
-  const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [] }
+  const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [], free: d.free || null }
     : d.steps ? tbFromSteps(d.steps) : { start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
   return { id: r.id, title: r.title || "", mode, shared: !!r.shared, owner_id: r.owner_id || null, updated_at: r.updated_at,
     names: d.names || {}, ballColor: d.ballColor === "white" ? "white" : "yellow", ballTrail: d.ballTrail !== false, playerTrail: d.playerTrail !== false,
@@ -28105,7 +28105,7 @@ async function tbLoadList() {
 }
 async function tbSaveBoard(b, schoolId) {
   const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
-    data: { start: b.start, moves: b.moves, draw: b.draw, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
+    data: { start: b.start, moves: b.moves, draw: b.draw, free: b.free || null, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
       court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) } },
     updated_at: new Date().toISOString() };
   try {
@@ -28161,6 +28161,8 @@ class TBEngine {
     this.drag = null; this.penCur = null; this.canvas = null; this.ctx = null; this.scale = 20; this.CW = 0; this.CH = 0;
     this.raf = 0; this.last = 0; this.shown = 0;
     this.pieceK = 1; this.ballK = 1; this.longPress = true; this.lpTimer = 0;   // ★大きさ（この端末だけの設定）・長押しで名前
+    this.rec = false;       // ★録画中だけ、動かした順に記録する（ふだんは自由に動かすだけ）
+    this.recAsk = 0;        // 前の録画と入れかえる確認（2回押し）
     this.running = false;   // ★playing＝再生バーで途中の場面を見ている（編集できない）、running＝今まさに動いている
     this.onChange = () => {}; this.onToast = () => {}; this.onLongPress = () => {}; this.onTick = () => {};
   }
@@ -28169,7 +28171,9 @@ class TBEngine {
   groups() { return tbGroups(this.b.moves); }
   posAfter(n) { const pos = tbClone(this.b.start); this.groups().slice(0, n).forEach(g => g.forEach(m => tbApply(pos, m))); return pos; }
   nowPos() { return this.posAfter(Infinity); }
-  ballOn() { return !!this.nowPos().b; }
+  // ★今コートに見えている並び：録画中は録画の最後、ふだんは自由に動かした並び（まだ動かしていなければ録画の最後）
+  viewPos() { return (!this.rec && this.b.free) ? tbClone(this.b.free) : this.nowPos(); }
+  ballOn() { return !!this.viewPos().b; }
   ballStyle() { return TB_BALL[this.b.ballColor === "white" ? "white" : "yellow"]; }
   colorOf(side) { return tbColorOf(this.b, side); }
   trailFor(side) { return side === "ball" ? this.b.ballTrail !== false : this.b.playerTrail !== false; }
@@ -28193,9 +28197,9 @@ class TBEngine {
     const fx = r.width ? this.CW / r.width : 1, fy = r.height ? this.CH / r.height : 1;
     return [(e.clientX - r.left) * fx / this.scale - TB_MX, (e.clientY - r.top) * fy / this.scale - TB_MY];
   }
-  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw }); }
-  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; }
-  snapshot() { this.hist.push(this.cur()); if (this.hist.length > 100) this.hist.shift(); this.fut = []; this.dirty = true; }
+  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, free: this.b.free || null, rec: this.rec }); }
+  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.free = o.free || null; this.rec = !!o.rec; }
+  snapshot(markDirty = true) { this.hist.push(this.cur()); if (this.hist.length > 100) this.hist.shift(); this.fut = []; if (markDirty) this.dirty = true; }
   undo() { if (!this.hist.length) return; this.fut.push(this.cur()); this.restore(this.hist.pop()); this.dirty = true; this.draw(); this.onChange(); }
   redo() { if (!this.fut.length) return; this.hist.push(this.cur()); this.restore(this.fut.pop()); this.dirty = true; this.draw(); this.onChange(); }
   // ---- 描画 ----
@@ -28312,9 +28316,11 @@ class TBEngine {
     if (this.playing) { this.drawPlaying(); return; }
     (this.b.draw || []).forEach(d => this.drawPen(d));
     if (this.penCur) this.drawPen(this.penCur);
-    this.drawHistory(Infinity);
-    if (this.drag && this.drag.pts && this.drag.pts.length > 1) this.drawTrail({ id: this.drag.id, pts: this.drag.pts }, 0);
-    const pos = this.nowPos();
+    if (this.rec) {   // ★線と番号は録画中だけ
+      this.drawHistory(Infinity);
+      if (this.drag && this.drag.pts && this.drag.pts.length > 1) this.drawTrail({ id: this.drag.id, pts: this.drag.pts }, 0);
+    }
+    const pos = this.viewPos();
     if (this.drag && this.drag.last) pos[this.drag.id] = this.drag.last;
     this.drawPieces(pos);
   }
@@ -28343,7 +28349,7 @@ class TBEngine {
   progress() { return this.playing ? Math.max(0, Math.min(1, this.playT / this.total())) : 1; }
   // ▶：一時停止中ならそこから続き、それ以外は最初から
   play() {
-    if (!this.b.moves.length) { this.onToast("選手やボールを動かすと、動かした順に再生できます"); return; }
+    if (!this.b.moves.length) { this.onToast(this.rec ? "選手やボールを動かすと、動かした順に再生できます" : "「● 録画」を押してから動かすと、その動きを再生できます"); return; }
     const total = this.total();
     if (!this.playing || this.playT >= total) { this.playT = 0; this.shown = -1; }
     cancelAnimationFrame(this.raf);
@@ -28377,12 +28383,12 @@ class TBEngine {
     return best;
   }
   down(e) {
-    if (this.playing && !this.running && !this.readOnly) { this.onToast("再生バーを右はしまで動かすと、また選手を動かせます"); return; }
-    if (this.playing || this.readOnly || !this.b) return;
+    if (this.readOnly || !this.b) return;
+    if (this.playing) this.stop();   // ★再生の途中でコートをさわったら、そのままいつもの画面に戻って動かせる
     const q = this.toM(e);
     try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
     if (this.tool === "pen") { this.penCur = { kind: this.penKind, color: this.penColor, pts: [q] }; this.draw(); return; }
-    const pos = this.nowPos(), p = this.hitPiece(q, pos); if (!p) return;
+    const pos = this.viewPos(), p = this.hitPiece(q, pos); if (!p) return;
     this.drag = { id: p.id, off: [pos[p.id][0] - q[0], pos[p.id][1] - q[1]], pts: [pos[p.id].slice()], last: null };
     // ★選手を動かさずに長押し → 名前を入れる画面
     clearTimeout(this.lpTimer);
@@ -28420,7 +28426,11 @@ class TBEngine {
     const end = d.pts[d.pts.length - 1], straight = Math.hypot(end[0] - d.pts[0][0], end[1] - d.pts[0][1]);
     if (straight < 0.2 && tbLen(d.pts) < 0.4) { this.draw(); return; }   // ほとんど動いていない
     const pts = tbLen(d.pts) > straight * 1.03 ? d.pts : [d.pts[0], end];
-    this.snapshot();
+    this.snapshot(this.rec);   // ★ふだん自由に動かすだけなら「保存していない変更」にはしない
+    if (!this.rec) {   // ★ふだん：位置が変わるだけ（線も番号も残さない）
+      const f = this.viewPos(); f[d.id] = end.slice(); this.b.free = f;
+      this.draw(); this.onChange(); return;
+    }
     // ★動かすたびに、順番に記録（「同時」オンなら1つ前の動きと同時）
     this.b.moves.push({ id: d.id, pts, with: this.sim && this.b.moves.length > 0 });
     this.draw(); this.onChange();
@@ -28429,22 +28439,46 @@ class TBEngine {
   ballSpot(pos) { return tbBallSpot(pos); }
   // ★ボールのオン／オフ。動きの記録がまだなければ最初の並びに、あれば順番の1つとして記録
   toggleBall() {
-    this.snapshot();
-    const pos = this.nowPos(), b = this.b;
+    if (this.playing) this.stop();
+    this.snapshot(this.rec);
+    const b = this.b;
+    if (!this.rec) {   // ★ふだん：その場で出す／消すだけ
+      const f = this.viewPos(); if (f.b) delete f.b; else f.b = this.ballSpot(f); b.free = f;
+      this.draw(); this.onChange(); return;
+    }
+    const pos = this.nowPos();
     if (!b.moves.length) { if (b.start.b) delete b.start.b; else b.start.b = this.ballSpot(pos); }
     else if (pos.b) b.moves.push({ id: "b", hide: true, with: this.sim });
     else b.moves.push({ id: "b", show: this.ballSpot(pos), with: this.sim });
     this.draw(); this.onChange();
   }
   wipe() { if (!this.b.draw.length) { this.onToast("ペンの線はありません"); return; } this.snapshot(); this.b.draw = []; this.draw(); this.onChange(); this.onToast("ペンの線を消しました（↶で戻せます）"); }
-  // ★今の並びを最初にする：それまでの動きの記録を消して、今の位置をスタートに
-  setStart() { this.snapshot(); this.b.start = this.nowPos(); this.b.moves = []; this.draw(); this.onChange(); this.onToast("今の並びを最初にしました（↶で戻せます）"); }
-  // ★初期配置：選手を最初の位置に戻し、動きの記録も消す（ボールが出ていれば後衛の足元に）
+  // ★録画：押したときの並びをスタートにして、ここから動かした順に記録。もう一度押すと終わる
+  toggleRec() {
+    if (this.playing) this.stop();
+    if (this.rec) {
+      this.rec = false; this.b.free = null;   // 録画の最後の並びから、また自由に動かせる
+      this.draw(); this.onChange();
+      this.onToast(this.b.moves.length ? "録画しました。▶で再生できます" : "録画を終えました");
+      return;
+    }
+    if (this.b.moves.length && Date.now() - this.recAsk > 3000) {
+      this.recAsk = Date.now(); this.onToast("もう一度「● 録画」を押すと、前の録画と入れかわります"); return;
+    }
+    this.recAsk = 0;
+    this.snapshot();
+    this.b.start = this.viewPos(); this.b.moves = []; this.b.free = null; this.rec = true;
+    this.draw(); this.onChange(); this.onToast("録画中：動かした順に記録します");
+  }
+  // ★初期配置：ふだんは並びだけ戻す（録画は残す）。録画中は、初期配置から録画し直し
   toDefault() {
-    this.snapshot(); const hadBall = !!this.nowPos().b;
-    this.b.start = tbStartFor(this.b.mode, hadBall);   // ★いつもの配置があればそれに戻す
+    if (this.playing) this.stop();
+    this.snapshot(this.rec); const hadBall = !!this.viewPos().b;
+    const st = tbStartFor(this.b.mode, hadBall);   // ★いつもの配置があればそれに戻す
     const custom = !!tbSavedLayout(this.b.mode);
-    this.b.moves = []; this.draw(); this.onChange(); this.onToast(custom ? "いつもの配置に戻しました（↶で戻せます）" : "初期配置に戻しました（↶で戻せます）");
+    if (this.rec) { this.b.start = st; this.b.moves = []; }
+    else this.b.free = st;
+    this.draw(); this.onChange(); this.onToast(custom ? "いつもの配置に戻しました（↶で戻せます）" : "初期配置に戻しました（↶で戻せます）");
   }
 }
 
@@ -28561,6 +28595,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
   useEffect(() => { if (!eng.playing) eng.attach(canvasRef.current, boxRef.current); }, [eng, eng.tool, readOnly]);
 
   const b = eng.b, ng = eng.groups().length, ballOn = eng.ballOn();
+  const leave = () => { if (eng.playing) eng.stop(); };   // ★再生の途中で道具を押したら、いつもの画面に戻る
   const back = () => {
     if (!readOnly && eng.dirty && !backAsk.current) {
       backAsk.current = true; showToast("保存していない変更があります。もう一度「戻る」で保存せずに戻ります");
@@ -28601,16 +28636,16 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
 
       {!readOnly && (
         <div style={{ display:"flex", gap:3, padding:"8px 6px 6px", background:C.white, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
-          {tool("move", "動かす", TB_ICON.move, () => { eng.tool = "move"; rerender(); }, { on: eng.tool === "move", disabled: eng.playing })}
-          {tool("pen", "ペン", TB_ICON.pen, () => { eng.tool = "pen"; rerender(); }, { on: eng.tool === "pen", disabled: eng.playing })}
-          {tool("ball", `ボール\n${ballOn ? "オン" : "オフ"}`, TB_ICON.ball, () => eng.toggleBall(), { disabled: eng.playing, bg: ballOn ? "#fff4c2" : undefined, color: ballOn ? "#7a5b00" : undefined })}
-          {tool("sim", `同時\n${eng.sim ? "オン" : "オフ"}`, TB_ICON.sim, () => { eng.sim = !eng.sim; rerender(); }, { disabled: eng.playing, bg: eng.sim ? "#e8f5ec" : undefined, color: eng.sim ? "#1f7a45" : undefined })}
-          {tool("wipe", "線を消す", TB_ICON.wipe, () => eng.wipe(), { disabled: eng.playing })}
-          {tool("undo", "戻す", TB_ICON.undo, () => eng.undo(), { disabled: !eng.hist.length || eng.playing })}
-          {tool("redo", "進む", TB_ICON.redo, () => eng.redo(), { disabled: !eng.fut.length || eng.playing })}
-          {tool("gear", "設定", TB_ICON.gear, () => setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}), ball: b.ballColor === "white" ? "white" : "yellow", trail: b.ballTrail !== false, ptrail: b.playerTrail !== false,
+          {tool("move", "動かす", TB_ICON.move, () => { leave(); eng.tool = "move"; rerender(); }, { on: eng.tool === "move" })}
+          {tool("pen", "ペン", TB_ICON.pen, () => { leave(); eng.tool = "pen"; rerender(); }, { on: eng.tool === "pen" })}
+          {tool("ball", `ボール\n${ballOn ? "オン" : "オフ"}`, TB_ICON.ball, () => eng.toggleBall(), { bg: ballOn ? "#fff4c2" : undefined, color: ballOn ? "#7a5b00" : undefined })}
+          {tool("sim", `同時\n${eng.sim ? "オン" : "オフ"}`, TB_ICON.sim, () => { leave(); eng.sim = !eng.sim; rerender(); }, { bg: eng.sim ? "#e8f5ec" : undefined, color: eng.sim ? "#1f7a45" : undefined })}
+          {tool("wipe", "線を消す", TB_ICON.wipe, () => { leave(); eng.wipe(); })}
+          {tool("undo", "戻す", TB_ICON.undo, () => { leave(); eng.undo(); }, { disabled: !eng.hist.length })}
+          {tool("redo", "進む", TB_ICON.redo, () => { leave(); eng.redo(); }, { disabled: !eng.fut.length })}
+          {tool("gear", "設定", TB_ICON.gear, () => leave() || setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}), ball: b.ballColor === "white" ? "white" : "yellow", trail: b.ballTrail !== false, ptrail: b.playerTrail !== false,
             court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) }, psize: dev.pieceSize, bsize: dev.ballSize, wake: !!dev.wake, lp: dev.longPress !== false, asDefault: false,
-            startBall: !!tbLoadStart().ballOn, layTick: 0 }), { disabled: eng.playing })}
+            startBall: !!tbLoadStart().ballOn, layTick: 0 }))}
         </div>
       )}
       {!readOnly && eng.tool === "pen" && (
@@ -28632,6 +28667,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
       <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background: tbCourtOf(b).box, position:"relative", overflow:"hidden" }}>
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
+        {eng.rec && <div style={{ position:"absolute", left:8, top:8, background:"#e53935", color:"#fff", fontSize:12, fontWeight:800, borderRadius:8, padding:"4px 9px", pointerEvents:"none" }}>● 録画中</div>}
         {readOnly && <div style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
       </div>
 
@@ -28656,8 +28692,10 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         </div>
         {!readOnly && (
           <div style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 0 calc(6px + env(safe-area-inset-bottom,0px))" }}>
-            {bb("def", "↺ 初期配置", () => eng.toDefault(), eng.playing)}
-            {bb("start", "📍 今を最初に", () => eng.setStart(), eng.playing || !b.moves.length)}
+            {bb("def", "↺ 初期配置", () => eng.toDefault(), false)}
+            {eng.rec
+              ? bb("rec", "■ 録画を終える", () => eng.toggleRec(), false, { background:"#e53935", borderColor:"#e53935", color:"#fff" })
+              : bb("rec", "● 録画", () => eng.toggleRec(), false, { color:"#e53935" })}
           </div>
         )}
       </div>
@@ -28716,7 +28754,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
             const md = b.mode === "single" ? "single" : "double", has = !!tbSavedLayout(md);
             const prev = { ...b, start: tbStartFor(md, sheet.startBall), moves: [], draw: [] };
             const saveLay = () => {
-              const now = eng.nowPos(), lay = {};
+              const now = eng.viewPos(), lay = {};
               Object.keys(tbBaseStart(md)).forEach(k => { if (now[k]) lay[k] = now[k].slice(); });
               if (now.b) lay.b = now.b.slice();
               const st = tbLoadStart(); st[md] = lay;
@@ -28786,7 +28824,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           <datalist id="tb-names-me">{nameChoices.me.map(c => <option key={c.full} value={c.label}>{c.full}</option>)}</datalist>
           <datalist id="tb-names-op">{nameChoices.op.map(c => <option key={c.full} value={c.label}>{c.full}</option>)}</datalist>
           <div style={{ display:"grid", gridTemplateColumns:"auto 1fr", gap:"6px 8px", alignItems:"center", margin:"6px 0 0" }}>
-            {TB_PIECES.filter(p => p.side !== "ball" && (b.start[p.id] || eng.nowPos()[p.id])).map(p => (
+            {TB_PIECES.filter(p => p.side !== "ball" && (b.start[p.id] || eng.viewPos()[p.id])).map(p => (
               <Fragment key={p.id}>
                 <span style={{ display:"flex", alignItems:"center", gap:5, fontSize:12.5, fontWeight:800, whiteSpace:"nowrap" }}>
                   <span style={{ width:20, height:20, borderRadius:"50%", background: sheet.colors[p.side], color:"#fff", fontSize:11, display:"flex", alignItems:"center", justifyContent:"center" }}>{p.label}</span>{p.name}
@@ -28837,7 +28875,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
             <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
               // ★設定は「保存」を押したときだけ反映（「キャンセル」なら何も変わらない）
-              if (sheet.mode !== b.mode) { eng.snapshot(); const hadBall = !!eng.nowPos().b; b.mode = sheet.mode; b.start = tbStartFor(sheet.mode, hadBall || !!sheet.startBall); b.moves = []; }
+              if (sheet.mode !== b.mode) { eng.snapshot(); const hadBall = !!eng.viewPos().b; b.mode = sheet.mode; b.start = tbStartFor(sheet.mode, hadBall || !!sheet.startBall); b.moves = []; b.free = null; }
               eng.speed = sheet.speed;
               const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
               b.ballColor = sheet.ball; b.ballTrail = !!sheet.trail; b.playerTrail = !!sheet.ptrail;
