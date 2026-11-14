@@ -28026,6 +28026,7 @@ const tbSizeK = key => (TB_SIZES.find(z => z[0] === key) || TB_SIZES[1])[2];
 // この端末だけの設定（大きさ・画面を消さない・長押しで名前）。共有した相手の画面は変えない
 const TB_DEV_KEY = "tbDeviceV1";
 const TB_DEV_DEF = { pieceSize: "m", ballSize: "m", wake: false, longPress: true };
+const TB_SPEEDS = [0.5, 1, 1.2, 1.5, 2];   // ★再生の速さ（下の段のボタンは 1.0〜2.0）
 function tbLoadDev() { try { return { ...TB_DEV_DEF, ...(JSON.parse(localStorage.getItem(TB_DEV_KEY) || "{}") || {}) }; } catch (_) { return { ...TB_DEV_DEF }; } }
 function tbSaveDev(d) { try { localStorage.setItem(TB_DEV_KEY, JSON.stringify(d)); } catch (_) {} }
 // いつもの設定（新しく作る作戦の最初の設定）
@@ -28518,7 +28519,8 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
   const engRef = useRef(null);
   if (!engRef.current) {
     const e = new TBEngine(); e.b = tbClone(board); e.readOnly = readOnly;
-    const df = tbLoadDefaults(); if (df && [0.5, 1, 2].includes(df.speed)) e.speed = df.speed;   // ★いつもの再生の速さ
+    const df = tbLoadDefaults(); if (df && TB_SPEEDS.includes(df.speed)) e.speed = df.speed;   // ★いつもの再生の速さ
+    const dv = tbLoadDev(); if (TB_SPEEDS.includes(dv.speed)) e.speed = dv.speed;   // ★下の段で選んだ速さ（このスマホで覚える）
     engRef.current = e;
   }
   const eng = engRef.current;
@@ -28692,10 +28694,16 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         </div>
         {!readOnly && (
           <div style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 0 calc(6px + env(safe-area-inset-bottom,0px))" }}>
-            {bb("def", "↺ 初期配置", () => eng.toDefault(), false)}
+            {bb("def", "↺ リセット", () => eng.toDefault(), false)}
             {eng.rec
               ? bb("rec", "■ 録画を終える", () => eng.toggleRec(), false, { background:"#e53935", borderColor:"#e53935", color:"#fff" })
               : bb("rec", "● 録画", () => eng.toggleRec(), false, { color:"#e53935" })}
+            <div role="group" aria-label="再生の速さ" style={{ marginLeft:"auto", display:"flex", border:`1px solid ${C.border}`, borderRadius:9, overflow:"hidden", flexShrink:0 }}>
+              {[1, 1.2, 1.5, 2].map(v => (
+                <button key={v} aria-pressed={eng.speed === v} onClick={() => { eng.speed = v; const nd = { ...tbLoadDev(), speed: v }; tbSaveDev(nd); setDev(d => ({ ...d, speed: v })); rerender(); }}
+                  style={{ border:"none", height:38, minWidth:38, padding:"0 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", background: eng.speed === v ? "#2a5ca8" : C.white, color: eng.speed === v ? "#fff" : C.navy }}>{v.toFixed(1)}</button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -28856,7 +28864,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           {sec("再生")}
           {sub("再生の速さ")}
           <div style={{ display:"flex", gap:6, margin:"6px 0 0" }}>
-            {[[0.5, "ゆっくり"], [1, "ふつう"], [2, "速い"]].map(([v, l]) => (
+            {[[0.5, "0.5"], [1, "1.0"], [1.2, "1.2"], [1.5, "1.5"], [2, "2.0"]].map(([v, l]) => (
               <button key={v} onClick={() => setSheet({ ...sheet, speed:v })} style={pick(sheet.speed === v)}>{l}</button>
             ))}
           </div>
@@ -28880,7 +28888,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
               const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
               b.ballColor = sheet.ball; b.ballTrail = !!sheet.trail; b.playerTrail = !!sheet.ptrail;
               b.court = sheet.court; b.colors = { ...sheet.colors };
-              const nd = { ...dev, pieceSize: sheet.psize, ballSize: sheet.bsize, wake: !!sheet.wake, longPress: !!sheet.lp };
+              const nd = { ...dev, pieceSize: sheet.psize, ballSize: sheet.bsize, wake: !!sheet.wake, longPress: !!sheet.lp, speed: sheet.speed };
               tbSaveDev(nd); setDev(nd);
               { const st = tbLoadStart(); st.ballOn = !!sheet.startBall; tbSaveStart(st); }   // ★ボールを最初から出す
               eng.pieceK = tbSizeK(nd.pieceSize); eng.ballK = tbSizeK(nd.ballSize); eng.longPress = nd.longPress;
