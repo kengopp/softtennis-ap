@@ -28981,6 +28981,14 @@ function TacticsPanel({ ctx, isViewer }) {
     const ok = await tbDeleteBoard(b.id);
     if (ok) { setList(l => (l || []).filter(x => x.id !== b.id)); showToast("作戦を削除しました"); } else showToast("削除できませんでした。もう一度お試しください");
   };
+  // ★共有の切りかえ（作った人だけ）
+  const toggleShare = async (b) => {
+    setMenu(null);
+    const nb = { ...b, shared: !b.shared };
+    const ok = await tbSaveBoard(nb, ctx.schoolId);
+    if (ok) { setList(l => (l || []).map(x => x.id === b.id ? { ...x, shared: nb.shared } : x)); showToast(nb.shared ? "チームで共有にしました" : "自分だけにしました"); load(); }
+    else showToast("変更できませんでした。もう一度お試しください");
+  };
   const doRename = async () => {
     const b = { ...rename.board, title: (rename.value || "").trim() }; setRename(null);
     const ok = await tbSaveBoard(b, ctx.schoolId);
@@ -29029,8 +29037,13 @@ function TacticsPanel({ ctx, isViewer }) {
       {/* ★「⋯」のメニュー：名前を変える・コピー・削除（削除は2回押し）。チームの人が作った作戦は、コピーだけ */}
       {menu && (
         <TBSheet onBg={() => setMenu(null)}>
-          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:8, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{menu.title || "名前なし"}</div>
+          <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:8, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{menu.title || "名前なし"}
+            {mineOf(menu) && <span style={{ display:"inline-block", fontSize:11, fontWeight:800, borderRadius:6, padding:"2px 7px", marginLeft:6, verticalAlign:"middle", background: menu.shared ? "#f3e8ff" : "#f1f2f5", color: menu.shared ? "#6b21a8" : "#6b7280" }}>{menu.shared ? "チームで共有" : "自分だけ"}</span>}</div>
           {mineOf(menu) && menuBtn("✏️ 名前を変える", () => { setRename({ board: menu, value: menu.title }); setMenu(null); })}
+          {mineOf(menu) && (menu.shared || ctx.schoolId) && menuBtn(
+            <><span>{menu.shared ? "🔒" : "👥"}</span><span>{menu.shared ? "自分だけにする" : "チームに共有する"}
+              <span style={{ display:"block", fontSize:11.5, fontWeight:600, color:C.textSec, marginTop:2 }}>{menu.shared ? "チームの人からは見えなくなります" : "チームの人も見られるようになります"}</span></span></>,
+            () => toggleShare(menu))}
           {menuBtn("📄 コピーする", () => copy(menu))}
           {mineOf(menu) && menuBtn(confirmDel ? "もう一度押すと削除します" : "🗑 削除する", () => del(menu), true, confirmDel)}
           <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}`, marginTop:8 }} onClick={() => setMenu(null)}>キャンセル</button>
