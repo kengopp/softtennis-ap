@@ -23344,14 +23344,15 @@ const GENDER_OPTIONS = [
   { key: "mixed", label: "共通" },
 ];
 
-// 学校マスター側の男女制限（共学/男子校/女子校）
+// 学校マスター側の区分2（男子／女子／その他）。DBの値は boys / girls / mixed のまま。
+// ★「その他」（mixed）は以前の「共学・共通」と同じ扱い（男子・女子どちらの登録でも候補に出る）
 const GENDER_RESTRICTION_OPTIONS = [
-  { key: "mixed", label: "共学・共通" },
-  { key: "boys",  label: "男子のみ" },
-  { key: "girls", label: "女子のみ" },
+  { key: "boys",  label: "男子" },
+  { key: "girls", label: "女子" },
+  { key: "mixed", label: "その他" },
 ];
 function genderRestrictionLabel(key) {
-  return GENDER_RESTRICTION_OPTIONS.find(g => g.key === key)?.label || "共学・共通";
+  return GENDER_RESTRICTION_OPTIONS.find(g => g.key === key)?.label || "その他";
 }
 // ユーザーの男女区分（genderCategory）から見て、その学校を選択肢に出してよいか
 function schoolMatchesGender(school, genderCategory) {
@@ -24931,27 +24932,29 @@ function PlayerRosterScreen({ onBack }) {
 // 学校マスター管理画面（管理者専用）
 // ============================================================
 function AdminSchoolsScreen({ onBack }) {
+  // ★学校マスター管理：選手マスターと同じ「条件を選ぶ → 登録済みの一覧を見る → 無ければ学校名だけ追加」の流れ。
+  //   ①区分1（高校など）②区分2（男子・女子・その他）③都道府県 で絞り込み、追加時は①〜③をそのまま使う。
+  //   区分2は DB の gender_restriction（boys / girls / mixed）をそのまま使う（その他＝mixed＝これまでの「共学・共通」）。
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filterCategory, setFilterCategory] = useState("");   // "" = すべて / "__none" = 区分未設定
+  const [filterGender, setFilterGender] = useState("");       // "" = すべて / boys / girls / mixed
+  const [filterPref, setFilterPref] = useState("");           // "" = すべて / "__none" = 都道府県未入力
   const [newName, setNewName] = useState("");
-  const [newPrefecture, setNewPrefecture] = useState("");
-  const [newCategory, setNewCategory] = useState(null);
-  const [newGenderRestriction, setNewGenderRestriction] = useState("mixed");
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editPrefecture, setEditPrefecture] = useState("");
   const [editCategory, setEditCategory] = useState(null);
   const [editGenderRestriction, setEditGenderRestriction] = useState("mixed");
   const [errorMsg, setErrorMsg] = useState("");
-  const [listPrefFilter, setListPrefFilter] = useState("");
+  const [addedMsg, setAddedMsg] = useState("");
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
+      // ★管理画面は「今のDBの正しい状態」を見る場所なので、必ずサーバーへ再取得しにいく（force=true）
       const list = await getSchools(true);
       setSchools(list);
-      // ★管理画面は「今のDBの正しい状態」を見る場所なので、
-      //   古いキャッシュを使い回さず必ずサーバーへ再取得しにいく（force=true）
     } catch (e) {
       console.error("学校マスターの再読み込みに失敗しました:", e);
       alert("学校一覧の取得に失敗しました。\n通信状態を確認して、もう一度再読み込みしてください。");
@@ -24962,25 +24965,73 @@ function AdminSchoolsScreen({ onBack }) {
 
   useEffect(() => { reload(); }, [reload]);
 
+  // ★①区分1・②区分2の初期値は、ログイン中の人の登録情報（category / gender_category）から決める。
+  //   男女が「共通」（mixed）の人は、男子・女子どちらも見ることが多いので②は「すべて」にする。
+  useEffect(() => {
+    let alive = true;
+    getMyProfile().then(p => {
+      if (!alive || !p) return;
+      if (p.category && CATEGORY_OPTIONS.some(c => c.key === p.category)) setFilterCategory(p.category);
+      if (p.gender_category === "boys" || p.gender_category === "girls") setFilterGender(p.gender_category);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // 学校名の比較用（空白と「高等学校」「高校」「中学校」「中学」を無視する）
+  const normName = (s) => String(s || "").replace(/[\s　]/g, "").replace(/高等学校|高校|中学校|中学/g, "");
+
+  const matchCategory = (s) => !filterCategory || (filterCategory === "__none" ? !s.category : s.category === filterCategory);
+  const matchGender = (s) => !filterGender || (s.gender_restriction || "mixed") === filterGender;
+  const matchPref = (s) => !filterPref || (filterPref === "__none" ? !s.prefecture : s.prefecture === filterPref);
+
+  const visible = schools
+    .filter(s => matchCategory(s) && matchGender(s) && matchPref(s))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ja"));
+
+  // ③都道府県：①②の条件で登録済みの学校がある県を上に、それ以外の県を下にまとめる
+  const usedPrefs = new Set(schools.filter(s => matchCategory(s) && matchGender(s)).map(s => s.prefecture).filter(Boolean));
+  const prefsWithSchools = PREFECTURES.filter(p => usedPrefs.has(p));
+  const prefsOthers = PREFECTURES.filter(p => !usedPrefs.has(p));
+  const hasNoCategory = schools.some(s => !s.category);
+  const hasNoPref = schools.some(s => !s.prefecture);
+
+  // 追加できるのは①〜③がすべて決まっているとき（「すべて」「未設定」では登録先が決まらない）
+  const canAdd = !!filterCategory && filterCategory !== "__none" && !!filterGender && !!filterPref && filterPref !== "__none";
+  const condLabel = [
+    filterCategory === "__none" ? "区分未設定" : categoryLabel(filterCategory),
+    filterGender ? genderRestrictionLabel(filterGender) : "",
+    filterPref === "__none" ? "都道府県未入力" : filterPref,
+  ].filter(Boolean).join("・");
+  const missingSteps = [
+    (!filterCategory || filterCategory === "__none") && "①区分1",
+    !filterGender && "②区分2",
+    (!filterPref || filterPref === "__none") && "③都道府県",
+  ].filter(Boolean);
+
+  // ★追加しようとしている名前と同じ・似た名前の学校は、①〜③の条件に関係なく表示する（別の県・区分での二重登録を防ぐ）
+  const nk = normName(newName);
+  const similar = nk ? schools.filter(s => { const k = normName(s.name); return k && (k.includes(nk) || nk.includes(k)); }).slice(0, 5) : [];
+
   async function handleAdd() {
-    setErrorMsg("");
-    if (!newName.trim()) return;
-    if (!newCategory) { setErrorMsg("区分（高校・中学校など）を選択してください"); return; }
+    setErrorMsg(""); setAddedMsg("");
+    const name = newName.trim();
+    if (!name || !canAdd) return;
     try {
-      await addSchool(newName.trim(), newPrefecture.trim(), newCategory, newGenderRestriction);
-      setNewName(""); setNewPrefecture(""); setNewCategory(null); setNewGenderRestriction("mixed");
+      await addSchool(name, filterPref, filterCategory, filterGender);
+      setNewName("");
+      setAddedMsg(`「${name}」（${condLabel}）を追加しました`);
       reload();
     } catch (e) {
       console.error("学校追加エラー（詳細）:", e);
       const friendly = e.message?.includes("duplicate") ? "同じ名前・同じ区分の学校がすでに登録されています" : (e.message || "追加に失敗しました");
-      setErrorMsg(friendly + " [詳細] " + (e.message||"") + " / " + (e.details||"") + " / " + (e.hint||""));
+      setErrorMsg(friendly);
     }
   }
 
   async function handleUpdate(id) {
     setErrorMsg("");
     if (!editName.trim()) return;
-    if (!editCategory) { setErrorMsg("区分（高校・中学校など）を選択してください"); return; }
+    if (!editCategory) { setErrorMsg("区分1（高校・中学校など）を選択してください"); return; }
     try {
       await updateSchoolMaster(id, { name: editName.trim(), prefecture: editPrefecture.trim() || null, category: editCategory, gender_restriction: editGenderRestriction });
       setEditingId(null);
@@ -25005,6 +25056,13 @@ function AdminSchoolsScreen({ onBack }) {
     }
   }
 
+  const selBox = (active) => ({ width:"100%", padding:"9px 6px", fontSize:14, borderRadius:8, border:`1.5px solid ${active ? C.navy : C.border}`, background: active ? "#eef2fb" : C.white, color:C.text, fontWeight: active ? 700 : 400, boxSizing:"border-box" });
+  const stepLabel = (n, label) => (
+    <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:12, fontWeight:800, color:C.text, marginBottom:5 }}>
+      <span style={{ width:17, height:17, borderRadius:"50%", background:C.navy, color:C.white, fontSize:10.5, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{n}</span>{label}
+    </div>
+  );
+
   return (
     <div style={S.page}>
       <div style={S.hdr}>
@@ -25014,75 +25072,76 @@ function AdminSchoolsScreen({ onBack }) {
         </div>
       </div>
       <div style={{ padding:14 }}>
-        <div style={{ background:"#f5f5f5",border:"1px solid #e0e0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:C.textSec,marginBottom:14 }}>
-          ℹ️ ここで登録した学校だけが、新規登録・プロフィールの学校名選択肢に表示されます。同じ学校名でも区分（高校・中学校など）が違えば別の学校として登録できます。
+        <div style={{ background:"#f5f5f5",border:"1px solid #e0e0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:C.textSec,marginBottom:14,lineHeight:1.6 }}>
+          ℹ️ ①区分1・②区分2は、あなたの登録情報から最初に選ばれています。③都道府県を選ぶと、その条件で登録済みの学校が下に出ます。一覧に無ければ、いちばん下で学校名を入れて追加してください。
         </div>
 
-        <FormSec title="学校を追加">
-          <FormRow label="学校名">
-            <input style={S.inp} placeholder="例：東福岡" value={newName} onChange={e=>setNewName(e.target.value)} />
-          </FormRow>
-          <FormRow label="区分">
-            <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-              {CATEGORY_OPTIONS.map(c => (
-                <button key={c.key} style={S.togBtn(newCategory===c.key)} onClick={()=>setNewCategory(c.key)}>{c.label}</button>
-              ))}
-            </div>
-          </FormRow>
-          <FormRow label="都道府県（任意）">
-            <select style={{ ...S.inp, background:"transparent" }} value={newPrefecture} onChange={e=>setNewPrefecture(e.target.value)}>
-              <option value="">指定なし</option>
-              {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1.3fr", gap:8, marginBottom:14 }}>
+          <div>
+            {stepLabel(1, "区分1")}
+            <select style={selBox(!!filterCategory)} value={filterCategory} onChange={e=>{ setFilterCategory(e.target.value); setEditingId(null); setAddedMsg(""); }}>
+              <option value="">すべて</option>
+              {CATEGORY_OPTIONS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+              {hasNoCategory && <option value="__none">未設定</option>}
             </select>
-          </FormRow>
-          <FormRow label="男女の制限">
-            <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-              {GENDER_RESTRICTION_OPTIONS.map(g => (
-                <button key={g.key} style={S.togBtn(newGenderRestriction===g.key)} onClick={()=>setNewGenderRestriction(g.key)}>{g.label}</button>
-              ))}
-            </div>
-          </FormRow>
-        </FormSec>
+          </div>
+          <div>
+            {stepLabel(2, "区分2")}
+            <select style={selBox(!!filterGender)} value={filterGender} onChange={e=>{ setFilterGender(e.target.value); setEditingId(null); setAddedMsg(""); }}>
+              <option value="">すべて</option>
+              {GENDER_RESTRICTION_OPTIONS.map(g => <option key={g.key} value={g.key}>{g.label}</option>)}
+            </select>
+          </div>
+          <div>
+            {stepLabel(3, "都道府県")}
+            <select style={selBox(!!filterPref)} value={filterPref} onChange={e=>{ setFilterPref(e.target.value); setEditingId(null); setAddedMsg(""); }}>
+              <option value="">すべて</option>
+              {prefsWithSchools.length > 0 && (
+                <optgroup label="登録済みの学校がある県">
+                  {prefsWithSchools.map(p => <option key={p} value={p}>{p}</option>)}
+                </optgroup>
+              )}
+              <optgroup label="その他の県">
+                {prefsOthers.map(p => <option key={p} value={p}>{p}</option>)}
+              </optgroup>
+              {hasNoPref && <option value="__none">未入力</option>}
+            </select>
+          </div>
+        </div>
 
-        {errorMsg && <div style={{ color:C.red,fontSize:12,marginBottom:10 }}>{errorMsg}</div>}
-
-        <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginBottom:16 }} onClick={handleAdd}>＋ 追加する</button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <div style={{ fontSize:12, fontWeight:800, color:C.textSec }}>{condLabel || "すべて"} の登録済み学校</div>
+          <div style={{ fontSize:11, color:C.textSec, fontWeight:700 }}>{loading ? "" : `${visible.length}校`}</div>
+        </div>
 
         {loading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
-        {!loading && schools.length===0 && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>登録されている学校がありません</div>}
-
-        {!loading && schools.length>0 && (
-          <select
-            style={{ ...S.inp, background:"transparent", marginBottom:10 }}
-            value={listPrefFilter}
-            onChange={e=>setListPrefFilter(e.target.value)}
-          >
-            <option value="">都道府県で絞り込み（すべて表示）</option>
-            {Array.from(new Set(schools.map(s=>s.prefecture).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ja")).map(p => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
+        {!loading && visible.length===0 && (
+          <div style={{ textAlign:"center",color:C.textSec,padding:"14px 0",fontSize:12,lineHeight:1.7 }}>この条件ではまだ登録されていません<br/>↓ 下で追加できます</div>
         )}
 
-        {schools.filter(s => !listPrefFilter || s.prefecture === listPrefFilter).map(s => (
+        {!loading && visible.map(s => (
           <div key={s.id} style={S.card}>
             {editingId===s.id ? (
               <div style={{ padding:12 }}>
-                <input style={{ ...S.inp, marginBottom:8 }} value={editName} onChange={e=>setEditName(e.target.value)} />
+                <div style={{ fontSize:11,color:C.textSec,marginBottom:4 }}>区分1</div>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
                   {CATEGORY_OPTIONS.map(c => (
                     <button key={c.key} style={S.togBtn(editCategory===c.key)} onClick={()=>setEditCategory(c.key)}>{c.label}</button>
                   ))}
                 </div>
-                <select style={{ ...S.inp, background:"transparent", marginBottom:10 }} value={editPrefecture} onChange={e=>setEditPrefecture(e.target.value)}>
-                  <option value="">指定なし</option>
-                  {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
+                <div style={{ fontSize:11,color:C.textSec,marginBottom:4 }}>区分2</div>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
                   {GENDER_RESTRICTION_OPTIONS.map(g => (
                     <button key={g.key} style={S.togBtn(editGenderRestriction===g.key)} onClick={()=>setEditGenderRestriction(g.key)}>{g.label}</button>
                   ))}
                 </div>
+                <div style={{ fontSize:11,color:C.textSec,marginBottom:4 }}>都道府県</div>
+                <select style={{ ...S.inp, background:"transparent", marginBottom:10 }} value={editPrefecture} onChange={e=>setEditPrefecture(e.target.value)}>
+                  <option value="">指定なし</option>
+                  {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <div style={{ fontSize:11,color:C.textSec,marginBottom:4 }}>学校名</div>
+                <input style={{ ...S.inp, marginBottom:10 }} value={editName} onChange={e=>setEditName(e.target.value)} />
                 {errorMsg && <div style={{ color:C.red,fontSize:12,marginBottom:8,padding:"6px 8px",background:"#fdecea",borderRadius:6 }}>{errorMsg}</div>}
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
                   <button style={{ ...S.btn("#f0f0f0"),color:C.text,fontSize:12 }} onClick={()=>{setEditingId(null);setErrorMsg("");}}>キャンセル</button>
@@ -25094,15 +25153,44 @@ function AdminSchoolsScreen({ onBack }) {
                 <div style={{ flex:1 }}>
                   <div style={{ fontSize:14,fontWeight:700,color:C.text }}>{s.name}</div>
                   <div style={{ fontSize:11,color:C.textSec }}>
-                    {[categoryLabel(s.category) || "区分未設定", s.prefecture, genderRestrictionLabel(s.gender_restriction)].filter(Boolean).join("・")}
+                    {[categoryLabel(s.category) || "区分未設定", genderRestrictionLabel(s.gender_restriction), s.prefecture || "都道府県未入力"].join("・")}
                   </div>
                 </div>
-                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer" }} onClick={()=>{ setEditingId(s.id); setEditName(s.name); setEditPrefecture(s.prefecture||""); setEditCategory(s.category||null); setEditGenderRestriction(s.gender_restriction||"mixed"); }}>✏️</button>
+                <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer" }} onClick={()=>{ setErrorMsg(""); setEditingId(s.id); setEditName(s.name); setEditPrefecture(s.prefecture||""); setEditCategory(s.category||null); setEditGenderRestriction(s.gender_restriction||"mixed"); }}>✏️</button>
                 <button style={{ background:"none",border:"none",fontSize:16,cursor:"pointer",color:C.red }} onClick={()=>handleDelete(s.id)}>🗑</button>
               </div>
             )}
           </div>
         ))}
+
+        {/* ★追加は学校名だけ。区分1・区分2・都道府県は①〜③で選んだものをそのまま使う */}
+        <div style={{ background:C.white, border:`1.5px solid ${C.accent}`, borderRadius:12, padding:14, marginTop:6 }}>
+          {canAdd ? (
+            <>
+              <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:8 }}>
+                <span style={{ color:"#00875a" }}>{condLabel}</span> に学校を追加
+              </div>
+              <input style={{ ...S.inp, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"10px 12px" }} placeholder="学校名（例：東福岡）" value={newName} onChange={e=>{ setNewName(e.target.value); setAddedMsg(""); setErrorMsg(""); }} />
+              {similar.length > 0 && (
+                <div style={{ background:"#fff7d6", border:"1px solid #e6d27a", borderRadius:8, padding:"8px 10px", fontSize:12, lineHeight:1.6, marginTop:8 }}>
+                  ⚠️ 似た名前の学校がすでにあります<br/>
+                  {similar.map(s => (
+                    <div key={s.id}>・<b>{s.name}</b>（{[categoryLabel(s.category) || "区分未設定", genderRestrictionLabel(s.gender_restriction), s.prefecture || "都道府県未入力"].join("・")}）</div>
+                  ))}
+                </div>
+              )}
+              {errorMsg && !editingId && <div style={{ color:C.red,fontSize:12,marginTop:8,padding:"6px 8px",background:"#fdecea",borderRadius:6 }}>{errorMsg}</div>}
+              {addedMsg && <div style={{ color:"#00875a",fontSize:12,marginTop:8,padding:"6px 8px",background:C.accentL,borderRadius:6,fontWeight:700 }}>✅ {addedMsg}</div>}
+              <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:12, opacity:newName.trim()?1:0.5 }} disabled={!newName.trim()} onClick={handleAdd}>＋ 追加する</button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:6 }}>学校を追加</div>
+              <div style={{ fontSize:12.5, color:C.textSec, lineHeight:1.6 }}>上の {missingSteps.join("・")} を選ぶと、学校名を入れるだけで追加できます</div>
+              {addedMsg && <div style={{ color:"#00875a",fontSize:12,marginTop:8,padding:"6px 8px",background:C.accentL,borderRadius:6,fontWeight:700 }}>✅ {addedMsg}</div>}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
