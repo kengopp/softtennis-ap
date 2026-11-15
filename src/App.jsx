@@ -25064,7 +25064,7 @@ function AdminSchoolsScreen({ onBack }) {
   );
 
   return (
-    <div style={S.page}>
+    <div style={{ ...S.page, paddingBottom:0 }}>
       <div style={S.hdr}>
         <div style={{ display:"flex",alignItems:"center",gap:12 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onBack}>←</button>
@@ -25073,7 +25073,7 @@ function AdminSchoolsScreen({ onBack }) {
       </div>
       <div style={{ padding:14 }}>
         <div style={{ background:"#f5f5f5",border:"1px solid #e0e0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:C.textSec,marginBottom:14,lineHeight:1.6 }}>
-          ℹ️ ①区分1・②区分2は、あなたの登録情報から最初に選ばれています。③都道府県を選ぶと、その条件で登録済みの学校が下に出ます。一覧に無ければ、いちばん下で学校名を入れて追加してください。
+          ℹ️ ①区分1・②区分2は、あなたの登録情報から最初に選ばれています。③都道府県を選ぶと、その条件で登録済みの学校が下に出ます。一覧に無ければ、画面のいちばん下の欄に学校名を入れて追加してください。
         </div>
 
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1.3fr", gap:8, marginBottom:14 }}>
@@ -25116,7 +25116,7 @@ function AdminSchoolsScreen({ onBack }) {
 
         {loading && <div style={{ textAlign:"center",color:C.textSec,padding:"20px 0" }}>読み込み中...</div>}
         {!loading && visible.length===0 && (
-          <div style={{ textAlign:"center",color:C.textSec,padding:"14px 0",fontSize:12,lineHeight:1.7 }}>この条件ではまだ登録されていません<br/>↓ 下で追加できます</div>
+          <div style={{ textAlign:"center",color:C.textSec,padding:"14px 0",fontSize:12,lineHeight:1.7 }}>この条件ではまだ登録されていません<br/>↓ 画面下の欄で追加できます</div>
         )}
 
         {!loading && visible.map(s => (
@@ -25163,29 +25163,36 @@ function AdminSchoolsScreen({ onBack }) {
           </div>
         ))}
 
-        {/* ★追加は学校名だけ。区分1・区分2・都道府県は①〜③で選んだものをそのまま使う */}
-        <div style={{ background:C.white, border:`1.5px solid ${C.accent}`, borderRadius:12, padding:14, marginTop:6 }}>
+      </div>
+      {/* ★追加欄は画面の下に固定（一覧をスクロールしても常に見えている）。
+          追加は学校名だけ。区分1・区分2・都道府県は①〜③で選んだものをそのまま使う */}
+      <div style={{ position:"sticky", bottom:0, zIndex:9, padding:"8px 14px 12px", background:`linear-gradient(to top, ${C.gray} 78%, rgba(244,246,249,0))` }}>
+        <div style={{ background:C.white, border:`1.5px solid ${C.accent}`, borderRadius:12, padding:"10px 12px", boxShadow:"0 -2px 12px rgba(15,32,68,0.08)" }}>
           {canAdd ? (
             <>
-              <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:8 }}>
+              <div style={{ fontSize:12.5, fontWeight:800, color:C.text, marginBottom:6 }}>
                 <span style={{ color:"#00875a" }}>{condLabel}</span> に学校を追加
               </div>
-              <input style={{ ...S.inp, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"10px 12px" }} placeholder="学校名（例：東福岡）" value={newName} onChange={e=>{ setNewName(e.target.value); setAddedMsg(""); setErrorMsg(""); }} />
               {similar.length > 0 && (
-                <div style={{ background:"#fff7d6", border:"1px solid #e6d27a", borderRadius:8, padding:"8px 10px", fontSize:12, lineHeight:1.6, marginTop:8 }}>
-                  ⚠️ 似た名前の学校がすでにあります<br/>
+                <div style={{ background:"#fff7d6", border:"1px solid #e6d27a", borderRadius:8, padding:"6px 10px", fontSize:12, lineHeight:1.6, marginBottom:8, maxHeight:96, overflowY:"auto" }}>
+                  ⚠️ 似た名前の学校がすでにあります
                   {similar.map(s => (
                     <div key={s.id}>・<b>{s.name}</b>（{[categoryLabel(s.category) || "区分未設定", genderRestrictionLabel(s.gender_restriction), s.prefecture || "都道府県未入力"].join("・")}）</div>
                   ))}
                 </div>
               )}
-              {errorMsg && !editingId && <div style={{ color:C.red,fontSize:12,marginTop:8,padding:"6px 8px",background:"#fdecea",borderRadius:6 }}>{errorMsg}</div>}
-              {addedMsg && <div style={{ color:"#00875a",fontSize:12,marginTop:8,padding:"6px 8px",background:C.accentL,borderRadius:6,fontWeight:700 }}>✅ {addedMsg}</div>}
-              <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), marginTop:12, opacity:newName.trim()?1:0.5 }} disabled={!newName.trim()} onClick={handleAdd}>＋ 追加する</button>
+              {errorMsg && !editingId && <div style={{ color:C.red,fontSize:12,marginBottom:8,padding:"6px 8px",background:"#fdecea",borderRadius:6 }}>{errorMsg}</div>}
+              {addedMsg && <div style={{ color:"#00875a",fontSize:12,marginBottom:8,padding:"6px 8px",background:C.accentL,borderRadius:6,fontWeight:700 }}>✅ {addedMsg}</div>}
+              <div style={{ display:"flex", gap:8 }}>
+                <input style={{ ...S.inp, flex:1, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"9px 12px" }} placeholder="学校名（例：東福岡）" value={newName}
+                  onChange={e=>{ setNewName(e.target.value); setAddedMsg(""); setErrorMsg(""); }}
+                  onKeyDown={e=>{ if (e.key === "Enter" && !e.nativeEvent.isComposing) handleAdd(); }} />
+                <button style={{ ...S.btn(`linear-gradient(135deg,${C.accent},#00a066)`), width:"auto", padding:"9px 16px", whiteSpace:"nowrap", opacity:newName.trim()?1:0.5 }} disabled={!newName.trim()} onClick={handleAdd}>＋ 追加</button>
+              </div>
             </>
           ) : (
             <>
-              <div style={{ fontSize:14, fontWeight:800, color:C.text, marginBottom:6 }}>学校を追加</div>
+              <div style={{ fontSize:12.5, fontWeight:800, color:C.text, marginBottom:4 }}>学校を追加</div>
               <div style={{ fontSize:12.5, color:C.textSec, lineHeight:1.6 }}>上の {missingSteps.join("・")} を選ぶと、学校名を入れるだけで追加できます</div>
               {addedMsg && <div style={{ color:"#00875a",fontSize:12,marginTop:8,padding:"6px 8px",background:C.accentL,borderRadius:6,fontWeight:700 }}>✅ {addedMsg}</div>}
             </>
