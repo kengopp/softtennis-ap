@@ -28216,23 +28216,34 @@ function tbRowToBoard(r) {
   const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [], fstart: d.fstart || d.free || null, fmoves: d.fstart ? (d.fmoves || []) : d.free ? [] : null }
     : d.steps ? tbFromSteps(d.steps) : { start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
   return { id: r.id, title: r.title || "", mode, shared: !!r.shared, owner_id: r.owner_id || null, updated_at: r.updated_at,
+    // ★ほかの人から届いた作戦（送った人の名前は、書き換えて保存するまで残す）／自分が送った相手
+    from_user_id: r.from_user_id || null, from_name: r.from_name || "", from_seen_at: r.from_seen_at || null,
+    sent_to: Array.isArray(r.sent_to) ? r.sent_to : [],
     names: d.names || {}, ballColor: d.ballColor === "white" ? "white" : "yellow", ballTrail: d.ballTrail !== false, playerTrail: d.playerTrail !== false,
     court: TB_COURTS[d.court] ? d.court : "hard", colors: { ...TB_DEF_COLORS, ...(d.colors || {}) }, ...body };
 }
 const tbTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+// ★「相手を選んで送る」で使う列（from_user_id など）が、まだデータベースに無いとき（SQLを流す前）でも一覧は出るようにする
+let tbHasSendCols = true;
 async function tbLoadList() {
   try {
-    const { data, error } = await tbTimeout(supabase.from("tactic_boards")
-      .select("id, title, mode, shared, owner_id, updated_at, data").order("updated_at", { ascending: false }).limit(100), 10000);
+    const base = "id, title, mode, shared, owner_id, updated_at, data";
+    const q = cols => tbTimeout(supabase.from("tactic_boards").select(cols).order("updated_at", { ascending: false }).limit(100), 10000);
+    let { data, error } = await q(base + ", from_user_id, from_name, from_seen_at, sent_to");
+    if (error && /from_user_id|from_name|from_seen_at|sent_to|column/i.test(error.message || "")) {
+      tbHasSendCols = false; ({ data, error } = await q(base));
+    } else if (!error) tbHasSendCols = true;
     if (error) { console.error(error); return { rows: [], error }; }
     return { rows: (data || []).map(tbRowToBoard), error: null };
   } catch (e) { console.error(e); return { rows: [], error: e }; }
 }
-async function tbSaveBoard(b, schoolId) {
+async function tbSaveBoard(b, schoolId, opts = {}) {
   const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
     data: { start: b.start, moves: b.moves, draw: b.draw, fstart: b.fstart || null, fmoves: b.fstart ? (b.fmoves || []) : null, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
       court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) } },
     updated_at: new Date().toISOString() };
+  // ★届いた作戦を書き換えて保存したら、送った人の名前を外して自分の作戦にする
+  if (opts.clearFrom && tbHasSendCols) { row.from_user_id = null; row.from_name = null; row.from_seen_at = null; }
   try {
     const { error } = await tbTimeout(supabase.from("tactic_boards").upsert(row, { onConflict: "id" }), 10000);
     if (error) { console.error(error); return false; }
@@ -28245,6 +28256,34 @@ async function tbDeleteBoard(id) {
     if (error) { console.error(error); return false; }
     return true;
   } catch (e) { console.error(e); return false; }
+}
+// ★作戦を相手に送る：相手の作戦として新しく作る（Supabase の関数 send_tactic_board。持ち主か・同じチームかは関数の中で確かめる）
+async function tbSendBoard(id, toIds) {
+  try {
+    const { data, error } = await tbTimeout(supabase.rpc("send_tactic_board", { p_board_id: id, p_to: toIds }), 15000);
+    if (error) { console.error(error); return { ok: false, error }; }
+    return { ok: true, count: data };
+  } catch (e) { console.error(e); return { ok: false, error: e }; }
+}
+// ★届いた作戦を開いたら NEW を消す（送った人の名前は残す）
+async function tbMarkSeen(id) {
+  try { await tbTimeout(supabase.from("tactic_boards").update({ from_seen_at: new Date().toISOString() }).eq("id", id), 10000); } catch (_) {}
+}
+// ★送る相手の候補：同じチームの承認済みメンバー。同じ選手につながっている人（親子など）を「ご家族」として上に出す
+async function tbLoadSendTargets(myId) {
+  try {
+    let { data, error } = await supabase.from("users").select("id, name, linked_player_id").eq("is_approved", true).order("name");
+    if (error) ({ data, error } = await supabase.from("users").select("id, name").eq("is_approved", true).order("name"));
+    if (error) { console.error(error); return null; }
+    const rows = (data || []).filter(u => u.id && u.name);
+    const me = rows.find(u => u.id === myId);
+    const myLink = me && me.linked_player_id;
+    const others = rows.filter(u => u.id !== myId);
+    return {
+      family: myLink ? others.filter(u => u.linked_player_id === myLink) : [],
+      members: others.filter(u => !(myLink && u.linked_player_id === myLink)),
+    };
+  } catch (e) { console.error(e); return null; }
 }
 function tbLen(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
 function tbCut(pts, k) {
@@ -28668,6 +28707,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
   const [sheet, setSheet] = useState(null);   // { type:"name"|"save"|"settings", ... }
   const [saving, setSaving] = useState(false);
   const backAsk = useRef(false);
+  const savedOnce = useRef(false);   // ★新しい作戦を一度保存したか（保存したら、何か変えるまで「保存済み」にする）
   const mine = !board.owner_id || board.owner_id === ctx.userId;
   // ★この端末だけの設定（選手・ボールの大きさ／画面を消さない／長押しで名前）
   const [dev, setDev] = useState(tbLoadDev);
@@ -28744,9 +28784,14 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
   const doSave = async (title, shared) => {
     setSaving(true);
     b.title = title; if (mine) b.shared = !!(shared && ctx.schoolId);
-    const ok = await tbSaveBoard(b, ctx.schoolId);
+    const wasFrom = !!b.from_user_id;   // ★届いた作戦を書き換えて保存したら、送った人の名前を外す
+    const ok = await tbSaveBoard(b, ctx.schoolId, { clearFrom: wasFrom });
     setSaving(false);
-    if (ok) { eng.dirty = false; setSheet(null); showToast("保存しました（「保存した作戦」から開けます）"); rerender(); }
+    if (ok) {
+      eng.dirty = false; savedOnce.current = true;
+      if (wasFrom) { b.from_user_id = null; b.from_name = ""; }
+      setSheet(null); showToast(wasFrom ? "保存しました。あなたの作戦として「保存した作戦」に入りました" : "保存しました（「保存した作戦」から開けます）"); rerender();
+    }
     else showToast("保存できませんでした。電波の良い所でもう一度「保存」を押してください");
   };
 
@@ -28768,8 +28813,16 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
       <div style={{ background:C.navy, color:C.white, padding:"calc(10px + env(safe-area-inset-top,0px)) 12px 10px", display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
         <button onClick={back} style={{ border:"none", background:"rgba(255,255,255,.14)", color:"#fff", borderRadius:9, padding:"7px 10px", fontSize:13, fontWeight:700, whiteSpace:"nowrap" }}>← 戻る</button>
         <div onClick={() => !readOnly && setSheet({ type:"name", value:b.title })} style={{ flex:1, minWidth:0, fontSize:16, fontWeight:800, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor: readOnly ? "default" : "pointer" }}>{b.title || "名前なしの作戦"}</div>
-        {!readOnly && <button onClick={() => setSheet({ type:"save", value:b.title, shared: !!b.shared })} style={{ border:"none", background:"#2e9e5b", color:"#fff", borderRadius:9, padding:"7px 12px", fontSize:13, fontWeight:800 }}>保存</button>}
+        {!readOnly && (() => {
+          // ★保存済みの作戦は、何か変えるまで「✓ 保存済み」（押せない）。新しい作戦は最初から「保存」
+          const canSave = eng.dirty || (isNew && !savedOnce.current);
+          return <button disabled={!canSave} onClick={() => setSheet({ type:"save", value:b.title, shared: !!b.shared })}
+            style={{ border:"none", background: canSave ? "#2e9e5b" : "rgba(255,255,255,.14)", color: canSave ? "#fff" : "rgba(255,255,255,.6)", borderRadius:9, padding:"7px 12px", fontSize:13, fontWeight:800, whiteSpace:"nowrap", cursor: canSave ? "pointer" : "default" }}>{canSave ? "保存" : "✓ 保存済み"}</button>;
+        })()}
       </div>
+      {b.from_user_id && b.from_name && (
+        <div style={{ background:"#fff1e6", color:"#c2410c", fontSize:12, fontWeight:700, padding:"6px 12px", flexShrink:0 }}>📩 {b.from_name} さんから届いた作戦（書き換えて保存すると、あなたの作戦になります）</div>
+      )}
 
       {!readOnly && (
         <div style={{ display:"flex", gap:3, padding:"8px 6px 6px", background:C.white, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
@@ -29083,6 +29136,7 @@ function TacticsPanel({ ctx, isViewer }) {
   const [menu, setMenu] = useState(null);       // board
   const [confirmDel, setConfirmDel] = useState(false);
   const [rename, setRename] = useState(null);   // { board, value }
+  const [sendTo, setSendTo] = useState(null);   // ★送る相手を選ぶ画面 { board, pick:Set, targets:null|{family,members}|"err", q, sending }
   const [toast, setToastMsg] = useState("");
   const toastTimer = useRef(null);
   const showToast = m => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(""), 2400); };
@@ -29115,8 +29169,29 @@ function TacticsPanel({ ctx, isViewer }) {
   };
   const doRename = async () => {
     const b = { ...rename.board, title: (rename.value || "").trim() }; setRename(null);
-    const ok = await tbSaveBoard(b, ctx.schoolId);
+    const ok = await tbSaveBoard(b, ctx.schoolId, { clearFrom: !!b.from_user_id });   // ★名前を変えたら、送った人の名前は外す
     if (ok) { showToast("名前を変えました"); load(); } else showToast("変更できませんでした。もう一度お試しください");
+  };
+  // ★相手を選んで送る
+  const openSend = (b) => {
+    setMenu(null);
+    if (!tbHasSendCols) { showToast("送る準備ができていません（管理者がデータベースの設定をすると使えます）"); return; }
+    setSendTo({ board: b, pick: new Set(), targets: null, q: "", sending: false });
+    tbLoadSendTargets(ctx.userId).then(t => setSendTo(v => v && v.board.id === b.id ? { ...v, targets: t || "err" } : v));
+  };
+  const doSend = async () => {
+    const v = sendTo; if (!v || !v.pick.size || v.sending) return;
+    setSendTo({ ...v, sending: true });
+    const ids = [...v.pick];
+    const all = [...(v.targets.family || []), ...(v.targets.members || [])];
+    const names = ids.map(i => (all.find(u => u.id === i) || {}).name).filter(Boolean);
+    const r = await tbSendBoard(v.board.id, ids);
+    if (r.ok) { setSendTo(null); showToast(`「${v.board.title || "名前なし"}」を ${names.join("、")} に送りました`); load(); }
+    else { setSendTo({ ...v, sending: false }); showToast("送れませんでした。電波の良い所でもう一度お試しください"); }
+  };
+  const openBoard = (b) => {
+    if (b.from_user_id && !b.from_seen_at && mineOf(b)) { tbMarkSeen(b.id); setList(l => (l || []).map(x => x.id === b.id ? { ...x, from_seen_at: new Date().toISOString() } : x)); }
+    setOpened({ board: b, isNew: false, readOnly: isViewer });
   };
   const menuBtn = (label, onClick, danger, ask) => (
     <button onClick={onClick} style={{ display:"flex", alignItems:"center", justifyContent: ask ? "center" : "flex-start", gap:10, width:"100%", border:"none", borderTop:`1px solid #eef0f4`, background: ask ? C.red : C.white,
@@ -29133,19 +29208,23 @@ function TacticsPanel({ ctx, isViewer }) {
           <div style={{ fontSize:11.5, color:C.textSec, marginTop:8, lineHeight:1.6 }}>コートの上で選手とボールを動かして、作戦や動き方をコマ送りで作れます。▶ で動きを再生できます。</div>
         </div>
       )}
-      <div style={{ background:C.white, borderRadius:14, padding:14, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
-        <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:6 }}>保存した作戦</div>
-        {list === null ? <div style={{ fontSize:12.5, color:C.textSec }}>読み込み中…</div>
-          : loadErr && !list.length ? <div style={{ fontSize:12.5, color:C.red, lineHeight:1.6 }}>読み込めませんでした。電波の良い所で開き直してください。</div>
-          : !list.length ? <div style={{ fontSize:12.5, color:C.textSec }}>まだありません。{isViewer ? "" : "「新しい作戦」から作れます。"}</div>
-          : list.map((b, i) => (
-            <div key={b.id} onClick={() => setOpened({ board: b, isNew: false, readOnly: isViewer })}
+      {/* ★ほかの人から届いた作戦（書き換えて保存するまで、送った人の名前を出す）。操作は自分の作戦と同じ */}
+      {(() => {
+        const recv = (list || []).filter(b => b.from_user_id && mineOf(b));
+        if (!recv.length) return null;
+        return (
+          <div style={{ background:"#fff7ed", border:"1.5px solid #fdba74", borderRadius:14, padding:14, marginBottom:12, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+            <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:6 }}>📩 あなたに届いた作戦</div>
+            {recv.map((b, i) => (
+            <div key={b.id} onClick={() => openBoard(b)}
               style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderTop: i ? "1px solid #eef0f4" : "none", cursor:"pointer" }}>
               <canvas width="92" height="140" ref={c => tbDrawMini(c, b)} style={{ width:46, height:70, borderRadius:6, flexShrink:0 }} />
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:14, fontWeight:800, color:C.navy, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden", lineHeight:1.35, wordBreak:"break-all" }}>{b.title || "名前なし"}</div>
+                <div style={{ fontSize:14, fontWeight:800, color:C.navy, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden", lineHeight:1.35, wordBreak:"break-all" }}>{b.title || "名前なし"}{b.from_user_id && !b.from_seen_at && mineOf(b) && <span style={{ fontSize:10, fontWeight:800, color:"#fff", background:"#f97316", borderRadius:4, padding:"1px 5px", marginLeft:6, verticalAlign:2 }}>NEW</span>}{""}</div>
                 <div style={{ fontSize:11.5, color:C.textSec, marginTop:3 }}>
                   {chip("#eef3ff", "#2a4fa8", b.mode === "single" ? "シングルス" : "ダブルス")}
+                  {b.from_user_id && mineOf(b) && chip("#fff1e6", "#c2410c", `${b.from_name || "ほかの人"} さんから`)}
+                  {mineOf(b) && b.sent_to && b.sent_to.length > 0 && chip("#fff1e6", "#c2410c", `👤 ${b.sent_to.length}人に送った`)}
                   {mineOf(b) ? chip(b.shared ? "#f3e8ff" : "#f1f2f5", b.shared ? "#6b21a8" : "#6b7280", b.shared ? "チームで共有" : "自分だけ") : chip("#f3e8ff", "#6b21a8", "チームの人が作成")}
                   {fmt(b.updated_at)}
                 </div>
@@ -29155,7 +29234,38 @@ function TacticsPanel({ ctx, isViewer }) {
                   style={{ border:`1px solid ${C.border}`, background:C.white, borderRadius:8, width:36, height:34, fontSize:20, fontWeight:900, color:"#4a5568", lineHeight:1, padding:0, flexShrink:0 }}>⋯</button>
               )}
             </div>
-          ))}
+))}
+          </div>
+        );
+      })()}
+      <div style={{ background:C.white, borderRadius:14, padding:14, boxShadow:"0 1px 3px rgba(0,0,0,.06)" }}>
+        <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:6 }}>保存した作戦</div>
+        {(() => {
+          const own = (list || []).filter(b => !(b.from_user_id && mineOf(b)));
+          return list === null ? <div style={{ fontSize:12.5, color:C.textSec }}>読み込み中…</div>
+          : loadErr && !list.length ? <div style={{ fontSize:12.5, color:C.red, lineHeight:1.6 }}>読み込めませんでした。電波の良い所で開き直してください。</div>
+          : !own.length ? <div style={{ fontSize:12.5, color:C.textSec }}>まだありません。{isViewer ? "" : "「新しい作戦」から作れます。"}</div>
+          : own.map((b, i) => (
+            <div key={b.id} onClick={() => openBoard(b)}
+              style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderTop: i ? "1px solid #eef0f4" : "none", cursor:"pointer" }}>
+              <canvas width="92" height="140" ref={c => tbDrawMini(c, b)} style={{ width:46, height:70, borderRadius:6, flexShrink:0 }} />
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, fontWeight:800, color:C.navy, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden", lineHeight:1.35, wordBreak:"break-all" }}>{b.title || "名前なし"}{b.from_user_id && !b.from_seen_at && mineOf(b) && <span style={{ fontSize:10, fontWeight:800, color:"#fff", background:"#f97316", borderRadius:4, padding:"1px 5px", marginLeft:6, verticalAlign:2 }}>NEW</span>}{""}</div>
+                <div style={{ fontSize:11.5, color:C.textSec, marginTop:3 }}>
+                  {chip("#eef3ff", "#2a4fa8", b.mode === "single" ? "シングルス" : "ダブルス")}
+                  {b.from_user_id && mineOf(b) && chip("#fff1e6", "#c2410c", `${b.from_name || "ほかの人"} さんから`)}
+                  {mineOf(b) && b.sent_to && b.sent_to.length > 0 && chip("#fff1e6", "#c2410c", `👤 ${b.sent_to.length}人に送った`)}
+                  {mineOf(b) ? chip(b.shared ? "#f3e8ff" : "#f1f2f5", b.shared ? "#6b21a8" : "#6b7280", b.shared ? "チームで共有" : "自分だけ") : chip("#f3e8ff", "#6b21a8", "チームの人が作成")}
+                  {fmt(b.updated_at)}
+                </div>
+              </div>
+              {!isViewer && (
+                <button title="その他" aria-label="その他" onClick={e => { e.stopPropagation(); setConfirmDel(false); setMenu(b); }}
+                  style={{ border:`1px solid ${C.border}`, background:C.white, borderRadius:8, width:36, height:34, fontSize:20, fontWeight:900, color:"#4a5568", lineHeight:1, padding:0, flexShrink:0 }}>⋯</button>
+              )}
+            </div>
+));
+        })()}
       </div>
 
       {/* ★「⋯」のメニュー：名前を変える・コピー・削除（削除は2回押し）。チームの人が作った作戦は、コピーだけ */}
@@ -29163,16 +29273,72 @@ function TacticsPanel({ ctx, isViewer }) {
         <TBSheet onBg={() => setMenu(null)}>
           <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:8, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{menu.title || "名前なし"}
             {mineOf(menu) && <span style={{ display:"inline-block", fontSize:11, fontWeight:800, borderRadius:6, padding:"2px 7px", marginLeft:6, verticalAlign:"middle", background: menu.shared ? "#f3e8ff" : "#f1f2f5", color: menu.shared ? "#6b21a8" : "#6b7280" }}>{menu.shared ? "チームで共有" : "自分だけ"}</span>}</div>
+          {mineOf(menu) && menu.sent_to && menu.sent_to.length > 0 && (
+            <div style={{ background:"#f8fafc", border:`1px solid ${C.border}`, borderRadius:10, padding:"8px 12px", fontSize:12.5, lineHeight:1.6, marginBottom:8 }}>
+              👤 {menu.sent_to.length}人に送りました
+              <div style={{ fontSize:11.5, color:C.textSec }}>送ったあとに直した内容は相手には届きません。届けたいときはもう一度送ってください</div>
+            </div>
+          )}
           {mineOf(menu) && menuBtn("✏️ 名前を変える", () => { setRename({ board: menu, value: menu.title }); setMenu(null); })}
           {mineOf(menu) && (menu.shared || ctx.schoolId) && menuBtn(
             <><span>{menu.shared ? "🔒" : "👥"}</span><span>{menu.shared ? "自分だけにする" : "チームに共有する"}
               <span style={{ display:"block", fontSize:11.5, fontWeight:600, color:C.textSec, marginTop:2 }}>{menu.shared ? "チームの人からは見えなくなります" : "チームの人も見られるようになります"}</span></span></>,
             () => toggleShare(menu))}
+          {mineOf(menu) && ctx.schoolId && menuBtn(
+            <><span>👤</span><span>相手を選んで送る
+              <span style={{ display:"block", fontSize:11.5, fontWeight:600, color:C.textSec, marginTop:2 }}>選んだ人に、この作戦が届きます（家族など）</span></span></>,
+            () => openSend(menu))}
           {menuBtn("📄 コピーする", () => copy(menu))}
           {mineOf(menu) && menuBtn(confirmDel ? "もう一度押すと削除します" : "🗑 削除する", () => del(menu), true, confirmDel)}
           <button style={{ ...S.btn(C.white), color:C.navy, border:`1px solid ${C.border}`, marginTop:8 }} onClick={() => setMenu(null)}>キャンセル</button>
         </TBSheet>
       )}
+      {/* ★送る相手を選ぶ：上の説明と下のボタンは固定し、間のメンバー一覧だけをスクロール */}
+      {sendTo && (() => {
+        const t = sendTo.targets;
+        const toggle = id => setSendTo(v => { const p = new Set(v.pick); p.has(id) ? p.delete(id) : p.add(id); return { ...v, pick: p }; });
+        const q = (sendTo.q || "").trim();
+        const row = (u, fam) => {
+          const on = sendTo.pick.has(u.id);
+          return (
+            <div key={u.id} onClick={() => toggle(u.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 8px", border:`1.5px solid ${on ? C.accent : C.border}`, background: on ? C.accentL : C.white, borderRadius:10, marginBottom:6, cursor:"pointer" }}>
+              <div style={{ width:32, height:32, borderRadius:"50%", background:"#dbe4f3", color:C.navy, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>{String(u.name).trim().charAt(0)}</div>
+              <div style={{ flex:1, minWidth:0, fontSize:14, fontWeight:700, color:C.text }}>{u.name}{fam && <span style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"1px 7px", background:"#fff1e6", color:"#c2410c", marginLeft:6 }}>ご家族</span>}</div>
+              <div style={{ width:22, height:22, borderRadius:6, border:`2px solid ${on ? C.accent : "#c3c9d4"}`, background: on ? C.accent : C.white, color:"#fff", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{on ? "✓" : ""}</div>
+            </div>
+          );
+        };
+        const members = t && t !== "err" ? t.members.filter(u => !q || String(u.name).includes(q)) : [];
+        const n = sendTo.pick.size;
+        return (
+          <div onClick={e => { if (e.target === e.currentTarget && !sendTo.sending) setSendTo(null); }} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"flex-end", zIndex:700, overscrollBehavior:"contain" }}>
+            <div style={{ background:C.white, width:"100%", maxHeight:"88vh", display:"flex", flexDirection:"column", borderRadius:"16px 16px 0 0", overflow:"hidden" }}>
+              <div style={{ padding:"16px 16px 8px", flexShrink:0 }}>
+                <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:4 }}>送る相手を選ぶ</div>
+                <div style={{ fontSize:12, color:C.textSec, lineHeight:1.6 }}>選んだ人の「📩 あなたに届いた作戦」に、この作戦が届きます。届いた作戦は相手のものになり、自分で作った作戦と同じように使えます（あなたの作戦はそのまま）。</div>
+              </div>
+              <div style={{ flex:1, minHeight:0, overflowY:"auto", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain", padding:"0 16px 8px" }}>
+                {!t ? <div style={{ fontSize:12.5, color:C.textSec, padding:"12px 0" }}>読み込み中…</div>
+                  : t === "err" ? <div style={{ fontSize:12.5, color:C.red, padding:"12px 0" }}>メンバーを読み込めませんでした。電波の良い所で開き直してください。</div>
+                  : <>
+                    {t.family.length > 0 && <>
+                      <div style={{ fontSize:12, fontWeight:800, color:C.textSec, margin:"6px 0 6px" }}>👨‍👩‍👦 ご家族（同じ選手につながっている人）</div>
+                      {t.family.map(u => row(u, true))}
+                    </>}
+                    <div style={{ fontSize:12, fontWeight:800, color:C.textSec, margin:"10px 0 6px" }}>チームのメンバー</div>
+                    <input type="text" autoComplete="off" value={sendTo.q} onChange={e => setSendTo(v => ({ ...v, q: e.target.value }))} placeholder="名前で探す"
+                      style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:9, padding:10, fontSize:15, marginBottom:8 }} />
+                    {members.length ? members.map(u => row(u, false)) : <div style={{ fontSize:12.5, color:C.textSec, padding:8 }}>見つかりません</div>}
+                  </>}
+              </div>
+              <div style={{ display:"flex", gap:8, padding:"10px 16px calc(14px + env(safe-area-inset-bottom,0px))", borderTop:"1px solid #eef0f4", flexShrink:0 }}>
+                <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} disabled={sendTo.sending} onClick={() => setSendTo(null)}>キャンセル</button>
+                <button style={{ ...S.btn(C.navy), flex:2, opacity: n && !sendTo.sending ? 1 : .45 }} disabled={!n || sendTo.sending} onClick={doSend}>{sendTo.sending ? "送っています…" : n ? `${n}人に送る` : "相手を選んでください"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {rename && (
         <TBSheet onBg={() => setRename(null)}>
           <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>名前を変える</div>
