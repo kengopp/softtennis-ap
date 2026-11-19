@@ -24545,6 +24545,95 @@ function MergeSurnameScreen({ mySchoolName, onBack }) {
   );
 }
 
+// ============================================================
+// ★選手マスター（他チーム）：学校を下から出る一覧で選ぶ（2026-11 案B）
+//   学校チップが40校近く並んで探しにくかったため、「学校」を1行のボタンにして、押すと一覧を出す。
+//   ・上の検索欄で学校名の一部から絞り込み
+//   ・学校マスターに読みがなが無いため、五十音ではなく「学校名の最初の字」でまとめ、右端の字を押すとそこへ飛ぶ
+//     （同じ字で始まる学校が2校以上あるときだけ見出しを出す）
+//   ・各学校の登録済み人数を表示（0人は「未登録」）
+// ============================================================
+const ROSTER_RECENT_KEY = "rosterRecentSchoolsV1";
+function rosterRecentGet() {
+  try { const a = JSON.parse(localStorage.getItem(ROSTER_RECENT_KEY) || "[]"); return Array.isArray(a) ? a.filter(x => typeof x === "string" && x) : []; }
+  catch (_) { return []; }
+}
+function rosterRecentPush(name) {
+  if (!name) return rosterRecentGet();
+  const next = [name, ...rosterRecentGet().filter(x => x !== name)].slice(0, 6);
+  try { localStorage.setItem(ROSTER_RECENT_KEY, JSON.stringify(next)); } catch (_) {}
+  return next;
+}
+function SchoolPickerSheet({ items, value, onPick, onNewSchool, onClose }) {
+  useBodyScrollLock(true);
+  const [q, setQ] = useState("");
+  const listRef = useRef(null);
+  const groupRefs = useRef({});
+  const t = q.trim();
+  const shown = t ? items.filter(it => it.name.includes(t)) : items;
+  const groups = [];
+  shown.forEach(it => {
+    const k = it.name.charAt(0);
+    const g = groups.length && groups[groups.length - 1].key === k ? groups[groups.length - 1] : null;
+    if (g) g.items.push(it); else groups.push({ key: k, items: [it] });
+  });
+  const jump = (k) => {
+    const el = groupRefs.current[k], box = listRef.current;
+    if (el && box) box.scrollTop = el.offsetTop;   // 一覧（listRef）は position:relative なので offsetTop は一覧の中の位置
+  };
+  const hl = (name) => {
+    if (!t) return name;
+    const i = name.indexOf(t);
+    if (i < 0) return name;
+    return <>{name.slice(0, i)}<span style={{ background:"#fff3b0", borderRadius:3 }}>{t}</span>{name.slice(i + t.length)}</>;
+  };
+  const row = (key, label, sub, on, onClick, extra) => (
+    <div key={key} onClick={onClick}
+      style={{ display:"flex", alignItems:"center", gap:8, padding:"12px 4px", borderBottom:`1px solid #eef0f4`, cursor:"pointer", fontSize:15, fontWeight:700, color: on ? C.navy : C.text, ...(extra || {}) }}>
+      <span style={{ flex:1, minWidth:0, overflowWrap:"anywhere" }}>{label}</span>
+      {sub != null && <span style={{ fontSize:12, color:C.textSec, fontWeight:700, flexShrink:0 }}>{sub}</span>}
+      {on && <span style={{ color:C.accent, fontWeight:900, flexShrink:0 }}>✓</span>}
+    </div>
+  );
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(10,15,30,0.45)", zIndex:999, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ width:"100%", maxWidth:520, background:C.white, borderRadius:"18px 18px 0 0", display:"flex", flexDirection:"column",
+          height:"calc(85dvh / var(--app-zoom, 1))", paddingBottom:"env(safe-area-inset-bottom,0px)", boxSizing:"border-box" }}>
+        <div style={{ width:40, height:4, borderRadius:2, background:"#cfd5df", margin:"8px auto 4px", flexShrink:0 }} />
+        <div style={{ display:"flex", alignItems:"center", padding:"4px 14px 8px", flexShrink:0 }}>
+          <span style={{ fontSize:16, fontWeight:800, color:C.text }}>学校を選ぶ</span>
+          <button onClick={onClose} style={{ marginLeft:"auto", border:"none", background:"none", fontSize:13, fontWeight:700, color:C.textSec, cursor:"pointer", padding:"6px 2px" }}>閉じる</button>
+        </div>
+        <div style={{ padding:"0 14px 8px", flexShrink:0 }}>
+          <input style={S.inp} placeholder="🔍 学校名の一部で探す（例：鹿児島、商業）" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+        <div style={{ display:"flex", flex:1, minHeight:0 }}>
+          <div ref={listRef} style={{ flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch", padding:"0 6px 24px 14px", position:"relative" }}>
+            {!t && row("__all", "すべての学校", null, value === "", () => onPick(""))}
+            {groups.map(g => (
+              <div key={g.key} ref={el => { groupRefs.current[g.key] = el; }}>
+                {/* ★見出しは同じ字で始まる学校が2校以上あるときだけ（1校だけの見出しは並ぶと読みにくいため） */}
+                {!t && g.items.length > 1 && <div style={{ fontSize:11, fontWeight:800, color:C.textSec, background:"#f2f4f8", borderRadius:6, padding:"3px 8px", margin:"10px 0 2px" }}>{g.key}（{g.items.length}校）</div>}
+                {g.items.map(it => row(it.name, hl(it.name), it.count > 0 ? `${it.count}人` : "未登録", it.name === value, () => onPick(it.name)))}
+              </div>
+            ))}
+            {t && shown.length === 0 && <div style={{ textAlign:"center", color:C.textSec, fontSize:13, padding:"18px 0 6px" }}>「{t}」に当てはまる学校はありません</div>}
+            {row("__new", t && shown.length === 0 ? `＋ 「${t}」を新しい学校として追加` : "＋ 一覧にない学校を追加", null, false, () => onNewSchool(t), { color:C.navy, borderBottom:"none", marginTop:6 })}
+          </div>
+          {!t && groups.length > 1 && (
+            <div style={{ width:30, flexShrink:0, overflowY:"auto", display:"flex", flexDirection:"column", alignItems:"center", padding:"2px 0 24px", scrollbarWidth:"none" }}>
+              {groups.map(g => (
+                <span key={g.key} onClick={() => jump(g.key)} style={{ fontSize:12, fontWeight:800, color:C.navy, padding:"3px 6px", cursor:"pointer", lineHeight:1.2 }}>{g.key}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PlayerRosterScreen({ onBack }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24571,6 +24660,8 @@ function PlayerRosterScreen({ onBack }) {
   const [menuOpen, setMenuOpen] = useState(false);     // ★右上「⋯」メニュー
   const [textImportOpen, setTextImportOpen] = useState(false); // ★テキストから一括登録の画面
   const [mergeOpen, setMergeOpen] = useState(false); // ★名字だけの記録をまとめる画面
+  const [schoolSheetOpen, setSchoolSheetOpen] = useState(false); // ★学校を選ぶ一覧（下から出る）
+  const [recentSchools, setRecentSchools] = useState(() => rosterRecentGet()); // ★最近選んだ学校（このスマホに保存）
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -24613,6 +24704,25 @@ function PlayerRosterScreen({ onBack }) {
         ...schools.filter(s => s.prefecture === schoolPrefFilter && s.name && s.name !== mySchoolName).map(s => s.name),
       ])].sort((a, b) => a.localeCompare(b, "ja"))
     : otherSchoolNames;
+
+  // ★学校ごとの登録済み人数（学校を選ぶ一覧に出す）
+  const otherCountBySchool = {};
+  otherPlayers.forEach(p => { if (p.team_name) otherCountBySchool[p.team_name] = (otherCountBySchool[p.team_name] || 0) + 1; });
+  const schoolPickerItems = [...filteredOtherSchoolNames]
+    .sort((a, b) => a.localeCompare(b, "ja"))
+    .map(name => ({ name, count: otherCountBySchool[name] || 0 }));
+  const recentSchoolChips = recentSchools.filter(n => n !== filterSchool && filteredOtherSchoolNames.includes(n)).slice(0, 4);
+  function pickSchool(name) {
+    setFilterSchool(name);
+    setShowNewSchoolInput(false);
+    setSchoolSheetOpen(false);
+    if (name) setRecentSchools(rosterRecentPush(name));
+  }
+  function changePref(pref) {
+    setSchoolPrefFilter(pref);
+    // ★選んでいた学校が、新しく選んだ都道府県の学校でなければ選択を外す
+    if (pref && filterSchool && schoolPrefByName[filterSchool] && schoolPrefByName[filterSchool] !== pref) setFilterSchool("");
+  }
 
   const handLabel = (k) => k==="right" ? "右利き" : k==="left" ? "左利き" : "";
 
@@ -24750,29 +24860,52 @@ function PlayerRosterScreen({ onBack }) {
         {/* ★他チームタブ：先に都道府県→学校をチップで選び、登録済み選手を確認してから選手名を入力する流れ */}
         {tab==="other" && (
           <>
-            {availablePrefs.length > 0 && otherSchoolNames.length > 0 && (
-              <div style={{ marginBottom:12 }}>
-                <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>都道府県で絞り込み</div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                  <button style={{ ...S.togBtn(schoolPrefFilter==="", C.navy), fontSize:11, padding:"6px 10px" }} onClick={()=>setSchoolPrefFilter("")}>すべて</button>
-                  {availablePrefs.map(pref=>(
-                    <button key={pref} style={{ ...S.togBtn(schoolPrefFilter===pref, C.navy), fontSize:11, padding:"6px 10px" }} onClick={()=>setSchoolPrefFilter(pref)}>{pref}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-
+            {/* ★案B：都道府県と学校を1行にまとめる。学校は押すと下から一覧が出る（チップが増えて探しにくかったため） */}
             {otherSchoolNames.length > 0 && (
               <div style={{ marginBottom:12 }}>
                 <div style={{ fontSize:11, color:C.textSec, marginBottom:6 }}>学校で絞り込み</div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                  <button style={{ ...S.togBtn(filterSchool==="" && !showNewSchoolInput, C.navy), fontSize:11, padding:"6px 10px" }} onClick={()=>{ setFilterSchool(""); setShowNewSchoolInput(false); }}>すべて</button>
-                  {filteredOtherSchoolNames.map(name=>(
-                    <button key={name} style={{ ...S.togBtn(filterSchool===name && !showNewSchoolInput, C.navy), fontSize:11, padding:"6px 10px" }} onClick={()=>{ setFilterSchool(name); setShowNewSchoolInput(false); }}>{name}</button>
-                  ))}
-                  <button style={{ ...S.togBtn(showNewSchoolInput, C.navy), fontSize:11, padding:"6px 10px" }} onClick={()=>{ setShowNewSchoolInput(v=>!v); setFilterSchool(""); }}>＋ 新しい学校</button>
+                <div style={{ display:"grid", gridTemplateColumns: availablePrefs.length > 0 ? "minmax(0,118px) minmax(0,1fr)" : "minmax(0,1fr)", gap:8 }}>
+                  {availablePrefs.length > 0 && (
+                    <div style={{ position:"relative" }}>
+                      <select value={schoolPrefFilter} onChange={e=>changePref(e.target.value)} aria-label="都道府県"
+                        style={{ width:"100%", height:"100%", minHeight:46, appearance:"none", WebkitAppearance:"none", border:`1.5px solid ${C.border}`, borderRadius:12, background:C.white, color:C.text, fontSize:13.5, fontWeight:800, padding:"0 24px 0 10px", fontFamily:"inherit" }}>
+                        <option value="">すべての県</option>
+                        {availablePrefs.map(pref => <option key={pref} value={pref}>{pref}</option>)}
+                      </select>
+                      <span style={{ position:"absolute", right:9, top:"50%", transform:"translateY(-50%)", fontSize:11, color:C.textSec, pointerEvents:"none" }}>▼</span>
+                    </div>
+                  )}
+                  <div onClick={()=>setSchoolSheetOpen(true)} role="button"
+                    style={{ display:"flex", alignItems:"center", gap:8, minHeight:46, boxSizing:"border-box", background:C.white, border:`1.5px solid ${(filterSchool || showNewSchoolInput) ? C.navy : C.border}`, borderRadius:12, padding:"0 12px", cursor:"pointer", minWidth:0 }}>
+                    <span style={{ flex:1, minWidth:0, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", fontSize:15, fontWeight:800, color: (filterSchool && !showNewSchoolInput) ? C.text : C.textSec }}>
+                      {showNewSchoolInput ? "＋ 新しい学校" : (filterSchool || "すべての学校")}
+                    </span>
+                    {(filterSchool || showNewSchoolInput) && (
+                      <button aria-label="学校の選択を外す" onClick={e=>{ e.stopPropagation(); setFilterSchool(""); setShowNewSchoolInput(false); }}
+                        style={{ border:"none", background:"#eef0f4", color:C.textSec, borderRadius:"50%", width:22, height:22, padding:0, fontSize:12, fontWeight:800, lineHeight:1, cursor:"pointer", flexShrink:0 }}>✕</button>
+                    )}
+                    <span style={{ fontSize:11, color:C.textSec, flexShrink:0 }}>▼</span>
+                  </div>
                 </div>
+                {recentSchoolChips.length > 0 && (
+                  <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:8, overflowX:"auto", scrollbarWidth:"none", WebkitOverflowScrolling:"touch" }}>
+                    <span style={{ fontSize:10.5, color:C.textSec, fontWeight:700, flexShrink:0 }}>最近：</span>
+                    {recentSchoolChips.map(name => (
+                      <button key={name} style={{ ...S.togBtn(false, C.navy), fontSize:11, padding:"5px 9px", flexShrink:0, whiteSpace:"nowrap" }} onClick={()=>pickSchool(name)}>{name}</button>
+                    ))}
+                  </div>
+                )}
               </div>
+            )}
+
+            {schoolSheetOpen && (
+              <SchoolPickerSheet
+                items={schoolPickerItems}
+                value={showNewSchoolInput ? null : filterSchool}
+                onPick={pickSchool}
+                onNewSchool={(text)=>{ setSchoolSheetOpen(false); setShowNewSchoolInput(true); setFilterSchool(text || ""); }}
+                onClose={()=>setSchoolSheetOpen(false)}
+              />
             )}
 
             {(showNewSchoolInput || otherSchoolNames.length===0) && (
