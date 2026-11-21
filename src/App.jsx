@@ -28323,7 +28323,7 @@ function tbNewBoard(mode) {
   return { id: tbUuid(), title: "", mode, shared: false, owner_id: null, names: {},
     ballColor: df.ballColor === "white" ? "white" : "yellow", ballTrail: df.ballTrail !== false, playerTrail: df.playerTrail !== false,
     court: TB_COURTS[df.court] ? df.court : "hard", colors: { ...TB_DEF_COLORS, ...(df.colors || {}) },
-    start: tbStartFor(mode), moves: [], draw: [] };   // ★いつもの配置（＋ボールを最初から出す設定）
+    start: tbStartFor(mode), moves: [], draw: [], setPos: null, showNum: true };   // ★いつもの配置（＋ボールを最初から出す設定）
 }
 // 前の形（コマ）→ 動かした順の形（コマの中の動きは同時、コマの順に再生）
 function tbFromSteps(steps) {
@@ -28353,7 +28353,8 @@ function tbRowToBoard(r) {
     from_user_id: r.from_user_id || null, from_name: r.from_name || "", from_seen_at: r.from_seen_at || null,
     sent_to: Array.isArray(r.sent_to) ? r.sent_to : [],
     names: d.names || {}, ballColor: d.ballColor === "white" ? "white" : "yellow", ballTrail: d.ballTrail !== false, playerTrail: d.playerTrail !== false,
-    court: TB_COURTS[d.court] ? d.court : "hard", colors: { ...TB_DEF_COLORS, ...(d.colors || {}) }, ...body };
+    court: TB_COURTS[d.court] ? d.court : "hard", colors: { ...TB_DEF_COLORS, ...(d.colors || {}) },
+    setPos: d.setPos && typeof d.setPos === "object" ? d.setPos : null, showNum: d.showNum !== false, ...body };   // ★セットした位置・番号の表示（2026-11-21）
 }
 const tbTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 // ★「相手を選んで送る」で使う列（from_user_id など）が、まだデータベースに無いとき（SQLを流す前）でも一覧は出るようにする
@@ -28373,7 +28374,8 @@ async function tbLoadList() {
 async function tbSaveBoard(b, schoolId, opts = {}) {
   const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
     data: { start: b.start, moves: b.moves, draw: b.draw, fstart: b.fstart || null, fmoves: b.fstart ? (b.fmoves || []) : null, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
-      court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) } },
+      court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) },
+      setPos: b.setPos || null, showNum: b.showNum !== false },
     updated_at: new Date().toISOString() };
   // ★届いた作戦を書き換えて保存したら、送った人の名前を外して自分の作戦にする
   if (opts.clearFrom && tbHasSendCols) { row.from_user_id = null; row.from_name = null; row.from_seen_at = null; }
@@ -28499,8 +28501,8 @@ class TBEngine {
     const fx = r.width ? this.CW / r.width : 1, fy = r.height ? this.CH / r.height : 1;
     return [(e.clientX - r.left) * fx / this.scale - TB_MX, (e.clientY - r.top) * fy / this.scale - TB_MY];
   }
-  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, fstart: this.b.fstart || null, fmoves: this.b.fmoves || null, rec: this.rec }); }
-  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.fstart = o.fstart || null; this.b.fmoves = o.fmoves || null; this.rec = !!o.rec; }
+  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, fstart: this.b.fstart || null, fmoves: this.b.fmoves || null, rec: this.rec, setPos: this.b.setPos || null }); }
+  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.fstart = o.fstart || null; this.b.fmoves = o.fmoves || null; this.rec = !!o.rec; this.b.setPos = o.setPos || null; }
   snapshot(markDirty = true) { this.hist.push(this.cur()); if (this.hist.length > 100) this.hist.shift(); this.fut = []; if (markDirty) this.dirty = true; }
   undo() { if (!this.hist.length) return; this.fut.push(this.cur()); this.restore(this.hist.pop()); this.dirty = true; this.draw(); this.onChange(); }
   redo() { if (!this.fut.length) return; this.hist.push(this.cur()); this.restore(this.fut.pop()); this.dirty = true; this.draw(); this.onChange(); }
@@ -28564,7 +28566,7 @@ class TBEngine {
     o.beginPath(); o.arc(x, y, 14, 0, 7); o.stroke(); o.setLineDash([]);
     if (hide) { o.strokeStyle = "rgba(255,255,255,.9)"; o.lineWidth = 2.2; o.beginPath(); o.moveTo(x - 6, y - 6); o.lineTo(x + 6, y + 6); o.moveTo(x + 6, y - 6); o.lineTo(x - 6, y + 6); o.stroke(); }
     o.restore();
-    this.numBadge(x + 14, y - 13, num, "#1d2330");
+    if (num) this.numBadge(x + 14, y - 13, num, "#1d2330");
   }
   drawPiece(p, q, opt = {}) {
     if (!q) return;
@@ -28602,13 +28604,26 @@ class TBEngine {
     TB_PIECES.forEach(p => { if (p.side !== "ball" && pos[p.id]) this.drawPiece(p, pos[p.id], { active: this.drag && this.drag.id === p.id }); });
     if (pos.b) this.drawPiece(tbPieceOf("b"), pos.b, { lift: opt.lift || 0, alpha: opt.ballAlpha });
   }
+  // ★番号（2026-11-21）：線や印が見えているまとまりだけで 1,2,3… と数える。
+  //   以前は選手とボールを通しで数えていたので、片方の軌跡をオフにすると「10・12・14」のように番号が飛んでいた。
+  //   戻り値：まとまりごとの番号（見えないまとまりは 0）。「番号」をオフにしているときは全部 0
+  groupNums(groups) {
+    let n = 0;
+    return groups.map(g => {
+      const vis = g.some(m => {
+        if (m.pts) { const p = tbPieceOf(m.id); return !!p && this.trailFor(p.side); }
+        return (m.show || m.hide) && this.trailFor("ball");
+      });
+      return vis ? ++n : 0;
+    }).map(v => (this.b.showNum === false ? 0 : v));
+  }
   // 先頭から n 個のまとまりの跡（線と番号）。ボールを出す／消すは、その場所に印
   drawHistory(n, start = this.b.start, moves = this.b.moves) {
-    const pos = tbClone(start);
-    tbGroups(moves).slice(0, n).forEach((g, gi) => g.forEach(m => {
-      if (m.pts) this.drawTrail(m, gi + 1);
-      else if (m.show && this.trailFor("ball")) this.drawBallEvent(m.show, gi + 1, false);
-      else if (m.hide && pos.b && this.trailFor("ball")) this.drawBallEvent(pos.b, gi + 1, true);
+    const pos = tbClone(start), gs = tbGroups(moves), nums = this.groupNums(gs);
+    gs.slice(0, n).forEach((g, gi) => g.forEach(m => {
+      if (m.pts) this.drawTrail(m, nums[gi]);
+      else if (m.show && this.trailFor("ball")) this.drawBallEvent(m.show, nums[gi], false);
+      else if (m.hide && pos.b && this.trailFor("ball")) this.drawBallEvent(pos.b, nums[gi], true);
       tbApply(pos, m);
     }));
   }
@@ -28635,7 +28650,7 @@ class TBEngine {
     const k = Math.max(0, Math.min(1, (t - gi * (TB_MOVE_SEC + TB_HOLD_SEC)) / TB_MOVE_SEC));
     const ease = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
     this.drawHistory(gi);
-    gs[gi].forEach(m => this.drawTrail(m, gi + 1, ease));
+    { const nums = this.groupNums(gs); gs[gi].forEach(m => this.drawTrail(m, nums[gi], ease)); }
     const pos = this.posAfter(gi); let lift = 0, ballAlpha;
     gs[gi].forEach(m => {
       if (m.pts) { const c = tbCut(m.pts, ease); pos[m.id] = c[c.length - 1]; if (m.id === "b" && tbLen(m.pts) > 4 && k < 1) lift = Math.sin(Math.PI * ease); }
@@ -28760,11 +28775,31 @@ class TBEngine {
     this.recAsk = 0;
     this.snapshot();
     this.b.start = this.viewPos(); this.b.moves = []; this.rec = true;
-    this.draw(); this.onChange(); this.onToast("録画中：動かした順に記録します");
+    this.draw(); this.onChange(); this.onToast("録画中：今の並びから、動かした順に記録します");
+  }
+  // ★セット（2026-11-21）：今の並び（ボールが出ていればボールも）を、この作戦の「戻る位置」として覚える。
+  //   ↺ リセットでここに戻る。録画は押したときの並びのまま始まる（勝手に戻さない）
+  setHere() {
+    if (this.playing) this.stop();
+    if (this.rec) { this.onToast("録画を終えてからセットしてください"); return; }
+    const had = !!this.b.setPos;
+    this.snapshot(); this.b.setPos = tbClone(this.viewPos());
+    this.draw(); this.onChange(); this.onToast(had ? "📍 今の並びでセットし直しました" : "📍 今の並びをセットしました（↺ リセットでここに戻ります）");
+  }
+  toggleNum() {
+    this.b.showNum = this.b.showNum === false;
+    if (!this.readOnly) this.dirty = true;
+    this.draw(); this.onChange(); this.onToast(this.b.showNum ? "線に番号を出します" : "番号を消しました（線はそのまま）");
   }
   // ★初期配置：ふだんは並びだけ戻す（録画は残す）。録画中は、初期配置から録画し直し
   toDefault() {
     if (this.playing) this.stop();
+    if (this.b.setPos) {   // ★セットした位置へ戻す（2026-11-21）
+      this.snapshot(this.rec);
+      this.setAct(tbClone(this.b.setPos), []);
+      this.draw(); this.onChange(); this.onToast(this.rec ? "セットした位置から録画し直します" : "セットした位置に戻しました（↶で戻せます）");
+      return;
+    }
     this.snapshot(this.rec); const hadBall = !!this.viewPos().b;
     const st = tbStartFor(this.b.mode, hadBall);   // ★いつもの配置があればそれに戻す
     const custom = !!tbSavedLayout(this.b.mode);
@@ -28991,7 +29026,18 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
         {eng.rec && <div style={{ position:"absolute", left:8, top:8, background:"#e53935", color:"#fff", fontSize:12, fontWeight:800, borderRadius:8, padding:"4px 9px", pointerEvents:"none" }}>● 録画中</div>}
-        {readOnly && <div style={{ position:"absolute", right:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
+        {readOnly && <div style={{ position:"absolute", left:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
+        {/* ★番号の出す／消す（2026-11-21）：線はそのまま、番号だけ */}
+        {(() => { const on = b.showNum !== false; return (
+          <button onClick={() => eng.toggleNum()} aria-pressed={on} aria-label={on ? "番号を消す" : "番号を出す"}
+            style={{ position:"absolute", right:8, top:8, display:"flex", alignItems:"center", gap:5, border:"1.5px solid #fff", borderRadius:18, padding:"4px 10px 4px 5px",
+              background: on ? "rgba(255,255,255,.95)" : "rgba(255,255,255,.6)", color: on ? "#1d2330" : "#4a5368", fontSize:12, fontWeight:800, cursor:"pointer", boxShadow:"0 2px 6px rgba(0,0,0,.2)" }}>
+            <span style={{ width:18, height:18, borderRadius:"50%", background: on ? "#1d2330" : "#9aa3b5", color:"#fff", fontSize:10.5, display:"flex", alignItems:"center", justifyContent:"center", position:"relative", overflow:"hidden" }}>
+              1{!on && <span style={{ position:"absolute", width:24, height:2, background:"#d9342b", transform:"rotate(-45deg)" }} />}
+            </span>
+            {on ? "番号 オン" : "番号 オフ"}
+          </button>
+        ); })()}
       </div>
 
       <div style={{ background:C.white, borderTop:`1px solid ${C.border}`, flexShrink:0, padding:`8px 10px ${readOnly ? "calc(10px + env(safe-area-inset-bottom,0px))" : "4px"}` }}>
@@ -29014,15 +29060,19 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
           </div>
         </div>
         {!readOnly && (
-          <div style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 0 calc(6px + env(safe-area-inset-bottom,0px))" }}>
-            {bb("def", "↺ リセット", () => eng.toDefault(), false)}
+          <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:4, padding:"4px 0 calc(6px + env(safe-area-inset-bottom,0px))" }}>
+            {/* ★セット（2026-11-21）：今の並びを覚える。↺ リセットでここに戻る */}
+            {bb("def", "↺ リセット", () => eng.toDefault(), false, { padding:"0 6px", fontSize:12 })}
+            {bb("set", b.setPos ? "📍 セット済" : "📍 セット", () => eng.setHere(), eng.rec,
+              b.setPos ? { padding:"0 6px", fontSize:12, background:"#eef2fa", border:`1px solid ${C.navy}` } : { padding:"0 6px", fontSize:12 })}
             {eng.rec
-              ? bb("rec", "■ 録画を終える", () => eng.toggleRec(), false, { background:"#e53935", borderColor:"#e53935", color:"#fff" })
-              : bb("rec", "● 録画", () => eng.toggleRec(), false, { color:"#e53935" })}
+              ? bb("rec", <span style={{ display:"inline-flex", alignItems:"center", gap:4 }}><span style={{ width:9, height:9, borderRadius:2, background:"#fff", display:"inline-block" }} />停止</span>,
+                  () => eng.toggleRec(), false, { background:"#e53935", border:"1px solid #e53935", color:"#fff", padding:"0 6px", fontSize:12 })
+              : bb("rec", "● 録画", () => eng.toggleRec(), false, { color:"#e53935", padding:"0 6px", fontSize:12 })}
             <div role="group" aria-label="再生の速さ" style={{ marginLeft:"auto", display:"flex", border:`1px solid ${C.border}`, borderRadius:9, overflow:"hidden", flexShrink:0 }}>
               {[1, 1.2, 1.5, 2].map(v => (
                 <button key={v} aria-pressed={eng.speed === v} onClick={() => { eng.speed = v; const nd = { ...tbLoadDev(), speed: v }; tbSaveDev(nd); setDev(d => ({ ...d, speed: v })); rerender(); }}
-                  style={{ border:"none", height:38, minWidth:38, padding:"0 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", background: eng.speed === v ? "#2a5ca8" : C.white, color: eng.speed === v ? "#fff" : C.navy }}>{v.toFixed(1)}</button>
+                  style={{ border:"none", height:38, minWidth:28, padding:"0 2px", fontSize:12, fontWeight:800, cursor:"pointer", background: eng.speed === v ? "#2a5ca8" : C.white, color: eng.speed === v ? "#fff" : C.navy }}>{v.toFixed(1)}</button>
               ))}
             </div>
           </div>
@@ -29204,7 +29254,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose }) {
             <button style={{ ...S.btn("#f0f0f0"), color:C.text, flex:1 }} onClick={() => setSheet(null)}>キャンセル</button>
             <button style={{ ...S.btn(C.navy), flex:2 }} onClick={() => {
               // ★設定は「保存」を押したときだけ反映（「キャンセル」なら何も変わらない）
-              if (sheet.mode !== b.mode) { eng.snapshot(); const hadBall = !!eng.viewPos().b; b.mode = sheet.mode; b.start = tbStartFor(sheet.mode, hadBall || !!sheet.startBall); b.moves = []; b.fstart = null; b.fmoves = null; }
+              if (sheet.mode !== b.mode) { eng.snapshot(); const hadBall = !!eng.viewPos().b; b.mode = sheet.mode; b.setPos = null; b.start = tbStartFor(sheet.mode, hadBall || !!sheet.startBall); b.moves = []; b.fstart = null; b.fmoves = null; }
               eng.speed = sheet.speed;
               const nm = {}; Object.entries(sheet.names).forEach(([k, v]) => { if (String(v).trim()) nm[k] = String(v).trim(); }); b.names = nm;
               b.ballColor = sheet.ball; b.ballTrail = !!sheet.trail; b.playerTrail = !!sheet.ptrail;
