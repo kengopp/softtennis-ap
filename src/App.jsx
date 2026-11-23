@@ -29983,7 +29983,8 @@ function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard }) 
 function CntThemeForm({ theme, me, tag, clubOf, boards, loadBoards, onPickPlayer, onClose, onSave, onDelete, eventsCount, otherCounters }) {
   const t = theme;
   const lastPick = me.isAdmin ? cntLs.get("cnt:lastPick", null) : null;
-  const defTarget = me.isAdmin ? lastPick : (me.player ? { name: me.player, club: me.schoolName } : null);
+  // ★数える選手の初期値：アカウントにつながっている選手（自分、保護者ならお子さん）。つながっていない管理者だけ、前回選んだ選手
+  const defTarget = me.player ? { name: me.player, club: me.schoolName } : (me.isAdmin ? lastPick : null);
   const [F, setF] = useState(() => ({
     id: t?.id || null, name: t?.name || "",
     btns: t ? (t.buttons || []).map(b => ({ label: b.label, tone: b.tone })) : [{ label: "", tone: "good" }, { label: "", tone: "bad" }],
