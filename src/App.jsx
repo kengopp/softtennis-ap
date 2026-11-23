@@ -30037,7 +30037,7 @@ function CntThemeForm({ theme, me, tag, clubOf, boards, loadBoards, onPickPlayer
         {F.goal && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
             <span style={{ fontSize: 16 }}>1試合で</span>
-            <input type="number" inputMode="numeric" style={{ ...cntInp, width: 84, ...(e.goal ? cntErrInp : {}) }} value={F.goal.val} placeholder="3"
+            <input type="number" inputMode="numeric" style={{ ...cntInp, width: 84, ...(e.goal ? cntErrInp : {}) }} value={F.goal.val}
               onChange={ev => set({ goal: { ...F.goal, kind: "count", val: ev.target.value === "" ? "" : Number(ev.target.value) }, errs: { ...e, goal: undefined } })} />
             <span style={{ fontWeight: 700 }}>回</span>
             <select style={{ ...cntInp, width: 96 }} value={F.goal.dir} onChange={ev => set({ goal: { ...F.goal, dir: ev.target.value } })}>
