@@ -29670,7 +29670,8 @@ function cntBuildMatches(matches, sessions) {
 }
 
 // ---------- 目標 ----------
-const cntGoalText = t => { const g = t.goal; if (!g) return ""; return `${t.buttons[g.btn]?.label || ""} ${g.val}${g.kind === "rate" ? "%" : "回"}${g.dir === "ge" ? "以上" : "以下"}`; };
+const cntSingle = t => (t.buttons || []).length <= 1;   // ★テーマ＝1つのカウント（ボタンの設定なし）
+const cntGoalText = t => { const g = t.goal; if (!g) return ""; return `${cntSingle(t) ? "1試合" : (t.buttons[g.btn]?.label || "")} ${g.val}${g.kind === "rate" ? "%" : "回"}${g.dir === "ge" ? "以上" : "以下"}`; };
 function cntGoalEval(t, cnt) {
   const g = t.goal; if (!g) return null;
   const tot = cnt.reduce((a, b) => a + b, 0);
@@ -29836,7 +29837,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
   const saveTheme = async (F) => {
     const row = {
       id: F.id || uid(), school_id: me.schoolId, owner_id: me.id, name: F.name.trim(),
-      buttons: F.btns.filter(b => b.label.trim()).map(b => ({ label: b.label.trim(), tone: b.tone })),
+      buttons: F.btns.length > 1 ? F.btns.filter(b => b.label.trim()).map(b => ({ label: b.label.trim(), tone: b.tone })) : [{ label: F.name.trim(), tone: "neutral" }],
       goal: F.goal, board_id: F.board || null, target_name: F.target?.name || null, target_club: F.target?.club || null,
       scope: F.scope, family_player: F.scope === "family" ? (me.player || F.target?.name || null) : null, updated_at: new Date().toISOString(),
     };
@@ -29987,7 +29988,7 @@ function CntThemeForm({ theme, me, tag, clubOf, boards, loadBoards, onPickPlayer
   const defTarget = me.player ? { name: me.player, club: me.schoolName } : (me.isAdmin ? lastPick : null);
   const [F, setF] = useState(() => ({
     id: t?.id || null, name: t?.name || "",
-    btns: t ? (t.buttons || []).map(b => ({ label: b.label, tone: b.tone })) : [{ label: "", tone: "good" }, { label: "", tone: "bad" }],
+    btns: t && (t.buttons || []).length > 1 ? t.buttons.map(b => ({ label: b.label, tone: b.tone })) : [{ label: "", tone: "neutral" }],
     goal: t?.goal ? { ...t.goal } : null, board: t?.board_id || null,
     target: t?.target_name ? { name: t.target_name, club: t.target_club || "" } : defTarget,
     scope: t?.scope || "me", errs: {}, delAsk: false, saving: false,
@@ -30004,19 +30005,17 @@ function CntThemeForm({ theme, me, tag, clubOf, boards, loadBoards, onPickPlayer
   const e = F.errs;
 
   const save = async () => {
-    const named = F.btns.filter(b => b.label.trim()); const errs = {};
+    const errs = {};
     if (!F.name.trim()) errs.name = "テーマ名を入れてください";
-    if (named.length < 2) errs.btns = named.length === 0 ? "ボタンの名前を2つ以上入れてください（例：仕掛けた／スルー）" : "ボタンがあと1つ足りません。名前を入れてください";
     if (F.goal) {
       const g = F.goal;
-      if (g.val === null || g.val === "" || isNaN(g.val)) errs.goal = "目標の数字を入れてください";
+      if (g.val === null || g.val === "" || isNaN(g.val)) errs.goal = "目標の回数を入れてください";
       else if (g.kind === "rate" && (g.val < 0 || g.val > 100)) errs.goal = "割合は0〜100%で入れてください";
       else if (g.val < 0) errs.goal = "回数は0以上で入れてください";
-      else if (!F.btns[g.btn]?.label.trim()) errs.goal = "目標にするボタンの名前を入れてください";
     }
     if (!F.target) errs.who = "数える選手を選んでください";
     if (Object.keys(errs).length) { set({ errs }); return; }
-    const goal = F.goal ? { ...F.goal, val: Number(F.goal.val), btn: named.indexOf(F.btns[F.goal.btn]) } : null;
+    const goal = F.goal ? { ...F.goal, val: Number(F.goal.val), btn: F.btns.length > 1 ? F.goal.btn : 0 } : null;
     set({ saving: true });
     await onSave({ ...F, scope: scopeVal, goal });
     set({ saving: false });
@@ -30030,35 +30029,18 @@ function CntThemeForm({ theme, me, tag, clubOf, boards, loadBoards, onPickPlayer
         {e.name && <div style={cntErr}>⚠ {e.name}</div>}
       </div>
       <div style={{ marginTop: 18 }}>
-        <label style={cntLabel}>ボタン</label>
-        {F.btns.map((b, i) => (
-          <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
-            <input style={{ ...cntInp, flex: 1, minWidth: 0, ...(e.btns && !b.label.trim() ? cntErrInp : {}) }} value={b.label} placeholder={["例：仕掛けた", "例：スルー", "例：見せて戻る"][i]}
-              onChange={ev => { const btns = F.btns.map((x, j) => j === i ? { ...x, label: ev.target.value } : x); set({ btns, errs: { ...e, btns: btns.filter(x => x.label.trim()).length >= 2 ? undefined : e.btns } }); }} />
-            <select style={{ ...cntInp, width: 150, flex: "none" }} value={b.tone} onChange={ev => set({ btns: F.btns.map((x, j) => j === i ? { ...x, tone: ev.target.value } : x) })}>
-              {CNT_TONES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            {F.btns.length > 2 && <button onClick={() => { const btns = F.btns.filter((_, j) => j !== i); set({ btns, goal: F.goal && F.goal.btn >= btns.length ? { ...F.goal, btn: 0 } : F.goal }); }} style={{ border: "none", background: "none", fontSize: 22, color: CNT.sub, cursor: "pointer" }} aria-label="ボタンを消す">×</button>}
-          </div>
-        ))}
-        {e.btns && <div style={cntErr}>⚠ {e.btns}</div>}
-        {F.btns.length < 3 && <button style={{ ...cntLink, paddingLeft: 0, marginTop: 4 }} onClick={() => set({ btns: [...F.btns, { label: "", tone: "neutral" }] })}>＋ ボタンを追加</button>}
-      </div>
-      <div style={{ marginTop: 18 }}>
-        <label style={cntLabel}>目標</label>
-        {cntSeg([["none", "なし"], ["rate", "割合"], ["count", "1試合の回数"]], F.goal?.kind || "none", v => {
+        <label style={cntLabel}>目標（任意）</label>
+        {cntSeg([["none", "なし"], ["count", "1試合の回数"]], F.goal ? "count" : "none", v => {
           if (v === "none") set({ goal: null, errs: { ...e, goal: undefined } });
-          else set({ goal: { kind: v, btn: F.goal?.btn ?? Math.max(0, F.btns.findIndex(x => x.tone === "good")), val: F.goal?.val ?? "", dir: F.goal?.dir || "ge" }, errs: { ...e, goal: undefined } });
+          else set({ goal: { kind: "count", btn: F.goal?.btn ?? 0, val: F.goal?.kind === "count" ? F.goal.val : "", dir: F.goal?.dir || "ge" }, errs: { ...e, goal: undefined } });
         })}
         {F.goal && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 76px auto 88px", gap: 6, alignItems: "center", marginTop: 8 }}>
-            <select style={cntInp} value={F.goal.btn} onChange={ev => set({ goal: { ...F.goal, btn: +ev.target.value } })}>
-              {F.btns.map((b, i) => <option key={i} value={i}>{b.label.trim() || `ボタン${i + 1}`}</option>)}
-            </select>
-            <input type="number" inputMode="numeric" style={{ ...cntInp, ...(e.goal ? cntErrInp : {}) }} value={F.goal.val} placeholder={F.goal.kind === "rate" ? "50" : "3"}
-              onChange={ev => set({ goal: { ...F.goal, val: ev.target.value === "" ? "" : Number(ev.target.value) }, errs: { ...e, goal: undefined } })} />
-            <span style={{ fontWeight: 700 }}>{F.goal.kind === "rate" ? "%" : "回"}</span>
-            <select style={cntInp} value={F.goal.dir} onChange={ev => set({ goal: { ...F.goal, dir: ev.target.value } })}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+            <span style={{ fontSize: 16 }}>1試合で</span>
+            <input type="number" inputMode="numeric" style={{ ...cntInp, width: 84, ...(e.goal ? cntErrInp : {}) }} value={F.goal.val} placeholder="3"
+              onChange={ev => set({ goal: { ...F.goal, kind: "count", val: ev.target.value === "" ? "" : Number(ev.target.value) }, errs: { ...e, goal: undefined } })} />
+            <span style={{ fontWeight: 700 }}>回</span>
+            <select style={{ ...cntInp, width: 96 }} value={F.goal.dir} onChange={ev => set({ goal: { ...F.goal, dir: ev.target.value } })}>
               <option value="ge">以上</option><option value="le">以下</option>
             </select>
           </div>
@@ -30069,7 +30051,7 @@ function CntThemeForm({ theme, me, tag, clubOf, boards, loadBoards, onPickPlayer
         <label style={cntLabel}>参考の作戦ボード（任意）</label>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${CNT.line}`, borderRadius: 10, padding: "8px 10px", gap: 8 }}>
           <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>{F.board ? <><CntBoardIcon w={26} /><span>{board ? (board.title || "名前なし") : (boards === null ? "読み込み中..." : "見られないボード")}</span></> : <span style={{ color: CNT.sub }}>なし</span>}</span>
-          <span style={{ flex: "none" }}>{F.board && <button style={{ ...cntLink, color: CNT.bad }} onClick={() => set({ board: null })}>外す</button>}<button style={cntLink} onClick={() => setBoardSheet(true)}>{F.board ? "変更" : "選ぶ"}</button></span>
+          <span style={{ flex: "none" }}>{F.board && <button style={{ ...cntLink, color: CNT.bad }} onClick={() => set({ board: null })}>削除</button>}<button style={cntLink} onClick={() => setBoardSheet(true)}>{F.board ? "変更" : "選ぶ"}</button></span>
         </div>
         {board && !board.shared && scopeVal !== "me" && <div style={{ background: "#fff8e6", borderRadius: 10, padding: 10, fontSize: 15, marginTop: 8 }}>この作戦ボードは「自分だけ」なので、ほかの人はこのテーマから開けません。作戦ボード側で「チームで共有」にすると見られます。</div>}
       </div>
@@ -30240,13 +30222,18 @@ function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf
               <div key={t.id} style={{ marginTop: 14 }}>
                 <div style={{ fontWeight: 700, fontSize: 17 }}>{t.name}</div>
                 {t.goal && <div style={{ fontSize: 15, color: CNT.sub }}>目標 {cntGoalText(t)}{ge && ge.v != null && <>・今 <b style={{ color: ge.ok ? CNT.good : CNT.warn }}>{ge.v}{ge.unit}</b></>}</div>}
-                <div style={{ display: "grid", gridTemplateColumns: `repeat(${(t.buttons || []).length || 2}, minmax(0,1fr))`, gap: 8, marginTop: 6 }}>
+                {cntSingle(t) ? (
+                  <button onClick={() => tap(t, p, 0)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", borderRadius: 12, background: CNT.neuBg, color: C.navy, padding: "10px 18px", marginTop: 6, cursor: "pointer" }}>
+                    <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.2 }}>{cnt[0]}<span style={{ fontSize: 16, marginLeft: 2 }}>回</span></span>
+                    <span style={{ fontSize: 20, fontWeight: 800 }}>＋1</span>
+                  </button>
+                ) : <div style={{ display: "grid", gridTemplateColumns: `repeat(${(t.buttons || []).length || 2}, minmax(0,1fr))`, gap: 8, marginTop: 6 }}>
                   {(t.buttons || []).map((b, i) => (
                     <button key={i} onClick={() => tap(t, p, i)} style={{ ...cntToneStyle(b.tone), border: "none", borderRadius: 12, padding: "10px 4px 8px", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
                       {b.label}<b style={{ display: "block", fontSize: 26, lineHeight: 1.2 }}>{cnt[i]}</b>
                     </button>
                   ))}
-                </div>
+                </div>}
               </div>
             );
           })}
@@ -30298,20 +30285,23 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
   const keys = [...new Set(events.filter(e => e.theme_id === t.id && e.player_name === player).map(e => e.match_key))]
     .sort((a, b) => ((mOf(a)?.order || "") > (mOf(b)?.order || "") ? 1 : -1));   // 古い順
   const rows = keys.map(k => ({ k, m: mOf(k), c: cntOf(t, player, k) }));
-  const isCnt = t.goal?.kind === "count";
+  const single = cntSingle(t);
+  const isCnt = single || t.goal?.kind === "count";
+  const cb = single ? 0 : (t.goal?.kind === "count" ? t.goal.btn : 0);
   const rb = t.goal?.kind === "rate" ? t.goal.btn : Math.max(0, (t.buttons || []).findIndex(b => b.tone === "good"));
   const unit = isCnt ? "回" : "%";
-  const val = r => { const tot = r.c.reduce((x, y) => x + y, 0); return isCnt ? r.c[t.goal.btn] : (tot ? Math.round(r.c[rb] / tot * 100) : 0); };
+  const val = r => { const tot = r.c.reduce((x, y) => x + y, 0); return isCnt ? r.c[cb] : (tot ? Math.round(r.c[rb] / tot * 100) : 0); };
   const vs = rows.map(val), n = vs.length;
-  const metric = isCnt ? `${t.buttons[t.goal.btn]?.label || ""}の回数` : `${t.buttons[rb]?.label || ""}の割合`;
-  const upGood = t.goal ? t.goal.dir === "ge" : t.buttons[rb]?.tone !== "bad";
-  const word = d => d === 0 ? "変わらず" : (d > 0) === upGood ? "よくなった" : "下がった";
+  const metric = single ? "1試合の回数" : isCnt ? `${t.buttons[cb]?.label || ""}の回数` : `${t.buttons[rb]?.label || ""}の割合`;
+  const upGood = t.goal ? t.goal.dir === "ge" : (single ? true : t.buttons[rb]?.tone !== "bad");
+  // 目標がないときは良い・悪いを決めず「増えた／減った」だけ
+  const word = d => d === 0 ? "変わらず" : !t.goal && single ? (d > 0 ? "増えた" : "減った") : (d > 0) === upGood ? "よくなった" : "下がった";
   const sign = d => d === 0 ? "±0" : d > 0 ? `▲${d}` : `▼${-d}`;
-  const dColor = d => d === 0 ? CNT.sub : (d > 0) === upGood ? CNT.good : CNT.warn;
+  const dColor = d => d === 0 ? CNT.sub : (!t.goal && single) ? C.text : (d > 0) === upGood ? CNT.good : CNT.warn;
   const okN = t.goal ? rows.filter(r => cntGoalEval(t, r.c).ok).length : 0;
   // 折れ線
   const W = 340, H = 196, L = 42, R = 22, T = 16, B = 48;
-  const maxY = isCnt ? Math.max(3, ...vs, Number(t.goal?.val) || 0) + 1 : 100;
+  const maxY = isCnt ? Math.max(3, ...vs, Number(t.goal?.val) || 0) + 1 : 100;   // 回数は最大値に合わせて目盛り
   const x = i => n <= 1 ? L + (W - L - R) / 2 : L + i * (W - L - R) / (n - 1);
   const y = v => T + (H - T - B) * (1 - v / maxY);
   const ticks = isCnt ? [0, Math.round(maxY / 2), maxY] : [0, 50, 100];
@@ -30366,7 +30356,7 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
             <div key={r.k} onClick={() => onOpen(r.k)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: `1px solid ${CNT.line}`, cursor: "pointer" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 16 }}>{r.m?.title || "削除された試合"}{ge?.ok && <span style={{ color: CNT.good, fontWeight: 800, marginLeft: 4 }}>✓</span>}</div>
-                <div style={{ fontSize: 15, color: CNT.sub }}>{t.buttons.map((b, j) => `${b.label} ${r.c[j]}`).join("・")}</div>
+                {!single && <div style={{ fontSize: 15, color: CNT.sub }}>{t.buttons.map((b, j) => `${b.label} ${r.c[j]}`).join("・")}</div>}
               </div>
               <div style={{ textAlign: "right", flex: "none" }}>
                 <div style={{ fontWeight: 800 }}>{v}{unit}</div>
@@ -30409,20 +30399,20 @@ function CntDetail({ k, m, themes, events, sends, me, isOwn, clubOf, cntOf, onBa
             {ps.filter(p => evs.some(e => e.theme_id === t.id && e.player_name === p)).map(p => {
               const cnt = cntOf(t, p, k), tot = cnt.reduce((a, b) => a + b, 0), ge = cntGoalEval(t, cnt);
               const rate = rateBtn != null && tot ? Math.round(cnt[rateBtn] / tot * 100) : null;
-              const main = t.goal?.kind === "count" ? `${cnt[t.goal.btn]}回` : rate != null ? `${rate}%` : "";
+              const main = cntSingle(t) ? `${cnt[0]}回` : t.goal?.kind === "count" ? `${cnt[t.goal.btn]}回` : rate != null ? `${rate}%` : "";
               return (
                 <div key={p} style={{ marginTop: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 16 }}>
                     <span>{p}{!isOwn(p) && clubOf(p, k) && <span style={{ color: CNT.sub, fontSize: 15 }}>　{clubOf(p, k)}</span>}{ge?.ok && <span style={{ color: CNT.good, fontWeight: 800, fontSize: 15, marginLeft: 4 }}>✓達成</span>}</span>
                     <span style={{ fontWeight: 800, fontSize: 20 }}>{main}</span>
                   </div>
-                  {rate != null && t.goal?.kind !== "count" && (
+                  {!cntSingle(t) && rate != null && t.goal?.kind !== "count" && (
                     <div style={{ height: 8, background: "#eceef1", borderRadius: 4, position: "relative", marginTop: 4 }}>
                       <i style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${rate}%`, background: CNT.good, borderRadius: 4 }} />
                       {t.goal?.kind === "rate" && <b style={{ position: "absolute", top: -4, bottom: -4, width: 2, left: `${t.goal.val}%`, background: C.text }} />}
                     </div>
                   )}
-                  <div style={{ fontSize: 15, color: CNT.sub }}>{t.buttons.map((b, i) => `${b.label} ${cnt[i]}`).join("・")}</div>
+                  {!cntSingle(t) && <div style={{ fontSize: 15, color: CNT.sub }}>{t.buttons.map((b, i) => `${b.label} ${cnt[i]}`).join("・")}</div>}
                 </div>
               );
             })}
@@ -30480,7 +30470,7 @@ function CounterMatchCard({ match, onNavigate }) {
         const ps = [...new Set((ev.data || []).filter(e => e.theme_id === t.id).map(e => e.player_name))];
         ps.forEach(p => {
           const c = (t.buttons || []).map((b, i) => (ev.data || []).filter(e => e.theme_id === t.id && e.player_name === p && e.button_idx === i).length);
-          out.push(`${t.name}（${p.split(/\s/)[0]}）：${(t.buttons || []).map((b, i) => `${b.label} ${c[i]}`).join("・")}`);
+          out.push(`${t.name}（${p.split(/\s/)[0]}）：${(t.buttons || []).length <= 1 ? `${c[0] || 0}回` : (t.buttons || []).map((b, i) => `${b.label} ${c[i]}`).join("・")}`);
         });
       });
       setRows(out);
