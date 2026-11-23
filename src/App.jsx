@@ -13813,6 +13813,8 @@ function HomeScreen({ onNew, onNewTeamMatch, onOpen, onNavigate, onGoPlayerStats
           <div style={{ textAlign:"center",color:C.textSec,marginTop:60 }}>読み込み中...</div>
         ) : (
           <>
+            {/* ★テーマカウンター：コーチから結果が届いたとき（届いたときだけ出る） */}
+            <CounterSendNotice linkedPlayerName={linkedPlayerName} onNavigate={onNavigate} />
             {/* ①進行中の試合カード */}
             {liveMatch && (() => {
               const aP = liveMatch.players.filter(p=>p.team==="A").map(p=>p.player_name).join("/");
@@ -19226,7 +19228,7 @@ function SchoolIdSearchField({ value, onChange, schools, prefFilter, placeholder
 // ============================================================
 // 試合セットアップ
 // ============================================================
-function MatchSetup({ practice, onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
+function MatchSetup({ countOnly, onCountOnly, practice, onSave, onCancel, sourceMatchId, editMatchId, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
   const [ready, setReady] = useState(!editMatchId && !sourceMatchId);
   const [editing, setEditing] = useState(null);
   const [source,  setSource]  = useState(null);
@@ -19261,10 +19263,10 @@ function MatchSetup({ practice, onSave, onCancel, sourceMatchId, editMatchId, in
   // ★key を付けて、編集対象・コピー元が変わったら必ず作り直す。
   //   付けないと前回開いたときの入力内容や「予定として登録済みのID」が残ったままになり、
   //   別の試合を上書きしてしまう恐れがある。
-  return <MatchSetupForm key={`${editMatchId || "new"}_${sourceMatchId || "none"}`} practice={!!practice} onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} tournamentParticipantIds={tournamentParticipantIds} />;
+  return <MatchSetupForm key={`${editMatchId || "new"}_${sourceMatchId || "none"}`} countOnly={!!countOnly} onCountOnly={onCountOnly} practice={!!practice} onSave={onSave} onCancel={onCancel} editing={editing} source={source} initialMatchType={initialMatchType} onScheduled={onScheduled} headerLabel={headerLabel} prefillTournament={prefillTournament} prefillRound={prefillRound} prefillVenue={prefillVenue} prefillDate={prefillDate} prefillOpponent={prefillOpponent} prefillIsYounger={prefillIsYounger} isTeamMatchGame={isTeamMatchGame} teamMatchMyDivision={teamMatchMyDivision} teamMatchOppDivision={teamMatchOppDivision} teamMatchMySchoolId={teamMatchMySchoolId} onSavePairOnly={onSavePairOnly} lockTournament={lockTournament} tournamentStartDate={tournamentStartDate} tournamentEndDate={tournamentEndDate} tournamentParticipantIds={tournamentParticipantIds} />;
 }
 
-function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
+function MatchSetupForm({ countOnly, onCountOnly, practice, onSave, onCancel, editing, source, initialMatchType, onScheduled, headerLabel, prefillTournament, prefillRound, prefillVenue, prefillDate, prefillOpponent, prefillIsYounger, isTeamMatchGame, teamMatchMyDivision, teamMatchOppDivision, teamMatchMySchoolId, onSavePairOnly, lockTournament, tournamentStartDate, tournamentEndDate, tournamentParticipantIds }) {
   // ★練習モードで開いている間だけ「新しく作る試合＝練習（このスマホの中だけ）」にする。閉じたら必ず戻す
   useEffect(() => { PRACTICE_MODE.creating = !!practice; return () => { PRACTICE_MODE.creating = false; }; }, [practice]);
   const base    = editing || source;
@@ -19640,7 +19642,7 @@ function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMa
       <div style={S.hdr}>
         <div style={{ display:"flex",alignItems:"center",gap:12 }}>
           <button style={{ background:"none",border:"none",color:C.white,fontSize:20,cursor:"pointer" }} onClick={onCancel}>←</button>
-          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{headerLabel || (practice ? (editing ? "🔰 練習の試合を編集" : "🔰 練習の試合を作成") : editing?"試合情報を編集":source?"試合をコピー":"新規試合")}</span>
+          <span style={{ fontSize:18,fontWeight:800,color:C.white }}>{headerLabel || (countOnly ? "📊 新規試合（カウント用）" : null) || (practice ? (editing ? "🔰 練習の試合を編集" : "🔰 練習の試合を作成") : editing?"試合情報を編集":source?"試合をコピー":"新規試合")}</span>
         </div>
       </div>
       {practice && <PracticeBand text="練習モード：この試合はこのスマホの中だけに保存します。チームの人には見えず、正式な記録・分析にも入りません。ここで新しく入れた選手は、選手マスターに登録されません" />}
@@ -19840,7 +19842,7 @@ function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMa
         {/* ★サーブ・レシーブ順：各ペアの「サーブの1人目」「レシーブの1人目」。
             試合情報の時点では最初のサーブは決まっていないので、ここでは順番だけを設定する。
             記録中に違っていたと気付いたら、記録画面右上の✏️からこの画面を開いて直す（試合の最初から集計し直される） */}
-        {isDoubles && (
+        {isDoubles && !countOnly && (
           <FormSec title="🎾 サーブ・レシーブ順">
             <div style={{ padding:"12px 12px 2px" }}>
             <div style={{ fontSize:11.5, color:C.textSec, lineHeight:1.6, marginBottom:10 }}>
@@ -19858,7 +19860,7 @@ function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMa
         )}
 
         {/* ★若番／遅番：試合開始ボタンのすぐ上に置く（必須項目なので、押す直前に選び忘れに気づけるように） */}
-        {!isTeamMatchGame && (
+        {!isTeamMatchGame && !countOnly && (
           <FormSec title="若番 / 遅番">
             <FormRow label="若番 / 遅番（必須）" required>
               {bothEntryNosNumeric ? (
@@ -19879,13 +19881,39 @@ function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMa
           </FormSec>
         )}
 
-        <button
+        {/* ★テーマカウンター用：スコアは付けず、この試合で数えるだけ */}
+        {countOnly && (
+          <>
+            <div style={{ fontSize:13, color:"#4a5262", margin:"4px 2px 10px", lineHeight:1.6 }}>スコアは記録しません。作った試合はカウンターの試合一覧にだけ出て、試合一覧・勝敗・分析には入りません。</div>
+            <button
+              style={{ ...S.btn((aP1.trim() && (!isDoubles || aP2.trim()) && !saving) ? C.navy : C.border, (aP1.trim() && (!isDoubles || aP2.trim()) && !saving) ? C.white : C.textSec), marginTop:4, marginBottom:8, fontSize:16 }}
+              disabled={!(aP1.trim() && (!isDoubles || aP2.trim())) || saving}
+              onClick={async ()=>{
+                setSaving(true);
+                try {
+                  const players = [
+                    { team:"A", player_name:aP1.trim(), club_name:aClub.trim(), order_num:1 },
+                    ...(isDoubles && aP2.trim() ? [{ team:"A", player_name:aP2.trim(), club_name:aClub.trim(), order_num:2 }] : []),
+                    ...(bP1.trim() ? [{ team:"B", player_name:bP1.trim(), club_name:bClub.trim(), order_num:1 }] : []),
+                    ...(isDoubles && bP2.trim() ? [{ team:"B", player_name:bP2.trim(), club_name:bClub.trim(), order_num:2 }] : []),
+                  ];
+                  if (!players.some(p=>p.team==="B")) players.push({ team:"B", player_name:"", club_name:bClub.trim(), order_num:1 });
+                  await onCountOnly({ match_date:matchDate, venue, tournament_name:tournamentName, round, match_number:matchNumber||null, court_number:courtNumber||null, game_format:gameFormat, is_doubles:isDoubles, players });
+                } catch(e) {
+                  alert("保存エラー: " + (e.message || e));
+                  setSaving(false);
+                }
+              }}
+            >{saving ? "保存中..." : "📊 この試合で数える"}</button>
+          </>
+        )}
+        {!countOnly && <button
           style={{ ...S.btn((canSave&&!saving) ? `linear-gradient(135deg,${C.accent},#00a066)` : C.border, (canSave&&!saving) ? C.white : C.textSec), marginTop:4, marginBottom:8 }}
           disabled={!canSave || saving}
           onClick={editing ? ()=>handleSave(null) : handleSaveWithServeSelect}
         >
           {saving ? "保存中..." : (editing ? "保存する 💾" : isTeamMatchGame ? "ペアを登録して試合開始 🎾" : practice ? "練習をはじめる 🔰" : "試合を開始する 🎾")}
-        </button>
+        </button>}
         {/* 団体戦ペア登録モード：ペアだけ保存して戻るボタン */}
         {isTeamMatchGame && onSavePairOnly && (
           <button
@@ -19923,7 +19951,7 @@ function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMa
             {saving ? "保存中..." : "💾 ペアを登録して戻る"}
           </button>
         )}
-        {!editing && !isTeamMatchGame && !practice && (
+        {!editing && !isTeamMatchGame && !practice && !countOnly && (
           <button
             style={{ ...S.btn(canSchedule ? "linear-gradient(135deg,#7b1fa2,#9c27b0)" : C.border, canSchedule ? C.white : C.textSec), marginTop:4 }}
             disabled={!canSchedule || saving}
@@ -19933,7 +19961,7 @@ function MatchSetupForm({ practice, onSave, onCancel, editing, source, initialMa
           </button>
         )}
         {/* ★ポイントは記録せず、試合の結果（ゲーム数）だけを登録する */}
-        {!editing && !isTeamMatchGame && (
+        {!editing && !isTeamMatchGame && !countOnly && (
           <button
             style={{ ...S.btn(canSave && !saving ? "#fff" : C.border, canSave && !saving ? C.navy : C.textSec), border:`1.5px solid ${canSave && !saving ? C.navy : C.border}`, marginTop:8 }}
             disabled={!canSave || saving}
@@ -21459,6 +21487,7 @@ function ScoreRecordInner({ practice, initialMatch, onBack, onEdit, onReload, on
                 )}
                 <button style={{ ...S.btn("#f2f3f6"),color:"#3a4152",border:"1px solid "+C.border,fontSize:11,padding:8,marginBottom:0 }} onClick={()=>window.open("https://line.me/R/msg/text/?"+encodeURIComponent(buildLineText(match)),"_blank")}>💬 LINE共有</button>
               </div>
+              {!isPracticeId(match.id) && <CounterMatchCard match={match} onNavigate={onNavigate} />}
               <button style={{ ...S.btn("linear-gradient(135deg,"+C.accent+",#00a066)") }} onClick={handleBack}>← 試合一覧に戻る</button>
               {/* ★動画リンクの追加・編集モーダル。「動画リンクを追加する」ボタンを押したときだけ開く。 */}
               {showVideoModal && (
@@ -29543,6 +29572,961 @@ function TacticsPanel({ ctx, isViewer }) {
   );
 }
 
+// ============================================================
+// 🎯 テーマカウンター（下のメニュー「戦略」の3つ目のタブ）
+//   ・スコア記録とは別に「仕掛けた／スルー」のようなテーマを数える
+//   ・保存先：count_themes / count_events / count_sessions / count_sends（theme_counter.sql）
+//   ・試合は「試合一覧から選ぶ」か「新しく作る」（試合作成画面 MatchSetup を countOnly で開く）
+//     新しく作った試合は count_sessions に入れ、試合一覧・勝敗・分析には入れない
+// ============================================================
+const CNT = {
+  sub: "#4a5262", line: "#e3e7ee", bg: "#f4f6f9",
+  good: "#2e8b57", goodBg: "#eef7f1", bad: "#c0392b", badBg: "#fbefed", neu: "#2f6fb5", neuBg: "#eef3fa", warn: "#a85d00",
+};
+const CNT_TONES = [["good", "良い"], ["bad", "直したい"], ["neutral", "どちらでもない"]];
+const CNT_CIRC = "①②③④⑤⑥⑦⑧⑨⑩";
+const CNT_SCOPE_LABEL = { me: "自分だけ", family: "家族", team: "チーム", send: "選手に送る" };
+
+// ★ほかの画面（試合詳細・ホーム・試合作成）から「カウンターの○○を開いて」と頼むための受け渡し
+let _counterIntent = null;   // { tab:"count"|"result", matchKey }
+function cntSetIntent(i) { _counterIntent = i; try { localStorage.setItem("va:hubTab", "counter"); } catch (_) {} }
+
+const cntLs = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
+};
+
+// ---------- データの読み書き ----------
+async function cntLoadAll() {
+  const [th, ev, se, cs] = await Promise.all([
+    fetchAllRows("count_themes", "*", q => q.order("created_at")),
+    fetchAllRows("count_events", "id, theme_id, match_key, player_name, club_name, button_idx, game_no, counted_by, created_at", q => q.order("created_at")),
+    fetchAllRows("count_sends", "*", q => q.order("created_at", { ascending: false })),
+    fetchAllRows("count_sessions", "*", q => q.order("created_at")),
+  ]);
+  const err = th.error || ev.error || se.error || cs.error;
+  if (err) console.error("テーマカウンターの読み込みエラー:", err);
+  return { themes: th.data || [], events: ev.data || [], sends: se.data || [], sessions: cs.data || [], error: err || null };
+}
+async function cntCreateSession(match) {
+  const p = await getMyProfile();
+  const id = uid();
+  const data = {
+    match_date: match.match_date, tournament_name: match.tournament_name || "", round: match.round || "",
+    match_number: match.match_number || null, venue: match.venue || "", court_number: match.court_number || null,
+    game_format: match.game_format || 7, is_doubles: match.is_doubles !== false,
+    players: (match.players || []).map(x => ({ team: x.team, player_name: x.player_name, club_name: x.club_name || "", order_num: x.order_num })),
+  };
+  const { error } = await supabase.from("count_sessions").insert({ id, school_id: p?.school_id || null, data });
+  if (error) throw error;
+  return id;
+}
+
+// ---------- 試合の一覧（試合＋カウント用の試合） ----------
+const cntMd = d => { if (!d) return "日付なし"; const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${+m[2]}/${+m[3]}` : String(d); };
+function cntBuildMatches(matches, sessions) {
+  const items = [];
+  const n = (matches || []).length;
+  (matches || []).forEach((m, i) => {
+    if (isPracticeId(m.id)) return;
+    const pl = m.players || [];
+    items.push({
+      key: String(m.id), date: m.match_date || "", tour: m.tournament_name || "", round: m.round || "", num: m.match_number || "",
+      games: m.game_format || 7, seq: n - i, noScore: false,
+      a: pl.filter(p => p.team === "A").map(p => ({ name: p.player_name, club: p.club_name || "" })),
+      b: pl.filter(p => p.team === "B").map(p => ({ name: p.player_name, club: p.club_name || "" })),
+    });
+  });
+  (sessions || []).forEach(s => {
+    const d = s.data || {}; const pl = d.players || [];
+    items.push({
+      key: "cs:" + s.id, date: d.match_date || "", tour: d.tournament_name || "", round: d.round || "", num: d.match_number || "",
+      games: d.game_format || 7, seq: new Date(s.created_at || 0).getTime(), noScore: true, createdBy: s.created_by,
+      a: pl.filter(p => p.team === "A").map(p => ({ name: p.player_name, club: p.club_name || "" })),
+      b: pl.filter(p => p.team === "B").map(p => ({ name: p.player_name, club: p.club_name || "" })),
+    });
+  });
+  // ★同じ日に複数の試合があるときは①②…（「何試合目」が入っていればその順、なければ作った順）
+  const byDate = {};
+  items.forEach(it => { (byDate[it.date] ??= []).push(it); });
+  Object.values(byDate).forEach(list => {
+    if (list.length < 2) return;
+    list.sort((x, y) => {
+      const a = parseInt(x.num, 10), b = parseInt(y.num, 10);
+      if (!isNaN(a) && !isNaN(b) && a !== b) return a - b;
+      return x.seq - y.seq;
+    });
+    list.forEach((it, i) => { it.dayNo = CNT_CIRC[i] || `(${i + 1})`; });
+  });
+  items.forEach(it => {
+    it.bClub = it.b.find(p => p.club)?.club || "";
+    it.dLabel = cntMd(it.date) + (it.dayNo || "");
+    it.title = `${it.dLabel} ${it.tour ? `${it.tour}${it.round ? " " + it.round : ""}` : "練習試合"} vs ${it.bClub || "相手未入力"}`;
+    it.pairs = `${it.a.map(p => p.name.split(/\s/)[0]).join("・") || "－"} vs ${it.b.map(p => p.name.split(/\s/)[0]).join("・") || "相手選手未入力"}`;
+    it.order = `${it.date}|${String(it.dayNo ? CNT_CIRC.indexOf(it.dayNo) : 0).padStart(2, "0")}|${String(it.seq).padStart(15, "0")}`;
+  });
+  items.sort((x, y) => (y.order > x.order ? 1 : -1));   // 新しい順
+  return items;
+}
+
+// ---------- 目標 ----------
+const cntGoalText = t => { const g = t.goal; if (!g) return ""; return `${t.buttons[g.btn]?.label || ""} ${g.val}${g.kind === "rate" ? "%" : "回"}${g.dir === "ge" ? "以上" : "以下"}`; };
+function cntGoalEval(t, cnt) {
+  const g = t.goal; if (!g) return null;
+  const tot = cnt.reduce((a, b) => a + b, 0);
+  const v = g.kind === "rate" ? (tot ? Math.round(cnt[g.btn] / tot * 100) : null) : cnt[g.btn];
+  if (v == null) return { v: null, ok: null, unit: "" };
+  return { v, ok: g.dir === "ge" ? v >= g.val : v <= g.val, unit: g.kind === "rate" ? "%" : "回" };
+}
+
+// ---------- 作戦ボードのマーク（小さなコート） ----------
+function CntBoardIcon({ w = 34 }) {
+  return (
+    <svg width={w} height={Math.round(w * 0.7)} viewBox="0 0 40 28" aria-hidden="true" style={{ display: "block" }}>
+      <rect x="0.5" y="0.5" width="39" height="27" rx="4" fill="#2f7d55" />
+      <rect x="4" y="4" width="32" height="20" fill="none" stroke="#fff" strokeWidth="1.4" />
+      <line x1="20" y1="4" x2="20" y2="24" stroke="#fff" strokeWidth="2" />
+      <circle cx="26" cy="10" r="2.8" fill="#3b82f6" stroke="#fff" strokeWidth=".8" />
+      <circle cx="12" cy="18" r="2.8" fill="#ef5b45" stroke="#fff" strokeWidth=".8" />
+      <path d="M26 10 Q22 15 21.5 19" fill="none" stroke="#ffd24a" strokeWidth="1.6" strokeDasharray="2 1.6" />
+      <circle cx="21.4" cy="20" r="1.7" fill="#ffd24a" />
+    </svg>
+  );
+}
+
+// ---------- 下から出る小窓 ----------
+function CntSheet({ title, onClose, children }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 300, display: "flex", alignItems: "flex-end", justifyContent: "center" }} onClick={onClose}>
+      <div style={{ background: "#fff", width: "100%", maxWidth: 520, borderRadius: "18px 18px 0 0", padding: "16px 16px calc(24px + env(safe-area-inset-bottom,0px))", maxHeight: "calc(90vh / var(--app-zoom, 1))", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>{title}</div>
+          <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 24, color: CNT.sub, padding: 4, cursor: "pointer" }} aria-label="閉じる">×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+const cntSeg = (items, value, onPick) => (
+  <div style={{ display: "flex", background: "#eef0f4", borderRadius: 10, padding: 3, gap: 3 }}>
+    {items.map(([v, l]) => (
+      <button key={v} onClick={() => onPick(v)} style={{ flex: 1, border: "none", borderRadius: 8, padding: "9px 4px", fontSize: 15, fontWeight: 700, cursor: "pointer",
+        background: value === v ? "#fff" : "transparent", color: value === v ? C.navy : CNT.sub, boxShadow: value === v ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>{l}</button>
+    ))}
+  </div>
+);
+const cntCard = { background: "#fff", border: `1px solid ${CNT.line}`, borderRadius: 14, padding: 16, marginBottom: 12 };
+const cntInp = { width: "100%", border: `1px solid ${CNT.line}`, borderRadius: 10, padding: 10, fontSize: 16, boxSizing: "border-box", fontFamily: "inherit", background: "#fff" };
+const cntErrInp = { border: `2px solid ${CNT.bad}`, background: "#fff8f7" };
+const cntLabel = { display: "block", fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 6 };
+const cntErr = { color: CNT.bad, fontSize: 15, fontWeight: 700, marginTop: 4 };
+const cntLink = { border: "none", background: "none", color: "#2563eb", fontWeight: 700, fontSize: 16, padding: "4px 6px", cursor: "pointer" };
+const cntToneStyle = t => t === "good" ? { background: CNT.goodBg, color: CNT.good } : t === "bad" ? { background: CNT.badBg, color: CNT.bad } : { background: CNT.neuBg, color: CNT.neu };
+
+// ============================================================
+// 本体
+// ============================================================
+function CounterPanel({ isViewer, onNewMatch }) {
+  const [tab, setTab] = useState(() => _counterIntent?.tab === "result" ? "result" : _counterIntent?.tab === "count" ? "count" : "themes");
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState(false);
+  const [me, setMe] = useState({ id: null, schoolId: null, schoolName: "", isAdmin: false, player: null });
+  const [themes, setThemes] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [sends, setSends] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [matchesRaw, setMatchesRaw] = useState([]);
+  const [roster, setRoster] = useState([]);
+  const [schools, setSchools] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [boards, setBoards] = useState(null);       // null = まだ読んでいない
+  const [openBoard, setOpenBoard] = useState(null);
+  const [saveErr, setSaveErr] = useState("");
+  const errTimer = useRef(null);
+  const showErr = m => { setSaveErr(m); clearTimeout(errTimer.current); errTimer.current = setTimeout(() => setSaveErr(""), 4000); };
+
+  // 端末に覚えておくもの（ユーザーごと）
+  const [onMap, setOnMap] = useState({});
+  const [curKey, setCurKey] = useState(() => _counterIntent?.matchKey || cntLs.get("cnt:match", null));
+  const [countPlayers, setCountPlayers] = useState([]);   // [{name, club}]
+  const [game, setGame] = useState(1);
+  const [lastEv, setLastEv] = useState(null);
+  const [form, setForm] = useState(null);          // テーマの作成・編集
+  const [picker, setPicker] = useState(null);      // 選手を選ぶ { onPick, current }
+  const [matchSheet, setMatchSheet] = useState(false);
+  const [rView, setRView] = useState(() => _counterIntent?.tab === "result" && _counterIntent?.matchKey ? "detail" : "trend");
+  const [rKey, setRKey] = useState(() => _counterIntent?.tab === "result" ? _counterIntent?.matchKey || null : null);
+  const [trTheme, setTrTheme] = useState(null);
+  const [trPlayer, setTrPlayer] = useState(null);
+  const [tip, setTip] = useState(null);
+  useEffect(() => { _counterIntent = null; }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = await getMyProfile();
+      const [all, ms, rs, sc, mem] = await Promise.all([
+        cntLoadAll(), getMatchesCached(), getPlayerRoster().catch(() => []), getSchools().catch(() => []), getGroupMembers().catch(() => []),
+      ]);
+      const player = p?.linked_player_id ? (rs.find(r => r.id === p.linked_player_id)?.player_name || null) : null;
+      setMe({ id: p?.id || null, schoolId: p?.school_id || null, schoolName: p?.school_name || "", isAdmin: !!p?.is_admin, player });
+      setThemes(all.themes); setEvents(all.events); setSends(all.sends); setSessions(all.sessions);
+      setMatchesRaw(ms || []); setRoster(rs || []); setSchools(sc || []); setMembers(mem || []);
+      setLoadErr(!!all.error);
+      setOnMap(cntLs.get("cnt:on:" + (p?.id || ""), {}));
+    } catch (e) { console.error(e); setLoadErr(true); }
+    setLoading(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const loadBoards = useCallback(async () => { const r = await tbLoadList(); setBoards(r.rows || []); return r.rows || []; }, []);
+
+  const matchItems = useMemo(() => cntBuildMatches(matchesRaw, sessions), [matchesRaw, sessions]);
+  const mOf = k => matchItems.find(m => m.key === k) || null;
+  const curMatch = curKey ? mOf(curKey) : null;
+  const ownNames = useMemo(() => new Set(roster.filter(r => r.is_own_team).map(r => r.player_name)), [roster]);
+  const isOwn = useCallback(n => ownNames.has(n), [ownNames]);
+  const clubOf = useCallback((name, sid) => {
+    const m = sid ? mOf(sid) : null;
+    const inMatch = m ? [...m.a, ...m.b].find(p => p.name === name) : null;
+    if (inMatch?.club) return inMatch.club;
+    const r = roster.find(x => x.player_name === name);
+    return r ? (r.is_own_team ? (me.schoolName || "") : (r.team_name || "")) : "";
+  }, [roster, me.schoolName, matchItems]);   // eslint-disable-line
+  const nameOfUser = id => members.find(m => m.id === id)?.name || "";
+  const tag = n => (n && n === me.player) ? (me.isAdmin ? "" : "（自分）") : "";
+
+  // 使える（数えられる）テーマ
+  const activeThemes = themes.filter(t => !t.deleted_at && (t.owner_id === me.id || t.scope === "team" || (t.scope === "family" && t.family_player && t.family_player === me.player)));
+  const isOn = t => onMap[t.id] !== undefined ? !!onMap[t.id] : t.owner_id === me.id;
+  const setOn = (t, v) => { const n = { ...onMap, [t.id]: v }; setOnMap(n); cntLs.set("cnt:on:" + me.id, n); };
+  const countThemes = activeThemes.filter(isOn);
+
+  // 今の試合の数える選手（試合ごとに覚える）
+  useEffect(() => {
+    if (!curKey || loading) return;
+    cntLs.set("cnt:match", curKey);
+    const saved = cntLs.get("cnt:players:" + curKey, null);
+    if (saved && saved.length) { setCountPlayers(saved); return; }
+    const m = mOf(curKey);
+    if (m) setCountPlayers([...m.a, ...m.b].filter(p => p.name && !/^選手[AB]$/.test(p.name)));
+    setGame(1);
+  }, [curKey, loading]);   // eslint-disable-line
+  const saveCountPlayers = list => { setCountPlayers(list); if (curKey) cntLs.set("cnt:players:" + curKey, list); };
+
+  const cntOf = (t, player, key) => (t.buttons || []).map((b, i) => events.filter(e => e.theme_id === t.id && e.button_idx === i && e.player_name === player && (!key || e.match_key === key)).length);
+
+  // ---------- 数える ----------
+  const tap = async (t, p, btn) => {
+    if (!curKey) return;
+    const ev = { id: uid(), school_id: me.schoolId, theme_id: t.id, match_key: curKey, player_name: p.name, club_name: p.club || null, button_idx: btn, game_no: game, counted_by: me.id, created_at: new Date().toISOString() };
+    setEvents(list => [...list, ev]); setLastEv(ev);
+    const { counted_by, created_at, ...row } = ev;
+    const { error } = await supabase.from("count_events").insert(row);
+    if (error) { console.error(error); setEvents(list => list.filter(x => x.id !== ev.id)); setLastEv(l => (l && l.id === ev.id ? null : l)); showErr("保存できませんでした。電波の良い所でもう一度押してください"); }
+  };
+  const undo = async () => {
+    const ev = lastEv; if (!ev) return;
+    setLastEv(null); setEvents(list => list.filter(x => x.id !== ev.id));
+    const { error } = await supabase.from("count_events").delete().eq("id", ev.id);
+    if (error) { console.error(error); setEvents(list => [...list, ev]); showErr("戻せませんでした。もう一度お試しください"); }
+  };
+
+  // ---------- テーマの保存・削除 ----------
+  const saveTheme = async (F) => {
+    const row = {
+      id: F.id || uid(), school_id: me.schoolId, owner_id: me.id, name: F.name.trim(),
+      buttons: F.btns.filter(b => b.label.trim()).map(b => ({ label: b.label.trim(), tone: b.tone })),
+      goal: F.goal, board_id: F.board || null, target_name: F.target?.name || null, target_club: F.target?.club || null,
+      scope: F.scope, family_player: F.scope === "family" ? (me.player || F.target?.name || null) : null, updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("count_themes").upsert(row);
+    if (error) { console.error(error); showErr("テーマを保存できませんでした。もう一度お試しください"); return false; }
+    setThemes(list => F.id ? list.map(x => x.id === row.id ? { ...x, ...row } : x) : [...list, { ...row, created_at: new Date().toISOString() }]);
+    if (!F.id) setOn(row, true);
+    return true;
+  };
+  const deleteTheme = async (t) => {
+    const r1 = await supabase.from("count_events").delete().eq("theme_id", t.id).eq("counted_by", me.id);
+    const r2 = await supabase.from("count_themes").update({ deleted_at: new Date().toISOString() }).eq("id", t.id);
+    if (r1.error || r2.error) { console.error(r1.error || r2.error); showErr("削除できませんでした。もう一度お試しください"); return false; }
+    setEvents(list => list.filter(e => !(e.theme_id === t.id && e.counted_by === me.id)));
+    setThemes(list => list.map(x => x.id === t.id ? { ...x, deleted_at: new Date().toISOString() } : x));
+    return true;
+  };
+
+  // ---------- 送る（コーチ・先生） ----------
+  const sendTo = async (key, names, message) => {
+    const rows = names.map(n => ({ school_id: me.schoolId, from_user: me.id, match_key: key, player_name: n, message: message || null }));
+    const del = sends.filter(s => s.from_user === me.id && s.match_key === key && !names.includes(s.player_name));
+    const { data, error } = await supabase.from("count_sends").upsert(rows, { onConflict: "from_user,match_key,player_name" }).select("*");
+    if (error) { console.error(error); showErr("送れませんでした。電波の良い所でもう一度お試しください"); return; }
+    if (del.length) await supabase.from("count_sends").delete().in("id", del.map(d => d.id));
+    setSends(list => [...(data || []), ...list.filter(s => !(s.from_user === me.id && s.match_key === key))]);
+  };
+  const unsend = async (key) => {
+    const { error } = await supabase.from("count_sends").delete().eq("from_user", me.id).eq("match_key", key);
+    if (error) { console.error(error); showErr("取り消せませんでした。もう一度お試しください"); return; }
+    setSends(list => list.filter(s => !(s.from_user === me.id && s.match_key === key)));
+  };
+
+  const openBoardById = async (id) => {
+    const list = boards || await loadBoards();
+    const b = list.find(x => x.id === id);
+    if (!b) { showErr("作戦ボードが見つかりません（削除されたか、自分だけのボードです）"); return; }
+    setOpenBoard(b);
+  };
+
+  if (openBoard) {
+    return <TacticBoardScreen board={openBoard} isNew={false} ctx={{ schoolId: me.schoolId, userId: me.id }} readOnly={isViewer || (openBoard.owner_id && openBoard.owner_id !== me.id)} onClose={() => setOpenBoard(null)} />;
+  }
+
+  const tabs = [["themes", "テーマ"], ["count", "数える"], ["result", "結果"]];
+  return (
+    <div style={{ padding: "8px 14px 0", fontSize: 16, color: C.text }}>
+      <div style={{ display: "flex", borderBottom: `1px solid ${CNT.line}`, marginBottom: 12 }}>
+        {tabs.map(([k, l]) => (
+          <button key={k} onClick={() => { setTab(k); if (k === "result") setRView("trend"); }} style={{ flex: 1, border: "none", background: "none", padding: "12px 2px", fontSize: 16, fontWeight: 800, cursor: "pointer",
+            color: tab === k ? C.navy : CNT.sub, borderBottom: `3px solid ${tab === k ? C.navy : "transparent"}` }}>{l}</button>
+        ))}
+      </div>
+      {loading ? <div style={{ textAlign: "center", color: CNT.sub, padding: 40 }}>読み込み中...</div> : (
+        <>
+          {loadErr && <div style={{ ...cntCard, background: "#fff8e6", borderColor: "#f0d9a8", fontSize: 15 }}>読み込めなかったデータがあります。電波の良い所で開き直してください。（初めて使うときは、データベースの準備〈theme_counter.sql〉が必要です）</div>}
+          {tab === "themes" && (
+            <CntThemesTab themes={activeThemes} me={me} isOn={isOn} setOn={setOn} nameOfUser={nameOfUser}
+              onEdit={t => setForm(t ? { t } : { t: null })} onBoard={openBoardById} />
+          )}
+          {tab === "count" && (
+            <CntCountTab curMatch={curMatch} countThemes={countThemes} countPlayers={countPlayers} game={game} setGame={setGame}
+              cntOf={cntOf} tap={tap} isOwn={isOwn} tag={tag}
+              onChangeMatch={() => setMatchSheet(true)}
+              onAddPlayer={() => setPicker({ inMatch: curMatch, current: null, onPick: p => { if (!countPlayers.some(x => x.name === p.name)) saveCountPlayers([...countPlayers, p]); } })}
+              onRemovePlayer={n => saveCountPlayers(countPlayers.filter(x => x.name !== n))}
+              onGoThemes={() => setTab("themes")} />
+          )}
+          {tab === "result" && (
+            <CntResultTab themes={themes} events={events} sends={sends} me={me} mOf={mOf} isOwn={isOwn} clubOf={clubOf} cntOf={cntOf}
+              view={rView} setView={setRView} rKey={rKey} setRKey={setRKey} trTheme={trTheme} setTrTheme={setTrTheme} trPlayer={trPlayer} setTrPlayer={setTrPlayer}
+              tip={tip} setTip={setTip} onBoard={openBoardById} sendTo={sendTo} unsend={unsend} />
+          )}
+        </>
+      )}
+
+      {tab === "count" && lastEv && (
+        <button onClick={undo} style={{ position: "fixed", right: 16, bottom: "calc(84px + env(safe-area-inset-bottom,0px))", zIndex: 20, border: "none", background: C.text, color: "#fff", borderRadius: 999, padding: "11px 18px", fontSize: 16, fontWeight: 800, boxShadow: "0 4px 12px rgba(0,0,0,.25)", cursor: "pointer" }}>↶ 1つ戻す</button>
+      )}
+      {saveErr && <div style={{ position: "fixed", left: "50%", bottom: "calc(140px + env(safe-area-inset-bottom,0px))", transform: "translateX(-50%)", background: CNT.bad, color: "#fff", fontSize: 15, fontWeight: 700, borderRadius: 10, padding: "10px 14px", zIndex: 400, maxWidth: "90vw" }}>{saveErr}</div>}
+
+      {form && (
+        <CntThemeForm theme={form.t} me={me} tag={tag} clubOf={clubOf} boards={boards} loadBoards={loadBoards}
+          onPickPlayer={(cur, cb) => setPicker({ inMatch: null, current: cur, onPick: cb })}
+          onClose={() => setForm(null)}
+          onSave={async F => { if (await saveTheme(F)) setForm(null); }}
+          onDelete={async t => { if (await deleteTheme(t)) setForm(null); }}
+          eventsCount={t => events.filter(e => e.theme_id === t.id && e.counted_by === me.id).length}
+          otherCounters={t => [...new Set(events.filter(e => e.theme_id === t.id && e.counted_by !== me.id).map(e => nameOfUser(e.counted_by) || "ほかの人"))]} />
+      )}
+      {picker && (
+        <CntPlayerPicker picker={picker} roster={roster} schools={schools} matchItems={matchItems} me={me} tag={tag} countPlayers={countPlayers}
+          onClose={() => setPicker(null)} onPick={p => { const cb = picker.onPick; setPicker(null); if (me.isAdmin) cntLs.set("cnt:lastPick", p); cb && cb(p); }} />
+      )}
+      {matchSheet && (
+        <CntSheet title="試合を選ぶ" onClose={() => setMatchSheet(false)}>
+          <div>
+            {matchItems.slice(0, 80).map(m => (
+              <button key={m.key} onClick={() => { setCurKey(m.key); setMatchSheet(false); setLastEv(null); setGame(1); }}
+                style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderTop: `1px solid ${CNT.line}`, background: m.key === curKey ? "#f3f6fa" : "#fff", padding: "12px 4px", cursor: "pointer" }}>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{m.title}{m.noScore && <span style={{ fontWeight: 400, fontSize: 14, color: CNT.sub }}>　スコアなし</span>}</div>
+                <div style={{ fontSize: 15, color: CNT.sub }}>{m.pairs}・{m.games}ゲーム</div>
+              </button>
+            ))}
+            {matchItems.length === 0 && <div style={{ color: CNT.sub, padding: "12px 0" }}>まだ試合がありません</div>}
+          </div>
+          <button style={{ ...S.btn("#fff", C.navy), border: `1px solid ${CNT.line}`, fontSize: 16, marginTop: 12 }} onClick={() => { setMatchSheet(false); onNewMatch && onNewMatch(); }}>＋ 新しい試合を作る</button>
+        </CntSheet>
+      )}
+    </div>
+  );
+}
+
+// ---------- テーマ一覧 ----------
+function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard }) {
+  return (
+    <>
+      <div style={cntCard}>
+        {themes.length === 0 && <div style={{ color: CNT.sub }}>まだテーマがありません。下の「＋ 新しいテーマ」から作れます。</div>}
+        {themes.map((t, i) => {
+          const mine = t.owner_id === me.id, on = isOn(t);
+          return (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0", borderTop: i ? `1px solid ${CNT.line}` : "none" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 18 }}>{t.name}</div>
+                <div style={{ fontSize: 15, color: CNT.sub }}>見られる人：{CNT_SCOPE_LABEL[t.scope] || "自分だけ"}{!mine && `（作成：${nameOfUser(t.owner_id) || "ほかの人"}）`}</div>
+              </div>
+              {t.board_id ? <button onClick={() => onBoard(t.board_id)} aria-label="参考の作戦ボードを見る" style={{ border: "none", background: "none", padding: "4px 2px", cursor: "pointer", flex: "none" }}><CntBoardIcon w={34} /></button> : <span style={{ width: 38, flex: "none" }} />}
+              {mine ? <button style={cntLink} onClick={() => onEdit(t)}>編集</button> : <span style={{ width: 48, flex: "none" }} />}
+              <button onClick={() => setOn(t, !on)} aria-label="使う" aria-pressed={on} style={{ width: 52, height: 30, borderRadius: 999, border: "none", background: on ? CNT.good : "#d5d9df", position: "relative", flex: "none", cursor: "pointer" }}>
+                <span style={{ position: "absolute", top: 3, left: on ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: ".15s" }} />
+              </button>
+            </div>
+          );
+        })}
+        {themes.length > 0 && <div style={{ fontSize: 15, color: CNT.sub, marginTop: 8 }}>右のスイッチがオンのテーマが「数える」に出ます。</div>}
+      </div>
+      <button style={{ ...S.btn(C.navy), fontSize: 17, marginBottom: 16 }} onClick={() => onEdit(null)}>＋ 新しいテーマ</button>
+    </>
+  );
+}
+
+// ---------- テーマの作成・編集 ----------
+function CntThemeForm({ theme, me, tag, clubOf, boards, loadBoards, onPickPlayer, onClose, onSave, onDelete, eventsCount, otherCounters }) {
+  const t = theme;
+  const lastPick = me.isAdmin ? cntLs.get("cnt:lastPick", null) : null;
+  const defTarget = me.isAdmin ? lastPick : (me.player ? { name: me.player, club: me.schoolName } : null);
+  const [F, setF] = useState(() => ({
+    id: t?.id || null, name: t?.name || "",
+    btns: t ? (t.buttons || []).map(b => ({ label: b.label, tone: b.tone })) : [{ label: "", tone: "good" }, { label: "", tone: "bad" }],
+    goal: t?.goal ? { ...t.goal } : null, board: t?.board_id || null,
+    target: t?.target_name ? { name: t.target_name, club: t.target_club || "" } : defTarget,
+    scope: t?.scope || "me", errs: {}, delAsk: false, saving: false,
+  }));
+  const set = patch => setF(f => ({ ...f, ...patch }));
+  const [boardSheet, setBoardSheet] = useState(false);
+  useEffect(() => { if (boards === null) loadBoards(); }, []);   // eslint-disable-line
+  const famKey = me.isAdmin ? "send" : "family";
+  const scopeItems = [["me", "自分だけ"], [famKey, me.isAdmin ? "選手に送る" : "家族"], ["team", "チーム"]];
+  const scopeVal = (F.scope === "family" || F.scope === "send") ? famKey : F.scope;
+  const board = F.board && boards ? boards.find(b => b.id === F.board) : null;
+  const others = t ? otherCounters(t) : [];
+  const narrow = t && t.scope === "team" && F.scope !== "team" && others.length > 0;
+  const e = F.errs;
+
+  const save = async () => {
+    const named = F.btns.filter(b => b.label.trim()); const errs = {};
+    if (!F.name.trim()) errs.name = "テーマ名を入れてください";
+    if (named.length < 2) errs.btns = named.length === 0 ? "ボタンの名前を2つ以上入れてください（例：仕掛けた／スルー）" : "ボタンがあと1つ足りません。名前を入れてください";
+    if (F.goal) {
+      const g = F.goal;
+      if (g.val === null || g.val === "" || isNaN(g.val)) errs.goal = "目標の数字を入れてください";
+      else if (g.kind === "rate" && (g.val < 0 || g.val > 100)) errs.goal = "割合は0〜100%で入れてください";
+      else if (g.val < 0) errs.goal = "回数は0以上で入れてください";
+      else if (!F.btns[g.btn]?.label.trim()) errs.goal = "目標にするボタンの名前を入れてください";
+    }
+    if (!F.target) errs.who = "数える選手を選んでください";
+    if (Object.keys(errs).length) { set({ errs }); return; }
+    const goal = F.goal ? { ...F.goal, val: Number(F.goal.val), btn: named.indexOf(F.btns[F.goal.btn]) } : null;
+    set({ saving: true });
+    await onSave({ ...F, scope: scopeVal, goal });
+    set({ saving: false });
+  };
+
+  return (
+    <CntSheet title={t ? "テーマを編集" : "新しいテーマ"} onClose={onClose}>
+      <div style={{ marginTop: 14 }}>
+        <label style={cntLabel}>テーマ名</label>
+        <input style={{ ...cntInp, ...(e.name ? cntErrInp : {}) }} value={F.name} placeholder="例：ポーチ" onChange={ev => set({ name: ev.target.value, errs: { ...e, name: ev.target.value.trim() ? undefined : e.name } })} />
+        {e.name && <div style={cntErr}>⚠ {e.name}</div>}
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <label style={cntLabel}>ボタン</label>
+        {F.btns.map((b, i) => (
+          <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+            <input style={{ ...cntInp, flex: 1, minWidth: 0, ...(e.btns && !b.label.trim() ? cntErrInp : {}) }} value={b.label} placeholder={["例：仕掛けた", "例：スルー", "例：見せて戻る"][i]}
+              onChange={ev => { const btns = F.btns.map((x, j) => j === i ? { ...x, label: ev.target.value } : x); set({ btns, errs: { ...e, btns: btns.filter(x => x.label.trim()).length >= 2 ? undefined : e.btns } }); }} />
+            <select style={{ ...cntInp, width: 150, flex: "none" }} value={b.tone} onChange={ev => set({ btns: F.btns.map((x, j) => j === i ? { ...x, tone: ev.target.value } : x) })}>
+              {CNT_TONES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            {F.btns.length > 2 && <button onClick={() => { const btns = F.btns.filter((_, j) => j !== i); set({ btns, goal: F.goal && F.goal.btn >= btns.length ? { ...F.goal, btn: 0 } : F.goal }); }} style={{ border: "none", background: "none", fontSize: 22, color: CNT.sub, cursor: "pointer" }} aria-label="ボタンを消す">×</button>}
+          </div>
+        ))}
+        {e.btns && <div style={cntErr}>⚠ {e.btns}</div>}
+        {F.btns.length < 3 && <button style={{ ...cntLink, paddingLeft: 0, marginTop: 4 }} onClick={() => set({ btns: [...F.btns, { label: "", tone: "neutral" }] })}>＋ ボタンを追加</button>}
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <label style={cntLabel}>目標</label>
+        {cntSeg([["none", "なし"], ["rate", "割合"], ["count", "1試合の回数"]], F.goal?.kind || "none", v => {
+          if (v === "none") set({ goal: null, errs: { ...e, goal: undefined } });
+          else set({ goal: { kind: v, btn: F.goal?.btn ?? Math.max(0, F.btns.findIndex(x => x.tone === "good")), val: F.goal?.val ?? "", dir: F.goal?.dir || "ge" }, errs: { ...e, goal: undefined } });
+        })}
+        {F.goal && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 76px auto 88px", gap: 6, alignItems: "center", marginTop: 8 }}>
+            <select style={cntInp} value={F.goal.btn} onChange={ev => set({ goal: { ...F.goal, btn: +ev.target.value } })}>
+              {F.btns.map((b, i) => <option key={i} value={i}>{b.label.trim() || `ボタン${i + 1}`}</option>)}
+            </select>
+            <input type="number" inputMode="numeric" style={{ ...cntInp, ...(e.goal ? cntErrInp : {}) }} value={F.goal.val} placeholder={F.goal.kind === "rate" ? "50" : "3"}
+              onChange={ev => set({ goal: { ...F.goal, val: ev.target.value === "" ? "" : Number(ev.target.value) }, errs: { ...e, goal: undefined } })} />
+            <span style={{ fontWeight: 700 }}>{F.goal.kind === "rate" ? "%" : "回"}</span>
+            <select style={cntInp} value={F.goal.dir} onChange={ev => set({ goal: { ...F.goal, dir: ev.target.value } })}>
+              <option value="ge">以上</option><option value="le">以下</option>
+            </select>
+          </div>
+        )}
+        {e.goal && <div style={cntErr}>⚠ {e.goal}</div>}
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <label style={cntLabel}>参考の作戦ボード（任意）</label>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${CNT.line}`, borderRadius: 10, padding: "8px 10px", gap: 8 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>{F.board ? <><CntBoardIcon w={26} /><span>{board ? (board.title || "名前なし") : (boards === null ? "読み込み中..." : "見られないボード")}</span></> : <span style={{ color: CNT.sub }}>なし</span>}</span>
+          <span style={{ flex: "none" }}>{F.board && <button style={{ ...cntLink, color: CNT.bad }} onClick={() => set({ board: null })}>外す</button>}<button style={cntLink} onClick={() => setBoardSheet(true)}>{F.board ? "変更" : "選ぶ"}</button></span>
+        </div>
+        {board && !board.shared && scopeVal !== "me" && <div style={{ background: "#fff8e6", borderRadius: 10, padding: 10, fontSize: 15, marginTop: 8 }}>この作戦ボードは「自分だけ」なので、ほかの人はこのテーマから開けません。作戦ボード側で「チームで共有」にすると見られます。</div>}
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <label style={cntLabel}>数える選手</label>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: `1px solid ${e.who ? CNT.bad : CNT.line}`, borderRadius: 10, padding: "8px 10px" }}>
+          <span>{F.target ? <>{F.target.name}{tag(F.target.name)} <span style={{ color: CNT.sub, fontSize: 15 }}>{F.target.club && F.target.club !== me.schoolName ? F.target.club : ""}</span></> : <span style={{ color: CNT.sub }}>選んでください</span>}</span>
+          <button style={cntLink} onClick={() => onPickPlayer(F.target, p => set({ target: p, errs: { ...e, who: undefined } }))}>変更</button>
+        </div>
+        {e.who && <div style={cntErr}>⚠ {e.who}</div>}
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <label style={cntLabel}>見られる人</label>
+        {cntSeg(scopeItems, scopeVal, v => set({ scope: v }))}
+        <div style={{ fontSize: 15, color: CNT.sub, marginTop: 6 }}>
+          {scopeVal === "me" ? "自分だけが見られます。" : scopeVal === "family" ? "選手本人とその保護者だけが見られ、どちらもこのテーマで数えられます。" : scopeVal === "send" ? "数えた結果を、調べた自チームの選手に送れます。送るまでは自分だけが見られます。" : "チームのみんなが見られ、ほかの人もこのテーマで数えられます。"}
+        </div>
+        {narrow && <div style={{ background: "#fff8e6", borderRadius: 10, padding: 10, fontSize: 15, marginTop: 8 }}>ほかの人（{others.join("・")}）もこのテーマで数えています。共有をやめると、その人たちの数えた分は本人だけに残り、新しくは数えられなくなります。</div>}
+      </div>
+      <button style={{ ...S.btn(F.saving ? C.border : C.navy), fontSize: 17, marginTop: 22 }} disabled={F.saving} onClick={save}>{F.saving ? "保存中..." : "保存する"}</button>
+      {t && (F.delAsk ? (
+        <div style={{ background: "#fdecea", borderRadius: 10, padding: 12, marginTop: 14, fontSize: 15 }}>
+          <div style={{ fontWeight: 800, color: CNT.bad }}>「{t.name}」を削除しますか？</div>
+          <div style={{ marginTop: 4 }}>このテーマで自分が数えた記録（{eventsCount(t)}回分）も消え、結果の推移からもなくなります。元には戻せません。</div>
+          {others.length > 0 && <div style={{ marginTop: 4 }}>ほかの人（{others.join("・")}）が数えた分は、その人の画面に残ります。</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={{ ...S.btn("#fff", C.navy), border: `1px solid ${CNT.line}`, fontSize: 16 }} onClick={() => set({ delAsk: false })}>やめる</button>
+            <button style={{ ...S.btn(CNT.bad), fontSize: 16 }} onClick={() => onDelete(t)}>削除する</button>
+          </div>
+        </div>
+      ) : (
+        <button style={{ ...S.btn("#fff", CNT.bad), border: `1px solid ${CNT.line}`, fontSize: 16, marginTop: 10 }} onClick={() => set({ delAsk: true })}>このテーマを削除</button>
+      ))}
+      {boardSheet && (
+        <CntSheet title="参考の作戦ボード" onClose={() => setBoardSheet(false)}>
+          <div style={{ fontSize: 15, color: CNT.sub }}>作戦ボードで保存したものから選びます</div>
+          {boards === null && <div style={{ padding: 16, color: CNT.sub }}>読み込み中...</div>}
+          {boards && boards.length === 0 && <div style={{ padding: 16, color: CNT.sub }}>まだ作戦ボードがありません</div>}
+          {(boards || []).map(b => (
+            <button key={b.id} onClick={() => { set({ board: b.id }); setBoardSheet(false); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", border: "none", borderTop: `1px solid ${CNT.line}`, background: b.id === F.board ? "#f3f6fa" : "#fff", padding: "12px 4px", fontSize: 16, textAlign: "left", cursor: "pointer" }}>
+              <CntBoardIcon w={26} /><span style={{ flex: 1 }}>{b.title || "名前なし"}</span><span style={{ fontSize: 14, color: CNT.sub }}>{b.shared ? "チーム" : "自分だけ"}</span>
+            </button>
+          ))}
+        </CntSheet>
+      )}
+    </CntSheet>
+  );
+}
+
+// ---------- 選手を選ぶ ----------
+function CntPlayerPicker({ picker, roster, schools, matchItems, me, tag, countPlayers, onClose, onPick }) {
+  const m = picker.inMatch;
+  const [ptab, setPtab] = useState(() => (picker.current && picker.current.club && picker.current.club !== me.schoolName) ? "other" : "own");
+  const [pref, setPref] = useState(() => schools.find(s => s.name === me.schoolName)?.prefecture || schools[0]?.prefecture || "");
+  const [school, setSchool] = useState(() => (picker.current && picker.current.club && picker.current.club !== me.schoolName) ? picker.current.club : null);
+  const [newName, setNewName] = useState("");
+  const recent = cntLs.get("cnt:recent", []);
+  const rowBtn = (p, disabled) => (
+    <button key={p.name + "|" + p.club} disabled={disabled} onClick={() => {
+      if (p.club && p.club !== me.schoolName) cntLs.set("cnt:recent", [p, ...recent.filter(r => r.name !== p.name)].slice(0, 4));
+      onPick(p);
+    }} style={{ display: "flex", justifyContent: "space-between", width: "100%", textAlign: "left", border: "none", borderTop: `1px solid ${CNT.line}`, background: "#fff", padding: "12px 4px", fontSize: 17, cursor: disabled ? "default" : "pointer", color: disabled ? "#8a93a3" : C.text, fontWeight: picker.current?.name === p.name ? 800 : 400 }}>
+      <span>{p.name}{tag(p.name)}</span>{disabled && <span style={{ fontSize: 15 }}>追加済み</span>}
+    </button>
+  );
+  // ★試合を選んでいるときは、その試合に出ている選手だけ
+  if (m) {
+    const group = (label, list) => (
+      <>
+        <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, margin: "14px 0 4px" }}>{label}</div>
+        {list.length ? list.map(p => rowBtn(p, countPlayers.some(x => x.name === p.name))) : <div style={{ color: CNT.sub }}>選手名が入っていません</div>}
+      </>
+    );
+    return (
+      <CntSheet title="選手を追加" onClose={onClose}>
+        <div style={{ fontSize: 15, color: CNT.sub }}>{m.title}に出ている選手</div>
+        {group(`自チーム（${m.a[0]?.club || me.schoolName || "自チーム"}）`, m.a.filter(p => p.name))}
+        {group(`相手（${m.bClub || "相手"}）`, m.b.filter(p => p.name && !/^選手[AB]$/.test(p.name)))}
+      </CntSheet>
+    );
+  }
+  const own = roster.filter(r => r.is_own_team).map(r => ({ name: r.player_name, club: me.schoolName }));
+  const prefs = [...new Set(schools.map(s => s.prefecture).filter(Boolean))];
+  const schoolNames = schools.filter(s => s.prefecture === pref && s.name !== me.schoolName).map(s => s.name);
+  const otherPlayers = school ? (() => {
+    const set = new Map();
+    roster.filter(r => !r.is_own_team && r.team_name === school).forEach(r => set.set(r.player_name, { name: r.player_name, club: school }));
+    matchItems.forEach(mi => [...mi.a, ...mi.b].forEach(p => { if (p.club === school && p.name && !/^選手[AB]$/.test(p.name)) set.set(p.name, { name: p.name, club: school }); }));
+    return [...set.values()].sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  })() : [];
+  return (
+    <CntSheet title="選手を選ぶ" onClose={onClose}>
+      {cntSeg([["own", "自チーム"], ["other", "他校"]], ptab, setPtab)}
+      {ptab === "own" ? (
+        <>
+          <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, margin: "14px 0 4px" }}>{me.schoolName || "自チーム"}</div>
+          {own.map(p => rowBtn(p, false))}
+          {own.length === 0 && <div style={{ color: CNT.sub }}>選手マスターに自チームの選手がいません</div>}
+        </>
+      ) : (
+        <>
+          {recent.length > 0 && <>
+            <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, margin: "14px 0 6px" }}>最近</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{recent.map(p => <button key={p.name} style={{ ...S.chip(false), fontSize: 15 }} onClick={() => onPick(p)}>{p.name}</button>)}</div>
+          </>}
+          <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, margin: "14px 0 6px" }}>県</div>
+          <select style={cntInp} value={pref} onChange={e => { setPref(e.target.value); setSchool(null); }}>{prefs.map(p => <option key={p}>{p}</option>)}</select>
+          <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, margin: "14px 0 6px" }}>学校</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {schoolNames.map(sc => <button key={sc} style={{ ...S.chip(sc === school), fontSize: 15 }} onClick={() => setSchool(sc)}>{sc}</button>)}
+            {schoolNames.length === 0 && <span style={{ color: CNT.sub }}>この県の学校はまだありません</span>}
+          </div>
+          {school && <>
+            <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, margin: "14px 0 4px" }}>選手</div>
+            {otherPlayers.map(p => rowBtn(p, false))}
+            {otherPlayers.length === 0 && <div style={{ color: CNT.sub }}>まだ選手がいません。下で名前を入れて追加できます。</div>}
+            <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+              <input style={{ ...cntInp, flex: 1 }} value={newName} placeholder="一覧にいない選手の名前" onChange={e => setNewName(e.target.value)} />
+              <button style={cntLink} onClick={() => { const n = newName.trim(); if (n) onPick({ name: n, club: school }); }}>追加</button>
+            </div>
+          </>}
+        </>
+      )}
+    </CntSheet>
+  );
+}
+
+// ---------- 数える ----------
+function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf, tap, isOwn, tag, onChangeMatch, onAddPlayer, onRemovePlayer, onGoThemes }) {
+  if (!curMatch) {
+    return (
+      <div style={cntCard}>
+        <div style={{ fontSize: 16, marginBottom: 12 }}>どの試合で数えるかを選んでください。</div>
+        <button style={{ ...S.btn(C.navy), fontSize: 17 }} onClick={onChangeMatch}>試合を選ぶ</button>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div style={cntCard}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>{curMatch.title}</div>
+            <div style={{ fontSize: 15, color: CNT.sub }}>{curMatch.pairs}・{curMatch.games}ゲームマッチ{curMatch.noScore ? "・スコアなし" : ""}</div>
+          </div>
+          <button style={{ ...cntLink, flex: "none", alignSelf: "flex-start" }} onClick={onChangeMatch}>変更</button>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, fontSize: 15, color: CNT.sub }}>
+          <span>ゲームの区切り（任意）</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button onClick={() => setGame(Math.max(1, game - 1))} style={{ border: `1px solid ${CNT.line}`, background: "#fff", borderRadius: 8, width: 36, height: 36, fontSize: 18, cursor: "pointer" }} aria-label="前のゲーム">‹</button>
+            <b style={{ color: C.text, minWidth: 88, textAlign: "center", fontSize: 16 }}>第{game}ゲーム</b>
+            <button onClick={() => setGame(Math.min(curMatch.games || 9, game + 1))} style={{ border: `1px solid ${CNT.line}`, background: "#fff", borderRadius: 8, width: 36, height: 36, fontSize: 18, cursor: "pointer" }} aria-label="次のゲーム">›</button>
+          </span>
+        </div>
+      </div>
+      {countThemes.length === 0 ? (
+        <div style={{ ...cntCard, color: CNT.sub }}>「テーマ」でスイッチをオンにすると、ここに出ます。<button style={{ ...cntLink, paddingLeft: 0 }} onClick={onGoThemes}>テーマへ ›</button></div>
+      ) : countPlayers.map((p, pi) => (
+        <div key={p.name} style={cntCard}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>{p.name}{tag(p.name)}{!isOwn(p.name) && p.club && <span style={{ fontWeight: 400, fontSize: 15, color: CNT.sub, marginLeft: 6 }}>{p.club}</span>}</div>
+            <button onClick={() => onRemovePlayer(p.name)} style={{ border: "none", background: "none", fontSize: 24, color: CNT.sub, cursor: "pointer" }} aria-label="外す">×</button>
+          </div>
+          {countThemes.map(t => {
+            const cnt = cntOf(t, p.name, curMatch.key); const ge = cntGoalEval(t, cnt);
+            return (
+              <div key={t.id} style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 17 }}>{t.name}</div>
+                {t.goal && <div style={{ fontSize: 15, color: CNT.sub }}>目標 {cntGoalText(t)}{ge && ge.v != null && <>・今 <b style={{ color: ge.ok ? CNT.good : CNT.warn }}>{ge.v}{ge.unit}</b></>}</div>}
+                <div style={{ display: "grid", gridTemplateColumns: `repeat(${(t.buttons || []).length || 2}, minmax(0,1fr))`, gap: 8, marginTop: 6 }}>
+                  {(t.buttons || []).map((b, i) => (
+                    <button key={i} onClick={() => tap(t, p, i)} style={{ ...cntToneStyle(b.tone), border: "none", borderRadius: 12, padding: "10px 4px 8px", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
+                      {b.label}<b style={{ display: "block", fontSize: 26, lineHeight: 1.2 }}>{cnt[i]}</b>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <button onClick={onAddPlayer} style={{ width: "100%", border: `1px dashed #b9c0c9`, background: "transparent", color: CNT.sub, borderRadius: 14, padding: 14, fontSize: 17, fontWeight: 700, marginBottom: 90, cursor: "pointer" }}>＋ 選手を追加</button>
+    </>
+  );
+}
+
+// ---------- 結果 ----------
+function CntResultTab({ themes, events, sends, me, mOf, isOwn, clubOf, cntOf, view, setView, rKey, setRKey, trTheme, setTrTheme, trPlayer, setTrPlayer, tip, setTip, onBoard, sendTo, unsend }) {
+  const inbox = sends.filter(s => s.from_user !== me.id && me.player && s.player_name === me.player);
+  const themeById = id => themes.find(t => t.id === id);
+  if (view === "detail" && rKey) {
+    return <CntDetail k={rKey} m={mOf(rKey)} themes={themes} events={events} sends={sends} me={me} isOwn={isOwn} clubOf={clubOf} cntOf={cntOf}
+      onBack={() => setView("trend")} sendTo={sendTo} unsend={unsend} inbox={inbox} />;
+  }
+  const usedT = themes.filter(t => events.some(e => e.theme_id === t.id));
+  const t = themeById(trTheme) && usedT.some(x => x.id === trTheme) ? themeById(trTheme) : usedT[0];
+  const ps = t ? [...new Set(events.filter(e => e.theme_id === t.id).map(e => e.player_name))] : [];
+  const defP = ps.includes(me.player) ? me.player : ps[0];
+  const player = ps.includes(trPlayer) ? trPlayer : defP;
+  return (
+    <>
+      {inbox.slice(0, 3).map(s => (
+        <div key={s.id} onClick={() => { setRKey(s.match_key); setView("detail"); window.scrollTo(0, 0); }} style={{ ...cntCard, borderLeft: `4px solid ${C.navy}`, cursor: "pointer" }}>
+          <div style={{ fontWeight: 800 }}>📩 コーチから届きました</div>
+          <div style={{ fontSize: 15, color: CNT.sub }}>{mOf(s.match_key)?.title || "試合"} ›</div>
+        </div>
+      ))}
+      {!t ? <div style={{ ...cntCard, color: CNT.sub }}>まだ数えた記録がありません。「数える」で試合を選んで数えると、ここに推移が出ます。</div> : (
+        <>
+          <div style={cntCard}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, marginBottom: 6 }}>テーマ</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{usedT.map(x => <button key={x.id} style={{ ...S.chip(x.id === t.id), fontSize: 15 }} onClick={() => setTrTheme(x.id)}>{x.name}</button>)}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: CNT.sub, margin: "12px 0 6px" }}>選手</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{ps.map(n => <button key={n} style={{ ...S.chip(n === player), fontSize: 15 }} onClick={() => setTrPlayer(n)}>{n.split(/\s/)[0]}{!isOwn(n) && clubOf(n) ? ` ${clubOf(n)}` : ""}</button>)}</div>
+          </div>
+          <CntTrend t={t} player={player} events={events} mOf={mOf} cntOf={cntOf} tip={tip} setTip={setTip} onBoard={onBoard}
+            onOpen={k => { setRKey(k); setView("detail"); window.scrollTo(0, 0); }} />
+        </>
+      )}
+    </>
+  );
+}
+
+function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen }) {
+  const keys = [...new Set(events.filter(e => e.theme_id === t.id && e.player_name === player).map(e => e.match_key))]
+    .sort((a, b) => ((mOf(a)?.order || "") > (mOf(b)?.order || "") ? 1 : -1));   // 古い順
+  const rows = keys.map(k => ({ k, m: mOf(k), c: cntOf(t, player, k) }));
+  const isCnt = t.goal?.kind === "count";
+  const rb = t.goal?.kind === "rate" ? t.goal.btn : Math.max(0, (t.buttons || []).findIndex(b => b.tone === "good"));
+  const unit = isCnt ? "回" : "%";
+  const val = r => { const tot = r.c.reduce((x, y) => x + y, 0); return isCnt ? r.c[t.goal.btn] : (tot ? Math.round(r.c[rb] / tot * 100) : 0); };
+  const vs = rows.map(val), n = vs.length;
+  const metric = isCnt ? `${t.buttons[t.goal.btn]?.label || ""}の回数` : `${t.buttons[rb]?.label || ""}の割合`;
+  const upGood = t.goal ? t.goal.dir === "ge" : t.buttons[rb]?.tone !== "bad";
+  const word = d => d === 0 ? "変わらず" : (d > 0) === upGood ? "よくなった" : "下がった";
+  const sign = d => d === 0 ? "±0" : d > 0 ? `▲${d}` : `▼${-d}`;
+  const dColor = d => d === 0 ? CNT.sub : (d > 0) === upGood ? CNT.good : CNT.warn;
+  const okN = t.goal ? rows.filter(r => cntGoalEval(t, r.c).ok).length : 0;
+  // 折れ線
+  const W = 340, H = 196, L = 42, R = 22, T = 16, B = 48;
+  const maxY = isCnt ? Math.max(3, ...vs, Number(t.goal?.val) || 0) + 1 : 100;
+  const x = i => n <= 1 ? L + (W - L - R) / 2 : L + i * (W - L - R) / (n - 1);
+  const y = v => T + (H - T - B) * (1 - v / maxY);
+  const ticks = isCnt ? [0, Math.round(maxY / 2), maxY] : [0, 50, 100];
+  const box = (label, a, b, d) => (
+    <div style={{ flex: 1, background: CNT.bg, borderRadius: 10, padding: "8px 10px" }}>
+      <div style={{ fontSize: 15, color: CNT.sub }}>{label}</div>
+      <div style={{ fontWeight: 800, fontSize: 18 }}>{a}{unit} → {b}{unit}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, color: dColor(d) }}>{sign(d)} {word(d)}</div>
+    </div>
+  );
+  return (
+    <div style={cntCard}>
+      <div style={{ fontWeight: 800, fontSize: 18 }}>{t.name}・{player}</div>
+      <div style={{ fontSize: 15, color: CNT.sub }}>{metric}{t.goal ? `・目標達成 ${okN}／${n}試合` : ""}</div>
+      {t.board_id && (
+        <button onClick={() => onBoard(t.board_id)} style={{ ...S.btn("#fff", C.navy), border: `1px solid ${CNT.line}`, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 15, padding: 10, marginTop: 10 }}>
+          <CntBoardIcon w={26} />参考の作戦ボードを見る
+        </button>
+      )}
+      {n >= 2 && <div style={{ display: "flex", gap: 10, margin: "10px 0 4px" }}>{box("最初 → 最近", vs[0], vs[n - 1], vs[n - 1] - vs[0])}{box("前回と比べて", vs[n - 2], vs[n - 1], vs[n - 1] - vs[n - 2])}</div>}
+      <div style={{ position: "relative" }}>
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${metric}の推移`} onMouseLeave={() => setTip(null)}>
+          {ticks.map(v => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="#eceef1" /><text x={L - 6} y={y(v) + 4} fontSize="13" textAnchor="end" fill={CNT.sub}>{v}{unit}</text></g>)}
+          {t.goal && <g><line x1={L} x2={W - R} y1={y(t.goal.val)} y2={y(t.goal.val)} stroke="#1d2430" strokeWidth="1.5" strokeDasharray="5 4" /><text x={L + 4} y={y(t.goal.val) - 5} fontSize="13" fill="#1d2430">目標 {t.goal.val}{unit}</text></g>}
+          <polyline points={vs.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke={C.navy} strokeWidth="2" strokeLinejoin="round" />
+          {vs.map((v, i) => {
+            const ok = t.goal && cntGoalEval(t, rows[i].c).ok;
+            const below = t.goal && Math.abs(y(v) - y(t.goal.val)) < 16 && v <= t.goal.val;
+            return (
+              <g key={i}>
+                <circle cx={x(i)} cy={y(v)} r="5" fill={ok ? CNT.good : C.navy} stroke="#fff" strokeWidth="2" />
+                {(i === 0 || i === n - 1) && <text x={Math.min(Math.max(x(i), L + 12), W - R - 8)} y={below ? y(v) + 18 : Math.max(14, y(v) - 10)} fontSize="14" fontWeight="700" textAnchor="middle" fill="#1d2430">{v}{unit}</text>}
+                <text x={x(i)} y={H - B + 20} fontSize="13" textAnchor="middle" fill="#1d2430">{cntMd(rows[i].m?.date)}</text>
+                {rows[i].m?.dayNo && <text x={x(i)} y={H - B + 38} fontSize="14" fontWeight="700" textAnchor="middle" fill="#1d2430">{rows[i].m.dayNo}</text>}
+                <rect x={x(i) - 18} y={T} width="36" height={H - T - B + 4} fill="transparent" style={{ cursor: "pointer" }}
+                  onMouseEnter={() => setTip({ i, x: x(i) / W })} onTouchStart={() => setTip({ i, x: x(i) / W })} />
+              </g>
+            );
+          })}
+        </svg>
+        {tip && rows[tip.i] && (
+          <div style={{ position: "absolute", top: 0, left: `clamp(0px, calc(${tip.x * 100}% - 90px), calc(100% - 180px))`, width: 180, background: "#1d2430", color: "#fff", fontSize: 14, borderRadius: 8, padding: "4px 8px", pointerEvents: "none" }}>
+            {rows[tip.i].m?.title || "試合"}<br /><b>{vs[tip.i]}{unit}</b>
+          </div>
+        )}
+      </div>
+      <div style={{ fontSize: 15, color: CNT.sub }}>点が緑＝目標達成　点線＝目標</div>
+      <div style={{ marginTop: 6 }}>
+        {rows.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => {
+          const v = vs[i], d = i ? v - vs[i - 1] : null, ge = cntGoalEval(t, r.c);
+          return (
+            <div key={r.k} onClick={() => onOpen(r.k)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: `1px solid ${CNT.line}`, cursor: "pointer" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 16 }}>{r.m?.title || "削除された試合"}{ge?.ok && <span style={{ color: CNT.good, fontWeight: 800, marginLeft: 4 }}>✓</span>}</div>
+                <div style={{ fontSize: 15, color: CNT.sub }}>{t.buttons.map((b, j) => `${b.label} ${r.c[j]}`).join("・")}</div>
+              </div>
+              <div style={{ textAlign: "right", flex: "none" }}>
+                <div style={{ fontWeight: 800 }}>{v}{unit}</div>
+                {d != null && <div style={{ fontSize: 15, fontWeight: 700, color: d === 0 ? CNT.sub : dColor(d) }}>{d === 0 ? "→" : `${d > 0 ? "▲" : "▼"}${Math.abs(d)}`}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CntDetail({ k, m, themes, events, sends, me, isOwn, clubOf, cntOf, onBack, sendTo, unsend, inbox }) {
+  const evs = events.filter(e => e.match_key === k);
+  const ps = [...new Set(evs.map(e => e.player_name))];
+  const mySent = sends.filter(s => s.from_user === me.id && s.match_key === k);
+  const [to, setTo] = useState(() => new Set(mySent.length ? mySent.map(s => s.player_name) : ps.filter(isOwn)));
+  const [msg, setMsg] = useState(mySent[0]?.message || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const received = inbox.filter(s => s.match_key === k);
+  return (
+    <>
+      <button style={{ ...cntLink, paddingLeft: 0 }} onClick={onBack}>‹ 推移にもどる</button>
+      <div style={{ fontWeight: 800, fontSize: 18, margin: "2px 2px 8px" }}>{m?.title || "試合"}</div>
+      {received.map(s => (
+        <div key={s.id} style={{ ...cntCard, borderLeft: `4px solid ${C.navy}` }}>
+          <div style={{ fontWeight: 800 }}>📩 コーチから</div>
+          <div>{s.message || "（メッセージなし）"}</div>
+        </div>
+      ))}
+      {themes.filter(t => evs.some(e => e.theme_id === t.id)).map(t => {
+        const gi = (t.buttons || []).findIndex(b => b.tone === "good");
+        const rateBtn = t.goal?.kind === "rate" ? t.goal.btn : (gi >= 0 ? gi : null);
+        return (
+          <div key={t.id} style={cntCard}>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>{t.name}</div>
+            {t.goal && <div style={{ fontSize: 15, color: CNT.sub }}>目標 {cntGoalText(t)}</div>}
+            {ps.filter(p => evs.some(e => e.theme_id === t.id && e.player_name === p)).map(p => {
+              const cnt = cntOf(t, p, k), tot = cnt.reduce((a, b) => a + b, 0), ge = cntGoalEval(t, cnt);
+              const rate = rateBtn != null && tot ? Math.round(cnt[rateBtn] / tot * 100) : null;
+              const main = t.goal?.kind === "count" ? `${cnt[t.goal.btn]}回` : rate != null ? `${rate}%` : "";
+              return (
+                <div key={p} style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 16 }}>
+                    <span>{p}{!isOwn(p) && clubOf(p, k) && <span style={{ color: CNT.sub, fontSize: 15 }}>　{clubOf(p, k)}</span>}{ge?.ok && <span style={{ color: CNT.good, fontWeight: 800, fontSize: 15, marginLeft: 4 }}>✓達成</span>}</span>
+                    <span style={{ fontWeight: 800, fontSize: 20 }}>{main}</span>
+                  </div>
+                  {rate != null && t.goal?.kind !== "count" && (
+                    <div style={{ height: 8, background: "#eceef1", borderRadius: 4, position: "relative", marginTop: 4 }}>
+                      <i style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${rate}%`, background: CNT.good, borderRadius: 4 }} />
+                      {t.goal?.kind === "rate" && <b style={{ position: "absolute", top: -4, bottom: -4, width: 2, left: `${t.goal.val}%`, background: C.text }} />}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 15, color: CNT.sub }}>{t.buttons.map((b, i) => `${b.label} ${cnt[i]}`).join("・")}</div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      {me.isAdmin && (() => {
+        const own = ps.filter(isOwn), other = ps.filter(n => !isOwn(n));
+        return (
+          <div style={cntCard}>
+            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>選手に送る</div>
+            {own.map(n => (
+              <label key={n} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", fontSize: 17 }}>
+                <input type="checkbox" style={{ width: 20, height: 20 }} checked={to.has(n)} onChange={e => { const s = new Set(to); e.target.checked ? s.add(n) : s.delete(n); setTo(s); setErr(""); }} />{n}
+              </label>
+            ))}
+            {own.length === 0 && <div style={{ color: CNT.sub }}>この試合で数えた自チームの選手がいません</div>}
+            {other.length > 0 && <div style={{ fontSize: 15, color: CNT.sub }}>{other.join("・")}は他校の選手のため送れません</div>}
+            <div style={{ fontSize: 15, color: CNT.sub, margin: "4px 0 8px" }}>選手本人と、その選手につながっている保護者のアカウントに届きます。</div>
+            <input style={cntInp} value={msg} placeholder="メッセージ（任意）" onChange={e => setMsg(e.target.value)} />
+            {err && <div style={cntErr}>⚠ {err}</div>}
+            {mySent.length ? (
+              <>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button style={{ ...S.btn("#fff", CNT.bad), border: `1px solid ${CNT.line}`, fontSize: 16 }} disabled={busy} onClick={async () => { setBusy(true); await unsend(k); setBusy(false); }}>送信を取り消す</button>
+                  <button style={{ ...S.btn(C.navy), fontSize: 16 }} disabled={busy} onClick={async () => { if (!to.size) { setErr("送る選手を選んでください"); return; } setBusy(true); await sendTo(k, [...to], msg.trim()); setBusy(false); }}>送り直す</button>
+                </div>
+                <div style={{ fontSize: 15, color: CNT.sub, marginTop: 6 }}>送信済み：{mySent.map(s => s.player_name).join("・")}</div>
+              </>
+            ) : (
+              <button style={{ ...S.btn(C.navy), fontSize: 17, marginTop: 12 }} disabled={busy} onClick={async () => { if (!to.size) { setErr("送る選手を選んでください"); return; } setBusy(true); await sendTo(k, [...to], msg.trim()); setBusy(false); }}>送る</button>
+            )}
+          </div>
+        );
+      })()}
+      <div style={{ height: 80 }} />
+    </>
+  );
+}
+
+// ---------- 試合詳細に出す「この試合のカウント」 ----------
+function CounterMatchCard({ match, onNavigate }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const [ev, th] = await Promise.all([
+        supabase.from("count_events").select("theme_id, player_name, button_idx").eq("match_key", String(match.id)),
+        supabase.from("count_themes").select("id, name, buttons"),
+      ]);
+      if (!alive) return;
+      if (ev.error || th.error) { setRows([]); return; }
+      const out = [];
+      (th.data || []).forEach(t => {
+        const ps = [...new Set((ev.data || []).filter(e => e.theme_id === t.id).map(e => e.player_name))];
+        ps.forEach(p => {
+          const c = (t.buttons || []).map((b, i) => (ev.data || []).filter(e => e.theme_id === t.id && e.player_name === p && e.button_idx === i).length);
+          out.push(`${t.name}（${p.split(/\s/)[0]}）：${(t.buttons || []).map((b, i) => `${b.label} ${c[i]}`).join("・")}`);
+        });
+      });
+      setRows(out);
+    })();
+    return () => { alive = false; };
+  }, [match.id]);
+  const go = tab => { cntSetIntent({ tab, matchKey: String(match.id) }); onNavigate && onNavigate("video"); };
+  return (
+    <div style={{ ...S.card, padding: 14, marginBottom: 8 }}>
+      <button style={{ ...S.btn("#fff", C.navy), border: `2px solid ${C.navy}`, fontSize: 15, marginBottom: rows && rows.length ? 10 : 0 }} onClick={() => go("count")}>📊 この試合で数える</button>
+      {rows && rows.length > 0 && (
+        <>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.navy, marginBottom: 4 }}>この試合のカウント</div>
+          {rows.slice(0, 6).map((r, i) => <div key={i} style={{ fontSize: 14, color: CNT.sub }}>{r}</div>)}
+          <button style={{ ...cntLink, paddingLeft: 0, fontSize: 15 }} onClick={() => go("result")}>結果をくわしく見る ›</button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------- ホームに出す「コーチから結果が届きました」（届いたときだけ） ----------
+function CounterSendNotice({ linkedPlayerName, onNavigate }) {
+  const [list, setList] = useState([]);
+  useEffect(() => {
+    if (!linkedPlayerName) return;
+    let alive = true;
+    (async () => {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString();
+      const { data, error } = await supabase.from("count_sends").select("id, match_key, created_at").eq("player_name", linkedPlayerName).gte("created_at", since).order("created_at", { ascending: false }).limit(5);
+      if (!alive || error) return;
+      const seen = new Set(cntLs.get("cnt:seenSends", []));
+      setList((data || []).filter(s => !seen.has(s.id)));
+    })();
+    return () => { alive = false; };
+  }, [linkedPlayerName]);
+  if (!list.length) return null;
+  const s = list[0];
+  return (
+    <div style={{ ...S.card, padding: 16, marginBottom: 14, borderLeft: `4px solid ${C.navy}`, cursor: "pointer" }}
+      onClick={() => { cntLs.set("cnt:seenSends", [...cntLs.get("cnt:seenSends", []), ...list.map(x => x.id)].slice(-200)); cntSetIntent({ tab: "result", matchKey: s.match_key }); onNavigate && onNavigate("video"); }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>📩 コーチから結果が届きました</div>
+      <div style={{ fontSize: 14, color: CNT.sub, marginTop: 2 }}>戦略 → カウンターで見られます ›</div>
+    </div>
+  );
+}
+
 // ---------- 「🎬 動画」画面（下のメニューから開く入口） ----------
 // ★iPhone（iPad）だけ：動画を選ぶ画面に「完了」ボタンがなく、選んだあと準備（変換）に時間がかかるので、先に案内する。
 //   「次から表示しない」にすると、その端末では出さない
@@ -29576,7 +30560,7 @@ function VAIosPickTip({ onGo, onCancel }) {
   );
 }
 
-function VideoHubScreen({ onNavigate }) {
+function VideoHubScreen({ onNavigate, onNewCountMatch }) {
   const [profile, setProfile] = useState(null);
   const [recent, setRecent] = useState(null);          // null = 読み込み中
   const [matchVideos, setMatchVideos] = useState(null);
@@ -29592,7 +30576,10 @@ function VideoHubScreen({ onNavigate }) {
   const [iosTip, setIosTip] = useState(false);          // iPhoneだけの案内
   const [mismatch, setMismatch] = useState(null);       // 違う動画を選んだとき { prev, row, file, info }
   // ★タブ：🎥 動画分析 ／ 🧩 作戦ボード（最後に開いたほうを覚える）
-  const [hubTab, setHubTab] = useState(() => { try { return localStorage.getItem("va:hubTab") === "board" ? "board" : "video"; } catch (_) { return "video"; } });
+  const [hubTab, setHubTab] = useState(() => {
+    if (_counterIntent) return "counter";   // ★試合詳細・ホームなどから「カウンターを開いて」と頼まれたとき
+    try { const v = localStorage.getItem("va:hubTab"); return v === "board" || v === "counter" ? v : "video"; } catch (_) { return "video"; }
+  });
   const pickTab = t => { setHubTab(t); try { localStorage.setItem("va:hubTab", t); } catch (_) {} };
 
   const isViewer = !!profile?.is_viewer;
@@ -29733,12 +30720,12 @@ function VideoHubScreen({ onNavigate }) {
         <div style={{ fontSize:20, fontWeight:800, display:"flex", alignItems:"center", gap:6 }}><StrategyIcon size={24} />戦略</div>
       </div>
       <div style={{ display:"flex", gap:6, padding:"12px 14px 0" }}>
-        {[["video", "🎥 動画分析"], ["board", "🧩 作戦ボード"]].map(([k, l]) => (
+        {[["video", "🎥 動画分析"], ["board", "🧩 作戦ボード"], ["counter", "🎯 カウンター"]].map(([k, l]) => (
           <button key={k} onClick={() => pickTab(k)} style={{ flex:1, border:`1px solid ${hubTab === k ? C.navy : C.border}`, background: hubTab === k ? C.navy : C.white, color: hubTab === k ? C.white : C.textSec,
             borderRadius:10, padding:9, fontSize:13.5, fontWeight:800, cursor:"pointer" }}>{l}</button>
         ))}
       </div>
-      {hubTab === "board" ? <TacticsPanel ctx={ctx} isViewer={isViewer} /> : (
+      {hubTab === "counter" ? <CounterPanel isViewer={isViewer} onNewMatch={onNewCountMatch} /> : hubTab === "board" ? <TacticsPanel ctx={ctx} isViewer={isViewer} /> : (
       <div style={{ padding:14 }}>
         <div style={card}>
           <div style={{ fontSize:14, fontWeight:800, color:C.navy, marginBottom:8 }}>動画を開く</div>
@@ -30080,7 +31067,8 @@ export default function App() {
   const [teamMatchGameEditMatchId, setTeamMatchGameEditMatchId] = useState(null); // ★番手の選手編集の対象
   const [teamMatchCopyId, setTeamMatchCopyId] = useState(null); // コピー元の団体戦ID
   const [listMatchMode, setListMatchMode] = useState("tournament");
-  const [practiceSetup, setPracticeSetup] = useState(false);   // ★試合作成を「練習」で開いているか
+  const [practiceSetup, setPracticeSetup] = useState(false);
+  const [countOnlySetup, setCountOnlySetup] = useState(false);   // ★テーマカウンター用に試合を作っているか（スコアなし）   // ★試合作成を「練習」で開いているか
   useEffect(() => { if (screen !== "setup") setPracticeSetup(false); }, [screen]);
   const [pendingOpenTrash, setPendingOpenTrash] = useState(false); // ★設定画面からゴミ箱を開く指示
   // 大会関連
@@ -30753,7 +31741,7 @@ export default function App() {
   _appGoNav = goNav;
 
   if (screen==="videoHub") {
-    return <VideoHubScreen onNavigate={goNav} />;
+    return <VideoHubScreen onNavigate={goNav} onNewCountMatch={()=>{ setCopySourceId(null); setEditTargetId(null); setInitMatchType(null); setCountOnlySetup(true); setPrevScreen("videoHub"); setScreen("setup"); }} />;
   }
 
   if (screen==="home") {
@@ -30903,7 +31891,15 @@ export default function App() {
   if (screen==="setup") {
     return (
       <MatchSetup
-        practice={practiceSetup || isPracticeId(editTargetId) || isPracticeId(copySourceId)}
+        countOnly={countOnlySetup}
+        onCountOnly={async (m)=>{
+          // ★スコアは付けない試合。試合一覧・勝敗・分析には入れず、カウンター用（count_sessions）に保存する
+          const sid = await cntCreateSession(m);
+          cntSetIntent({ tab:"count", matchKey:"cs:"+sid });
+          setCountOnlySetup(false);
+          setScreen("videoHub");
+        }}
+        practice={!countOnlySetup && (practiceSetup || isPracticeId(editTargetId) || isPracticeId(copySourceId))}
         sourceMatchId={copySourceId}
         editMatchId={editTargetId}
         initialMatchType={initMatchType}
@@ -30951,6 +31947,7 @@ export default function App() {
           setCopySourceId(null);
           setInitMatchType(null);
           setCreatingFromTournament(false);
+          if (countOnlySetup) { setCountOnlySetup(false); cntSetIntent({ tab:"count" }); setScreen("videoHub"); return; }
           if (prevScreen === "teamMatchRecord" && editTargetId) {
             // ★団体戦の番手から編集を開いてキャンセルした場合も、同じくteam_matchの文脈に戻す
             setEditTargetId(null);
