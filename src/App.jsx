@@ -29616,6 +29616,7 @@ async function cntCreateSession(match) {
     match_number: match.match_number || null, venue: match.venue || "", court_number: match.court_number || null,
     game_format: match.game_format || 7, is_doubles: match.is_doubles !== false,
     players: (match.players || []).map(x => ({ team: x.team, player_name: x.player_name, club_name: x.club_name || "", order_num: x.order_num })),
+    ...(match.free ? { free: true } : {}),
   };
   const { error } = await supabase.from("count_sessions").insert({ id, school_id: p?.school_id || null, data });
   if (error) throw error;
@@ -29639,7 +29640,7 @@ function cntBuildMatches(matches, sessions) {
   });
   (sessions || []).forEach(s => {
     const d = s.data || {}; const pl = d.players || [];
-    items.push({
+    items.push({ free: !!d.free,
       key: "cs:" + s.id, date: d.match_date || "", tour: d.tournament_name || "", round: d.round || "", num: d.match_number || "",
       games: d.game_format || 7, seq: new Date(s.created_at || 0).getTime(), noScore: true, createdBy: s.created_by,
       a: pl.filter(p => p.team === "A").map(p => ({ name: p.player_name, club: p.club_name || "" })),
@@ -29661,8 +29662,8 @@ function cntBuildMatches(matches, sessions) {
   items.forEach(it => {
     it.bClub = it.b.find(p => p.club)?.club || "";
     it.dLabel = cntMd(it.date) + (it.dayNo || "");
-    it.title = `${it.dLabel} ${it.tour ? `${it.tour}${it.round ? " " + it.round : ""}` : "練習試合"} vs ${it.bClub || "相手未入力"}`;
-    it.pairs = `${it.a.map(p => p.name.split(/\s/)[0]).join("・") || "－"} vs ${it.b.map(p => p.name.split(/\s/)[0]).join("・") || "相手選手未入力"}`;
+    it.title = it.free ? `${it.dLabel} 試合なし` : `${it.dLabel} ${it.tour ? `${it.tour}${it.round ? " " + it.round : ""}` : "練習試合"} vs ${it.bClub || "相手未入力"}`;
+    it.pairs = it.free ? "試合を選ばずに数えた記録" : `${it.a.map(p => p.name.split(/\s/)[0]).join("・") || "－"} vs ${it.b.map(p => p.name.split(/\s/)[0]).join("・") || "相手選手未入力"}`;
     it.order = `${it.date}|${String(it.dayNo ? CNT_CIRC.indexOf(it.dayNo) : 0).padStart(2, "0")}|${String(it.seq).padStart(15, "0")}`;
   });
   items.sort((x, y) => (y.order > x.order ? 1 : -1));   // 新しい順
@@ -29801,7 +29802,28 @@ function CounterPanel({ isViewer, onNewMatch }) {
   const activeThemes = themes.filter(t => !t.deleted_at && (t.owner_id === me.id || t.scope === "team" || (t.scope === "family" && t.family_player && t.family_player === me.player)));
   const isOn = t => onMap[t.id] !== undefined ? !!onMap[t.id] : t.owner_id === me.id;
   const setOn = (t, v) => { const n = { ...onMap, [t.id]: v }; setOnMap(n); cntLs.set("cnt:on:" + me.id, n); };
-  const countThemes = activeThemes.filter(isOn);
+  // ★テーマをタップして始めたときは、そのテーマだけを出す（「数える」タブを直接押したときはスイッチがオンのテーマ）
+  // 「試合を作って開始」から戻ってきたときだけ、始めたテーマに絞る
+  const [focusId, setFocusId] = useState(() => {
+    const pend = cntLs.get("cnt:focusPending", false); cntLs.set("cnt:focusPending", false);
+    return _counterIntent?.tab === "count" && pend ? cntLs.get("cnt:focus", null) : null;
+  });
+  const focusTheme = focusId ? activeThemes.find(t => t.id === focusId) : null;
+  const countThemes = focusTheme ? [focusTheme] : activeThemes.filter(isOn);
+  const [startSheet, setStartSheet] = useState(null);   // タップしたテーマ（開始のしかたを選ぶ）
+  const startWith = async (t, how) => {
+    setStartSheet(null); setFocusId(t.id); cntLs.set("cnt:focus", t.id);
+    if (how === "pick") { setMatchSheet(true); return; }
+    if (how === "new") { cntLs.set("cnt:focusPending", true); onNewMatch && onNewMatch(); return; }
+    // そのまま開始：試合を選ばない記録を1つ作る
+    try {
+      const d = new Date(); const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const players = me.player ? [{ team: "A", player_name: me.player, club_name: me.schoolName, order_num: 1 }] : [];
+      const id = await cntCreateSession({ match_date: ymd, players, game_format: 7, is_doubles: true, free: true });
+      setSessions(list => [...list, { id, school_id: me.schoolId, created_by: me.id, created_at: new Date().toISOString(), data: { match_date: ymd, players, game_format: 7, is_doubles: true, free: true } }]);
+      setCurKey("cs:" + id); setLastEv(null); setGame(1); setTab("count");
+    } catch (e) { console.error(e); showErr("始められませんでした。電波の良い所でもう一度お試しください"); }
+  };
 
   // 今の試合の数える選手（試合ごとに覚える）
   useEffect(() => {
@@ -29897,7 +29919,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
     <div style={{ padding: "8px 14px 0", fontSize: 16, color: C.text }}>
       <div style={{ display: "flex", borderBottom: `1px solid ${CNT.line}`, marginBottom: 12 }}>
         {tabs.map(([k, l]) => (
-          <button key={k} onClick={() => { setTab(k); if (k === "result") setRView("trend"); }} style={{ flex: 1, border: "none", background: "none", padding: "12px 2px", fontSize: 16, fontWeight: 800, cursor: "pointer",
+          <button key={k} onClick={() => { setTab(k); if (k === "result") setRView("trend"); if (k === "count") setFocusId(null); }} style={{ flex: 1, border: "none", background: "none", padding: "12px 2px", fontSize: 16, fontWeight: 800, cursor: "pointer",
             color: tab === k ? C.navy : CNT.sub, borderBottom: `3px solid ${tab === k ? C.navy : "transparent"}` }}>{l}</button>
         ))}
       </div>
@@ -29906,7 +29928,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
           {loadErr && <div style={{ ...cntCard, background: "#fff8e6", borderColor: "#f0d9a8", fontSize: 15 }}>読み込めなかったデータがあります。電波の良い所で開き直してください。（初めて使うときは、データベースの準備〈theme_counter.sql〉が必要です）</div>}
           {tab === "themes" && (
             <CntThemesTab themes={activeThemes} me={me} isOn={isOn} setOn={setOn} nameOfUser={nameOfUser}
-              onEdit={t => setForm(t ? { t } : { t: null })} onBoard={openBoardById} />
+              onEdit={t => setForm(t ? { t } : { t: null })} onBoard={openBoardById} onStart={t => setStartSheet(t)} />
           )}
           {tab === "count" && (
             <CntCountTab curMatch={curMatch} countThemes={countThemes} countPlayers={countPlayers} game={game} setGame={setGame}
@@ -29939,11 +29961,25 @@ function CounterPanel({ isViewer, onNewMatch }) {
         <CntPlayerPicker picker={picker} roster={roster} schools={schools} matchItems={matchItems} me={me} tag={tag} countPlayers={countPlayers}
           onClose={() => setPicker(null)} onPick={p => { const cb = picker.onPick; setPicker(null); if (me.isAdmin) cntLs.set("cnt:lastPick", p); cb && cb(p); }} />
       )}
+      {startSheet && (
+        <CntSheet title={`「${startSheet.name}」を数える`} onClose={() => setStartSheet(null)}>
+          {[
+            ["free", "▶ そのまま開始", "試合を選ばずに、すぐ数えはじめる"],
+            ["pick", "📋 試合を選んで開始", "登録済みの試合から選ぶ"],
+            ["new", "＋ 試合を作って開始", "試合作成画面で試合を作ってから数える"],
+          ].map(([k, l, d]) => (
+            <button key={k} onClick={() => startWith(startSheet, k)} style={{ display: "block", width: "100%", textAlign: "left", border: `1px solid ${CNT.line}`, borderRadius: 12, background: k === "free" ? C.navy : "#fff", color: k === "free" ? "#fff" : C.text, padding: "14px 16px", marginTop: 10, cursor: "pointer" }}>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>{l}</div>
+              <div style={{ fontSize: 15, marginTop: 2, color: k === "free" ? "#dfe5ef" : CNT.sub }}>{d}</div>
+            </button>
+          ))}
+        </CntSheet>
+      )}
       {matchSheet && (
         <CntSheet title="試合を選ぶ" onClose={() => setMatchSheet(false)}>
           <div>
             {matchItems.slice(0, 80).map(m => (
-              <button key={m.key} onClick={() => { setCurKey(m.key); setMatchSheet(false); setLastEv(null); setGame(1); }}
+              <button key={m.key} onClick={() => { setCurKey(m.key); setMatchSheet(false); setLastEv(null); setGame(1); setTab("count"); }}
                 style={{ display: "block", width: "100%", textAlign: "left", border: "none", borderTop: `1px solid ${CNT.line}`, background: m.key === curKey ? "#f3f6fa" : "#fff", padding: "12px 4px", cursor: "pointer" }}>
                 <div style={{ fontWeight: 800, fontSize: 16 }}>{m.title}{m.noScore && <span style={{ fontWeight: 400, fontSize: 14, color: CNT.sub }}>　スコアなし</span>}</div>
                 <div style={{ fontSize: 15, color: CNT.sub }}>{m.pairs}・{m.games}ゲーム</div>
@@ -29959,7 +29995,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
 }
 
 // ---------- テーマ一覧 ----------
-function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard }) {
+function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard, onStart }) {
   return (
     <>
       <div style={cntCard}>
@@ -29968,9 +30004,10 @@ function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard }) 
           const mine = t.owner_id === me.id, on = isOn(t);
           return (
             <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0", borderTop: i ? `1px solid ${CNT.line}` : "none" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => onStart(t)} role="button">
                 <div style={{ fontWeight: 800, fontSize: 18 }}>{t.name}</div>
                 <div style={{ fontSize: 15, color: CNT.sub }}>見られる人：{CNT_SCOPE_LABEL[t.scope] || "自分だけ"}{!mine && `（作成：${nameOfUser(t.owner_id) || "ほかの人"}）`}</div>
+                <div style={{ fontSize: 15, color: "#2563eb", fontWeight: 700, marginTop: 2 }}>▶ タップして数える</div>
               </div>
               {t.board_id ? <button onClick={() => onBoard(t.board_id)} aria-label="参考の作戦ボードを見る" style={{ border: "none", background: "none", padding: "4px 2px", cursor: "pointer", flex: "none" }}><CntBoardIcon w={34} /></button> : <span style={{ width: 38, flex: "none" }} />}
               {mine ? <button style={cntLink} onClick={() => onEdit(t)}>編集</button> : <span style={{ width: 48, flex: "none" }} />}
@@ -30202,7 +30239,7 @@ function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: 18 }}>{curMatch.title}</div>
-            <div style={{ fontSize: 15, color: CNT.sub }}>{curMatch.pairs}・{curMatch.games}ゲームマッチ{curMatch.noScore ? "・スコアなし" : ""}</div>
+            <div style={{ fontSize: 15, color: CNT.sub }}>{curMatch.free ? curMatch.pairs : <>{curMatch.pairs}・{curMatch.games}ゲームマッチ{curMatch.noScore ? "・スコアなし" : ""}</>}</div>
           </div>
           <button style={{ ...cntLink, flex: "none", alignSelf: "flex-start" }} onClick={onChangeMatch}>変更</button>
         </div>
