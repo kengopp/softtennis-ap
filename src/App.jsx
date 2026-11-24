@@ -29583,6 +29583,10 @@ const CNT = {
   sub: "#4a5262", line: "#e3e7ee", bg: "#f4f6f9",
   good: "#2e8b57", goodBg: "#eef7f1", bad: "#c0392b", badBg: "#fbefed", neu: "#2f6fb5", neuBg: "#eef3fa", warn: "#a85d00",
 };
+// ★ゲームの色（順番がある＝青1色で薄い→濃い。第1ゲーム〜第9ゲーム。見分けやすさは検証済み）
+const CNT_GAME = ["#90b7ea", "#71a3e4", "#5e90cf", "#4c7dbb", "#3a6aa7", "#285893", "#244773", "#133660", "#02264e"];
+const cntGameColor = g => CNT_GAME[Math.min(Math.max(g, 1), 9) - 1];
+const cntGameInk = g => (g >= 5 ? "#fff" : "#10233d");   // 濃い色の上は白文字
 const CNT_TONES = [["good", "良い"], ["bad", "直したい"], ["neutral", "どちらでもない"]];
 const CNT_CIRC = "①②③④⑤⑥⑦⑧⑨⑩";
 const CNT_SCOPE_LABEL = { me: "自分だけ", family: "家族", team: "チーム", send: "選手に送る" };
@@ -30372,6 +30376,15 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
   const unit = isCnt ? "回" : "%";
   const val = r => { const tot = r.c.reduce((x, y) => x + y, 0); return isCnt ? r.c[cb] : (tot ? Math.round(r.c[rb] / tot * 100) : 0); };
   const vs = rows.map(val), n = vs.length;
+  // ★回数テーマはゲームごとの内訳（1本の棒の中で色分け）
+  const gamesOf = k => {
+    const m = {};
+    events.forEach(e => { if (e.theme_id === t.id && e.player_name === player && e.match_key === k && e.button_idx === cb) { const g = e.game_no || 1; m[g] = (m[g] || 0) + 1; } });
+    return Object.keys(m).map(Number).sort((a, b) => a - b).map(g => ({ g, c: m[g] }));
+  };
+  const gs = rows.map(r => gamesOf(r.k));
+  const maxG = Math.max(7, ...gs.flat().map(x => x.g));
+  const gText = arr => arr.map(x => `G${x.g} ${x.c}`).join("・");
   const metric = single ? "1試合の回数" : isCnt ? `${t.buttons[cb]?.label || ""}の回数` : `${t.buttons[rb]?.label || ""}の割合`;
   const upGood = t.goal ? t.goal.dir === "ge" : (single ? true : t.buttons[rb]?.tone !== "bad");
   // 目標がないときは良い・悪いを決めず「増えた／減った」だけ
@@ -30407,13 +30420,23 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
           {ticks.map(v => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="#eceef1" /><text x={L - 6} y={y(v) + 4} fontSize="13" textAnchor="end" fill={CNT.sub}>{v}{unit}</text></g>)}
           {t.goal && !isCnt && <g><line x1={L} x2={W - R} y1={y(t.goal.val)} y2={y(t.goal.val)} stroke="#1d2430" strokeWidth="1.5" strokeDasharray="5 4" /><text x={L + 4} y={y(t.goal.val) - 5} fontSize="13" fill="#1d2430">目標 {t.goal.val}{unit}</text></g>}
           {isCnt ? vs.map((v, i) => {
-            // ★回数は棒グラフ（目標達成は緑）
-            const slot = (W - L - R) / Math.max(n, 1), cx = L + slot * (i + 0.5), bw = Math.min(34, slot * 0.6);
+            // ★回数は「1試合＝1本」の積み上げ棒。中をゲームごとに色分け
+            const slot = (W - L - R) / Math.max(n, 1), cx = L + slot * (i + 0.5), bw = Math.min(40, slot * 0.62);
             const ok = t.goal && cntGoalEval(t, rows[i].c).ok;
+            let acc = 0;
             return (
               <g key={i}>
-                <rect x={cx - bw / 2} y={y(v)} width={bw} height={Math.max(0, y(0) - y(v))} rx="4" fill={ok ? CNT.good : C.navy} />
-                {(n <= 8 || i === 0 || i === n - 1) && <text x={cx} y={Math.max(14, y(v) - 6)} fontSize="14" fontWeight="700" textAnchor="middle" fill="#1d2430">{v}{unit}</text>}
+                {gs[i].map(({ g, c }) => {
+                  const y1 = y(acc), y2 = y(acc + c); acc += c;
+                  const h = Math.max(0, y1 - y2 - 2);   // 2pxのすき間
+                  return (
+                    <g key={g}>
+                      <rect x={cx - bw / 2} y={y2} width={bw} height={h} rx="3" fill={cntGameColor(g)} />
+                      {h >= 15 && <text x={cx} y={y2 + h / 2 + 4.5} fontSize="12" fontWeight="700" textAnchor="middle" fill={cntGameInk(g)}>G{g}</text>}
+                    </g>
+                  );
+                })}
+                {(n <= 8 || i === 0 || i === n - 1) && <text x={cx} y={Math.max(14, y(v) - 6)} fontSize="14" fontWeight="700" textAnchor="middle" fill="#1d2430">{v}{unit}{ok ? " ✓" : ""}</text>}
                 <text x={cx} y={H - B + 20} fontSize="13" textAnchor="middle" fill="#1d2430">{cntMd(rows[i].m?.date)}</text>
                 {rows[i].m?.dayNo && <text x={cx} y={H - B + 38} fontSize="14" fontWeight="700" textAnchor="middle" fill="#1d2430">{rows[i].m.dayNo}</text>}
                 <rect x={cx - slot / 2} y={T} width={slot} height={H - T - B + 4} fill="transparent" style={{ cursor: "pointer" }}
@@ -30439,11 +30462,21 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
         </svg>
         {tip && rows[tip.i] && (
           <div style={{ position: "absolute", top: 0, left: `clamp(0px, calc(${tip.x * 100}% - 90px), calc(100% - 180px))`, width: 180, background: "#1d2430", color: "#fff", fontSize: 14, borderRadius: 8, padding: "4px 8px", pointerEvents: "none" }}>
-            {rows[tip.i].m?.title || "試合"}<br /><b>{vs[tip.i]}{unit}</b>
+            {rows[tip.i].m?.title || "試合"}<br /><b>{vs[tip.i]}{unit}</b>{isCnt && gs[tip.i].length > 0 && <><br />{gText(gs[tip.i])}</>}
           </div>
         )}
       </div>
-      <div style={{ fontSize: 15, color: CNT.sub }}>{isCnt ? (t.goal ? `緑の棒＝目標達成　赤い点線＝目標（${t.goal.val}回）` : "") : "点が緑＝目標達成　点線＝目標"}</div>
+      {isCnt ? (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", fontSize: 15, color: "#1d2430", margin: "4px 0" }}>
+            {Array.from({ length: maxG }, (_, j) => j + 1).map(g => (
+              <span key={g} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><i style={{ width: 14, height: 14, borderRadius: 3, background: cntGameColor(g), display: "inline-block" }} />第{g}G</span>
+            ))}
+            {maxG < 9 && <span style={{ color: CNT.sub }}>（{maxG === 7 ? "8・9" : "9"}ゲームはさらに濃い色）</span>}
+          </div>
+          <div style={{ fontSize: 15, color: CNT.sub }}>棒1本＝1試合。色はゲーム（薄い＝前半 → 濃い＝後半）。{t.goal ? `赤い点線＝目標（${t.goal.val}回）` : ""}</div>
+        </>
+      ) : <div style={{ fontSize: 15, color: CNT.sub }}>点が緑＝目標達成　点線＝目標</div>}
       <div style={{ marginTop: 6 }}>
         {rows.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => {
           const v = vs[i], d = i ? v - vs[i - 1] : null, ge = cntGoalEval(t, r.c);
@@ -30452,6 +30485,14 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 16 }}>{r.m?.title || "削除された試合"}{ge?.ok && <span style={{ color: CNT.good, fontWeight: 800, marginLeft: 4 }}>✓</span>}</div>
                 {!single && <div style={{ fontSize: 15, color: CNT.sub }}>{t.buttons.map((b, j) => `${b.label} ${r.c[j]}`).join("・")}</div>}
+                {isCnt && gs[i].length > 0 && (
+                  <>
+                    <div style={{ fontSize: 15, color: CNT.sub }}>{gText(gs[i])}</div>
+                    <div style={{ display: "flex", gap: 2, marginTop: 4 }}>
+                      {gs[i].map(({ g, c }) => <i key={g} style={{ flex: c, height: 10, borderRadius: 3, background: cntGameColor(g) }} />)}
+                    </div>
+                  </>
+                )}
               </div>
               <div style={{ textAlign: "right", flex: "none" }}>
                 <div style={{ fontWeight: 800 }}>{v}{unit}</div>
