@@ -29811,10 +29811,10 @@ function CounterPanel({ isViewer, onNewMatch }) {
   const focusTheme = focusId ? activeThemes.find(t => t.id === focusId) : null;
   const countThemes = focusTheme ? [focusTheme] : activeThemes.filter(isOn);
   const [startSheet, setStartSheet] = useState(null);   // タップしたテーマ（開始のしかたを選ぶ）
-  const startWith = async (t, how) => {
-    setStartSheet(null); setFocusId(t.id); cntLs.set("cnt:focus", t.id);
+  const startWith = async (how) => {
+    setStartSheet(null); setFocusId(null);
     if (how === "pick") { setMatchSheet(true); return; }
-    if (how === "new") { cntLs.set("cnt:focusPending", true); onNewMatch && onNewMatch(); return; }
+    if (how === "new") { onNewMatch && onNewMatch(); return; }
     // そのまま開始：試合を選ばない記録を1つ作る
     try {
       const d = new Date(); const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -29928,7 +29928,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
           {loadErr && <div style={{ ...cntCard, background: "#fff8e6", borderColor: "#f0d9a8", fontSize: 15 }}>読み込めなかったデータがあります。電波の良い所で開き直してください。（初めて使うときは、データベースの準備〈theme_counter.sql〉が必要です）</div>}
           {tab === "themes" && (
             <CntThemesTab themes={activeThemes} me={me} isOn={isOn} setOn={setOn} nameOfUser={nameOfUser}
-              onEdit={t => setForm(t ? { t } : { t: null })} onBoard={openBoardById} onStart={t => setStartSheet(t)} />
+              onEdit={t => setForm(t ? { t } : { t: null })} onBoard={openBoardById} onStart={() => setStartSheet(true)} onCount={activeThemes.filter(isOn)} />
           )}
           {tab === "count" && (
             <CntCountTab curMatch={curMatch} countThemes={countThemes} countPlayers={countPlayers} game={game} setGame={setGame}
@@ -29962,13 +29962,14 @@ function CounterPanel({ isViewer, onNewMatch }) {
           onClose={() => setPicker(null)} onPick={p => { const cb = picker.onPick; setPicker(null); if (me.isAdmin) cntLs.set("cnt:lastPick", p); cb && cb(p); }} />
       )}
       {startSheet && (
-        <CntSheet title={`「${startSheet.name}」を数える`} onClose={() => setStartSheet(null)}>
+        <CntSheet title="数え始める" onClose={() => setStartSheet(null)}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>{countThemes.map(t => <span key={t.id} style={{ background: CNT.neuBg, color: C.navy, borderRadius: 999, padding: "4px 12px", fontSize: 15, fontWeight: 700 }}>{t.name}</span>)}</div>
           {[
             ["free", "▶ そのまま開始", "試合を選ばずに、すぐ数えはじめる"],
             ["pick", "📋 試合を選んで開始", "登録済みの試合から選ぶ"],
             ["new", "＋ 試合を作って開始", "試合作成画面で試合を作ってから数える"],
           ].map(([k, l, d]) => (
-            <button key={k} onClick={() => startWith(startSheet, k)} style={{ display: "block", width: "100%", textAlign: "left", border: `1px solid ${CNT.line}`, borderRadius: 12, background: k === "free" ? C.navy : "#fff", color: k === "free" ? "#fff" : C.text, padding: "14px 16px", marginTop: 10, cursor: "pointer" }}>
+            <button key={k} onClick={() => startWith(k)} style={{ display: "block", width: "100%", textAlign: "left", border: `1px solid ${CNT.line}`, borderRadius: 12, background: k === "free" ? C.navy : "#fff", color: k === "free" ? "#fff" : C.text, padding: "14px 16px", marginTop: 10, cursor: "pointer" }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>{l}</div>
               <div style={{ fontSize: 15, marginTop: 2, color: k === "free" ? "#dfe5ef" : CNT.sub }}>{d}</div>
             </button>
@@ -29995,7 +29996,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
 }
 
 // ---------- テーマ一覧 ----------
-function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard, onStart }) {
+function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard, onStart, onCount }) {
   return (
     <>
       <div style={cntCard}>
@@ -30003,11 +30004,10 @@ function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard, on
         {themes.map((t, i) => {
           const mine = t.owner_id === me.id, on = isOn(t);
           return (
-            <div key={t.id} onClick={() => onStart(t)} role="button" style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0", borderTop: i ? `1px solid ${CNT.line}` : "none", cursor: "pointer" }}>
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0", borderTop: i ? `1px solid ${CNT.line}` : "none" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 800, fontSize: 18 }}>{t.name}</div>
                 <div style={{ fontSize: 15, color: CNT.sub }}>見られる人：{CNT_SCOPE_LABEL[t.scope] || "自分だけ"}{!mine && `（作成：${nameOfUser(t.owner_id) || "ほかの人"}）`}</div>
-                <div style={{ fontSize: 15, color: "#2563eb", fontWeight: 700, marginTop: 2 }}>▶ タップして数える</div>
               </div>
               {t.board_id ? <button onClick={ev => { ev.stopPropagation(); onBoard(t.board_id); }} aria-label="参考の作戦ボードを見る" style={{ border: "none", background: "none", padding: "4px 2px", cursor: "pointer", flex: "none" }}><CntBoardIcon w={34} /></button> : <span style={{ width: 38, flex: "none" }} />}
               {mine ? <button style={cntLink} onClick={ev => { ev.stopPropagation(); onEdit(t); }}>編集</button> : <span style={{ width: 48, flex: "none" }} />}
@@ -30017,9 +30017,14 @@ function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard, on
             </div>
           );
         })}
-        {themes.length > 0 && <div style={{ fontSize: 15, color: CNT.sub, marginTop: 8 }}>右のスイッチがオンのテーマが「数える」に出ます。</div>}
       </div>
-      <button style={{ ...S.btn(C.navy), fontSize: 17, marginBottom: 16 }} onClick={() => onEdit(null)}>＋ 新しいテーマ</button>
+      {themes.length > 0 && (
+        <button disabled={!onCount.length} onClick={onStart} style={{ ...S.btn(onCount.length ? C.navy : C.border, onCount.length ? "#fff" : CNT.sub), padding: "12px 14px", marginBottom: 10 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>数え始める</div>
+          <div style={{ fontSize: 14, fontWeight: 400, marginTop: 2, color: onCount.length ? "#dfe5ef" : CNT.sub }}>{onCount.length ? `スイッチがオンの${onCount.length}つのテーマ` : "数えるテーマのスイッチをオンにしてください"}</div>
+        </button>
+      )}
+      <button style={{ ...S.btn("#fff", C.navy), border: `1px solid ${CNT.line}`, fontSize: 17, marginBottom: 16 }} onClick={() => onEdit(null)}>＋ 新しいテーマ</button>
     </>
   );
 }
