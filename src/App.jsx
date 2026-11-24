@@ -29807,13 +29807,14 @@ function CounterPanel({ isViewer, onNewMatch }) {
   useEffect(() => {
     if (!curKey || loading) return;
     cntLs.set("cnt:match", curKey);
-    const saved = cntLs.get("cnt:players:" + curKey, null);
-    if (saved && saved.length) { setCountPlayers(saved); return; }
+    const saved = cntLs.get("cnt:players2:" + curKey, null);
+    if (saved) { setCountPlayers(saved); return; }
     const m = mOf(curKey);
-    if (m) setCountPlayers([...m.a, ...m.b].filter(p => p.name && !/^選手[AB]$/.test(p.name)));
+    const mine = me.player ? ([...(m?.a || []), ...(m?.b || [])].find(p => p.name === me.player) || { name: me.player, club: me.schoolName }) : null;
+    setCountPlayers(mine ? [mine] : []);
     setGame(1);
   }, [curKey, loading]);   // eslint-disable-line
-  const saveCountPlayers = list => { setCountPlayers(list); if (curKey) cntLs.set("cnt:players:" + curKey, list); };
+  const saveCountPlayers = list => { setCountPlayers(list); if (curKey) cntLs.set("cnt:players2:" + curKey, list); };
 
   const cntOf = (t, player, key) => (t.buttons || []).map((b, i) => events.filter(e => e.theme_id === t.id && e.button_idx === i && e.player_name === player && (!key || e.match_key === key)).length);
 
@@ -29825,6 +29826,15 @@ function CounterPanel({ isViewer, onNewMatch }) {
     const { counted_by, created_at, ...row } = ev;
     const { error } = await supabase.from("count_events").insert(row);
     if (error) { console.error(error); setEvents(list => list.filter(x => x.id !== ev.id)); setLastEv(l => (l && l.id === ev.id ? null : l)); showErr("保存できませんでした。電波の良い所でもう一度押してください"); }
+  };
+  const minus = async (t, p, btn = 0) => {
+    if (!curKey) return;
+    const mineEvs = events.filter(e => e.theme_id === t.id && e.match_key === curKey && e.player_name === p.name && e.button_idx === btn && e.counted_by === me.id);
+    const ev = mineEvs[mineEvs.length - 1];
+    if (!ev) { showErr("ほかの人が数えた分は減らせません"); return; }
+    setEvents(list => list.filter(x => x.id !== ev.id));
+    const { error } = await supabase.from("count_events").delete().eq("id", ev.id);
+    if (error) { console.error(error); setEvents(list => [...list, ev]); showErr("減らせませんでした。電波の良い所でもう一度押してください"); }
   };
   const undo = async () => {
     const ev = lastEv; if (!ev) return;
@@ -29900,7 +29910,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
           )}
           {tab === "count" && (
             <CntCountTab curMatch={curMatch} countThemes={countThemes} countPlayers={countPlayers} game={game} setGame={setGame}
-              cntOf={cntOf} tap={tap} isOwn={isOwn} tag={tag}
+              cntOf={cntOf} tap={tap} minus={minus} isOwn={isOwn} tag={tag}
               onChangeMatch={() => setMatchSheet(true)}
               onAddPlayer={() => setPicker({ inMatch: curMatch, current: null, onPick: p => { if (!countPlayers.some(x => x.name === p.name)) saveCountPlayers([...countPlayers, p]); } })}
               onRemovePlayer={n => saveCountPlayers(countPlayers.filter(x => x.name !== n))}
@@ -29914,9 +29924,6 @@ function CounterPanel({ isViewer, onNewMatch }) {
         </>
       )}
 
-      {tab === "count" && lastEv && (
-        <button onClick={undo} style={{ position: "fixed", right: 16, bottom: "calc(84px + env(safe-area-inset-bottom,0px))", zIndex: 20, border: "none", background: C.text, color: "#fff", borderRadius: 999, padding: "11px 18px", fontSize: 16, fontWeight: 800, boxShadow: "0 4px 12px rgba(0,0,0,.25)", cursor: "pointer" }}>↶ 1つ戻す</button>
-      )}
       {saveErr && <div style={{ position: "fixed", left: "50%", bottom: "calc(140px + env(safe-area-inset-bottom,0px))", transform: "translateX(-50%)", background: CNT.bad, color: "#fff", fontSize: 15, fontWeight: 700, borderRadius: 10, padding: "10px 14px", zIndex: 400, maxWidth: "90vw" }}>{saveErr}</div>}
 
       {form && (
@@ -30180,7 +30187,7 @@ function CntPlayerPicker({ picker, roster, schools, matchItems, me, tag, countPl
 }
 
 // ---------- 数える ----------
-function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf, tap, isOwn, tag, onChangeMatch, onAddPlayer, onRemovePlayer, onGoThemes }) {
+function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf, tap, minus, isOwn, tag, onChangeMatch, onAddPlayer, onRemovePlayer, onGoThemes }) {
   if (!curMatch) {
     return (
       <div style={cntCard}>
@@ -30223,10 +30230,15 @@ function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf
                 <div style={{ fontWeight: 700, fontSize: 17 }}>{t.name}</div>
                 {t.goal && <div style={{ fontSize: 15, color: CNT.sub }}>目標 {cntGoalText(t)}{ge && ge.v != null && <>・今 <b style={{ color: ge.ok ? CNT.good : CNT.warn }}>{ge.v}{ge.unit}</b></>}</div>}
                 {cntSingle(t) ? (
-                  <button onClick={() => tap(t, p, 0)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", borderRadius: 12, background: CNT.neuBg, color: C.navy, padding: "10px 18px", marginTop: 6, cursor: "pointer" }}>
-                    <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.2 }}>{cnt[0]}<span style={{ fontSize: 16, marginLeft: 2 }}>回</span></span>
-                    <span style={{ fontSize: 20, fontWeight: 800 }}>＋1</span>
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                    <button onClick={() => minus(t, p, 0)} disabled={!cnt[0]} aria-label="1つ減らす"
+                      style={{ width: 64, height: 60, flex: "none", borderRadius: 12, border: `2px solid ${cnt[0] ? "#c3cad5" : "#e3e7ee"}`, background: "#fff", color: cnt[0] ? C.text : "#c3cad5", fontSize: 30, fontWeight: 800, lineHeight: 1, cursor: cnt[0] ? "pointer" : "default" }}>−</button>
+                    <div style={{ flex: 1, textAlign: "center" }}>
+                      <span style={{ fontSize: 34, fontWeight: 800, lineHeight: 1 }}>{cnt[0]}</span><span style={{ fontSize: 17, fontWeight: 700, marginLeft: 3 }}>回</span>
+                    </div>
+                    <button onClick={() => tap(t, p, 0)} aria-label="1つ増やす"
+                      style={{ width: 110, height: 60, flex: "none", borderRadius: 12, border: "none", background: C.navy, color: "#fff", fontSize: 30, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>＋</button>
+                  </div>
                 ) : <div style={{ display: "grid", gridTemplateColumns: `repeat(${(t.buttons || []).length || 2}, minmax(0,1fr))`, gap: 8, marginTop: 6 }}>
                   {(t.buttons || []).map((b, i) => (
                     <button key={i} onClick={() => tap(t, p, i)} style={{ ...cntToneStyle(b.tone), border: "none", borderRadius: 12, padding: "10px 4px 8px", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
