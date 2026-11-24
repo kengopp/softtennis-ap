@@ -28811,6 +28811,8 @@ class TBEngine {
 
 const TB_ICON = {
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  expand: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
+  shrink: <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />,
   back: <path d="M15 5l-7 7 7 7" />,
   more: <g><circle cx="5" cy="12" r="1.4" fill="currentColor" /><circle cx="12" cy="12" r="1.4" fill="currentColor" /><circle cx="19" cy="12" r="1.4" fill="currentColor" /></g>,
   move: <path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />,
@@ -28861,7 +28863,10 @@ function TBSwitch({ label, on, onClick }) {
 }
 
 // ---------- ボード画面 ----------
-function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel }) {
+function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, dockTop }) {
+  // ★戦略の画面の中に置くとき（dockTop あり）：ふだんは上のタブと下のメニューが見えたまま。⛶ で画面いっぱい、もう一度で元に戻す
+  const [full, setFull] = useState(dockTop == null);
+  const docked = dockTop != null && !full;
   const engRef = useRef(null);
   if (!engRef.current) {
     const e = new TBEngine(); e.b = tbClone(board); e.readOnly = readOnly;
@@ -28940,7 +28945,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel }) 
     fit(); const t = setTimeout(fit, 60), t2 = setTimeout(fit, 350);   // iPhone は画面の大きさが決まるのが少し遅いので、もう一度合わせる
     window.addEventListener("resize", fit);
     return () => { clearTimeout(t); clearTimeout(t2); window.removeEventListener("resize", fit); };
-  }, [eng, sheet]);
+  }, [eng, sheet, full, dockTop]);
   useEffect(() => { if (!eng.playing) eng.attach(canvasRef.current, boxRef.current); }, [eng, eng.tool, readOnly]);
 
   const b = eng.b, ng = eng.groups().length, ballOn = eng.ballOn();
@@ -28982,9 +28987,11 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel }) 
   );
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:600, background: tbCourtOf(b).out, display:"flex", flexDirection:"column", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
+    <div style={{ position:"fixed", ...(docked
+        ? { top:dockTop, left:0, right:0, bottom:"calc(58px + env(safe-area-inset-bottom,0px))", zIndex: sheet ? 600 : 5 }   // 設定などを開いたときは下のメニューより上に
+        : { inset:0, zIndex:600 }), background: tbCourtOf(b).out, display:"flex", flexDirection:"column", fontFamily:"'Helvetica Neue','Hiragino Kaku Gothic ProN','Meiryo',sans-serif" }}>
       {/* ★上は道具のアイコン1列だけ（2026-11-25）：📁 保存した作戦（戻る）・道具・設定・保存。コートを画面いっぱいに */}
-      <div style={{ display:"flex", alignItems:"center", gap:0, padding:"calc(6px + env(safe-area-inset-top,0px)) 4px 4px", background: tbCourtOf(b).out, flexShrink:0 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:0, padding: docked ? "4px 4px" : "calc(6px + env(safe-area-inset-top,0px)) 4px 4px", background: tbCourtOf(b).out, flexShrink:0 }}>
         {tool("back", backLabel || "戻る", backLabel ? TB_ICON.folder : TB_ICON.back, back)}
         {!readOnly ? <>
           {tool("move", "動かす", TB_ICON.move, () => { leave(); eng.tool = "move"; rerender(); }, { on: eng.tool === "move" })}
@@ -28997,6 +29004,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel }) 
           {tool("gear", "設定", TB_ICON.gear, () => leave() || setSheet({ type:"settings", speed:eng.speed, mode:b.mode, names:tbClone(b.names || {}), ball: b.ballColor === "white" ? "white" : "yellow", trail: b.ballTrail !== false, ptrail: b.playerTrail !== false,
             court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) }, psize: dev.pieceSize, bsize: dev.ballSize, wake: !!dev.wake, lp: dev.longPress !== false, asDefault: false,
             startBall: !!tbLoadStart().ballOn, layTick: 0 }))}
+          {dockTop != null && tool("full", full ? "小さくする" : "画面いっぱいにする", full ? TB_ICON.shrink : TB_ICON.expand, () => { leave(); setFull(f => !f); })}
           {(() => {
             // ★保存済みの作戦は、何か変えるまで「✓」（押せない）。新しい作戦は最初から「保存」
             const canSave = eng.dirty || (isNew && !savedOnce.current);
@@ -29033,7 +29041,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel }) 
       </div>
 
       {/* ★下は1列（2026-11-25）：再生・再生バー・速さ・⋯（リセット／セット／録画／番号） */}
-      <div style={{ background: tbCourtOf(b).out, flexShrink:0, padding:"6px 10px calc(8px + env(safe-area-inset-bottom,0px))" }}>
+      <div style={{ background: tbCourtOf(b).out, flexShrink:0, padding: docked ? "4px 10px 6px" : "6px 10px calc(8px + env(safe-area-inset-bottom,0px))" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <button aria-label={eng.running ? "一時停止" : "再生"} onClick={() => (eng.running ? eng.pause() : eng.play())}
             style={{ width:52, height:42, flexShrink:0, border:"none", borderRadius:10, background:C.navy, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", padding:0 }}>
@@ -29323,6 +29331,16 @@ function TacticsPanel({ ctx, isViewer }) {
   const [court, setCourt] = useState(() => isViewer ? null : { board: tbNewBoard(), isNew: true, readOnly: false, k: 0 });
   useEffect(() => { if (isViewer) setCourt(c => (c && c.isNew ? null : c)); }, [isViewer]);
   const freshCourt = () => setCourt(c => ({ board: tbNewBoard(), isNew: true, readOnly: false, k: (c?.k || 0) + 1 }));
+  // コートを置く位置（タブのすぐ下）を測る。文字の大きさの設定が変わると位置も変わるので、少しあとにもう一度測る
+  const rootRef = useRef(null);
+  const [dockTop, setDockTop] = useState(null);
+  useLayoutEffect(() => {
+    if (!court) return;
+    const fit = () => { const el = rootRef.current; if (el) setDockTop(Math.max(0, Math.round(el.getBoundingClientRect().top + 10))); };
+    window.scrollTo(0, 0); fit(); const t1 = setTimeout(fit, 60), t2 = setTimeout(fit, 350);
+    window.addEventListener("resize", fit);
+    return () => { clearTimeout(t1); clearTimeout(t2); window.removeEventListener("resize", fit); };
+  }, [court]);
   const [menu, setMenu] = useState(null);       // board
   const [confirmDel, setConfirmDel] = useState(false);
   const [rename, setRename] = useState(null);   // { board, value }
@@ -29389,7 +29407,7 @@ function TacticsPanel({ ctx, isViewer }) {
   );
 
   return (
-    <div style={{ padding:14 }}>
+    <div ref={rootRef} style={{ padding:14 }}>
       {!isViewer && (
         <button style={{ ...S.btn(C.navy), marginBottom:12 }} onClick={freshCourt}>コートを開く</button>
       )}
@@ -29537,8 +29555,8 @@ function TacticsPanel({ ctx, isViewer }) {
       )}
       {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(96px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", fontSize:12.5, borderRadius:9, padding:"8px 12px", zIndex:800, pointerEvents:"none", maxWidth:"92vw" }}>{toast}</div>}
 
-      {court && (
-        <TacticBoardScreen key={court.k} board={court.board} isNew={court.isNew} ctx={ctx} readOnly={court.readOnly} backLabel="保存した作戦"
+      {court && dockTop != null && (
+        <TacticBoardScreen key={court.k} board={court.board} isNew={court.isNew} ctx={ctx} readOnly={court.readOnly} backLabel="保存した作戦" dockTop={dockTop}
           onClose={() => { setCourt(null); load(); }} />
       )}
     </div>
