@@ -29838,6 +29838,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
   }, [curKey, loading]);   // eslint-disable-line
   const saveCountPlayers = list => { setCountPlayers(list); if (curKey) cntLs.set("cnt:players2:" + curKey, list); };
 
+  const cntGameOf = (t, player, key, g) => events.filter(e => e.theme_id === t.id && e.button_idx === 0 && e.player_name === player && e.match_key === key && (e.game_no || 1) === g).length;
   const cntOf = (t, player, key) => (t.buttons || []).map((b, i) => events.filter(e => e.theme_id === t.id && e.button_idx === i && e.player_name === player && (!key || e.match_key === key)).length);
 
   // ---------- 数える ----------
@@ -29849,9 +29850,9 @@ function CounterPanel({ isViewer, onNewMatch }) {
     const { error } = await supabase.from("count_events").insert(row);
     if (error) { console.error(error); setEvents(list => list.filter(x => x.id !== ev.id)); setLastEv(l => (l && l.id === ev.id ? null : l)); showErr("保存できませんでした。電波の良い所でもう一度押してください"); }
   };
-  const minus = async (t, p, btn = 0) => {
+  const minus = async (t, p, btn = 0, g = null) => {
     if (!curKey) return;
-    const mineEvs = events.filter(e => e.theme_id === t.id && e.match_key === curKey && e.player_name === p.name && e.button_idx === btn && e.counted_by === me.id);
+    const mineEvs = events.filter(e => e.theme_id === t.id && e.match_key === curKey && e.player_name === p.name && e.button_idx === btn && e.counted_by === me.id && (g == null || (e.game_no || 1) === g));
     const ev = mineEvs[mineEvs.length - 1];
     if (!ev) { showErr("ほかの人が数えた分は減らせません"); return; }
     setEvents(list => list.filter(x => x.id !== ev.id));
@@ -29932,7 +29933,7 @@ function CounterPanel({ isViewer, onNewMatch }) {
           )}
           {tab === "count" && (
             <CntCountTab curMatch={curMatch} countThemes={countThemes} countPlayers={countPlayers} game={game} setGame={setGame}
-              cntOf={cntOf} tap={tap} minus={minus} isOwn={isOwn} tag={tag}
+              cntOf={cntOf} cntGameOf={cntGameOf} tap={tap} minus={minus} isOwn={isOwn} tag={tag}
               onChangeMatch={() => setMatchSheet(true)}
               onAddPlayer={() => setPicker({ inMatch: curMatch, current: null, onPick: p => { if (!countPlayers.some(x => x.name === p.name)) saveCountPlayers([...countPlayers, p]); } })}
               onRemovePlayer={n => saveCountPlayers(countPlayers.filter(x => x.name !== n))}
@@ -30229,7 +30230,7 @@ function CntPlayerPicker({ picker, roster, schools, matchItems, me, tag, countPl
 }
 
 // ---------- 数える ----------
-function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf, tap, minus, isOwn, tag, onChangeMatch, onAddPlayer, onRemovePlayer, onGoThemes }) {
+function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf, cntGameOf, tap, minus, isOwn, tag, onChangeMatch, onAddPlayer, onRemovePlayer, onGoThemes }) {
   if (!curMatch) {
     return (
       <div style={cntCard}>
@@ -30267,6 +30268,31 @@ function CntCountTab({ curMatch, countThemes, countPlayers, game, setGame, cntOf
           </div>
           {countThemes.map(t => {
             const cnt = cntOf(t, p.name, curMatch.key); const ge = cntGoalEval(t, cnt);
+            const gcnt = cntGameOf(t, p.name, curMatch.key, game);   // ★このゲームの回数（ゲームを進めると0から）
+            if (cntSingle(t)) return (
+              <div key={t.id} style={{ marginTop: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 17 }}>{t.name}</div>
+                    {t.goal && <div style={{ fontSize: 15, color: CNT.sub }}>目標 {cntGoalText(t)}</div>}
+                  </div>
+                  <div style={{ textAlign: "right", flex: "none" }}>
+                    <div style={{ fontSize: 14, color: CNT.sub, fontWeight: 700 }}>この試合の合計</div>
+                    <div style={{ lineHeight: 1 }}><span style={{ fontSize: 40, fontWeight: 800, color: ge ? (ge.ok ? CNT.good : CNT.warn) : C.text }}>{cnt[0]}</span><span style={{ fontSize: 18, fontWeight: 800, marginLeft: 2 }}>回</span></div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                  <button onClick={() => minus(t, p, 0, game)} disabled={!gcnt} aria-label="1つ減らす"
+                    style={{ width: 64, height: 60, flex: "none", borderRadius: 12, border: `2px solid ${gcnt ? "#c3cad5" : "#e3e7ee"}`, background: "#fff", color: gcnt ? C.text : "#c3cad5", fontSize: 30, fontWeight: 800, lineHeight: 1, cursor: gcnt ? "pointer" : "default" }}>−</button>
+                  <div style={{ flex: 1, textAlign: "center" }}>
+                    <div style={{ fontSize: 13, color: CNT.sub, fontWeight: 700 }}>第{game}ゲーム</div>
+                    <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{gcnt}</span><span style={{ fontSize: 16, fontWeight: 700, marginLeft: 3 }}>回</span>
+                  </div>
+                  <button onClick={() => tap(t, p, 0)} aria-label="1つ増やす"
+                    style={{ width: 110, height: 60, flex: "none", borderRadius: 12, border: "none", background: C.navy, color: "#fff", fontSize: 30, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>＋</button>
+                </div>
+              </div>
+            );
             return (
               <div key={t.id} style={{ marginTop: 14 }}>
                 <div style={{ fontWeight: 700, fontSize: 17 }}>{t.name}</div>
@@ -30379,9 +30405,23 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
       <div style={{ position: "relative" }}>
         <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${metric}の推移`} onMouseLeave={() => setTip(null)}>
           {ticks.map(v => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="#eceef1" /><text x={L - 6} y={y(v) + 4} fontSize="13" textAnchor="end" fill={CNT.sub}>{v}{unit}</text></g>)}
-          {t.goal && <g><line x1={L} x2={W - R} y1={y(t.goal.val)} y2={y(t.goal.val)} stroke="#1d2430" strokeWidth="1.5" strokeDasharray="5 4" /><text x={L + 4} y={y(t.goal.val) - 5} fontSize="13" fill="#1d2430">目標 {t.goal.val}{unit}</text></g>}
-          <polyline points={vs.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke={C.navy} strokeWidth="2" strokeLinejoin="round" />
-          {vs.map((v, i) => {
+          {t.goal && !isCnt && <g><line x1={L} x2={W - R} y1={y(t.goal.val)} y2={y(t.goal.val)} stroke="#1d2430" strokeWidth="1.5" strokeDasharray="5 4" /><text x={L + 4} y={y(t.goal.val) - 5} fontSize="13" fill="#1d2430">目標 {t.goal.val}{unit}</text></g>}
+          {isCnt ? vs.map((v, i) => {
+            // ★回数は棒グラフ（目標達成は緑）
+            const slot = (W - L - R) / Math.max(n, 1), cx = L + slot * (i + 0.5), bw = Math.min(34, slot * 0.6);
+            const ok = t.goal && cntGoalEval(t, rows[i].c).ok;
+            return (
+              <g key={i}>
+                <rect x={cx - bw / 2} y={y(v)} width={bw} height={Math.max(0, y(0) - y(v))} rx="4" fill={ok ? CNT.good : C.navy} />
+                {(n <= 8 || i === 0 || i === n - 1) && <text x={cx} y={Math.max(14, y(v) - 6)} fontSize="14" fontWeight="700" textAnchor="middle" fill="#1d2430">{v}{unit}</text>}
+                <text x={cx} y={H - B + 20} fontSize="13" textAnchor="middle" fill="#1d2430">{cntMd(rows[i].m?.date)}</text>
+                {rows[i].m?.dayNo && <text x={cx} y={H - B + 38} fontSize="14" fontWeight="700" textAnchor="middle" fill="#1d2430">{rows[i].m.dayNo}</text>}
+                <rect x={cx - slot / 2} y={T} width={slot} height={H - T - B + 4} fill="transparent" style={{ cursor: "pointer" }}
+                  onMouseEnter={() => setTip({ i, x: cx / W })} onTouchStart={() => setTip({ i, x: cx / W })} />
+              </g>
+            );
+          }) : <polyline points={vs.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke={C.navy} strokeWidth="2" strokeLinejoin="round" />}
+          {!isCnt && vs.map((v, i) => {
             const ok = t.goal && cntGoalEval(t, rows[i].c).ok;
             const below = t.goal && Math.abs(y(v) - y(t.goal.val)) < 16 && v <= t.goal.val;
             return (
@@ -30395,6 +30435,7 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
               </g>
             );
           })}
+          {t.goal && isCnt && <g pointerEvents="none"><line x1={L} x2={W - R} y1={y(t.goal.val)} y2={y(t.goal.val)} stroke="#c0392b" strokeWidth="1.5" strokeDasharray="5 4" /></g>}
         </svg>
         {tip && rows[tip.i] && (
           <div style={{ position: "absolute", top: 0, left: `clamp(0px, calc(${tip.x * 100}% - 90px), calc(100% - 180px))`, width: 180, background: "#1d2430", color: "#fff", fontSize: 14, borderRadius: 8, padding: "4px 8px", pointerEvents: "none" }}>
@@ -30402,7 +30443,7 @@ function CntTrend({ t, player, events, mOf, cntOf, tip, setTip, onBoard, onOpen 
           </div>
         )}
       </div>
-      <div style={{ fontSize: 15, color: CNT.sub }}>点が緑＝目標達成　点線＝目標</div>
+      <div style={{ fontSize: 15, color: CNT.sub }}>{isCnt ? (t.goal ? `緑の棒＝目標達成　赤い点線＝目標（${t.goal.val}回）` : "") : "点が緑＝目標達成　点線＝目標"}</div>
       <div style={{ marginTop: 6 }}>
         {rows.map((r, i) => ({ r, i })).reverse().map(({ r, i }) => {
           const v = vs[i], d = i ? v - vs[i - 1] : null, ge = cntGoalEval(t, r.c);
