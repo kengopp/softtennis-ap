@@ -30003,15 +30003,15 @@ function CntThemesTab({ themes, me, isOn, setOn, nameOfUser, onEdit, onBoard, on
         {themes.map((t, i) => {
           const mine = t.owner_id === me.id, on = isOn(t);
           return (
-            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0", borderTop: i ? `1px solid ${CNT.line}` : "none" }}>
-              <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => onStart(t)} role="button">
+            <div key={t.id} onClick={() => onStart(t)} role="button" style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0", borderTop: i ? `1px solid ${CNT.line}` : "none", cursor: "pointer" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 800, fontSize: 18 }}>{t.name}</div>
                 <div style={{ fontSize: 15, color: CNT.sub }}>見られる人：{CNT_SCOPE_LABEL[t.scope] || "自分だけ"}{!mine && `（作成：${nameOfUser(t.owner_id) || "ほかの人"}）`}</div>
                 <div style={{ fontSize: 15, color: "#2563eb", fontWeight: 700, marginTop: 2 }}>▶ タップして数える</div>
               </div>
-              {t.board_id ? <button onClick={() => onBoard(t.board_id)} aria-label="参考の作戦ボードを見る" style={{ border: "none", background: "none", padding: "4px 2px", cursor: "pointer", flex: "none" }}><CntBoardIcon w={34} /></button> : <span style={{ width: 38, flex: "none" }} />}
-              {mine ? <button style={cntLink} onClick={() => onEdit(t)}>編集</button> : <span style={{ width: 48, flex: "none" }} />}
-              <button onClick={() => setOn(t, !on)} aria-label="使う" aria-pressed={on} style={{ width: 52, height: 30, borderRadius: 999, border: "none", background: on ? CNT.good : "#d5d9df", position: "relative", flex: "none", cursor: "pointer" }}>
+              {t.board_id ? <button onClick={ev => { ev.stopPropagation(); onBoard(t.board_id); }} aria-label="参考の作戦ボードを見る" style={{ border: "none", background: "none", padding: "4px 2px", cursor: "pointer", flex: "none" }}><CntBoardIcon w={34} /></button> : <span style={{ width: 38, flex: "none" }} />}
+              {mine ? <button style={cntLink} onClick={ev => { ev.stopPropagation(); onEdit(t); }}>編集</button> : <span style={{ width: 48, flex: "none" }} />}
+              <button onClick={ev => { ev.stopPropagation(); setOn(t, !on); }} aria-label="使う" aria-pressed={on} style={{ width: 52, height: 30, borderRadius: 999, border: "none", background: on ? CNT.good : "#d5d9df", position: "relative", flex: "none", cursor: "pointer" }}>
                 <span style={{ position: "absolute", top: 3, left: on ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: ".15s" }} />
               </button>
             </div>
