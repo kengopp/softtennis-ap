@@ -28496,6 +28496,7 @@ class TBEngine {
     this.hist = []; this.fut = []; this.playing = false; this.playT = 0; this.speed = 1; this.dirty = false; this.readOnly = false;
     this.drag = null; this.penCur = null; this.canvas = null; this.ctx = null; this.scale = 20; this.CW = 0; this.CH = 0;
     this.raf = 0; this.last = 0; this.shown = 0;
+    this.mx = TB_MX; this.my = TB_MY;   // ★見えているコートの外の余白（m）。画面に合わせて広げる
     this.pieceK = 1; this.ballK = 1; this.longPress = true; this.lpTimer = 0;   // ★大きさ（この端末だけの設定）・長押しで名前
     this.rec = false;       // ★録画中だけ、動かした順に記録する（ふだんは自由に動かすだけ）
     this.recAsk = 0;        // 前の録画と入れかえる確認（2回押し）
@@ -28503,8 +28504,10 @@ class TBEngine {
     this.onChange = () => {}; this.onToast = () => {}; this.onLongPress = () => {}; this.onTick = () => {};
     this.onPlayEnd = () => false;   // ★再生が終わった／途中でさわった（true を返したら、さわった動きはそこで終わり）
   }
-  X(m) { return (Math.max(-TB_MX + 0.3, Math.min(TB_COURT.W + TB_MX - 0.3, m)) + TB_MX) * this.scale; }   // ★見える所に寄せる
-  Y(m) { return (Math.max(-TB_MY + 0.3, Math.min(TB_COURT.L + TB_MY - 0.3, m)) + TB_MY) * this.scale; }
+  // ★選手の丸がはみ出さない余白（m）。丸の半径＋ふち
+  padM() { return (13 * Math.max(1, this.pieceK || 1) + 4) / (this.scale || 20); }
+  X(m) { const p = this.padM(); return (Math.max(-this.mx + p, Math.min(TB_COURT.W + this.mx - p, m)) + this.mx) * this.scale; }   // ★見える所に寄せる（丸が切れない）
+  Y(m) { const p = this.padM(); return (Math.max(-this.my + p, Math.min(TB_COURT.L + this.my - p, m)) + this.my) * this.scale; }
   groups() { return tbGroups(this.b.moves); }
   posAfter(n) { const pos = tbClone(this.b.start); this.groups().slice(0, n).forEach(g => g.forEach(m => tbApply(pos, m))); return pos; }
   nowPos() { return this.posAfter(Infinity); }
@@ -28525,8 +28528,12 @@ class TBEngine {
     // 枠の大きさは clientWidth/clientHeight（拡大・縮小の影響を受けない）で測る
     const bw = box.clientWidth, bh = box.clientHeight;
     if (!bw || !bh) return;
+    // ★コートの大きさは今までどおり（縦か横の狭いほうに合わせる）。空いた横（または縦）の分だけ余白を広げて、
+    //   コートの外に置いた選手の丸が切れないようにする（2026-11-26）
     this.scale = Math.max(4, Math.min((bw - 4) / TB_VW, (bh - 4) / TB_VH));
-    this.CW = TB_VW * this.scale; this.CH = TB_VH * this.scale;
+    this.mx = Math.min(3.5, Math.max(TB_MX, ((bw - 4) / this.scale - TB_COURT.W) / 2));
+    this.my = Math.min(5, Math.max(TB_MY, ((bh - 4) / this.scale - TB_COURT.L) / 2));
+    this.CW = (TB_COURT.W + this.mx * 2) * this.scale; this.CH = (TB_COURT.L + this.my * 2) * this.scale;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(this.CW * dpr); canvas.height = Math.round(this.CH * dpr);
     canvas.style.width = this.CW + "px"; canvas.style.height = this.CH + "px";
@@ -28537,7 +28544,7 @@ class TBEngine {
   toM(e) {
     const r = this.canvas.getBoundingClientRect();
     const fx = r.width ? this.CW / r.width : 1, fy = r.height ? this.CH / r.height : 1;
-    return [(e.clientX - r.left) * fx / this.scale - TB_MX, (e.clientY - r.top) * fy / this.scale - TB_MY];
+    return [(e.clientX - r.left) * fx / this.scale - this.mx, (e.clientY - r.top) * fy / this.scale - this.my];
   }
   cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, fstart: this.b.fstart || null, fmoves: this.b.fmoves || null, rec: this.rec, setPos: this.b.setPos || null }); }
   restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.fstart = o.fstart || null; this.b.fmoves = o.fmoves || null; this.rec = !!o.rec; this.b.setPos = o.setPos || null; }
@@ -28768,7 +28775,8 @@ class TBEngine {
     if (this.penCur) { const q = this.toM(e), l = this.penCur.pts[this.penCur.pts.length - 1]; if (Math.hypot(q[0] - l[0], q[1] - l[1]) > 0.15) { this.penCur.pts.push(q); this.draw(); } return; }
     if (!this.drag) return;
     const q = this.toM(e), d = this.drag;
-    const np = [Math.max(-TB_MX + 0.4, Math.min(TB_COURT.W + TB_MX - 0.4, q[0] + d.off[0])), Math.max(-TB_MY + 0.4, Math.min(TB_COURT.L + TB_MY - 0.4, q[1] + d.off[1]))];
+    const pm = this.padM();   // ★丸が画面の外に出ない所まで
+    const np = [Math.max(-this.mx + pm, Math.min(TB_COURT.W + this.mx - pm, q[0] + d.off[0])), Math.max(-this.my + pm, Math.min(TB_COURT.L + this.my - pm, q[1] + d.off[1]))];
     const l = d.pts[d.pts.length - 1]; if (Math.hypot(np[0] - l[0], np[1] - l[1]) > 0.2) d.pts.push(np);
     if (Math.hypot(np[0] - d.pts[0][0], np[1] - d.pts[0][1]) > 0.3) clearTimeout(this.lpTimer);   // 動かし始めたら長押しではない
     d.last = np; this.draw();
