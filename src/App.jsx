@@ -29235,11 +29235,9 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
                   reviewPlay.current = true; setReview(r => ({ ...r, hidden: true, askDel: false })); eng.play();
                 }, { marginBottom:8 })}
                 <div style={{ display:"flex", gap:8 }}>
+                  {/* ★左に削除・右に録り直す。削除は1回で消す（2026-11-26） */}
+                  {btn("🗑 削除", () => { setReview(null); restorePrev(); showToast("録画を削除しました"); })}
                   {btn("● 録り直す", () => { setReview(null); restorePrev(); eng.recAsk = Date.now(); startCountdown(); })}
-                  {btn(review.askDel ? "もう一度で削除" : "🗑 削除", () => {
-                    if (!review.askDel) { setReview(r => ({ ...r, askDel: true })); return; }
-                    setReview(null); restorePrev(); showToast("録画を削除しました");
-                  })}
                 </div>
               </>;
             })()}
