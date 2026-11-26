@@ -4634,13 +4634,17 @@ function RefreshButton({ onClick, spinning = false, label = "", size = 36, onLig
 const ptrGuards = new Set();   // fn(proceed) → true を返したら、その画面が確かめてから proceed() を呼ぶ
 const ptrBeforeRun = new Set(); // 更新する直前に呼ぶ（作戦ボードで開いている作戦を、更新後にもう一度開くため など）
 const PTR_TH = 70;             // これ以上引っ張って離すと更新
-function ptrCanStart(target) {
+function ptrCanStart(target, touch) {
   if (!target || !target.closest) return false;
   if (target.closest("input,textarea,select,[contenteditable=true],[data-no-ptr]")) return false;
   let scroller = null, fixed = false;
   for (let n = target; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
     const s = getComputedStyle(n);
-    if (s.touchAction === "none") return false;                                   // コート・キャンバスなど
+    if (s.touchAction === "none") {                                               // コート・キャンバスなど
+      // ★作戦ボードのコート：選手やボールの無い所から引っ張ったときは更新してよい（n.__ptrOk が教える）
+      if (typeof n.__ptrOk === "function" && touch) { try { if (n.__ptrOk(touch)) continue; } catch (e) {} }
+      return false;
+    }
     if (!scroller && /(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1) scroller = n;
     if (s.position === "fixed") {
       fixed = true;
@@ -4696,7 +4700,7 @@ function PullToRefresh({ onRefresh }) {
       const s = st.current;
       s.sy = null; s.on = false; s.d = 0;
       if (s.busy || e.touches.length !== 1) return;
-      if (!ptrCanStart(e.target)) return;
+      if (!ptrCanStart(e.target, e.touches[0])) return;
       s.sy = e.touches[0].clientY; s.sx = e.touches[0].clientX;
     };
     const onMove = (e) => {
@@ -29213,7 +29217,18 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
     ptrGuards.add(guard);
     return () => { ptrGuards.delete(guard); };
   }, [eng]);
-  useEffect(() => { if (!sheet || sheet.type !== "save") { if (!saving) ptrAfterSave.current = null; } }, [sheet]);   // 保存をやめたら、更新もしない
+  useEffect(() => { if (!sheet || sheet.type !== "save") { if (!saving) ptrAfterSave.current = null; } }, [sheet]);
+  // ★引っ張って更新：コートの空いている所（選手・ボールの無い所）から引っ張ったら更新できる。
+  //   ペン・消しゴムのとき、録画中・再生中、選手やボールに触れたときは、いつもどおりコートの操作
+  useEffect(() => {
+    const cv = canvasRef.current; if (!cv) return;
+    cv.__ptrOk = (t) => {
+      if (eng.playing || eng.rec || eng.drag || eng.penCur || eng.erasing) return false;
+      if (!eng.readOnly && eng.tool !== "move") return false;
+      return !eng.hitPiece(eng.toM(t), eng.viewPos());
+    };
+    return () => { if (cv) cv.__ptrOk = null; };
+  }, [eng]);   // 保存をやめたら、更新もしない
   useEffect(() => {
     if (!eng.rec) return;
     const t0 = Date.now(); setRecSec(0);
