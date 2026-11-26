@@ -28771,6 +28771,7 @@ class TBEngine {
     this.draw();
   }
   move(e) {
+    if (this.rec && (this.drag || this.penCur)) this.lastAct = Date.now();   // ★録画：最後に動かした時刻（1分動きがなければ止める）
     if (this.erasing) { const q = this.toM(e); this.eraseCur = q; this.eraseAt(q); this.draw(); return; }
     if (this.penCur) { const q = this.toM(e), l = this.penCur.pts[this.penCur.pts.length - 1]; if (Math.hypot(q[0] - l[0], q[1] - l[1]) > 0.15) { this.penCur.pts.push(q); this.draw(); } return; }
     if (!this.drag) return;
@@ -28783,6 +28784,7 @@ class TBEngine {
   }
   up() {
     clearTimeout(this.lpTimer);
+    if (this.rec && (this.drag || this.penCur)) this.lastAct = Date.now();
     if (this.erasing) { this.erasing = false; this.eraseCur = null; this.draw(); this.onChange(); return; }
     if (this.penCur) {
       const c = this.penCur; this.penCur = null;
@@ -28851,7 +28853,7 @@ class TBEngine {
     }
     this.recAsk = 0;
     this.snapshot();
-    this.b.start = this.viewPos(); this.b.moves = []; this.rec = true;
+    this.b.start = this.viewPos(); this.b.moves = []; this.rec = true; this.lastAct = Date.now();
     this.draw(); this.onChange(); this.onToast("録画中：今の並びから、動かした順に記録します");
   }
   // ★セット（2026-11-21）：今の並び（ボールが出ていればボールも）を、この作戦の「戻る位置」として覚える。
@@ -29043,7 +29045,14 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
   useEffect(() => {
     if (!eng.rec) return;
     const t0 = Date.now(); setRecSec(0);
-    const iv = setInterval(() => setRecSec(Math.floor((Date.now() - t0) / 1000)), 250);
+    const iv = setInterval(() => {
+      setRecSec(Math.floor((Date.now() - t0) / 1000));
+      // ★最後に動かしてから1分動きがなければ、自動で止める（動かしている途中は止めない）
+      if (eng.rec && !eng.drag && !eng.penCur && Date.now() - (eng.lastAct || t0) >= 60000) {
+        eng.recQuiet = true; eng.toggleRec();
+        setReview({ secs: 0, played: false, hidden: false, askDel: false, auto: true });
+      }
+    }, 250);
     return () => clearInterval(iv);
   }, [eng.rec]);
   const startCountdown = () => {
@@ -29209,8 +29218,8 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
       {review && !review.hidden && (
         <div style={{ position:"fixed", inset:0, zIndex:700, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
           <div style={{ background:C.white, borderRadius:16, padding:16, width:"100%", maxWidth:380, boxShadow:"0 8px 30px rgba(0,0,0,.25)" }}>
-            <div style={{ fontSize:16, fontWeight:800, color:C.navy }}>{review.played ? "再生しました" : "録画を止めました"}（{review.secs}秒）</div>
-            <div style={{ fontSize:13, color:C.textSec, margin:"4px 0 12px" }}>{review.played ? "確かめた動きでよければ保存してください" : "この動きをどうしますか？"}</div>
+            <div style={{ fontSize:16, fontWeight:800, color:C.navy }}>{review.played ? "再生しました" : "録画を止めました"}</div>
+            <div style={{ fontSize:13, color:C.textSec, margin:"4px 0 12px" }}>{review.played ? "確かめた動きでよければ保存してください" : review.auto ? "最後に動かしたところまで記録しています" : "この動きをどうしますか？"}</div>
             {(() => {
               const btn = (label, onClick, st = {}) => (
                 <button onClick={onClick} style={{ width:"100%", border:`1px solid ${C.border}`, background:C.white, color:C.navy, borderRadius:10, padding:"12px 8px", fontSize:15, fontWeight:800, cursor:"pointer", ...st }}>{label}</button>
