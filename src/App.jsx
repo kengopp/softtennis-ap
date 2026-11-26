@@ -4623,6 +4623,129 @@ function RefreshButton({ onClick, spinning = false, label = "", size = 36, onLig
   );
 }
 
+// ============================================================
+// ★引っ張って更新（2026-11-27）：どの画面でも、いちばん上で下に引っ張ると最新の情報に更新する。
+//   Chrome 標準の「引っ張って更新」は、作戦ボードや動画分析のように画面全体を固定している画面では効かず、
+//   効いてもページ全体を読み込み直してホームに戻ってしまう。そこで標準のものは止めて、アプリで1つ持つ。
+//   ・今の画面のまま、データの一時記憶を捨てて画面を作り直す（＝最新を取り直す）
+//   ・コートなど指で動かす場所（touch-action:none）、入力欄、ポップ（半透明の背景）の中では反応しない
+//   ・作戦ボードなど、保存していない変更がある画面は ptrGuards で先に確かめる
+// ============================================================
+const ptrGuards = new Set();   // fn(proceed) → true を返したら、その画面が確かめてから proceed() を呼ぶ
+const ptrBeforeRun = new Set(); // 更新する直前に呼ぶ（作戦ボードで開いている作戦を、更新後にもう一度開くため など）
+const PTR_TH = 70;             // これ以上引っ張って離すと更新
+function ptrCanStart(target) {
+  if (!target || !target.closest) return false;
+  if (target.closest("input,textarea,select,[contenteditable=true],[data-no-ptr]")) return false;
+  let scroller = null, fixed = false;
+  for (let n = target; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    const s = getComputedStyle(n);
+    if (s.touchAction === "none") return false;                                   // コート・キャンバスなど
+    if (!scroller && /(auto|scroll)/.test(s.overflowY) && n.scrollHeight > n.clientHeight + 1) scroller = n;
+    if (s.position === "fixed") {
+      fixed = true;
+      const m = s.backgroundColor.match(/rgba\([^)]*,\s*([\d.]+)\)/);
+      if (m && +m[1] > 0 && +m[1] < 1) return false;                              // ポップ（半透明の背景）の中
+    }
+  }
+  if (scroller && scroller.scrollTop > 0) return false;
+  if (!fixed && (window.scrollY || document.documentElement.scrollTop || 0) > 0) return false;
+  return true;
+}
+function PullToRefresh({ onRefresh }) {
+  const ballRef = useRef(null), iconRef = useRef(null);
+  const [toast, setToast] = useState("");
+  const st = useRef({ sy: null, sx: 0, d: 0, on: false, busy: false });
+  useEffect(() => {
+    // Chrome 標準の「引っ張って更新」を止める（二重に動いてホームに戻るのを防ぐ）
+    const html = document.documentElement, body = document.body;
+    const prevH = html.style.overscrollBehaviorY, prevB = body.style.overscrollBehaviorY;
+    html.style.overscrollBehaviorY = "contain"; body.style.overscrollBehaviorY = "contain";
+    const ball = () => ballRef.current, icon = () => iconRef.current;
+    const place = (d) => {
+      const el = ball(); if (!el) return;
+      el.style.transition = "none";
+      el.style.transform = `translateY(${Math.min(d, 120) * 0.8 - 50}px)`;
+      el.style.opacity = String(Math.min(1, d / 40));
+      if (icon()) { icon().style.transform = `rotate(${d * 3}deg)`; icon().style.opacity = d >= PTR_TH ? "1" : ".45"; }
+    };
+    const hide = () => {
+      const el = ball(); if (!el) return;
+      el.style.transition = "transform .2s, opacity .2s";
+      el.style.transform = "translateY(-60px)"; el.style.opacity = "0";
+      if (icon()) icon().style.animation = "none";
+    };
+    const run = async () => {
+      const s = st.current; s.busy = true;
+      const el = ball();
+      if (el) { el.style.transition = "transform .15s"; el.style.transform = "translateY(36px)"; el.style.opacity = "1"; }
+      if (icon()) { icon().style.opacity = "1"; icon().style.transform = ""; icon().style.animation = "st-ptr-spin .8s linear infinite"; }
+      for (const f of ptrBeforeRun) { try { f(); } catch (e) { console.error(e); } }
+      const t0 = Date.now();
+      try { await onRefresh(); } catch (e) { console.error(e); }
+      const wait = Math.max(0, 600 - (Date.now() - t0));   // くるっと回るのが見える時間
+      setTimeout(() => { hide(); s.busy = false; setToast("最新の情報に更新しました"); setTimeout(() => setToast(""), 1800); }, wait);
+    };
+    const go = () => {
+      for (const g of ptrGuards) {
+        try { if (g(run)) { hide(); return; } } catch (e) { console.error(e); }
+      }
+      run();
+    };
+    const onStart = (e) => {
+      const s = st.current;
+      s.sy = null; s.on = false; s.d = 0;
+      if (s.busy || e.touches.length !== 1) return;
+      if (!ptrCanStart(e.target)) return;
+      s.sy = e.touches[0].clientY; s.sx = e.touches[0].clientX;
+    };
+    const onMove = (e) => {
+      const s = st.current; if (s.sy == null) return;
+      if (e.touches.length !== 1) { s.sy = null; if (s.on) hide(); return; }
+      const dy = e.touches[0].clientY - s.sy, dx = e.touches[0].clientX - s.sx;
+      if (!s.on) {
+        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) { s.sy = null; return; }   // 横向きの操作は対象外
+        if (dy < -4) { s.sy = null; return; }                                            // 上に動かした＝ふつうのスクロール
+        if (dy < 10) return;
+        s.on = true;
+      }
+      s.d = Math.max(0, dy - 10);
+      if (e.cancelable) e.preventDefault();   // 引っ張っている間は画面を動かさない
+      place(s.d);
+    };
+    const onEnd = () => {
+      const s = st.current; if (s.sy == null) return;
+      const on = s.on, d = s.d; s.sy = null; s.on = false;
+      if (!on) return;
+      if (d >= PTR_TH) go(); else hide();
+    };
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
+    return () => {
+      html.style.overscrollBehaviorY = prevH; body.style.overscrollBehaviorY = prevB;
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+    };
+  }, [onRefresh]);
+  return (
+    <>
+      <style>{"@keyframes st-ptr-spin{to{transform:rotate(360deg);}}"}</style>
+      <div ref={ballRef} aria-hidden="true" style={{ position:"fixed", left:"50%", top:"env(safe-area-inset-top,0px)", width:44, height:44, marginLeft:-22, borderRadius:"50%", background:"#fff",
+        boxShadow:"0 2px 8px rgba(0,0,0,.25)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:10000, pointerEvents:"none", transform:"translateY(-60px)", opacity:0 }}>
+        <svg ref={iconRef} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 11.5A8 8 0 0 0 6.2 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 13.8 5.2L20 15.5"/><path d="M20 20v-4.5h-4.5"/>
+        </svg>
+      </div>
+      {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(84px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff",
+        fontSize:14, fontWeight:700, padding:"10px 16px", borderRadius:12, zIndex:10000, whiteSpace:"nowrap", pointerEvents:"none", boxShadow:"0 4px 14px rgba(0,0,0,.25)" }}>{toast}</div>}
+    </>
+  );
+}
+
 // ★サーブ/レシーブの「1人目・2人目のどちらが先か」を選ぶ小さなセグメントボタン
 function OrderSegBtn({ active, color, children, onClick }) {
   return (
@@ -29079,6 +29202,21 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
   const reviewPlay = useRef(false);
   const recPrev = useRef(null);
   const [recAsk, setRecAsk] = useState(false);
+  // ★引っ張って更新（2026-11-27）：保存していない変更があるときは、更新の前に確かめる
+  const [ptrAsk, setPtrAsk] = useState(null);   // { proceed }
+  const ptrAfterSave = useRef(null);
+  const ptrStateRef = useRef({});
+  ptrStateRef.current = { readOnly };
+  useEffect(() => {
+    const guard = (proceed) => {
+      if (ptrStateRef.current.readOnly || !eng.dirty) return false;
+      if (eng.playing) eng.stop();
+      setPtrAsk({ proceed }); return true;
+    };
+    ptrGuards.add(guard);
+    return () => { ptrGuards.delete(guard); };
+  }, [eng]);
+  useEffect(() => { if (!sheet || sheet.type !== "save") { if (!saving) ptrAfterSave.current = null; } }, [sheet]);   // 保存をやめたら、更新もしない
   useEffect(() => () => clearTimeout(cdT.current), []);
   useEffect(() => {
     if (!eng.rec) return;
@@ -29134,10 +29272,11 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
     if (ok) {
       eng.dirty = false; savedOnce.current = true;
       if (wasFrom) { b.from_user_id = null; b.from_name = ""; }
+      if (ptrAfterSave.current) { const go = ptrAfterSave.current; ptrAfterSave.current = null; setSheet(null); go(); return; }   // ★「保存してから更新」
       const goShare = sheet && sheet.after === "share";
       setSheet(goShare ? { type:"share" } : null); showToast(wasFrom ? "保存しました。あなたの作戦として「保存した作戦」に入りました" : "保存しました（「保存した作戦」から開けます）"); rerender();
     }
-    else showToast("保存できませんでした。電波の良い所でもう一度「保存」を押してください");
+    else { ptrAfterSave.current = null; showToast("保存できませんでした。電波の良い所でもう一度「保存」を押してください"); }
   };
 
   // ★保存できるか：保存済みの作戦は、何か変えるまで押せない。新しい作戦は最初から押せる
@@ -29253,6 +29392,23 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
 
       {toast && <div style={{ position:"fixed", left:"50%", bottom:"calc(66px + env(safe-area-inset-bottom,0px))", transform:"translateX(-50%)", background:"#1d2330", color:"#fff", fontSize:12.5, borderRadius:9, padding:"8px 12px", zIndex:800, pointerEvents:"none", maxWidth:"92vw", textAlign:"center" }}>{toast}</div>}
 
+      {ptrAsk && (
+        <div style={{ position:"fixed", inset:0, zIndex:700, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{ background:C.white, borderRadius:16, padding:16, width:"100%", maxWidth:380, boxShadow:"0 8px 30px rgba(0,0,0,.25)" }}>
+            <div style={{ fontSize:16, fontWeight:800, color:C.navy }}>保存していない変更があります</div>
+            <div style={{ fontSize:13, color:C.textSec, margin:"4px 0 12px", lineHeight:1.6 }}>更新すると、この作戦の変更は消えます。</div>
+            <button style={{ ...S.btn(C.navy), marginBottom:8 }} onClick={() => {
+              const go = ptrAsk.proceed; setPtrAsk(null); ptrAfterSave.current = go;
+              if (isNew && !savedOnce.current) setSheet({ type:"save", value:b.title, shared: !!b.shared });
+              else doSave(b.title, b.shared);
+            }}>💾 保存してから更新</button>
+            <button style={{ ...S.btn(C.white), color:"#c62828", border:`1px solid ${C.border}`, marginBottom:8 }} onClick={() => {
+              const go = ptrAsk.proceed; setPtrAsk(null); eng.dirty = false; go();
+            }}>保存せずに更新</button>
+            <button style={{ ...S.btn("#f0f0f0"), color:C.text }} onClick={() => setPtrAsk(null)}>やめる</button>
+          </div>
+        </div>
+      )}
       {review && !review.hidden && (
         <div style={{ position:"fixed", inset:0, zIndex:700, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
           <div style={{ background:C.white, borderRadius:16, padding:16, width:"100%", maxWidth:380, boxShadow:"0 8px 30px rgba(0,0,0,.25)" }}>
@@ -29605,6 +29761,12 @@ function TacticsPanel({ ctx, isViewer }) {
   const [court, setCourt] = useState(() => isViewer ? null : { board: tbNewBoard(), isNew: true, readOnly: false, k: 0 });
   useEffect(() => { if (isViewer) setCourt(c => (c && c.isNew ? null : c)); }, [isViewer]);
   const freshCourt = () => setCourt(c => ({ board: tbNewBoard(), isNew: true, readOnly: false, k: (c?.k || 0) + 1 }));
+  // ★引っ張って更新：保存済みの作戦を開いていたら、更新後も同じ作戦（最新の内容）を開く
+  const courtRef = useRef(court); courtRef.current = court;
+  useEffect(() => {
+    const f = () => { const c = courtRef.current; if (c && c.board?.id) _tbOpenIntent = c.board.id; };   // 保存していない作戦は一覧に無いので、新しいコートになる
+    ptrBeforeRun.add(f); return () => { ptrBeforeRun.delete(f); };
+  }, []);
   // コートを置く位置（タブのすぐ下）を測る。文字の大きさの設定が変わると位置も変わるので、少しあとにもう一度測る
   const rootRef = useRef(null);
   const [dockTop, setDockTop] = useState(null);
@@ -30776,6 +30938,13 @@ export default function App() {
     })();
   }, [user, profileChecked, profile, pendingApplied]);
 
+  // ★引っ張って更新（2026-11-27）：データの一時記憶を捨てて、今の画面を作り直す（画面の場所はそのまま）
+  const [ptrKey, setPtrKey] = useState(0);
+  const handlePullRefresh = useCallback(async () => {
+    clearScreenCache();
+    setPtrKey(k => k + 1);
+  }, []);
+  const screenEl = (() => {
   // ログイン状態確認中は簡易ローディング表示
   if (!authChecked) {
     return (
@@ -31365,5 +31534,12 @@ export default function App() {
         setScreen(existing ? "aiAnalysisDetail" : "aiAnalysisAdd");
       }}
     />
+  );
+  })();
+  return (
+    <>
+      <Fragment key={ptrKey}>{screenEl}</Fragment>
+      {user && <PullToRefresh onRefresh={handlePullRefresh} />}
+    </>
   );
 }
