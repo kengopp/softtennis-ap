@@ -28393,7 +28393,7 @@ function VideoAnalysisScreenForMatch(props) {
 const TB_COURT = { W: 10.97, L: 23.77, net: 11.885, svc: 6.40, sgl: 1.37 };   // ソフトテニスのコート（m）
 const TB_MX = 0.9, TB_MY = 1.7;                                                 // コートの外の余白（m）★コートを画面いっぱいに（2026-11-25）
 const TB_VW = TB_COURT.W + TB_MX * 2, TB_VH = TB_COURT.L + TB_MY * 2;
-const TB_COLORS = [["#2f6fd6", "青"], ["#d64545", "赤"], ["#ffd400", "黄"], ["#ffffff", "白"], ["#1d2330", "黒"]];
+const TB_COLORS = [["#2f6fd6", "青"], ["#d64545", "赤"], ["#ffd400", "黄"], ["#ffffff", "白"], ["#ff8a00", "オレンジ"]];   // ★黒→オレンジ（2026-11-27）。前に黒で描いた線はそのまま黒で出る
 const TB_PIECES = [
   { id: "m1", side: "me", label: "前", name: "味方 前衛" }, { id: "m2", side: "me", label: "後", name: "味方 後衛" },
   { id: "o1", side: "op", label: "前", name: "相手 前衛" }, { id: "o2", side: "op", label: "後", name: "相手 後衛" },
@@ -28640,7 +28640,7 @@ function tbDrawMini(c, b) {
 // ---------- ボードの描画とタッチ（画面の外で持つ） ----------
 class TBEngine {
   constructor() {
-    this.b = null; this.tool = "move"; this.penKind = "arrow"; this.penColor = "#ffd400"; this.sim = false;
+    this.b = null; this.tool = "move"; this.penKind = "line"; this.penColor = "#ffd400"; this.penWidth = 3.2;   // ★線は矢印なしが最初（2026-11-27） this.sim = false;
     this.hist = []; this.fut = []; this.playing = false; this.playT = 0; this.speed = 1; this.dirty = false; this.readOnly = false;
     this.drag = null; this.penCur = null; this.canvas = null; this.ctx = null; this.scale = 20; this.CW = 0; this.CH = 0;
     this.raf = 0; this.last = 0; this.shown = 0;
@@ -28789,7 +28789,7 @@ class TBEngine {
     o.restore();
   }
   drawPen(d) {
-    const w = 3.2;
+    const w = d.w || 3.2;   // ★太さ（2026-11-27）：細い2／ふつう3.2／太い5.5。太さの無い前の線は「ふつう」
     if (d.color === "#ffffff" || d.color === "#ffd400") this.arrowLine(d.pts, "rgba(0,0,0,.35)", w + 2.4, false, d.kind === "arrow");
     this.arrowLine(d.pts, d.color, w, false, d.kind === "arrow");
   }
@@ -28919,7 +28919,7 @@ class TBEngine {
       this.eraseRec = this.rec ? { id: "erase", erase: { r: this.eraserBig ? 1.1 : 0.55, path: [] }, with: this.sim && this.b.moves.length > 0 } : null;
       this.eraseAt(q); this.draw(); return;
     }
-    if (this.tool === "pen") { this.penCur = { kind: this.penKind, color: this.penColor, pts: [q] }; this.draw(); return; }
+    if (this.tool === "pen") { this.penCur = { kind: this.penKind, color: this.penColor, w: this.penWidth || 3.2, pts: [q] }; this.draw(); return; }
     const pos = this.viewPos(), p = this.hitPiece(q, pos); if (!p) return;
     this.drag = { id: p.id, off: [pos[p.id][0] - q[0], pos[p.id][1] - q[1]], pts: [pos[p.id].slice()], last: null };
     // ★選手を動かさずに長押し → 名前を入れる画面
@@ -29195,13 +29195,10 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
   const leave = () => { if (eng.playing) eng.stop(); };
   // ★録画（2026-11-25）：押すと 3・2・1 のあと録画開始（そのあいだに動かしたものは記録しない＝スタートの並びになる）。
   //   ■ で止めると「保存する／再生して確かめる／録り直す／削除」のポップ
-  const [cd, setCd] = useState(0);
-  const cdT = useRef(null);
   const [recSec, setRecSec] = useState(0);
   const [review, setReview] = useState(null);   // { secs, played, hidden, askDel }
   const reviewPlay = useRef(false);
   const recPrev = useRef(null);
-  const [recAsk, setRecAsk] = useState(false);
   // ★引っ張って更新（2026-11-27）：保存していない変更があるときは、更新の前に確かめる
   const [ptrAsk, setPtrAsk] = useState(null);   // { proceed }
   const ptrAfterSave = useRef(null);
@@ -29217,7 +29214,6 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
     return () => { ptrGuards.delete(guard); };
   }, [eng]);
   useEffect(() => { if (!sheet || sheet.type !== "save") { if (!saving) ptrAfterSave.current = null; } }, [sheet]);   // 保存をやめたら、更新もしない
-  useEffect(() => () => clearTimeout(cdT.current), []);
   useEffect(() => {
     if (!eng.rec) return;
     const t0 = Date.now(); setRecSec(0);
@@ -29231,29 +29227,27 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
     }, 250);
     return () => clearInterval(iv);
   }, [eng.rec]);
-  const startCountdown = () => {
-    leave(); clearTimeout(cdT.current);
-    let n = 3; setCd(3);
-    const tick = () => {
-      n -= 1;
-      if (n > 0) { setCd(n); cdT.current = setTimeout(tick, 1000); return; }
-      setCd(0); cdT.current = null;
-      recPrev.current = { start: tbClone(b.start), moves: tbClone(b.moves), fstart: b.fstart ? tbClone(b.fstart) : null, fmoves: b.fmoves ? tbClone(b.fmoves) : null, draw: tbClone(b.draw || []), drawStart: b.drawStart ? tbClone(b.drawStart) : null, dirty: eng.dirty };
-      eng.recAsk = Date.now(); eng.toggleRec();
-    };
-    cdT.current = setTimeout(tick, 1000);
+  // ★録画（2026-11-27）：カウントダウンは無くして、押したらすぐ録画。今の並びがスタート
+  const startRec = () => {
+    leave();
+    recPrev.current = { start: tbClone(b.start), moves: tbClone(b.moves), fstart: b.fstart ? tbClone(b.fstart) : null, fmoves: b.fmoves ? tbClone(b.fmoves) : null, draw: tbClone(b.draw || []), drawStart: b.drawStart ? tbClone(b.drawStart) : null, dirty: eng.dirty };
+    eng.recAsk = Date.now(); eng.toggleRec();
   };
   const restorePrev = () => {
     const p = recPrev.current; if (!p) return;
     b.start = p.start; b.moves = p.moves; b.fstart = p.fstart; b.fmoves = p.fmoves; b.draw = p.draw; b.drawStart = p.drawStart; eng.rec = false; eng.dirty = p.dirty;   // ★書いた線・消した所も録画前に戻す
     eng.draw(); rerender();
   };
+  // ★左下のボタン1つ（2026-11-27）：録画が無い＝● 録画／録画中＝■ 録画を終える／録画がある＝▶ 再生・⏸
+  //   新しく録り直すのは「⋯」の「● 新しく録画」か、録画を終えたあとのポップの「録り直す」
+  const hasRec = b.moves.length > 0;
   const onRec = () => {
-    if (cd) { clearTimeout(cdT.current); cdT.current = null; setCd(0); showToast("録画をやめました"); return; }
     if (eng.rec) { eng.recQuiet = true; eng.toggleRec(); setReview({ secs: recSec, played: false, hidden: false, askDel: false }); return; }
-    leave();
-    if (b.moves.length) { setRecAsk(true); return; }   // ★前の録画があるときは、ポップで確かめる
-    startCountdown();
+    startRec();
+  };
+  const onMain = () => {
+    if (!readOnly && (eng.rec || !hasRec)) { onRec(); return; }
+    eng.running ? eng.pause() : eng.play();
   };   // ★再生の途中で道具を押したら、いつもの画面に戻る
   const back = () => {
     if (!readOnly && eng.dirty && !backAsk.current) {
@@ -29303,9 +29297,6 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
       <div style={{ display:"flex", alignItems:"center", gap:0, padding: docked ? "4px 4px" : "calc(6px + env(safe-area-inset-top,0px)) 4px 4px", background: tbCourtOf(b).out, flexShrink:0 }}>
         {tool("back", backLabel || "戻る", backLabel ? TB_ICON.folder : TB_ICON.back, back)}
         {!readOnly ? <>
-          {eng.rec
-            ? tool("rec", "録画を止める", TB_ICON.recStop, onRec, { bg: "#e53935" })
-            : tool("rec", cd ? "録画をやめる" : "録画", TB_ICON.rec, onRec, { on: !!cd })}
           {/* ペンと消しゴム：押すとオン、もう一度押すとオフ（オフのときは選手やボールを動かせる） */}
           {tool("pen", "ペン", TB_ICON.pen, () => { leave(); eng.tool = eng.tool === "pen" ? "move" : "pen"; rerender(); }, { on: eng.tool === "pen" })}
           {tool("eraser", "消しゴム", TB_ICON.wipe, () => { leave(); eng.tool = eng.tool === "eraser" ? "move" : "eraser"; rerender(); }, { on: eng.tool === "eraser" })}
@@ -29321,18 +29312,31 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
       </div>
 
       {!readOnly && eng.tool === "pen" && (
-        <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 10px", background:"#f7f9fc", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
-          {[["line", <path key="l" d="M3 6h24" />], ["arrow", <path key="a" d="M3 6h22M19 1l6 5-6 5" />]].map(([k, d]) => (
+        <div style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 8px", background:"#f7f9fc", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+          {[["line", <path key="l" d="M3 6h22" />], ["arrow", <path key="a" d="M3 6h20M17 1l6 5-6 5" />]].map(([k, d]) => (
             <button key={k} title={k === "line" ? "線" : "矢印"} onClick={() => { eng.penKind = k; rerender(); }}
-              style={{ border: eng.penKind === k ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:8, width:46, height:30, padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <svg width="30" height="12" fill="none" stroke="#1d2330" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+              style={{ border: eng.penKind === k ? `2px solid ${C.navy}` : `1px solid ${C.border}`, background:C.white, borderRadius:8, width:42, height:30, padding:0, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <svg width="28" height="12" fill="none" stroke="#1d2330" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">{d}</svg>
             </button>
           ))}
-          <span style={{ width:1, height:24, background:C.border }} />
+          <span style={{ width:1, height:24, background:C.border, flexShrink:0 }} />
           {TB_COLORS.map(([c, nm]) => (
             <button key={c} title={nm} onClick={() => { eng.penColor = c; rerender(); }}
-              style={{ width:26, height:26, borderRadius:"50%", border:"2px solid #fff", padding:0, background:c, boxShadow: eng.penColor === c ? `0 0 0 2px ${C.navy}` : "0 0 0 1px #c5ccd8" }} />
+              style={{ width:24, height:24, borderRadius:"50%", border:"2px solid #fff", padding:0, flexShrink:0, background:c, boxShadow: eng.penColor === c ? `0 0 0 2px ${C.navy}` : "0 0 0 1px #c5ccd8" }} />
           ))}
+          <span style={{ width:1, height:24, background:C.border, flexShrink:0 }} />
+          {/* ★線の太さ（2026-11-27）：細い／ふつう／太い */}
+          <div style={{ display:"flex", border:`1px solid ${C.border}`, borderRadius:8, overflow:"hidden", background:C.white, flexShrink:0 }}>
+            {[[2, "細い", 2], [3.2, "ふつう", 4], [5.5, "太い", 7]].map(([w, nm, h], i) => {
+              const on = (eng.penWidth || 3.2) === w;
+              return (
+                <button key={w} title={nm} aria-label={`線の太さ：${nm}`} aria-pressed={on} onClick={() => { eng.penWidth = w; rerender(); }}
+                  style={{ width:30, height:30, border:"none", borderLeft: i ? `1px solid ${C.border}` : "none", background: on ? C.navy : C.white, padding:0, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+                  <span style={{ display:"block", width:16, height:h, borderRadius:9, background: on ? "#fff" : "#1d2330" }} />
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -29351,12 +29355,6 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
         {/* ★録画中の「● 録画中 0:00」表示は邪魔なので出さない（2026-11-27）。録画中はコートの赤枠で分かる */}
-        {cd > 0 && (
-          <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
-            <div style={{ width:128, height:128, borderRadius:"50%", background:"rgba(20,30,55,.55)", color:"#fff", fontSize:76, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>{cd}</div>
-            <div style={{ marginTop:10, background:"rgba(20,30,55,.75)", color:"#fff", fontSize:13, fontWeight:700, padding:"6px 12px", borderRadius:14 }}>録画まで準備中（今動かしても記録されません）</div>
-          </div>
-        )}
         {eng.playing && reviewPlay.current && <div style={{ position:"absolute", left:"50%", top:8, transform:"translateX(-50%)", background:C.navy, color:"#fff", fontSize:13, fontWeight:800, borderRadius:14, padding:"5px 12px", pointerEvents:"none" }}>▶ 再生中</div>}
         {readOnly && <div style={{ position:"absolute", left:8, top:8, background:"rgba(0,0,0,.55)", color:"#fff", fontSize:11.5, fontWeight:700, borderRadius:8, padding:"4px 8px" }}>見るだけ</div>}
       </div>
@@ -29364,12 +29362,19 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
       {/* ★下は1列（2026-11-25）：再生・再生バー・速さ・⋯（リセット／セット／録画／番号） */}
       <div style={{ background: tbCourtOf(b).out, flexShrink:0, padding: docked ? "4px 10px 6px" : "6px 10px calc(8px + env(safe-area-inset-bottom,0px))" }}>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <button aria-label={eng.running ? "一時停止" : "再生"} onClick={() => (eng.running ? eng.pause() : eng.play())}
-            style={{ width:52, height:42, flexShrink:0, border:"none", borderRadius:10, background:C.navy, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", padding:0 }}>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff">{eng.running
+          <button aria-label={!readOnly && eng.rec ? "録画を終える" : !readOnly && !hasRec ? "録画" : eng.running ? "一時停止" : "再生"} onClick={onMain}
+            style={{ width:52, height:42, flexShrink:0, border:"none", borderRadius:10, background: !readOnly && eng.rec ? "#e53935" : C.navy, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", padding:0 }}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff">{!readOnly && eng.rec
+              ? <rect x="6" y="6" width="12" height="12" rx="2" />
+              : !readOnly && !hasRec
+              ? <circle cx="12" cy="12" r="7" fill="#ff5a52" />
+              : eng.running
               ? <g><rect x="5" y="4" width="5" height="16" rx="1.2" /><rect x="14" y="4" width="5" height="16" rx="1.2" /></g>
               : <path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z" />}</svg>
           </button>
+          {!readOnly && eng.rec ? (
+            <div style={{ flex:1, textAlign:"center", color:"#fff", fontSize:15, fontWeight:800, textShadow:"0 1px 2px rgba(0,0,0,.3)" }}>録画 {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</div>
+          ) : (
           <div aria-label="再生バー" role="slider" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(eng.progress() * 100)}
             onPointerDown={e => { if (!ng) return; seekDrag.current = true; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} seekAt(e); }}
             onPointerMove={e => { if (seekDrag.current) seekAt(e); }}
@@ -29380,6 +29385,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
               <div ref={seekKnob} style={{ position:"absolute", top:"50%", left:"100%", width:22, height:22, margin:"-11px 0 0 -11px", borderRadius:"50%", background:"#fff", border:`3px solid ${C.navy}`, boxSizing:"border-box", boxShadow:"0 1px 4px rgba(0,0,0,.3)" }} />
             </div>
           </div>
+          )}
           <button aria-label="再生の速さ" onClick={() => { const L = [1, 1.2, 1.5, 2]; const v = L[(L.indexOf(eng.speed) + 1) % L.length] || 1; eng.speed = v; const nd = { ...tbLoadDev(), speed: v }; tbSaveDev(nd); setDev(d => ({ ...d, speed: v })); rerender(); }}
             style={{ flexShrink:0, height:42, minWidth:58, border:"none", borderRadius:10, background:"rgba(255,255,255,.92)", color:C.navy, fontSize:14, fontWeight:800, padding:"0 8px", cursor:"pointer" }}>{(eng.speed || 1).toFixed(1)}倍</button>
           {!readOnly && <button aria-label="ほかの操作" onClick={() => { leave(); setSheet({ type:"more" }); }}
@@ -29431,7 +29437,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
                 <div style={{ display:"flex", gap:8 }}>
                   {/* ★左に削除・右に録り直す。削除は1回で消す（2026-11-26） */}
                   {btn("🗑 削除", () => { setReview(null); restorePrev(); showToast("録画を削除しました"); })}
-                  {btn("● 録り直す", () => { setReview(null); restorePrev(); eng.recAsk = Date.now(); startCountdown(); })}
+                  {btn("● 録り直す", () => { setReview(null); restorePrev(); eng.recAsk = Date.now(); startRec(); })}
                 </div>
               </>;
             })()}
@@ -29487,19 +29493,6 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
           <button style={{ ...S.btn("#f0f0f0"), color:C.text, marginTop:2 }} onClick={() => setSheet(null)}>閉じる</button>
         </TBSheet>
       )}
-      {/* ★前の録画があるとき：入れかえるか確かめる（2026-11-26） */}
-      {recAsk && (
-        <div style={{ position:"fixed", inset:0, zIndex:700, background:"rgba(0,0,0,.4)", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-          <div style={{ background:C.white, borderRadius:16, padding:16, width:"100%", maxWidth:380 }}>
-            <div style={{ fontSize:16, fontWeight:800, color:C.navy }}>前の録画があります</div>
-            <div style={{ fontSize:13, color:C.textSec, lineHeight:1.6, margin:"4px 0 12px" }}>新しく録画すると、前の録画と入れかわります。前の録画は「戻す」で元に戻せます。</div>
-            <button style={{ width:"100%", border:`1px solid ${C.border}`, background:C.white, color:C.navy, borderRadius:10, padding:"12px 8px", fontSize:15, fontWeight:800, marginBottom:8 }}
-              onClick={() => { setRecAsk(false); startCountdown(); }}>● 新しく録画する</button>
-            <button style={{ width:"100%", border:`1px solid ${C.border}`, background:C.white, color:C.navy, borderRadius:10, padding:"12px 8px", fontSize:15, fontWeight:800 }}
-              onClick={() => setRecAsk(false)}>やめる</button>
-          </div>
-        </div>
-      )}
       {sheet && sheet.type === "more" && (
         <TBSheet onBg={() => setSheet(null)}>
           <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:10 }}>ほかの操作</div>
@@ -29515,6 +29508,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
                 ? row("save", "💾 作戦を保存", "名前を付けて「保存した作戦」に入れる", () => setSheet({ type:"save", value:b.title, shared: !!b.shared }), { bg:"#e8f5ec", color:"#1f7a45" })
                 : row("save", "✓ 保存済み", "何か変えると、また保存できます", () => {}, { disabled: true })}
               {mine && row("share", "📤 共有する", "チームに共有・相手を選んで送る・画像で送る", () => setSheet(canSave ? { type:"shareAsk" } : { type:"share" }))}
+              {hasRec && !eng.rec && row("newrec", "● 新しく録画", "今の並びから録り直す（前の録画と入れかわります。「戻す」で元に戻せます）", () => { setSheet(null); startRec(); })}
               {row("def", "↺ リセット", "選手とボールを最初の並び（セットした並び）に戻す", () => { setSheet(null); eng.toDefault(); })}
               {row("set", b.setPos ? "📍 セット済（もう一度で置き直す）" : "📍 セット", "今の並びを、リセットで戻る並びにする", () => { setSheet(null); eng.setHere(); }, { disabled: eng.rec })}
             </>;
