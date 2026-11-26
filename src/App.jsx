@@ -28892,7 +28892,7 @@ class TBEngine {
     this.recAsk = 0;
     this.snapshot();
     this.b.start = this.viewPos(); this.b.moves = []; this.b.drawStart = tbClone(this.b.draw || []); this.rec = true; this.lastAct = Date.now();
-    this.draw(); this.onChange(); this.onToast("録画中：今の並びから、動かした順に記録します");
+    this.draw(); this.onChange();   // ★録画開始のメッセージは出さない（2026-11-27）
   }
   // ★セット（2026-11-21）：今の並び（ボールが出ていればボールも）を、この作戦の「戻る位置」として覚える。
   //   ↺ リセットでここに戻る。録画は押したときの並びのまま始まる（勝手に戻さない）
@@ -29211,7 +29211,7 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
       <div ref={boxRef} style={{ flex:1, minHeight:0, display:"flex", alignItems:"center", justifyContent:"center", background: tbCourtOf(b).out, position:"relative", overflow:"hidden", boxShadow: eng.rec ? "inset 0 0 0 4px #e53935" : "none" }}>{/* ★キャンバスの外も同じ色で、つながって見える */}
         <canvas ref={canvasRef} style={{ display:"block", touchAction:"none" }}
           onPointerDown={e => eng.down(e)} onPointerMove={e => eng.move(e)} onPointerUp={() => eng.up()} onPointerCancel={() => eng.up()} />
-        {eng.rec && <div style={{ position:"absolute", left:"50%", top:8, transform:"translateX(-50%)", background:"#e53935", color:"#fff", fontSize:13, fontWeight:800, borderRadius:14, padding:"5px 12px", pointerEvents:"none", whiteSpace:"nowrap" }}>● 録画中 {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</div>}
+        {/* ★録画中の「● 録画中 0:00」表示は邪魔なので出さない（2026-11-27）。録画中はコートの赤枠で分かる */}
         {cd > 0 && (
           <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
             <div style={{ width:128, height:128, borderRadius:"50%", background:"rgba(20,30,55,.55)", color:"#fff", fontSize:76, fontWeight:800, display:"flex", alignItems:"center", justifyContent:"center" }}>{cd}</div>
