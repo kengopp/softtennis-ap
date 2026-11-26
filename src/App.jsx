@@ -28370,7 +28370,7 @@ function tbRowToBoard(r) {
   let d = r.data; if (typeof d === "string") { try { d = JSON.parse(d); } catch (_) { d = null; } }
   d = d || {};
   const mode = r.mode === "single" ? "single" : "double";
-  const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [], fstart: d.fstart || d.free || null, fmoves: d.fstart ? (d.fmoves || []) : d.free ? [] : null }
+  const body = d.start ? { start: d.start, moves: d.moves || [], draw: d.draw || [], drawStart: d.drawStart || null, fstart: d.fstart || d.free || null, fmoves: d.fstart ? (d.fmoves || []) : d.free ? [] : null }
     : d.steps ? tbFromSteps(d.steps) : { start: tbClone(mode === "single" ? TB_START_S : TB_START_D), moves: [], draw: [] };
   return { id: r.id, title: r.title || "", mode, shared: !!r.shared, owner_id: r.owner_id || null, updated_at: r.updated_at,
     // ★ほかの人から届いた作戦（送った人の名前は、書き換えて保存するまで残す）／自分が送った相手
@@ -28410,7 +28410,7 @@ async function tbLoadList() {
 }
 async function tbSaveBoard(b, schoolId, opts = {}) {
   const row = { id: b.id, title: b.title || "", mode: b.mode, shared: !!(b.shared && schoolId), school_id: schoolId || null,
-    data: { start: b.start, moves: b.moves, draw: b.draw, fstart: b.fstart || null, fmoves: b.fstart ? (b.fmoves || []) : null, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
+    data: { start: b.start, moves: b.moves, draw: b.draw, drawStart: b.drawStart || null, fstart: b.fstart || null, fmoves: b.fstart ? (b.fmoves || []) : null, names: b.names || {}, ballColor: b.ballColor || "yellow", ballTrail: b.ballTrail !== false, playerTrail: b.playerTrail !== false,
       court: TB_COURTS[b.court] ? b.court : "hard", colors: { ...TB_DEF_COLORS, ...(b.colors || {}) },
       setPos: b.setPos || null, showNum: b.showNum !== false },
     updated_at: new Date().toISOString() };
@@ -28470,6 +28470,31 @@ function tbCut(pts, k) {
   return out;
 }
 // 動きのまとまり（同時に動くものを1つに）
+// ★消しゴム：線のリストから、q のまわり r(m) を消した新しいリスト（変わらなければ null）
+function tbEraseList(list, q, r) {
+  const dens = pts => { const o = [pts[0]]; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], c = pts[i], n = Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / 0.1); for (let k = 1; k <= n; k++) o.push([a[0] + (c[0] - a[0]) * k / n, a[1] + (c[1] - a[1]) * k / n]); } return o; };
+  let changed = false; const out = [];
+  (list || []).forEach(d => {
+    if (!d.pts || d.pts.length < 2) { out.push(d); return; }
+    const dp = dens(d.pts), runs = []; let cur = [], hit = false;
+    dp.forEach(p => { if (Math.hypot(p[0] - q[0], p[1] - q[1]) <= r) { hit = true; if (cur.length) runs.push(cur); cur = []; } else cur.push(p); });
+    if (!hit) { out.push(d); return; }
+    changed = true; if (cur.length) runs.push(cur);
+    const last = dp[dp.length - 1];
+    runs.forEach(run => {
+      if (run.length < 2 || tbLen(run) < 0.25) return;
+      const head = d.kind === "arrow" && run[run.length - 1] === last;   // 矢印の頭がある側だけ矢印のまま
+      out.push({ ...d, kind: d.kind === "arrow" && !head ? "line" : d.kind, pts: run });
+    });
+  });
+  return changed ? out : null;
+}
+// ★録画したペンの線・消しゴムを、k（0〜1）まで当てはめる（再生用）
+function tbApplyDraw(list, m, k = 1) {
+  if (m.pen) { const pts = tbCut(m.pen.pts, k); return pts.length > 1 ? [...list, { ...m.pen, pts, kind: k >= 1 ? m.pen.kind : "line" }] : list; }
+  if (m.erase) { const path = m.erase.path, n = Math.max(1, Math.round(path.length * k)); let cur = list; for (let i = 0; i < n; i++) cur = tbEraseList(cur, path[i], m.erase.r) || cur; return cur; }
+  return list;
+}
 function tbGroups(moves) { const g = []; (moves || []).forEach(m => { if (m.with && g.length) g[g.length - 1].push(m); else g.push([m]); }); return g; }
 function tbApply(pos, m) { if (m.pts) pos[m.id] = m.pts[m.pts.length - 1].slice(); else if (m.show) pos[m.id] = m.show.slice(); else if (m.hide) delete pos[m.id]; }
 // 一覧の小さなコート図（最初の並び）
@@ -28546,8 +28571,8 @@ class TBEngine {
     const fx = r.width ? this.CW / r.width : 1, fy = r.height ? this.CH / r.height : 1;
     return [(e.clientX - r.left) * fx / this.scale - this.mx, (e.clientY - r.top) * fy / this.scale - this.my];
   }
-  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, fstart: this.b.fstart || null, fmoves: this.b.fmoves || null, rec: this.rec, setPos: this.b.setPos || null }); }
-  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.fstart = o.fstart || null; this.b.fmoves = o.fmoves || null; this.rec = !!o.rec; this.b.setPos = o.setPos || null; }
+  cur() { return JSON.stringify({ start: this.b.start, moves: this.b.moves, draw: this.b.draw, drawStart: this.b.drawStart || null, fstart: this.b.fstart || null, fmoves: this.b.fmoves || null, rec: this.rec, setPos: this.b.setPos || null }); }
+  restore(json) { const o = JSON.parse(json); this.b.start = o.start; this.b.moves = o.moves; this.b.draw = o.draw; this.b.drawStart = o.drawStart || null; this.b.fstart = o.fstart || null; this.b.fmoves = o.fmoves || null; this.rec = !!o.rec; this.b.setPos = o.setPos || null; }
   snapshot(markDirty = true) { this.hist.push(this.cur()); if (this.hist.length > 100) this.hist.shift(); this.fut = []; if (markDirty) this.dirty = true; }
   undo() { if (!this.hist.length) return; this.fut.push(this.cur()); this.restore(this.hist.pop()); this.dirty = true; this.draw(); this.onChange(); }
   redo() { if (!this.fut.length) return; this.hist.push(this.cur()); this.restore(this.fut.pop()); this.dirty = true; this.draw(); this.onChange(); }
@@ -28691,13 +28716,21 @@ class TBEngine {
   }
   // ---- 再生：最初の並びを少し見せてから、動かした順に1つずつ ----
   playIndex() { const t = this.playT - TB_LEAD_SEC; return t < 0 ? -1 : Math.min(this.groups().length - 1, Math.floor(t / (TB_MOVE_SEC + TB_HOLD_SEC))); }
+  // ★再生中のペンの線：録画を始めたときの線から、書いた・消したタイミングで足したり消したりする（2026-11-26）
+  drawAt(gs, gi, k) {
+    const timed = this.b.drawStart && (this.b.moves || []).some(m => m.pen || m.erase);
+    if (!timed) return this.b.draw || [];
+    let list = tbClone(this.b.drawStart);
+    gs.forEach((g, i) => { if (i < gi) g.forEach(m => { list = tbApplyDraw(list, m, 1); }); else if (i === gi) g.forEach(m => { list = tbApplyDraw(list, m, k); }); });
+    return list;
+  }
   drawPlaying() {
     const gs = this.groups();
-    (this.b.draw || []).forEach(d => this.drawPen(d));
     const gi = this.playIndex();
-    if (gi < 0) { this.drawPieces(tbClone(this.b.start)); return; }
     const t = this.playT - TB_LEAD_SEC;
-    const k = Math.max(0, Math.min(1, (t - gi * (TB_MOVE_SEC + TB_HOLD_SEC)) / TB_MOVE_SEC));
+    const k = gi < 0 ? 0 : Math.max(0, Math.min(1, (t - gi * (TB_MOVE_SEC + TB_HOLD_SEC)) / TB_MOVE_SEC));
+    this.drawAt(gs, gi, k).forEach(d => this.drawPen(d));
+    if (gi < 0) { this.drawPieces(tbClone(this.b.start)); return; }
     const ease = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
     this.drawHistory(gi);
     { const nums = this.groupNums(gs); gs[gi].forEach(m => this.drawTrail(m, nums[gi], ease)); }
@@ -28708,6 +28741,12 @@ class TBEngine {
       else if (m.hide) { ballAlpha = 1 - ease; if (k >= 1) delete pos.b; }
     });
     this.drawPieces(pos, { lift, ballAlpha });
+    gs[gi].forEach(m => {   // ★消しゴムを使ったところでは、消しゴムの丸も見せる
+      if (!m.erase || k >= 1 || !m.erase.path.length) return;
+      const P = m.erase.path, q = P[Math.min(P.length - 1, Math.max(0, Math.round(P.length * k) - 1))], o = this.ctx, rr = m.erase.r * this.scale;
+      o.save(); o.beginPath(); o.arc(this.X(q[0]), this.Y(q[1]), rr, 0, Math.PI * 2);
+      o.fillStyle = "rgba(255,255,255,.25)"; o.fill(); o.setLineDash([4, 3]); o.lineWidth = 2; o.strokeStyle = "#fff"; o.stroke(); o.restore();
+    });
   }
   total() { return TB_LEAD_SEC + this.groups().length * (TB_MOVE_SEC + TB_HOLD_SEC); }
   // 再生バーの位置（0＝スタート、1＝最後の並び）
@@ -28752,7 +28791,11 @@ class TBEngine {
     if (this.playing) { this.stop(); if (this.onPlayEnd("touch")) return; }   // ★再生の途中でコートをさわったら、そのままいつもの画面に戻って動かせる
     const q = this.toM(e);
     try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    if (this.tool === "eraser") { this.erasing = true; this.eraseSnap = false; this.eraseCur = q; this.eraseAt(q); this.draw(); return; }
+    if (this.tool === "eraser") {
+      this.erasing = true; this.eraseSnap = false; this.eraseCur = q;
+      this.eraseRec = this.rec ? { id: "erase", erase: { r: this.eraserBig ? 1.1 : 0.55, path: [] }, with: this.sim && this.b.moves.length > 0 } : null;
+      this.eraseAt(q); this.draw(); return;
+    }
     if (this.tool === "pen") { this.penCur = { kind: this.penKind, color: this.penColor, pts: [q] }; this.draw(); return; }
     const pos = this.viewPos(), p = this.hitPiece(q, pos); if (!p) return;
     this.drag = { id: p.id, off: [pos[p.id][0] - q[0], pos[p.id][1] - q[1]], pts: [pos[p.id].slice()], last: null };
@@ -28785,10 +28828,18 @@ class TBEngine {
   up() {
     clearTimeout(this.lpTimer);
     if (this.rec && (this.drag || this.penCur)) this.lastAct = Date.now();
-    if (this.erasing) { this.erasing = false; this.eraseCur = null; this.draw(); this.onChange(); return; }
+    if (this.erasing) {
+      this.erasing = false; this.eraseCur = null;
+      if (this.eraseRec && this.eraseSnap) this.b.moves.push(this.eraseRec);   // ★録画中に何か消したら、そのタイミングを記録
+      this.eraseRec = null;
+      this.draw(); this.onChange(); return;
+    }
     if (this.penCur) {
       const c = this.penCur; this.penCur = null;
-      if (tbLen(c.pts) > 0.6) { this.snapshot(); this.b.draw.push(c); }
+      if (tbLen(c.pts) > 0.6) {
+        this.snapshot(); this.b.draw.push(c);
+        if (this.rec) this.b.moves.push({ id: "pen", pen: tbClone(c), with: this.sim && this.b.moves.length > 0 });   // ★録画中に書いた線は、書いた順に記録
+      }
       this.draw(); this.onChange(); return;
     }
     if (!this.drag) return;
@@ -28818,22 +28869,9 @@ class TBEngine {
   // ★消しゴム（2026-11-25）：なぞった所のペンの線だけ消す。線は途中で分かれる。選手やボールの動きの線（軌跡）は消さない
   eraseAt(q) {
     const r = this.eraserBig ? 1.1 : 0.55;
-    const dens = pts => { const o = [pts[0]]; for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], c = pts[i], n = Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / 0.1); for (let k = 1; k <= n; k++) o.push([a[0] + (c[0] - a[0]) * k / n, a[1] + (c[1] - a[1]) * k / n]); } return o; };
-    let changed = false; const out = [];
-    (this.b.draw || []).forEach(d => {
-      if (!d.pts || d.pts.length < 2) { out.push(d); return; }
-      const dp = dens(d.pts), runs = []; let cur = [], hit = false;
-      dp.forEach(p => { if (Math.hypot(p[0] - q[0], p[1] - q[1]) <= r) { hit = true; if (cur.length) runs.push(cur); cur = []; } else cur.push(p); });
-      if (!hit) { out.push(d); return; }
-      changed = true; if (cur.length) runs.push(cur);
-      const last = dp[dp.length - 1];
-      runs.forEach(run => {
-        if (run.length < 2 || tbLen(run) < 0.25) return;
-        const head = d.kind === "arrow" && run[run.length - 1] === last;   // 矢印の頭がある側だけ矢印のまま
-        out.push({ ...d, kind: d.kind === "arrow" && !head ? "line" : d.kind, pts: run });
-      });
-    });
-    if (!changed) return;
+    if (this.eraseRec) { const P = this.eraseRec.erase.path, l = P[P.length - 1]; if (!l || Math.hypot(q[0] - l[0], q[1] - l[1]) > 0.08) P.push(q); }   // ★録画中は消した道すじも覚える
+    const out = tbEraseList(this.b.draw, q, r);
+    if (!out) return;
     if (!this.eraseSnap) { this.snapshot(); this.eraseSnap = true; }   // ひとなぞりで「戻す」1回
     this.b.draw = out;
   }
@@ -28853,7 +28891,7 @@ class TBEngine {
     }
     this.recAsk = 0;
     this.snapshot();
-    this.b.start = this.viewPos(); this.b.moves = []; this.rec = true; this.lastAct = Date.now();
+    this.b.start = this.viewPos(); this.b.moves = []; this.b.drawStart = tbClone(this.b.draw || []); this.rec = true; this.lastAct = Date.now();
     this.draw(); this.onChange(); this.onToast("録画中：今の並びから、動かした順に記録します");
   }
   // ★セット（2026-11-21）：今の並び（ボールが出ていればボールも）を、この作戦の「戻る位置」として覚える。
@@ -29062,14 +29100,14 @@ function TacticBoardScreen({ board, isNew, ctx, readOnly, onClose, backLabel, do
       n -= 1;
       if (n > 0) { setCd(n); cdT.current = setTimeout(tick, 1000); return; }
       setCd(0); cdT.current = null;
-      recPrev.current = { start: tbClone(b.start), moves: tbClone(b.moves), fstart: b.fstart ? tbClone(b.fstart) : null, fmoves: b.fmoves ? tbClone(b.fmoves) : null, dirty: eng.dirty };
+      recPrev.current = { start: tbClone(b.start), moves: tbClone(b.moves), fstart: b.fstart ? tbClone(b.fstart) : null, fmoves: b.fmoves ? tbClone(b.fmoves) : null, draw: tbClone(b.draw || []), drawStart: b.drawStart ? tbClone(b.drawStart) : null, dirty: eng.dirty };
       eng.recAsk = Date.now(); eng.toggleRec();
     };
     cdT.current = setTimeout(tick, 1000);
   };
   const restorePrev = () => {
     const p = recPrev.current; if (!p) return;
-    b.start = p.start; b.moves = p.moves; b.fstart = p.fstart; b.fmoves = p.fmoves; eng.rec = false; eng.dirty = p.dirty;
+    b.start = p.start; b.moves = p.moves; b.fstart = p.fstart; b.fmoves = p.fmoves; b.draw = p.draw; b.drawStart = p.drawStart; eng.rec = false; eng.dirty = p.dirty;   // ★書いた線・消した所も録画前に戻す
     eng.draw(); rerender();
   };
   const onRec = () => {
