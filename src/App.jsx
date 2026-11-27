@@ -28397,7 +28397,7 @@ function VideoAnalysisScreenForMatch(props) {
 const TB_COURT = { W: 10.97, L: 23.77, net: 11.885, svc: 6.40, sgl: 1.37 };   // ソフトテニスのコート（m）
 const TB_MX = 0.9, TB_MY = 1.7;                                                 // コートの外の余白（m）★コートを画面いっぱいに（2026-11-25）
 const TB_VW = TB_COURT.W + TB_MX * 2, TB_VH = TB_COURT.L + TB_MY * 2;
-const TB_COLORS = [["#2f6fd6", "青"], ["#d64545", "赤"], ["#ffd400", "黄"], ["#ffffff", "白"], ["#ff8a00", "オレンジ"]];   // ★黒→オレンジ（2026-11-27）。前に黒で描いた線はそのまま黒で出る
+const TB_COLORS = [["#2f6fd6", "青"], ["#d64545", "赤"], ["#ffd400", "黄"], ["#ff8a00", "オレンジ"]];   // ★白と黒はやめてオレンジ（2026-11-27）。前に白・黒で描いた線はそのままの色で出る
 const TB_PIECES = [
   { id: "m1", side: "me", label: "前", name: "味方 前衛" }, { id: "m2", side: "me", label: "後", name: "味方 後衛" },
   { id: "o1", side: "op", label: "前", name: "相手 前衛" }, { id: "o2", side: "op", label: "後", name: "相手 後衛" },
